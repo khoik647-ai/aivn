@@ -1,4 +1,4 @@
-// Truy cập mạng cho AIVN BOT (chỉ khi người dùng bật "Cho phép truy cập mạng").
+// Truy cập mạng cho AIVN AGENT (chỉ khi người dùng bật "Cho phép truy cập mạng").
 // Tìm kiếm: DuckDuckGo bản HTML (không cần khoá), dự phòng Wikipedia API. Đọc trang: chỉ http/https công khai,
 // chặn địa chỉ nội bộ (localhost, mạng LAN…) ở mọi bước chuyển hướng, giới hạn dung lượng và thời gian.
 const dns = require('dns').promises;

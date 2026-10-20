@@ -1,5 +1,5 @@
 // Nhật ký chung của AIVN: ghi ĐỒNG BỘ (không mất khi bộ máy sập) vào userData/logs/aivn.log, xoay vòng ~5 MB.
-// Dùng cho tiến trình chính, bộ máy AI (qua tiến trình chính) và công cụ của AIVN BOT. Tự che token/mật khẩu.
+// Dùng cho tiến trình chính, bộ máy AI (qua tiến trình chính) và công cụ của AIVN AGENT. Tự che token/mật khẩu.
 const fs = require('fs');
 const path = require('path');
 const MAX = 5 * 1024 * 1024;

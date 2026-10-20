@@ -145,7 +145,7 @@ async function perform({ action, nx, ny, text, keys, display, amount }) {
     n.keyTap('v', process.platform === 'darwin' ? 'command' : 'control'); await sleep(250);
     setTimeout(async () => { try { if (await Promise.resolve(clipboard.readText()) === t) await Promise.resolve(clipboard.writeText(prev)); } catch {} }, 1500);
   }
-  if (action === 'key') { const k = parseKeys(keys); n.keyTap(k.key, k.mods.length ? k.mods : undefined); await sleep(150); }
+  if (action === 'key') { const k = parseKeys(keys); if (k.mods.length) n.keyTap(k.key, k.mods); else n.keyTap(k.key); await sleep(150); }
   if (action === 'scroll') { const a = Math.max(-20, Math.min(20, Math.round(Number(amount) || -5))); n.scrollMouse(0, process.platform === 'win32' ? a * 120 : a); await sleep(150); }
 }
 

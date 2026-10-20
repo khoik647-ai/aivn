@@ -50,7 +50,7 @@ fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');" "$OWNER" "$REPO
 
 if [[ "$SKIP_BUILD" != "1" ]]; then
   step "Kiểm thử trích xuất tài liệu"
-  node --test test/
+  node --test test/*.test.js
 
   step "Tải Node.js thuần (bộ máy suy luận chạy ngoài Electron) cho Windows/macOS, kiểm SHA-256"
   node build/fetch-node.cjs
@@ -132,6 +132,9 @@ else
 fi
 
 step "Tạo GitHub Release $TAG"
+if [ -f "$(dirname "$0")/RELEASE_NOTES.md" ]; then NOTES="AIVN $VERSION · Phát triển bởi NGUYỄN NGỌC KHÔI SINH VIÊN VLU
+
+$(cat "$(dirname "$0")/RELEASE_NOTES.md")"; else
 NOTES="AIVN $VERSION · Phát triển bởi NGUYỄN NGỌC KHÔI SINH VIÊN VLU
 
 Mới ở 0.13.0 – Trợ lý (chạy hoàn toàn trên mô hình cục bộ):
@@ -148,6 +151,7 @@ Tải về:
 - Windows 10/11: AIVN-Setup.exe
 - macOS Apple Silicon: AIVN-mac-arm64.zip · macOS Intel: AIVN-mac-x64.zip
 Bản cài chưa có chữ ký số: Windows SmartScreen chọn More info → Run anyway; macOS nhấp phải → Mở."
+fi
 if gh release view "$TAG" -R "$OWNER/$REPO" >/dev/null 2>&1; then
   gh release upload "$TAG" "$OUT"/* -R "$OWNER/$REPO" --clobber
 else

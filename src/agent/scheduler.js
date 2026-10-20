@@ -34,7 +34,7 @@ function validate(spec, old = {}) {
   t.kind = spec.kind === 'agent' ? 'agent' : 'reminder';
   t.message = String(spec.message ?? old.message ?? '').trim().slice(0, 1000);
   t.prompt = String(spec.prompt ?? old.prompt ?? '').trim().slice(0, 4000);
-  if (t.kind === 'agent' && !t.prompt) throw new Error('Việc tự động cần có yêu cầu cho AIVN BOT');
+  if (t.kind === 'agent' && !t.prompt) throw new Error('Việc tự động cần có yêu cầu cho AIVN AGENT');
   t.repeat = ['once', 'daily', 'weekly'].includes(spec.repeat) ? spec.repeat : 'once';
   if (t.repeat === 'once') {
     const at = typeof spec.at === 'number' ? spec.at : Date.parse(spec.at);

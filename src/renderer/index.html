@@ -15,11 +15,13 @@
       <span>AIVN</span>
     </div>
     <button class="nav-item active" data-view="chat"><i>💬</i><span>Trò chuyện</span></button>
-    <div class="nav-group" aria-label="AIVN BOT">
-      <button class="nav-item" data-view="agent"><i>🤖</i><span>AIVN BOT</span><b class="nav-new">Mới</b></button>
+    <div class="nav-group" aria-label="AIVN AGENT">
+      <button class="nav-item" data-view="agent"><i>🤖</i><span>AIVN AGENT</span><b class="nav-new">Mới</b></button>
       <button class="nav-item sub" data-view="schedule"><i>⏰</i><span>Lịch tự động</span><b class="pill-count" id="schedCount" hidden></b></button>
       <button class="nav-item sub" data-view="memory"><i>🧠</i><span>Ghi nhớ</span><b class="pill-count" id="memCount" hidden></b></button>
     </div>
+    <div class="nav-group small muted">Kinh doanh</div>
+    <button class="nav-item" data-view="crm"><i>👥</i><span>Khách hàng</span></button>
     <button class="nav-item" data-view="discover"><i>🗃</i><span>Kho mô hình</span></button>
     <button class="nav-item" data-view="models"><i>📦</i><span>Mô hình của tôi</span></button>
     <button class="nav-item" data-view="server"><i>⚡</i><span>Máy chủ API</span><b class="pill-dot" id="srvDot"></b></button>
@@ -35,7 +37,19 @@
         <button class="btn sm" id="ejectBtn" title="Gỡ mô hình khỏi bộ nhớ" disabled>⏏ Gỡ</button>
       </div>
       <div class="model-state" id="modelState"><span class="dot off"></span>Chưa nạp mô hình</div>
+      <div class="top-tools"><button class="btn sm ghost" id="paletteBtn" title="Tìm lệnh nhanh (Ctrl+K)" aria-label="Tìm lệnh nhanh">⌘ Lệnh <kbd>Ctrl+K</kbd></button><button class="btn sm ghost" id="panelToggle" title="Ẩn/hiện bảng cài đặt bên phải (Ctrl+.)" aria-label="Ẩn hoặc hiện bảng cài đặt">⇥ Bảng cài đặt</button><button class="btn sm ghost" id="helpKeys" title="Phím tắt (Ctrl+/)" aria-label="Phím tắt">⌨</button></div>
     </header>
+
+    <!-- KINH DOANH → KHÁCH HÀNG -->
+    <section class="view" id="view-crm">
+      <div class="crm-head"><h2>👥 Khách hàng</h2>
+        <nav class="crm-tabs" role="tablist"><button data-crm="dash" class="on" role="tab">Tổng quan</button><button data-crm="contacts" role="tab">Liên hệ</button><button data-crm="leads" role="tab">Cơ hội</button><button data-crm="acts" role="tab">Việc cần làm</button></nav>
+        <div class="crm-actions"><input type="search" id="crmQ" placeholder="Tìm tên, số điện thoại, email…" aria-label="Tìm khách hàng"><button class="btn sm primary" id="crmAdd">＋ Thêm</button><button class="btn sm" id="crmImport" title="Nhập từ CSV/Excel">⬆ Nhập</button><button class="btn sm" id="crmExport" title="Xuất CSV (mở được bằng Excel)">⬇ Xuất</button></div>
+      </div>
+      <div class="crm-body" id="crmBody"></div>
+      <p class="small muted crm-foot">Dữ liệu khách hàng lưu trên máy này (SQLite), không gửi đi đâu.</p>
+    </section>
+    <div class="modal-back" id="crmModal" hidden><form class="modal crm-form" id="crmForm"><h3 id="crmFormTitle"></h3><div id="crmFields"></div><p class="small" id="crmErr" style="color:#82071e"></p><div class="row"><button type="button" class="btn" id="crmCancel">Huỷ</button><button type="submit" class="btn primary">Lưu</button></div></form></div>
 
     <!-- CHAT -->
     <section class="view active" id="view-chat">
@@ -45,7 +59,7 @@
       </aside>
       <div class="chat" id="chatPane">
         <div class="agent-bar only-agent" id="agentBar">
-          <div class="agent-title"><b>🤖 AIVN BOT</b><span class="muted small">Tự dùng công cụ ngay trên máy bạn · mỗi bước đều hiện bên dưới</span></div>
+          <div class="agent-title"><b>🤖 AIVN AGENT</b><span class="muted small">Tự dùng công cụ ngay trên máy bạn · mỗi bước đều hiện bên dưới</span></div>
           <div class="tool-chips" id="toolChips"></div>
         </div>
         <div class="doc-warn agent-warn only-agent" id="agentWarn" hidden></div>
@@ -54,6 +68,22 @@
         <div class="doc-warn offer rag-offer" id="sysNotice" hidden></div>
         <div class="doc-warn offer rag-offer" id="ragOffer" hidden></div>
         <div class="chips" id="chips" hidden></div>
+        <div class="mcp-badges" id="mcpBadges" hidden></div>
+        <div class="phase-strip" id="phaseStrip" hidden aria-live="polite"><span data-ph="think">Nghĩ</span><i>→</i><span data-ph="ask">Xin phép</span><i>→</i><span data-ph="act">Làm</span><i>→</i><span data-ph="done">Kết quả</span></div>
+        <section class="approve-card" id="approveCard" hidden role="alertdialog" aria-labelledby="apTitle">
+          <div class="ap-head"><span class="ap-icon" id="apIcon">🔧</span><div><b id="apTitle"></b><div class="muted small" id="apSub"></div></div></div>
+          <table class="ap-fields" id="apFields"></table>
+          <pre class="ap-preview" id="apPreview" hidden></pre>
+          <pre class="ap-diff" id="apDiff" hidden></pre>
+          <div class="ap-reason" id="apReasonBox" hidden><textarea id="apReason" rows="2" maxlength="500" placeholder="Lý do / góp ý cho AIVN AGENT (vd. “đặt tên tệp là tom-tat.md”)…"></textarea></div>
+          <label class="ap-always small" id="apAlwaysRow" hidden><input type="checkbox" id="apAlways"> Luôn cho phép công cụ này</label>
+          <div class="ap-warn small" id="apWarn" hidden></div>
+          <div class="ap-actions">
+            <button type="button" class="btn primary" id="apAllow" title="Ctrl+Enter">Cho phép <kbd>Ctrl+Enter</kbd></button>
+            <button type="button" class="btn" id="apDeny" title="Esc">Từ chối <kbd>Esc</kbd></button>
+            <button type="button" class="btn ghost" id="apDenyReason">Từ chối kèm lý do</button>
+          </div>
+        </section>
         <form class="composer" id="composer">
           <button type="button" class="btn icon" id="attachBtn" title="Đính kèm tệp (PDF có lớp chữ, DOCX, TXT, MD, CSV, JSON, mã nguồn, ảnh · tối đa 20 MB)" aria-label="Đính kèm tệp">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.4 11.6-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
@@ -66,19 +96,40 @@
       </div>
       <aside class="settings">
         <div class="only-agent agent-settings" id="agentSettings">
-          <h3>Cài đặt AIVN BOT</h3>
+          <h3>Cài đặt AIVN AGENT</h3>
           <div class="set-block">
             <div class="set-head"><b>📂 Thư mục được phép</b><button class="btn sm" id="addFolder">＋ Thêm thư mục</button></div>
             <div class="folder-list" id="folderList"></div>
-            <small>AIVN BOT chỉ xem, đọc, ghi tệp trong các thư mục này. <b>Xoá</b> hay <b>ghi đè</b> tệp luôn hỏi bạn trước.</small>
+            <small>AIVN AGENT chỉ xem, đọc, ghi tệp trong các thư mục này. <b>Xoá</b> hay <b>ghi đè</b> tệp luôn hỏi bạn trước.</small>
           </div>
           <label class="check toggle"><input type="checkbox" id="agWeb"> <span><b>🌐 Cho phép truy cập mạng</b><small>Tìm kiếm qua DuckDuckGo (dự phòng Wikipedia) và đọc trang web. Mọi địa chỉ đã mở đều ghi dưới câu trả lời.</small></span></label>
           <label class="check toggle"><input type="checkbox" id="agPy"> <span><b>🐍 Cho phép chạy Python</b><small id="agPyNote">Đang kiểm tra Python trên máy…</small></span></label>
-          <label class="check toggle"><input type="checkbox" id="agMem"> <span><b>🧠 Cho phép ghi nhớ</b><small id="agMemNote">AIVN BOT lưu điều cần nhớ lâu dài và tự nhắc lại khi liên quan.</small></span></label>
+          <label class="check toggle"><input type="checkbox" id="agMem"> <span><b>🧠 Cho phép ghi nhớ</b><small id="agMemNote">AIVN AGENT lưu điều cần nhớ lâu dài và tự nhắc lại khi liên quan.</small></span></label>
           <div class="set-block comp-block">
+            <details class="set-block mcp-block" id="mcpBlock"><summary><b>🔌 Kết nối (MCP)</b> <span class="muted small" id="mcpSum"></span></summary>
+              <div class="mcp-warn small">⚠ Máy chủ MCP là chương trình chạy trên máy bạn (stdio) hoặc dịch vụ bên ngoài (http/SSE) và có thể đọc/ghi dữ liệu. Chỉ thêm máy chủ bạn tin tưởng. AIVN luôn xin phép trước mỗi lần gọi công cụ MCP (trừ khi bạn chọn “Luôn cho phép”).</div>
+              <label class="check toggle"><input type="checkbox" id="mcpMaster"> <span><b>Cho AIVN AGENT dùng công cụ MCP</b></span></label>
+              <div class="row wrap"><span class="small muted">Thêm nhanh:</span><button type="button" class="btn sm" data-mcp-preset="filesystem">📁 filesystem (chọn thư mục)</button><button type="button" class="btn sm" data-mcp-preset="fetch">🌐 fetch</button><button type="button" class="btn sm" data-mcp-preset="memory">🧠 memory</button></div>
+              <div class="mcp-list" id="mcpList"></div>
+              <label class="small">mcp.json <span class="muted" id="mcpFile"></span></label>
+              <textarea id="mcpJson" class="mcp-json" rows="9" spellcheck="false" aria-label="Nội dung mcp.json"></textarea>
+              <div class="row wrap"><button type="button" class="btn sm primary" id="mcpSaveBtn">Lưu &amp; kết nối lại</button><span class="small" id="mcpMsg"></span></div>
+              <small class="muted">Dạng: {"mcpServers": {"tên": {"command": "npx", "args": ["-y", "gói"], "env": {}}}} hoặc {"tên": {"url": "https://…/mcp"}} (thêm "type": "sse" cho SSE). Máy không có Node thì AIVN dùng Node đi kèm để chạy npx.</small>
+            </details>
+            <div class="always-box small" id="alwaysBox" hidden><b>✅ Luôn cho phép (không hỏi lại):</b> <span class="muted">bấm × để AIVN AGENT hỏi lại trước khi dùng.</span><div class="always-list" id="alwaysList"></div></div>
             <label class="check toggle"><input type="checkbox" id="agComp"> <span><b>💻 Truy cập máy tính</b><small>Mở ứng dụng, tệp, thư mục, trang web; xem/đóng ứng dụng; chạy lệnh terminal; khoá màn hình, âm lượng… Chạy lệnh, đóng ứng dụng, tắt máy luôn hỏi bạn trước. Lệnh nguy hiểm (xoá hàng loạt, định dạng ổ đĩa, tải mã về chạy, quyền quản trị) bị chặn.</small></span></label>
             <label class="check toggle sub"><input type="checkbox" id="agAutoRO"> <span><b>Không hỏi lại với lệnh chỉ đọc</b><small>Ví dụ dir, ls, ipconfig, git status. Mặc định tắt: mọi lệnh đều hiện thẻ duyệt.</small></span></label>
-            <label class="check toggle"><input type="checkbox" id="agScreen"> <span><b>🖱 Điều khiển màn hình <em class="beta">Thử nghiệm</em></b><small id="agScreenNote">AIVN BOT chụp màn hình, mô hình nhìn ảnh đề xuất chỗ bấm; mỗi cú bấm/gõ hiện thẻ có khung đỏ để bạn duyệt. Cần mô hình nhìn ảnh. Dừng khẩn cấp: Ctrl+Alt+Q.</small></span></label>
+            <label class="check toggle"><input type="checkbox" id="agScreen"> <span><b>🖱 Điều khiển màn hình <em class="beta">Thử nghiệm</em></b><small id="agScreenNote">AIVN AGENT tự mở ứng dụng và bấm/gõ từng bước như bạn. Dừng: Esc hoặc Ctrl+Alt+Q.</small></span></label>
+            <div class="screen-opts" id="agScreenOpts" hidden>
+              <label class="small">Xin phép <select id="agScreenMode"><option value="each">Hỏi từng bước</option><option value="important">Chỉ hỏi bước quan trọng</option></select></label>
+              <label class="small grounder-row">Mô hình định vị (tuỳ chọn) <select id="agGrounder"><option value="">Không dùng — chỉ cây giao diện + đọc chữ</option></select>
+                <small class="muted">Chế độ hai mô hình: mô hình đang chat (vd. Qwen3 4B/8B) lập kế hoạch; mô hình định vị nhìn ảnh (Holo, UI-TARS, Qwen-VL) chỉ tìm toạ độ khi cửa sổ không cho biết vị trí nút. Holo/UI-TARS định vị tốt nhưng lập kế hoạch kém — đừng dùng chúng làm mô hình chat. Cần thêm RAM/VRAM để chạy song song.</small></label>
+              <div class="bench-box" id="benchBox"><b>📏 Đo Điểm tác vụ trên máy này</b>
+                <small class="muted">AIVN mở một cửa sổ thử “AIVN Bench” và để mô hình tự làm 10 việc có kịch bản (mở ứng dụng, bấm nút có tên, gõ tiếng Việt, đọc chữ, nhấp đúp…) + 1 bài an toàn (phải hỏi trước khi gửi). Chấm điểm tự động bằng trạng thái thật của cửa sổ. Mất khoảng 10–40 phút; đừng dùng chuột/bàn phím trong lúc đo (Esc để dừng).</small>
+                <div class="row wrap"><select id="benchModel" aria-label="Mô hình cần đo"></select><button type="button" class="btn sm" id="benchRun">Bắt đầu đo</button><button type="button" class="btn sm" id="benchStop" hidden>Dừng</button></div>
+                <div class="bench-res" id="benchRes"></div></div>
+              <label class="small">Tối đa <select id="agScreenBudget"><option>20</option><option>40</option><option>60</option><option>100</option></select> thao tác mỗi lượt</label>
+            </div>
             <div class="perm-guide" id="permGuide" hidden></div>
           </div>
 <div class="set-block diag-block">
@@ -123,6 +174,15 @@
             <div class="row wrap scan-row"><input type="text" class="scan-q" value="zalo" aria-label="Tên ứng dụng cần tìm" maxlength="60"><button type="button" class="btn sm" data-scan="1">Kiểm tra quét ứng dụng</button></div>
           </div>
         </details>
+        <div class="perf-box" id="perfBox">
+          <h3>⚡ Hiệu năng</h3>
+          <p class="small" id="perfTier">Đang nhận biết máy…</p>
+          <label>Chế độ <select id="perfMode"><option value="auto">Tự động (theo máy)</option><option value="saver">Tiết kiệm — máy yếu, ít RAM</option><option value="balanced">Cân bằng</option><option value="max">Tối đa — máy mạnh/GPU rời</option></select></label>
+          <div class="perf-cfg small" id="perfCfg"></div>
+          <ul class="small muted" id="perfTips"></ul>
+          <div class="row wrap"><button type="button" class="btn sm" id="perfSpeedBtn" title="Sinh 128 token với mô hình đang nạp">⏱ Đo tốc độ mô hình đang nạp</button><span class="small" id="perfSpeedMsg"></span></div>
+          <table class="perf-runs small" id="perfRuns"></table>
+        </div>
         <label>Độ dài ngữ cảnh (áp dụng khi nạp lại)
           <select id="ctxSize"><option>2048</option><option>4096</option><option>8192</option><option>16384</option></select>
         </label>
@@ -174,7 +234,7 @@
           <div class="row between"><h3>Gợi ý của AIVN</h3><div class="fam-filter" id="famFilter"></div></div>
           <section id="screenArea" class="screen-area" hidden>
             <h3>🖥 Mô hình điều khiển máy tính</h3>
-            <p class="muted small">Nhìn được màn hình (👁) và gọi công cụ tốt: dùng cho “Điều khiển màn hình” của AIVN BOT (mở ứng dụng, tìm nút, bấm/gõ — bạn duyệt từng thao tác). Mỗi mô hình ở đây đã được AIVN kiểm tra thật: nạp được, đọc đúng ảnh, chỉ đúng nút trên ảnh chụp màn hình và gọi công cụ.</p>
+            <p class="muted small">AIVN AGENT điều khiển máy bằng <b>hai vai</b>: <b>🧠 Lập kế hoạch</b> — một mô hình chữ gọi công cụ tốt (Qwen3 4B/8B) đọc danh sách nút/ô của cửa sổ qua Trợ năng của hệ điều hành và quyết định bước tiếp; <b>🎯 Định vị</b> (tuỳ chọn, chế độ hai mô hình) — một mô hình nhìn ảnh (Holo1.5, UI-TARS, Qwen-VL) chỉ ra toạ độ khi danh sách thiếu nút. Nhãn ⭐ Gợi ý chỉ dành cho mô hình đã qua bài đo thật (<b>Điểm tác vụ</b> ≥ 7/10 và luôn hỏi trước khi gửi); điểm ghi rõ đo ở đâu.</p>
             <div class="cards" id="screenCards"></div>
             <h3 class="mt">Các mô hình khác</h3>
           </section>
@@ -232,15 +292,15 @@
     <section class="view" id="view-schedule">
       <div class="page">
         <div class="page-head">
-          <div><h2>⏰ Lịch tự động</h2><p class="muted">Nhắc việc và việc định kỳ cho AIVN BOT. Chạy khi AIVN đang mở (hoặc đang chạy nền trong khay), hiện thông báo của hệ điều hành và lưu kết quả vào một cuộc trò chuyện.</p></div>
+          <div><h2>⏰ Lịch tự động</h2><p class="muted">Nhắc việc và việc định kỳ cho AIVN AGENT. Chạy khi AIVN đang mở (hoặc đang chạy nền trong khay), hiện thông báo của hệ điều hành và lưu kết quả vào một cuộc trò chuyện.</p></div>
         </div>
         <div class="grid-sched">
           <form class="sched-form" id="schedForm">
             <h3 id="schedFormTitle">Tạo lịch mới</h3>
             <label>Tên<input id="sfTitle" maxlength="120" placeholder="vd. Uống nước, Báo cáo chi tiêu tuần" required></label>
-            <div class="seg" id="sfKind" role="radiogroup"><button type="button" data-kind="reminder" class="on">🔔 Nhắc việc</button><button type="button" data-kind="agent">🤖 Việc cho AIVN BOT</button></div>
+            <div class="seg" id="sfKind" role="radiogroup"><button type="button" data-kind="reminder" class="on">🔔 Nhắc việc</button><button type="button" data-kind="agent">🤖 Việc cho AIVN AGENT</button></div>
             <label id="sfMsgWrap">Nội dung nhắc<textarea id="sfMsg" rows="2" placeholder="vd. Đứng dậy vươn vai và uống một cốc nước"></textarea></label>
-            <label id="sfPromptWrap" hidden>Yêu cầu cho AIVN BOT<textarea id="sfPrompt" rows="3" placeholder="vd. Đọc tệp chi-tieu.csv, tính tổng tuần này và ghi vào bao-cao-tuan.md"></textarea><small>Chạy với mô hình đang nạp (hoặc mô hình dùng gần nhất). Không thể xoá/ghi đè tệp vì không có ai xác nhận.</small></label>
+            <label id="sfPromptWrap" hidden>Yêu cầu cho AIVN AGENT<textarea id="sfPrompt" rows="3" placeholder="vd. Đọc tệp chi-tieu.csv, tính tổng tuần này và ghi vào bao-cao-tuan.md"></textarea><small>Chạy với mô hình đang nạp (hoặc mô hình dùng gần nhất). Không thể xoá/ghi đè tệp vì không có ai xác nhận.</small></label>
             <div class="seg" id="sfRepeat" role="radiogroup"><button type="button" data-rep="once" class="on">Một lần</button><button type="button" data-rep="daily">Hằng ngày</button><button type="button" data-rep="weekly">Hằng tuần</button></div>
             <div class="row"><label class="grow" id="sfDateWrap">Ngày<input type="date" id="sfDate"></label><label class="grow">Giờ<input type="time" id="sfTime" required></label></div>
             <div class="days" id="sfDays" hidden><button type="button" data-d="1">T2</button><button type="button" data-d="2">T3</button><button type="button" data-d="3">T4</button><button type="button" data-d="4">T5</button><button type="button" data-d="5">T6</button><button type="button" data-d="6">T7</button><button type="button" data-d="0">CN</button></div>
@@ -264,7 +324,7 @@
     <section class="view" id="view-memory">
       <div class="page narrow">
         <div class="page-head">
-          <div><h2>🧠 Ghi nhớ của AIVN BOT</h2><p class="muted" id="memMode">Những điều AIVN BOT đã ghi nhớ về bạn. Chỉ lưu trên máy này; điều liên quan được đưa vào lời nhắc của AIVN BOT.</p></div>
+          <div><h2>🧠 Ghi nhớ của AIVN AGENT</h2><p class="muted" id="memMode">Những điều AIVN AGENT đã ghi nhớ về bạn. Chỉ lưu trên máy này; điều liên quan được đưa vào lời nhắc của AIVN AGENT.</p></div>
           <div class="row mem-tools"><label class="check"><input type="checkbox" id="memOn"> Cho phép ghi nhớ</label><button class="btn danger sm" id="memClear">Xoá tất cả</button></div>
         </div>
         <form class="row mem-add" id="memForm"><input id="memNew" maxlength="500" placeholder="Thêm một điều cần nhớ, vd. Tôi học ngành Công nghệ thông tin ở VLU"><button class="btn primary" type="submit">Thêm</button></form>
@@ -298,13 +358,17 @@
 </div>
 <div class="modal-back" id="screenModal" hidden>
   <div class="modal wide" role="alertdialog" aria-modal="true" aria-labelledby="scTitle">
-    <h3 id="scTitle">🖱 AIVN BOT muốn thao tác trên màn hình <em class="beta">Thử nghiệm</em></h3>
+    <h3 id="scTitle">🖱 AIVN AGENT muốn thao tác trên màn hình <em class="beta">Thử nghiệm</em></h3>
     <p id="scMsg"></p>
     <div class="sc-shot" id="scShot"><img id="scImg" alt="Ảnh chụp màn hình"><div class="sc-box" id="scBox" hidden></div><div class="sc-dot" id="scDot" hidden></div></div>
-    <p class="small muted" id="scHint">Khung đỏ là chỗ AIVN BOT sẽ bấm. Nếu sai, hãy bấm vào ảnh để chọn đúng vị trí. Dừng khẩn cấp bất cứ lúc nào: Ctrl+Alt+Q.</p>
-    <div class="row end"><button class="btn" id="scNo">Từ chối</button><button class="btn danger" id="scStop">■ Dừng AIVN BOT</button><button class="btn primary" id="scYes">Đồng ý thực hiện</button></div>
+    <p class="small muted" id="scHint">Khung đỏ là chỗ AIVN AGENT sẽ bấm. Nếu sai, hãy bấm vào ảnh để chọn đúng vị trí. Dừng khẩn cấp bất cứ lúc nào: Ctrl+Alt+Q.</p>
+    <div class="row end"><button class="btn" id="scNo">Từ chối</button><button class="btn danger" id="scStop">■ Dừng AIVN AGENT</button><button class="btn primary" id="scYes">Đồng ý thực hiện</button></div>
   </div>
 </div>
+<div class="modal-back palette-back" id="palette" hidden><div class="palette" role="dialog" aria-label="Tìm lệnh nhanh"><input id="palQ" type="text" placeholder="Gõ để tìm lệnh: “mô hình”, “AIVN AGENT”, “MCP”, “tốc độ”…" aria-label="Tìm lệnh"><div class="pal-list" id="palList" role="listbox"></div><div class="small muted pal-foot">↑↓ chọn · Enter chạy · Esc đóng</div></div></div>
+<div class="modal-back" id="keysModal" hidden><div class="modal keys-modal" role="dialog" aria-labelledby="keysTitle"><h3 id="keysTitle">⌨ Phím tắt</h3><table class="keys-table">
+<tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Tìm lệnh nhanh</td></tr><tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>Cuộc trò chuyện mới</td></tr><tr><td><kbd>Ctrl</kbd>+<kbd>.</kbd></td><td>Ẩn/hiện bảng cài đặt</td></tr><tr><td><kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Gửi / xuống dòng</td></tr><tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Cho phép bước AIVN AGENT đang xin</td></tr><tr><td><kbd>Esc</kbd></td><td>Từ chối bước đang xin · đóng hộp thoại</td></tr><tr><td><kbd>Esc</kbd> hoặc <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Q</kbd></td><td>Dừng ngay khi AIVN AGENT điều khiển máy</td></tr><tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>Bảng phím tắt này</td></tr></table><div class="row"><button class="btn primary" id="keysClose">Đóng</button></div></div></div>
+<div class="modal-back" id="onboard" hidden><div class="modal onboard" role="dialog" aria-labelledby="obTitle"><div class="ob-step" id="obStep"></div><div class="row ob-actions"><button class="btn ghost" id="obSkip">Bỏ qua</button><span class="ob-dots" id="obDots"></span><button class="btn primary" id="obNext">Tiếp</button></div></div></div>
 <div class="modal-back" id="confirmModal" hidden>
   <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="cfTitle" aria-describedby="cfMsg">
     <div class="modal-ic" id="cfIcon">🗑</div>
@@ -312,7 +376,7 @@
     <p id="cfMsg"></p>
     <code class="cf-path" id="cfPath"></code>
     <pre class="cf-preview" id="cfPreview" hidden></pre>
-    <p class="small muted from-agent">Yêu cầu này do AIVN BOT tạo ra. Nếu bạn không chắc, hãy chọn “Không”.</p>
+    <p class="small muted from-agent">Yêu cầu này do AIVN AGENT tạo ra. Nếu bạn không chắc, hãy chọn “Không”.</p>
     <div class="row end"><button class="btn" id="cfNo">Không, giữ nguyên tệp</button><button class="btn danger" id="cfYes">Xoá</button></div>
   </div>
 </div>

@@ -1,3 +1,4 @@
+const SMP = require('./agent/sampling');
 const TP = require('./agent/textproto');
 // Chế độ "nhìn ảnh": chạy llama-server chính thức của llama.cpp (MIT) với --mmproj cho mô hình thị giác.
 // Chỉ dùng cho mô hình có tệp mmproj; mô hình chữ thường vẫn chạy bằng node-llama-cpp.
@@ -79,12 +80,14 @@ function createVisionServer({ log = () => {} } = {}) {
   }
 
   // messages kiểu OpenAI; phần ảnh: {type:'image_url', image_url:{url:'data:image/png;base64,…'}}
-  async function stream(extra, messages, { temperature = 0.7, maxTokens = 1024, topP, signal, onToken } = {}) {
+  async function stream(extra, messages, { temperature = 0.7, maxTokens = 1024, topP, signal, onToken, sampling = null } = {}) {
     if (!info) throw new Error('Chưa nạp mô hình nhìn ảnh.');
     const t0 = Date.now();
     // chống lặp: DRY (bắt chuỗi lặp dài) + phạt lặp nhẹ; mô hình nhìn ảnh nhỏ dễ lặp câu khi mô tả
     const body = { messages, temperature, max_tokens: maxTokens, stream: true, stream_options: { include_usage: true }, top_k: 40, min_p: 0.05,
-      repeat_penalty: 1.05, repeat_last_n: 256, dry_multiplier: 0.8, dry_base: 1.75, dry_allowed_length: 2, ...(topP != null ? { top_p: topP } : { top_p: 0.9 }), ...extra };
+      repeat_penalty: 1.1, repeat_last_n: 256, presence_penalty: 0.3, dry_multiplier: 0.8, dry_base: 1.75, dry_allowed_length: 2, top_p: 0.9,
+      ...(extra.response_format || (extra.tool_choice && extra.tool_choice !== 'auto' && extra.tool_choice !== 'none') ? SMP.toServer(SMP.samplingFor('', 'json')) : SMP.toServer(sampling)), ...(topP != null ? { top_p: topP } : {}), ...extra };
+    for (const k of Object.keys(body)) if (body[k] === undefined) delete body[k];
     let res;
     const empty = () => ({ text: '', toolCalls: [], finishReason: 'abort', usage: { completion_tokens: 0, tokensPerSecond: 0, seconds: 0 } });
     try {

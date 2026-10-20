@@ -9,7 +9,7 @@ const fmtBytes = (b) => { if (!b) return '0 B'; const u = ['B', 'KB', 'MB', 'GB'
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 let toastTimer;
-function toast(msg, err = false) { const t = $('#toast'); t.textContent = msg; t.className = 'toast show' + (err ? ' err' : ''); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = 'toast', 3500); }
+function toast(msg, err = false) { const t = $('#toast'); t.textContent = msg; t.className = 'toast show' + (err ? ' err' : ''); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = 'toast', Math.max(3500, Math.min(15000, String(msg).length * 55))); }
 
 // Markdown tối giản: khối code, code inline, in đậm, nghiêng, xuống dòng
 function md(src) {
@@ -30,12 +30,13 @@ function show(view) {
   if (view === 'memory') refreshMem();
   if (view === 'discover' && !$('#sugArea').hidden) renderCatalog();
   if (view === 'models') refreshModels();
+  if (view === 'crm') renderCrm();
   if (view === 'server') refreshServer();
   if (view === 'security') refreshSecurity().catch(err => toast(cleanErr(err.message), true));
 }
 $$('.nav-item').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
 document.addEventListener('click', (e) => { const g = e.target.closest('[data-goto]'); if (g) show(g.dataset.goto); });
-// Trò chuyện thường và AIVN BOT dùng chung khung chat; mỗi chế độ có danh sách cuộc trò chuyện riêng
+// Trò chuyện thường và AIVN AGENT dùng chung khung chat; mỗi chế độ có danh sách cuộc trò chuyện riêng
 function setMode(mode) {
   if (state.mode !== mode) {
     if (state.current) state.lastByMode[state.mode] = state.current.id;
@@ -44,9 +45,9 @@ function setMode(mode) {
     pending = []; renderChips();
   }
   $('#view-chat').classList.toggle('agent-mode', mode === 'agent');
-  $('#input').placeholder = mode === 'agent' ? 'Giao việc cho AIVN BOT… (vd. đọc tệp bao-cao.csv, tính tổng rồi ghi tóm tắt vào tom-tat.md)' : 'Nhập tin nhắn… (Enter để gửi, Shift+Enter xuống dòng, kéo thả tệp hoặc dán ảnh bằng Ctrl+V)';
+  $('#input').placeholder = mode === 'agent' ? 'Giao việc cho AIVN AGENT… (vd. đọc tệp bao-cao.csv, tính tổng rồi ghi tóm tắt vào tom-tat.md)' : 'Nhập tin nhắn… (Enter để gửi, Shift+Enter xuống dòng, kéo thả tệp hoặc dán ảnh bằng Ctrl+V)';
   $('#attachBtn').hidden = false;
-  $('#newChat').textContent = mode === 'agent' ? '＋ Việc mới cho AIVN BOT' : '＋ Cuộc trò chuyện mới';
+  $('#newChat').textContent = mode === 'agent' ? '＋ Việc mới cho AIVN AGENT' : '＋ Cuộc trò chuyện mới';
   renderConvos(); renderMessages();
   if (mode === 'agent') refreshAgent();
 }
@@ -105,7 +106,7 @@ async function ensureLoaded() {
   const list = state.models || [];
   const pick = list.find(m => m.id === $('#modelSelect').value) || list.find(m => state.settings && m.id === state.settings.lastModel) || list[0];
   if (!pick) {
-    const go = await modalAsk({ icon: '📦', title: 'Chưa có mô hình nào', message: 'Bạn cần tải một mô hình trước khi trò chuyện. Mở Kho mô hình để tải (gợi ý: Qwen3 4B hoặc Gemma 3 4B)?', okLabel: 'Mở Kho mô hình', noLabel: 'Để sau' });
+    const go = await modalAsk({ icon: '📦', title: 'Chưa có mô hình nào', message: 'Bạn cần tải một mô hình trước khi trò chuyện. Mở Kho mô hình để tải (gợi ý: Qwen3 4B Instruct 2507, hoặc Qwen3 8B nếu máy mạnh)?', okLabel: 'Mở Kho mô hình', noLabel: 'Để sau' });
     if (go) show('discover'); return false;
   }
   toast(`Đang nạp ${pick.catalog ? pick.catalog.name : pick.file}…`);
@@ -123,6 +124,7 @@ function setStatus(st) {
   if (st.loading) el.innerHTML = `<span class="dot busy"></span>Đang nạp ${esc(st.id || '')}…`;
   else if (st.loaded) el.innerHTML = `<span class="dot"></span>${esc(st.id)}${st.vision ? ' · <b class="vis-pill" title="Mô hình nhìn được ảnh: ảnh bạn dán được gửi thẳng cho mô hình">👁 nhìn ảnh</b>' : ''} · ngữ cảnh ${st.contextSize} · ${st.gpu ? 'GPU ' + esc(String(st.gpu)) : 'CPU'}`;
   else el.innerHTML = `<span class="dot off"></span>Chưa nạp mô hình`;
+  el.title = el.textContent;
   $('#ejectBtn').disabled = !st.loaded;
   $('#modelSelect').disabled = !!st.loading;
 }
@@ -166,15 +168,26 @@ async function renderCatalog() {
   const fams = ['all', ...new Set(state.catalog.map(c => c.family))];
   $('#famFilter').innerHTML = fams.map(f => `<button class="chip-btn ${disc.fam === f ? 'on' : ''}" data-fam="${esc(f)}">${f === 'all' ? 'Tất cả' : esc(f)}</button>`).join('');
   const list = state.catalog.filter(c => disc.fam === 'all' || c.family === disc.fam);
-  const comp = state.catalog.filter(c => c.computer && (disc.fam === 'all' || c.family === disc.fam)).sort((x, y) => (!!y.recScreen - !!x.recScreen) || ((y.screenPriority || 0) - (x.screenPriority || 0)));
+  const roleOrd = (c) => (c.recScreen ? 0 : c.recGround ? 1 : c.role === 'planner' ? 2 : 3);
+  const comp = state.catalog.filter(c => c.role && (disc.fam === 'all' || c.family === disc.fam)).sort((x, y) => (roleOrd(x) - roleOrd(y)) || ((y.bench ? y.bench.score : -1) - (x.bench ? x.bench.score : -1)) || ((y.screenPriority || 0) - (x.screenPriority || 0)));
   $('#screenArea').hidden = !comp.length;
   $('#screenCards').innerHTML = comp.map(catCard).join('');
-  $('#catalog').innerHTML = list.filter(c => !c.computer).map(catCard).join('');
+  $('#catalog').innerHTML = list.filter(c => !c.role).map(catCard).join('');
+}
+const roleTag = (c) => c.role === 'planner' ? '<span class="tag comp" title="Bộ lập kế hoạch: đọc danh sách nút/ô của cửa sổ (Trợ năng của hệ điều hành) rồi chọn bước tiếp theo. Không cần nhìn ảnh.">🧠 Lập kế hoạch</span>' : c.role === 'grounder' ? '<span class="tag comp" title="Bộ định vị (chế độ hai mô hình): khi danh sách nút/ô thiếu phần tử, mô hình này nhìn ảnh chụp màn hình và chỉ ra toạ độ cần bấm. Chạy cùng một mô hình Qwen3 lập kế hoạch.">🎯 Định vị (nhìn ảnh)</span>' : '';
+function benchTag(c) {
+  const b = c.bench; if (!c.role && !b) return '';
+  const out = [];
+  if (b && b.done === 10) out.push(`<span class="tag bench ${b.score >= 7 ? 'good' : 'low'}" title="${esc(`Đo trên ${b.where}${b.date ? ' ngày ' + new Date(b.date).toLocaleDateString('vi-VN') : ''}: 10 việc có kịch bản (mở ứng dụng, bấm nút có tên, gõ tiếng Việt, đọc chữ, nhấp đúp…). An toàn (hỏi trước khi gửi): ${b.safety === null ? 'chưa đo' : b.safety ? 'đạt' : 'KHÔNG đạt'}. ${b.seconds ? 'Tổng ' + Math.round(b.seconds / 60) + ' phút.' : ''}`)}">Điểm tác vụ: ${b.score}/10</span>`);
+  else if (c.role === 'planner') out.push('<span class="tag bench" title="Chưa có lần đo nào. Mở Cài đặt AIVN AGENT → Điều khiển màn hình → Đo Điểm tác vụ để đo trên máy bạn.">Điểm tác vụ: chưa đo</span>');
+  if (b && b.grounding) out.push(`<span class="tag bench ${b.grounding.score >= 7 ? 'good' : 'low'}" title="${esc(`Bài đo định vị: chỉ đúng ${b.grounding.score}/10 nút trên ảnh chụp cửa sổ AIVN Bench (đo trên ${b.where}).`)}">Điểm định vị: ${b.grounding.score}/10</span>`);
+  else if (c.role === 'grounder') out.push('<span class="tag bench" title="Chưa đo trên máy nào; chưa được gắn nhãn Gợi ý.">Điểm định vị: chưa đo</span>');
+  return out.join('');
 }
 const catCard = (c) => `<div class="card" data-id="${esc(c.id)}">
     <div class="card-top"><div class="av">${esc(c.family.slice(0, 2))}</div><div><h4>${esc(c.name)}</h4><div class="sub">${esc(c.params)} tham số · ${esc(c.quant)} · ${fmtBytes(c.size + (c.mmproj ? c.mmproj.size : 0))}</div></div></div>
     <p>${esc(c.desc)}</p>
-    <div class="tags">${c.recScreen ? '<span class="tag rec" title="Nhìn được màn hình và gọi công cụ tốt, vừa với máy này">⭐ Gợi ý cho điều khiển màn hình</span>' : ''}${c.recommended ? '<span class="tag rec" title="Mô hình lớn nhất vẫn chạy tốt trên máy này">⭐ Gợi ý cho máy này</span>' : ''}${c.computer ? `<span class="tag comp" title="${esc(c.computerNote || 'Đã kiểm tra: nhìn ảnh, chỉ đúng vị trí nút trên ảnh chụp màn hình, gọi công cụ thật')}">🖥 Điều khiển máy tính</span>` : ''}${fitBadge(c.fit)}${c.vision ? `<span class="tag vis" title="Tải kèm tệp thị giác ${esc(c.mmproj.file)} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán">👁 Nhìn được ảnh</span>` : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}${c.tags.filter(t => t !== 'Nhìn được ảnh' && t !== 'Điều khiển máy tính').map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
+    <div class="tags">${c.recommended ? '<span class="tag rec" title="Qwen3 gọi công cụ tốt nhất trong các mô hình vừa máy này">⭐ Gợi ý: trò chuyện &amp; công cụ</span>' : ''}${c.recScreen ? '<span class="tag rec" title="Đã qua bài đo Điểm tác vụ (≥ 7/10 và hỏi trước bước quan trọng)">⭐ Gợi ý: điều khiển máy</span>' : ''}${c.recGround ? '<span class="tag rec" title="Đã qua bài đo định vị (≥ 7/10) và vừa máy này">⭐ Gợi ý: định vị (hai mô hình)</span>' : ''}${roleTag(c)}${benchTag(c)}${fitBadge(c.fit)}${c.vision ? `<span class="tag vis" title="Tải kèm tệp thị giác ${esc(c.mmproj.file)} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán">👁 Nhìn được ảnh</span>` : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}${c.tags.filter(t => t !== 'Nhìn được ảnh' && t !== 'Điều khiển máy tính').map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
     <div class="card-foot" data-job="${esc(jobIdFor(c.repo, c.file))}">${footHtml({ ...c, size: c.size + (c.mmproj ? c.mmproj.size : 0) }, `data-act="dl-cat" data-id="${esc(c.id)}"`, c.file)}</div>
     <button class="linkish" data-act="open-repo" data-repo="${esc(c.repo)}">Các bản lượng tử khác · ${esc(c.repo)}</button></div>`;
 
@@ -276,7 +289,7 @@ $('#tokenClear').addEventListener('click', async () => { state.settings = await 
 // ---------- Trò chuyện ----------
 async function loadConvos() { state.convos = await A.convos(); renderConvos(); }
 function renderConvos() {
-  $('#convoList').innerHTML = state.convos.filter(c => convoMode(c) === state.mode).map(c => `<div class="convo ${state.current && c.id === state.current.id ? 'active' : ''}" data-id="${c.id}"><span>${esc(c.title)}</span><button class="del" title="Xoá">✕</button></div>`).join('') || `<div class="muted" style="padding:8px;font-size:12.5px">${isAgent() ? 'Chưa giao việc nào cho AIVN BOT' : 'Chưa có cuộc trò chuyện nào'}</div>`;
+  $('#convoList').innerHTML = state.convos.filter(c => convoMode(c) === state.mode).map(c => `<div class="convo ${state.current && c.id === state.current.id ? 'active' : ''}" data-id="${c.id}"><span>${esc(c.title)}</span><button class="del" title="Xoá">✕</button></div>`).join('') || `<div class="muted" style="padding:8px;font-size:12.5px">${isAgent() ? 'Chưa giao việc nào cho AIVN AGENT' : 'Chưa có cuộc trò chuyện nào'}</div>`;
 }
 $('#convoList').addEventListener('click', async (e) => {
   const row = e.target.closest('.convo'); if (!row) return;
@@ -294,8 +307,8 @@ function renderMessages() {
   const box = $('#messages');
   const msgs = state.current ? state.current.messages : [];
   if (!msgs.length && isAgent()) {
-    const welcome = (state.agent && state.agent.welcome) || 'Xin chào! Mình là **AIVN BOT**.';
-    box.innerHTML = `<div class="msg assistant agent welcome" id="botWelcome"><div class="who"><img src="logo-tile.svg" alt="" width="16" height="16"> AIVN BOT</div><div class="body">${md(welcome)}</div></div>
+    const welcome = (state.agent && state.agent.welcome) || 'Xin chào! Mình là **AIVN AGENT**.';
+    box.innerHTML = `<div class="msg assistant agent welcome" id="botWelcome"><div class="who"><img src="logo-tile.svg" alt="" width="16" height="16"> AIVN AGENT</div><div class="body">${md(welcome)}</div></div>
       <div class="empty compact"><p class="muted small">Thử giao việc:</p><div class="examples">${AGENT_EXAMPLES.map(x => `<button type="button" data-example="${esc(x)}">${esc(x)}</button>`).join('')}</div></div>`;
     return;
   }
@@ -312,7 +325,7 @@ function renderMessages() {
     const ag = m.role === 'assistant' && (m.steps || m.agent);
     const extra = m.role === 'assistant' ? webSrcHtml(m) + (m.memories && m.memories.length ? `<div class="mem-used" title="${esc(m.memories.join('\n'))}">🧠 Đã dùng ${m.memories.length} ghi nhớ liên quan</div>` : '') : '';
     const sched = m.scheduled ? `<div class="sched-tag">⏰ Lịch tự động · ${new Date(m.scheduled.at).toLocaleString('vi-VN')}${m.scheduled.late ? ' · chạy bù (trễ)' : ''}${m.scheduled.manual ? ' · chạy thủ công' : ''}</div>` : '';
-    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN BOT' : 'AIVN'}${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions"><button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning ? `<div class="no-action" role="alert"><b>⚠ Chưa có việc nào được làm</b><span>${esc(m.warning)}</span><button type="button" class="btn sm" data-rec-go="1">Mở Kho mô hình</button></div>` : ''}${srcs}${extra}${sched}${copyBtn}</div>${warn}`;
+    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN AGENT' : 'AIVN'}${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions"><button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning ? `<div class="no-action" role="alert"><b>⚠ Chưa có việc nào được làm</b><span>${esc(m.warning)}</span><button type="button" class="btn sm" data-rec-go="1">Mở Kho mô hình</button></div>` : ''}${srcs}${extra}${sched}${copyBtn}</div>${warn}`;
   }).join('');
   box.scrollTop = box.scrollHeight;
 }
@@ -463,7 +476,7 @@ $('#composer').addEventListener('submit', async (e) => {
   input.value = ''; input.style.height = 'auto';
   renderMessages();
   const bodyEl = $('#messages .msg:last-child .body'); bodyEl.classList.add('cursor');
-  const reqId = uid(); state.generating = reqId; genStartedAt = Date.now();
+  const reqId = uid(); state.generating = reqId; genStartedAt = Date.now(); setPhase('think');
   $('#sendBtn').hidden = true; $('#stopBtn').hidden = false; $('#genStats').textContent = 'Đang suy nghĩ…';
   const s = state.settings;
   // Lịch sử gửi cho mô hình: chỉ tin nhắn có tài liệu gần nhất giữ toàn bộ nội dung đã đóng gói, tin cũ hơn chỉ ghi tên tệp
@@ -521,7 +534,7 @@ $('#stopBtn').addEventListener('click', () => { if (!state.generating) return; i
 function bindSettings() {
   const s = state.settings;
   $('#sysPrompt').value = s.systemPrompt; $('#temp').value = s.temperature; $('#tempOut').textContent = s.temperature;
-  $('#maxTok').value = s.maxTokens; $('#ctxSize').value = String(s.contextSize);
+  $('#maxTok').value = s.maxTokens; $('#ctxSize').value = String(s.contextSize); paintPerf();
   $('#srvPort').value = s.apiPort; $('#srvAuto').checked = !!s.apiAutoStart;
   const save = async (patch) => { state.settings = await A.setSettings(patch); };
   $('#sysPrompt').addEventListener('change', e => save({ systemPrompt: e.target.value }));
@@ -676,7 +689,7 @@ A.onVcredist(() => { // Windows thiếu Visual C++ Redistributable: llama-server
 });
 $('#sysNotice').addEventListener('click', (e) => { const b = e.target.closest('[data-vc]'); if (!b) return; if (b.dataset.vc === 'dl') A.openVcredist(); $('#sysNotice').hidden = true; });
 
-// ---------- AIVN BOT ----------
+// ---------- AIVN AGENT ----------
 const AGENT_EXAMPLES = ['Bây giờ là mấy giờ, hôm nay thứ mấy? Còn bao nhiêu ngày nữa đến Tết Dương lịch?', 'Xem thư mục được phép có những tệp nào rồi tóm tắt tệp mới nhất.', 'Tính lãi kép: gửi 50 triệu, lãi 6,5%/năm trong 5 năm thì được bao nhiêu?', 'Hãy nhớ: tôi tên Khôi, đang học ở VLU.'];
 const STATUS_VI = { running: 'đang chạy', ok: 'xong', error: 'lỗi', refused: 'bị từ chối' };
 const fmtMs = (ms) => ms == null ? '' : ms < 1000 ? ms + ' ms' : (ms / 1000).toFixed(1).replace('.', ',') + ' giây';
@@ -684,13 +697,13 @@ function argPreview(st) { const a = st.args || {}; const v = a.path || a.express
 function stepHtml(st, open) {
   const args = Object.keys(st.args || {}).length ? JSON.stringify(st.args, null, 2) : '(không có)';
   return `<details class="step st-${esc(st.status)}" data-step="${esc(st.id)}"${open ? ' open' : ''}><summary><span aria-hidden="true">${esc(st.icon || '🔧')}</span><span class="s-name">${esc(st.label)}</span><span class="s-sum">${esc(st.summary || argPreview(st))}</span>${st.ms != null ? `<span class="s-ms">${fmtMs(st.ms)}</span>` : ''}<span class="s-st">${STATUS_VI[st.status] || esc(st.status)}</span></summary>
-    <div class="s-body"><h5>Công cụ</h5><div><code>${esc(st.name)}</code></div><h5>Đầu vào</h5><pre>${esc(args)}</pre>${st.status !== 'running' ? `<h5>Kết quả</h5><pre>${esc(st.detail ?? st.summary ?? '')}</pre>` : ''}</div></details>`;
+    ${st.thumb && st.thumb.src ? `<img class="s-thumb" src="${esc(st.thumb.src)}" alt="Màn hình sau bước này" loading="lazy">` : ''}<div class="s-body"><h5>Công cụ</h5><div><code>${esc(st.name)}</code></div><h5>Đầu vào</h5><pre>${esc(args)}</pre>${st.status !== 'running' ? `<h5>Kết quả</h5><pre>${esc(st.detail ?? st.summary ?? '')}</pre>` : ''}</div></details>`;
 }
 function stepsHtml(m, openIds = new Set()) {
   if (!m.steps || !m.steps.length) return '';
   let html = '', lastPre = null;
   for (const st of m.steps) { if (st.pre && st.pre !== lastPre) { html += `<div class="step-pre">💭 ${esc(st.pre)}</div>`; lastPre = st.pre; } html += stepHtml(st, openIds.has(st.id)); }
-  return `<div class="steps" aria-label="Các bước AIVN BOT đã làm">${html}</div>`;
+  return `<div class="steps" aria-label="Các bước AIVN AGENT đã làm">${html}</div>`;
 }
 function webSrcHtml(m) {
   const urls = (m.urls || []).filter(Boolean); if (!urls.length) return '';
@@ -705,7 +718,7 @@ function agentHistory(conv) {
 }
 $('#messages').addEventListener('click', (e) => { const b = e.target.closest('[data-example]'); if (b) { input.value = b.dataset.example; input.focus(); input.dispatchEvent(new Event('input')); } });
 
-// Tệp/ảnh đính kèm cho AIVN BOT: ảnh → mô hình nhìn ảnh (nếu có) hoặc chữ đọc bằng OCR; tài liệu → nội dung chữ đưa vào lượt hỏi;
+// Tệp/ảnh đính kèm cho AIVN AGENT: ảnh → mô hình nhìn ảnh (nếu có) hoặc chữ đọc bằng OCR; tài liệu → nội dung chữ đưa vào lượt hỏi;
 // đường dẫn tệp đính kèm được phép đọc (read_file) trong việc này
 async function agentAttachments(atts, text) {
   const vision = !!state.status.vision;
@@ -759,13 +772,16 @@ async function sendAgent(text) {
   });
   const offSt = A.onAgentStatus((st) => {
     if (st.reqId !== reqId) return;
+    if (st.stage === 'think') setPhase('think');
+    if (st.stage === 'ask') setPhase('ask');
+    if (st.stage === 'act' || st.stage === 'tools') setPhase('act');
     if (st.stage === 'think') $('#genStats').textContent = st.round ? `Đang suy nghĩ… (bước ${st.round + 1})` : 'Đang suy nghĩ…';
     if (st.stage === 'recover') { reply.content = ''; reply.steps = []; paintBody(); paintSteps(); $('#genStats').textContent = `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${st.ctx}) và thử lại…`; return; }
     if (st.stage === 'verify') { reply.content = ''; paintBody(); $('#genStats').textContent = 'Đang kiểm tra lại: câu trả lời chưa khớp với các bước đã làm…'; }
   });
   try {
     const r = await A.agentRun({ reqId, convoId: conv.id, messages: [...agentHistory(conv), { role: 'user', content: pack.content }], attachments: pack.files });
-    Object.assign(reply, { content: r.text || (r.finishReason === 'abort' ? '' : r.warning ? '' : '(AIVN BOT không trả lời)'), warning: r.warning || null, steps: r.steps, urls: r.urls, memories: r.memories, model: r.model || reply.model });
+    Object.assign(reply, { content: r.text || (r.finishReason === 'abort' ? '' : r.warning ? '' : '(AIVN AGENT không trả lời)'), warning: r.warning || null, steps: r.steps, urls: r.urls, memories: r.memories, model: r.model || reply.model });
     const tools = r.steps.length;
     $('#genStats').textContent = `${tools ? tools + ' bước dùng công cụ · ' : ''}${r.usage.completion_tokens} token · ${r.usage.seconds.toFixed(1)} giây${r.finishReason === 'abort' ? ' · đã dừng' : r.finishReason === 'length' ? ' · chạm giới hạn token' : ''}`;
     if (r.finishReason === 'abort') reply.content = (reply.content ? reply.content + '\n\n' : '') + `_Đã dừng${r.stoppedBy ? ' (' + r.stoppedBy + ')' : ''}._`;
@@ -773,6 +789,7 @@ async function sendAgent(text) {
     reply.error = true; reply.content = (reply.content ? reply.content + '\n\n' : '') + '⚠ ' + cleanErr(err.message);
     $('#genStats').textContent = '';
   } finally {
+    setPhase('done'); setTimeout(() => { if (!state.generating) setPhase(null); }, 4000);
     offTok(); offStep(); offSt(); state.generating = null; $('#sendBtn').hidden = false; $('#stopBtn').hidden = true;
     conv.updatedAt = Date.now(); await A.saveConvo(conv); await loadConvos(); renderMessages();
     if (reply.steps.some(x => x.name === 'save_memory' && x.status === 'ok')) refreshMemCount();
@@ -802,11 +819,259 @@ $('#confirmModal').addEventListener('click', (e) => { if (e.target.id === 'confi
 A.onAgentConfirm(async (req) => { const ok = await modalAsk({ ...req, fromAgent: true }); A.agentConfirmReply({ id: req.id, ok }); });
 A.onAgentConfirmCancel(({ id }) => { if (modalOpen && modalOpen.id === id) closeModal(false); const i = modalQueue.findIndex(x => x.id === id); if (i >= 0) modalQueue.splice(i, 1)[0].resolve(false); });
 
-// --- Cài đặt AIVN BOT ---
+// --- Thẻ xin phép chung (0.15.0): Cho phép (Ctrl+Enter) / Từ chối (Esc) / Từ chối kèm lý do / Luôn cho phép ---
+const apQueue = []; let apOpen = null;
+function setPhase(ph) {
+  const el = $('#phaseStrip'); if (!el) return;
+  if (!ph) { el.hidden = true; return; }
+  el.hidden = false; const order = ['think', 'ask', 'act', 'done']; const k = order.indexOf(ph);
+  el.querySelectorAll('span').forEach(sp => { const i = order.indexOf(sp.dataset.ph); sp.classList.toggle('on', i === k); sp.classList.toggle('done', ph === 'done' ? i < k : false); });
+}
+function apShow() {
+  if (apOpen || !apQueue.length) return;
+  const c = apOpen = apQueue.shift();
+  const card = $('#approveCard'); card.classList.toggle('danger', !!c.danger);
+  $('#apIcon').textContent = c.icon || '🔧'; $('#apTitle').textContent = c.title || 'AIVN AGENT xin phép';
+  $('#apSub').textContent = `Công cụ: ${c.label || c.tool}${c.path ? ' · ' + c.path : ''}`;
+  $('#apFields').innerHTML = (c.fields || []).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('');
+  $('#apPreview').hidden = !c.preview; $('#apPreview').textContent = c.preview || '';
+  $('#apDiff').hidden = !c.diff;
+  $('#apDiff').innerHTML = c.diff ? c.diff.text.split('\n').map(l => { const k = l.startsWith('+ ') ? 'add' : l.startsWith('- ') ? 'del' : 'ctx'; return `<span class="${k}"><i class="g" aria-label="${k === 'add' ? 'thêm' : k === 'del' ? 'bỏ' : ''}">${k === 'add' ? '+' : k === 'del' ? '−' : ' '}</i>${esc(k === 'ctx' ? l.replace(/^ {2}/, '') : l.slice(2)) || ' '}</span>`; }).join('') : '';
+  $('#apReasonBox').hidden = true; $('#apReason').value = '';
+  $('#apAlwaysRow').hidden = !c.allowAlways; $('#apAlways').checked = false; $('#apWarn').hidden = true; // không bao giờ bật sẵn
+  card.hidden = false; setPhase('ask');
+  $('#apDeny').focus({ preventScroll: true }); card.scrollTop = 0;
+  card.scrollIntoView({ block: 'nearest' });
+}
+function apAnswer(ok, withReason = false) {
+  const c = apOpen; if (!c) return;
+  const reason = withReason ? $('#apReason').value.trim() : '';
+  const always = ok && c.allowAlways && $('#apAlways').checked;
+  apOpen = null; $('#approveCard').hidden = true; setPhase(ok ? 'act' : 'think');
+  A.agentApproveReply({ id: c.id, ok, reason, always });
+  if (always) toast(`Đã chọn “Luôn cho phép” cho ${c.label || c.tool}. Bỏ trong Cài đặt AIVN AGENT.`);
+  apShow();
+}
+$('#apAllow').addEventListener('click', () => apAnswer(true));
+$('#apDeny').addEventListener('click', () => { if (!$('#apReasonBox').hidden && $('#apReason').value.trim()) apAnswer(false, true); else apAnswer(false); });
+$('#apDenyReason').addEventListener('click', () => {
+  if ($('#apReasonBox').hidden) { $('#apReasonBox').hidden = false; $('#apReason').focus(); $('#apDenyReason').textContent = 'Gửi lý do & từ chối'; return; }
+  apAnswer(false, true); $('#apDenyReason').textContent = 'Từ chối kèm lý do';
+});
+$('#apAlways').addEventListener('change', (e) => { const c = apOpen; $('#apWarn').hidden = !e.target.checked; $('#apWarn').textContent = '⚠ ' + ((c && c.warn) || 'AIVN AGENT sẽ dùng công cụ này mà không hỏi lại.') + ' Bạn có thể bỏ trong Cài đặt AIVN AGENT.'; });
+document.addEventListener('keydown', (e) => {
+  if (!apOpen) return;
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); apAnswer(true); }
+  else if (e.key === 'Escape') { e.preventDefault(); if (!$('#apReasonBox').hidden && document.activeElement === $('#apReason') && $('#apReason').value.trim()) apAnswer(false, true); else apAnswer(false); }
+}, true);
+A.onAgentApprove((c) => { apQueue.push(c); apShow(); });
+A.onAgentApproveCancel(({ id }) => { if (apOpen && apOpen.id === id) { apOpen = null; $('#approveCard').hidden = true; apShow(); } const i = apQueue.findIndex(x => x.id === id); if (i >= 0) apQueue.splice(i, 1); });
+
+if (A.onNotice) A.onNotice((n) => toast((n.kind === 'warn' ? '⚠ ' : '') + n.text, n.kind === 'warn'));
+
+// --- Kinh doanh → Khách hàng (CRM) ---
+const crm = { tab: 'dash', contacts: [] };
+const vnd = (n) => (Number(n) || 0).toLocaleString('vi-VN') + ' đ';
+async function C(fn, ...a) { const r = await A.crm(fn, ...a); if (!r.ok) throw new Error(r.error); return r.data; }
+async function renderCrm() {
+  $$('.crm-tabs button').forEach(b => b.classList.toggle('on', b.dataset.crm === crm.tab));
+  const q = $('#crmQ').value.trim(); const body = $('#crmBody');
+  $('#crmAdd').textContent = crm.tab === 'leads' ? '＋ Cơ hội' : crm.tab === 'acts' ? '＋ Việc' : '＋ Liên hệ';
+  try {
+    if (crm.tab === 'dash') {
+      const d = await C('dashboard');
+      body.innerHTML = `<div class="kpis"><div class="kpi">Cơ hội đang mở<b>${d.open.n}</b><span class="small muted">${vnd(d.open.sum)} · dự kiến ${vnd(d.open.weighted)}</span></div><div class="kpi">Thắng trong tháng<b>${d.wonMonth.n}</b><span class="small muted">${vnd(d.wonMonth.sum)}</span></div><div class="kpi">Tỉ lệ thắng<b>${d.winRate == null ? '—' : Math.round(d.winRate) + '%'}</b><span class="small muted">90 ngày: ${d.winRate90 == null ? '—' : Math.round(d.winRate90) + '%'}</span></div><div class="kpi">Việc cần làm<b>${d.activities.open}</b><span class="small muted">${d.activities.overdue} quá hạn · ${d.activities.today} hôm nay</span></div></div>
+        <h3>Theo giai đoạn</h3><table class="crm-table"><tr><th>Giai đoạn</th><th>Số cơ hội</th><th>Giá trị</th></tr>${d.byStage.map(x => `<tr><td>${esc(x.name)}</td><td>${x.n}</td><td>${vnd(x.sum)}</td></tr>`).join('')}</table>
+        <h3>Sắp tới</h3>${(d.upcoming || []).length ? `<table class="crm-table">${d.upcoming.map(a => `<tr><td>${esc(a.type_vi || '')}</td><td>${esc(a.title)}</td><td>${esc(a.contact_name || '')}</td><td>${a.due_at ? new Date(a.due_at).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }) : 'chưa hẹn giờ'}</td></tr>`).join('')}</table>` : '<div class="empty-state"><div class="big">📅</div>Chưa có việc nào sắp tới.</div>'}`;
+    } else if (crm.tab === 'contacts') {
+      const r = await C('listContacts', { q }); crm.contacts = r.rows;
+      body.innerHTML = r.rows.length ? `<table class="crm-table"><tr><th>Tên</th><th>Loại</th><th>Điện thoại</th><th>Email</th><th>Thẻ</th><th>Phụ trách</th><th></th></tr>${r.rows.map(c => `<tr><td><b>${esc(c.name)}</b>${c.job_title ? `<div class="small muted">${esc(c.job_title)}</div>` : ''}</td><td>${esc(c.kind_vi)}</td><td>${esc(c.phone_fmt || c.phone || '')}</td><td>${esc(c.email || '')}</td><td>${(c.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join(' ')}</td><td>${esc(c.owner || '')}</td><td><button class="btn sm" data-crm-edit="${esc(c.id)}">Sửa</button> <button class="btn sm ghost" data-crm-del="${esc(c.id)}" title="Xoá liên hệ">🗑</button></td></tr>`).join('')}</table><p class="small muted">${r.total} liên hệ</p>`
+        : `<div class="empty-state"><div class="big">👥</div>${q ? 'Không tìm thấy liên hệ phù hợp.' : 'Chưa có khách hàng nào. Bấm “＋ Liên hệ” hoặc “⬆ Nhập” từ tệp Excel/CSV.'}</div>`;
+    } else if (crm.tab === 'leads') {
+      const r = await C('listLeads', { q }); const rows = Array.isArray(r) ? r : r.rows || [];
+      const ST = [['new', 'Mới'], ['contacted', 'Đã liên hệ'], ['quoted', 'Báo giá'], ['negotiation', 'Đàm phán'], ['won', 'Thắng'], ['lost', 'Thua']];
+      body.innerHTML = `<div class="kanban">${ST.map(([id, n]) => { const col = rows.filter(l => l.stage === id); return `<div class="kcol" data-stage="${id}"><h4>${n}<span class="muted">${col.length}</span></h4>${col.map(l => `<div class="kcard" draggable="true" data-lead="${esc(l.id)}"><b>${esc(l.title)}</b><div class="small muted">${esc(l.contact_name || '')}</div><div class="small">${vnd(l.expected_revenue)} · ${l.probability}%</div></div>`).join('') || '<div class="small muted">Kéo thẻ vào đây</div>'}</div>`; }).join('')}</div>`;
+    } else {
+      const r = await C('listActivities', { status: 'open' });
+      body.innerHTML = r.length ? `<table class="crm-table"><tr><th></th><th>Việc</th><th>Loại</th><th>Khách hàng</th><th>Hạn</th></tr>${r.map(a => `<tr><td><input type="checkbox" data-crm-done="${esc(a.id)}" aria-label="Đánh dấu xong"></td><td>${esc(a.title)}${a.overdue ? ' <span class="tag" style="color:#82071e">quá hạn</span>' : ''}</td><td>${esc(a.type_vi)}</td><td>${esc(a.contact_name || '')}</td><td>${a.due_at ? new Date(a.due_at).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td></tr>`).join('')}</table>` : '<div class="empty-state"><div class="big">✅</div>Không còn việc nào cần làm.</div>';
+    }
+  } catch (e) { body.innerHTML = `<div class="empty-state">⚠ ${esc(e.message)}</div>`; }
+}
+function crmForm(kind, data = {}) {
+  const F = {
+    contact: [['name', 'Họ tên / tên công ty *'], ['kind', 'Loại', [['person', 'Cá nhân'], ['company', 'Công ty']]], ['phone', 'Điện thoại'], ['email', 'Email'], ['job_title', 'Chức vụ'], ['address', 'Địa chỉ'], ['tax_id', 'Mã số thuế'], ['tags', 'Thẻ (cách nhau bởi dấu phẩy)'], ['notes', 'Ghi chú', 'area']],
+    lead: [['title', 'Tên cơ hội *'], ['contact_id', 'Khách hàng', [['', '—'], ...crm.contacts.map(c => [c.id, c.name])]], ['expected_revenue', 'Giá trị dự kiến (đ)'], ['stage', 'Giai đoạn', [['new', 'Mới'], ['contacted', 'Đã liên hệ'], ['quoted', 'Báo giá'], ['negotiation', 'Đàm phán'], ['won', 'Thắng'], ['lost', 'Thua']]], ['close_date', 'Ngày dự kiến chốt (YYYY-MM-DD)'], ['notes', 'Ghi chú', 'area']],
+    act: [['title', 'Việc cần làm *'], ['type', 'Loại', [['call', 'Gọi điện'], ['meeting', 'Cuộc hẹn'], ['email', 'Email'], ['todo', 'Việc cần làm']]], ['contact_id', 'Khách hàng', [['', '—'], ...crm.contacts.map(c => [c.id, c.name])]], ['due_at', 'Hạn', 'datetime'], ['notes', 'Ghi chú', 'area']]
+  }[kind];
+  $('#crmFormTitle').textContent = (data.id ? 'Sửa ' : 'Thêm ') + ({ contact: 'liên hệ', lead: 'cơ hội', act: 'việc cần làm' })[kind];
+  $('#crmFields').innerHTML = F.map(([k, l, t]) => `<label>${esc(l)}${Array.isArray(t) ? `<select name="${k}">${t.map(([v, n]) => `<option value="${esc(v)}" ${String(data[k] ?? '') === v ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : t === 'area' ? `<textarea name="${k}" rows="3">${esc(data[k] || '')}</textarea>` : `<input name="${k}" type="${t === 'datetime' ? 'datetime-local' : 'text'}" value="${esc(Array.isArray(data[k]) ? data[k].join(', ') : data[k] ?? '')}">`}</label>`).join('');
+  $('#crmErr').textContent = ''; $('#crmModal').hidden = false; $('#crmForm').dataset.kind = kind; $('#crmForm').dataset.id = data.id || '';
+  $('#crmFields').querySelector('input,select').focus();
+}
+$('#crmForm').addEventListener('submit', async (e) => {
+  e.preventDefault(); const f = e.target; const o = Object.fromEntries(new FormData(f).entries()); if (f.dataset.id) o.id = f.dataset.id;
+  try { await C({ contact: 'saveContact', lead: 'saveLead', act: 'saveActivity' }[f.dataset.kind], o); $('#crmModal').hidden = true; toast('Đã lưu ✓'); renderCrm(); }
+  catch (err) { $('#crmErr').textContent = err.message; }
+});
+$('#crmCancel').addEventListener('click', () => { $('#crmModal').hidden = true; });
+$('#crmModal').addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#crmModal').hidden = true; });
+$$('.crm-tabs button').forEach(b => b.addEventListener('click', () => { crm.tab = b.dataset.crm; renderCrm(); }));
+let crmT = null; $('#crmQ').addEventListener('input', () => { clearTimeout(crmT); crmT = setTimeout(() => { if (crm.tab === 'dash') crm.tab = 'contacts'; renderCrm(); }, 220); });
+$('#crmAdd').addEventListener('click', async () => { if (!crm.contacts.length) crm.contacts = (await C('listContacts', {}).catch(() => ({ rows: [] }))).rows; crmForm(crm.tab === 'leads' ? 'lead' : crm.tab === 'acts' ? 'act' : 'contact'); });
+$('#crmExport').addEventListener('click', async () => { const r = await A.crmExport(); if (r.ok) toast('Đã xuất ' + r.file); else if (!r.canceled) toast('⚠ ' + r.error, true); });
+$('#crmImport').addEventListener('click', async () => { const r = await A.crmImport(); if (r.ok) { toast(`Đã nhập: ${r.result.created} mới, ${r.result.merged} gộp, ${r.result.skipped} bỏ qua${r.result.errors.length ? `, ${r.result.errors.length} lỗi` : ''}`); crm.tab = 'contacts'; renderCrm(); } else if (!r.canceled) toast('⚠ ' + r.error, true); });
+$('#crmBody').addEventListener('click', async (e) => {
+  const ed = e.target.closest('[data-crm-edit]'); const del = e.target.closest('[data-crm-del]'); const lead = e.target.closest('[data-lead]');
+  if (ed) crmForm('contact', crm.contacts.find(c => c.id === ed.dataset.crmEdit) || {});
+  if (del && await modalAsk({ icon: '🗑', title: 'Xoá liên hệ?', message: 'Liên hệ và lịch sử liên quan sẽ bị xoá khỏi máy này.', okLabel: 'Xoá', noLabel: 'Giữ lại' })) { await C('deleteContact', del.dataset.crmDel).catch(err => toast(err.message, true)); renderCrm(); }
+  if (lead && !e.defaultPrevented) { const rows = await C('listLeads', {}); const all = Array.isArray(rows) ? rows : rows.rows; if (!crm.contacts.length) crm.contacts = (await C('listContacts', {})).rows; crmForm('lead', all.find(l => l.id === lead.dataset.lead) || {}); }
+});
+$('#crmBody').addEventListener('change', async (e) => { const d = e.target.closest('[data-crm-done]'); if (d) { await C('completeActivity', d.dataset.crmDone).catch(err => toast(err.message, true)); toast('Đã xong ✓'); renderCrm(); } });
+$('#crmBody').addEventListener('dragstart', (e) => { const c = e.target.closest('[data-lead]'); if (c) { e.dataTransfer.setData('text/plain', c.dataset.lead); c.classList.add('drag'); } });
+$('#crmBody').addEventListener('dragover', (e) => { const col = e.target.closest('.kcol'); if (col) { e.preventDefault(); $$('.kcol').forEach(k => k.classList.toggle('over', k === col)); } });
+$('#crmBody').addEventListener('drop', async (e) => { const col = e.target.closest('.kcol'); if (!col) return; e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); await C('moveLead', id, col.dataset.stage).catch(err => toast(err.message, true)); renderCrm(); });
+
+// --- UX 0.15.0: bảng lệnh Ctrl+K, ẩn/hiện bảng phải, phím tắt, giới thiệu nhanh ---
+function togglePanel(force) {
+  const v = $('#view-chat'); const off = typeof force === 'boolean' ? force : !v.classList.contains('no-panel');
+  v.classList.toggle('no-panel', off); localStorage.setItem('aivn.noPanel', off ? '1' : '0');
+  $('#panelToggle').textContent = off ? '⇤ Hiện bảng cài đặt' : '⇥ Ẩn bảng cài đặt';
+}
+if (localStorage.getItem('aivn.noPanel') === '1' || (localStorage.getItem('aivn.noPanel') === null && innerWidth < 1100)) togglePanel(true); else togglePanel(false);
+$('#panelToggle').addEventListener('click', () => togglePanel());
+const openKeys = () => { $('#keysModal').hidden = false; $('#keysClose').focus(); };
+$('#helpKeys').addEventListener('click', openKeys);
+$('#keysClose').addEventListener('click', () => { $('#keysModal').hidden = true; });
+$('#keysModal').addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#keysModal').hidden = true; });
+function paletteCommands() {
+  const cmds = [
+    { i: '💬', t: 'Trò chuyện thường', run: () => show('chat') },
+    { i: '🤖', t: 'AIVN AGENT', run: () => show('agent') },
+    { i: '＋', t: 'Cuộc trò chuyện mới', k: 'Ctrl+N', run: () => $('#newChat').click() },
+    { i: '🗃', t: 'Kho mô hình (tải mô hình)', run: () => show('discover') },
+    { i: '👥', t: 'Kinh doanh → Khách hàng', run: () => show('crm') },
+    { i: '📦', t: 'Mô hình của tôi', run: () => show('models') },
+    { i: '⏰', t: 'Lịch tự động', run: () => show('schedule') },
+    { i: '🧠', t: 'Ghi nhớ', run: () => show('memory') },
+    { i: '⚡', t: 'Máy chủ API', run: () => show('server') },
+    { i: '🔐', t: 'Bảo mật & Quản trị', run: () => show('security') },
+    { i: '🔌', t: 'Kết nối (MCP)', run: () => { show('agent'); togglePanel(false); $('#mcpBlock').open = true; refreshMcp(true); $('#mcpBlock').scrollIntoView({ block: 'start' }); } },
+    { i: '⏱', t: 'Đo tốc độ mô hình đang nạp', run: () => { $('#perfSpeedBtn').scrollIntoView({ block: 'center' }); $('#perfSpeedBtn').click(); } },
+    { i: '📏', t: 'Đo Điểm tác vụ (điều khiển máy)', run: () => { show('agent'); togglePanel(false); $('#benchBox').scrollIntoView({ block: 'center' }); } },
+    { i: '⇥', t: 'Ẩn/hiện bảng cài đặt', k: 'Ctrl+.', run: () => togglePanel() },
+    { i: '📋', t: 'Sao chép nhật ký', run: () => document.querySelector('[data-logs="copy"]').click() },
+    { i: '⌨', t: 'Phím tắt', k: 'Ctrl+/', run: openKeys },
+    { i: '🎓', t: 'Xem lại giới thiệu nhanh', run: () => startOnboard(true) }
+  ];
+  for (const m of (state.models || []).slice(0, 12)) cmds.push({ i: '▶', t: `Nạp mô hình: ${m.name || m.id}`, run: () => { $('#modelSelect').value = m.id; $('#modelSelect').dispatchEvent(new Event('change')); } });
+  return cmds;
+}
+let palSel = 0, palItems = [];
+const foldVi = (x) => String(x).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
+function paintPalette() {
+  const q = foldVi($('#palQ').value.trim());
+  palItems = paletteCommands().filter(c => !q || q.split(/\s+/).every(w => foldVi(c.t).includes(w)));
+  palSel = Math.min(palSel, Math.max(0, palItems.length - 1));
+  $('#palList').innerHTML = palItems.map((c, i) => `<div class="pal-item ${i === palSel ? 'sel' : ''}" role="option" data-pal="${i}"><span>${c.i}</span><span>${esc(c.t)}</span>${c.k ? `<span class="k">${c.k}</span>` : ''}</div>`).join('') || '<div class="pal-item">Không có lệnh phù hợp</div>';
+}
+function openPalette() { $('#palette').hidden = false; $('#palQ').value = ''; palSel = 0; paintPalette(); $('#palQ').focus(); }
+function runPal(i) { const c = palItems[i]; $('#palette').hidden = true; if (c) c.run(); }
+$('#paletteBtn').addEventListener('click', openPalette);
+$('#palQ').addEventListener('input', () => { palSel = 0; paintPalette(); });
+$('#palQ').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') { palSel = Math.min(palItems.length - 1, palSel + 1); paintPalette(); e.preventDefault(); }
+  else if (e.key === 'ArrowUp') { palSel = Math.max(0, palSel - 1); paintPalette(); e.preventDefault(); }
+  else if (e.key === 'Enter') { runPal(palSel); e.preventDefault(); }
+  else if (e.key === 'Escape') { $('#palette').hidden = true; }
+});
+$('#palList').addEventListener('click', (e) => { const it = e.target.closest('[data-pal]'); if (it) runPal(Number(it.dataset.pal)); });
+$('#palette').addEventListener('click', (e) => { if (e.target.id === 'palette') $('#palette').hidden = true; });
+document.addEventListener('keydown', (e) => {
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); $('#palette').hidden ? openPalette() : ($('#palette').hidden = true); }
+  else if (mod && e.key === '.') { e.preventDefault(); togglePanel(); }
+  else if (mod && e.key === '/') { e.preventDefault(); openKeys(); }
+  else if (mod && (e.key === 'n' || e.key === 'N') && !e.shiftKey) { e.preventDefault(); $('#newChat').click(); }
+});
+// Giới thiệu nhanh lần đầu (4 bước)
+const OB = [
+  { big: '🐉', h: 'Chào mừng đến với AIVN', p: 'Trợ lý AI chạy hoàn toàn trên máy bạn — không gửi dữ liệu ra ngoài. Làm quen trong 30 giây nhé.' },
+  { big: '🗃', h: 'Bước 1: Tải một mô hình', p: 'Vào Kho mô hình. Gợi ý cho trò chuyện và công cụ: Qwen3 4B Instruct 2507 (hoặc Qwen3 8B nếu máy mạnh). Mô hình có nhãn ⭐ là lựa chọn AIVN đã kiểm chứng cho máy bạn.' },
+  { big: '🤖', h: 'Bước 2: Dùng AIVN AGENT', p: 'AIVN AGENT đọc/ghi tệp trong thư mục bạn cho phép, mở ứng dụng, và (thử nghiệm) điều khiển chuột/bàn phím. Mỗi bước có tác động đều hiện thẻ xin phép: Ctrl+Enter để cho phép, Esc để từ chối.' },
+  { big: '⌘', h: 'Bước 3: Phím tắt', p: 'Ctrl+K mở bảng lệnh để làm mọi thứ nhanh; Ctrl+. ẩn/hiện bảng cài đặt; Ctrl+/ xem tất cả phím tắt.' }
+];
+let obI = 0;
+function paintOb() { const s = OB[obI]; $('#obStep').innerHTML = `<div class="big">${s.big}</div><h3 id="obTitle">${esc(s.h)}</h3><p>${esc(s.p)}</p>`; $('#obDots').innerHTML = OB.map((_, i) => `<span class="${i === obI ? 'on' : ''}"></span>`).join(''); $('#obNext').textContent = obI === OB.length - 1 ? 'Bắt đầu' : 'Tiếp'; }
+function startOnboard(force) { if (!force && localStorage.getItem('aivn.onboarded')) return; obI = 0; paintOb(); $('#onboard').hidden = false; $('#obNext').focus(); }
+const endOb = () => { $('#onboard').hidden = true; localStorage.setItem('aivn.onboarded', '1'); };
+$('#obNext').addEventListener('click', () => { if (obI < OB.length - 1) { obI++; paintOb(); } else { endOb(); if (!(state.models || []).length) show('discover'); } });
+$('#obSkip').addEventListener('click', endOb);
+$('#onboard').addEventListener('keydown', (e) => { if (e.key === 'Escape') endOb(); });
+setTimeout(() => { if (!navigator.webdriver && !A.qaMode) startOnboard(false); }, 1200);
+
+// --- Hiệu năng (0.15.0) ---
+async function paintPerf(pf) {
+  try {
+    const info = pf ? { profile: pf } : await A.perfInfo(); const p = info.profile;
+    $('#perfTier').innerHTML = `Máy này: <b>${esc(p.tierLabel)}</b> (${esc(p.why)}). Đang dùng chế độ <b>${esc(p.effectiveLabel)}</b>${p.mode === 'auto' ? ' (tự chọn)' : ''}.`;
+    $('#perfMode').value = p.mode || 'auto';
+    $('#perfCfg').innerHTML = `<span title="Số luồng CPU dùng để suy luận">🧵 ${p.threads} luồng</span> · <span title="Độ dài ngữ cảnh mặc định khi nạp">📏 ngữ cảnh ${p.ctx}</span> · <span title="Số token xử lý mỗi lượt khi đọc câu hỏi">📦 lô ${p.batchSize}</span>${p.kvQuant ? ' · <span title="Nén bộ nhớ đệm ngữ cảnh q8_0">🗜 KV q8_0</span>' : ''}${p.idleUnloadMin ? ` · <span title="Tự gỡ mô hình khi không dùng">💤 gỡ sau ${p.idleUnloadMin} phút</span>` : ''}${p.uiLite ? ' · <span title="Tắt hiệu ứng, gộp cập nhật chữ">🪶 giao diện nhẹ</span>' : ''}`;
+    $('#perfTips').innerHTML = (p.tips || []).map(t => `<li>${esc(t)}</li>`).join('');
+    const runs = await A.perfRuns();
+    $('#perfRuns').innerHTML = runs.length ? '<tr><th>Lúc</th><th>Mô hình</th><th>Chế độ</th><th>Chữ đầu</th><th>Tốc độ</th></tr>' + runs.slice(-6).reverse().map(r => `<tr><td>${new Date(r.at).toLocaleTimeString('vi-VN')}</td><td>${esc(String(r.model).slice(0, 28))}</td><td>${esc(r.modeLabel)}</td><td>${(r.ttftMs / 1000).toFixed(1)} giây</td><td><b>${r.tokPerSec}</b> token/giây</td></tr>`).join('') : '';
+  } catch {}
+}
+$('#perfMode').addEventListener('change', async (e) => { state.settings = await A.setSettings({ perfMode: e.target.value }); toast('Chế độ hiệu năng mới áp dụng đầy đủ khi nạp lại mô hình.'); setTimeout(() => paintPerf(), 300); });
+A.onPerfChanged((p) => paintPerf(p));
+$('#perfSpeedBtn').addEventListener('click', async () => {
+  const b = $('#perfSpeedBtn'); b.disabled = true; $('#perfSpeedMsg').textContent = 'Đang đo…';
+  const r = await A.perfSpeed(); b.disabled = false;
+  $('#perfSpeedMsg').textContent = r.ok ? `${r.tokPerSec} token/giây · chữ đầu sau ${(r.ttftMs / 1000).toFixed(1)} giây` : '⚠ ' + r.error;
+  paintPerf();
+});
+
+// --- Kết nối (MCP) ---
+let mcpState = { servers: [] };
+function paintMcp(st) {
+  if (st) mcpState = { ...mcpState, ...st };
+  const list = mcpState.servers || [];
+  const on = list.filter(x => x.state === 'on');
+  $('#mcpSum').textContent = list.length ? `${on.length}/${list.length} máy chủ đang kết nối · ${on.reduce((a, x) => a + x.tools.length, 0)} công cụ` : 'chưa có máy chủ nào';
+  if (typeof mcpState.enabled === 'boolean') $('#mcpMaster').checked = mcpState.enabled;
+  const stLbl = { on: 'đang kết nối', off: 'đã tắt', starting: 'đang khởi động…', error: 'lỗi' };
+  $('#mcpList').innerHTML = list.map(x => `<div class="mcp-srv"><div class="hd"><label class="check"><input type="checkbox" data-mcp-toggle="${esc(x.name)}" ${x.enabled ? 'checked' : ''}> <b>${esc(x.name)}</b></label><span class="st ${x.state}">${stLbl[x.state] || x.state}</span><span class="muted small">${esc(x.kind)} · ${esc(x.command).slice(0, 90)}</span><button type="button" class="btn sm" data-mcp-restart="${esc(x.name)}">Kết nối lại</button></div>
+    ${x.error ? `<div class="small" style="color:#82071e">${esc(x.error)}</div>` : ''}
+    ${x.tools.length ? `<div class="small muted">Công cụ: ${x.tools.map(t => `<code title="${esc(t.description)}">${esc(t.name)}</code>`).join(' ')}</div>` : ''}
+    <details><summary class="small">Nhật ký máy chủ</summary><pre>${esc(x.logs.join('\n') || '(trống)')}</pre></details></div>`).join('') || '<div class="small muted">Chưa có máy chủ. Thêm nhanh bằng các nút ở trên hoặc sửa mcp.json.</div>';
+  const b = $('#mcpBadges'); const shown = list.filter(x => x.enabled && (x.state === 'on' || x.state === 'error'));
+  b.hidden = !(isAgent() && mcpState.enabled !== false && shown.length);
+  b.innerHTML = shown.map(x => `<span class="${x.state === 'error' ? 'error' : ''}" title="${esc(x.state === 'error' ? x.error || '' : x.tools.map(t => t.name).join(', '))}">🔌 ${esc(x.name)}${x.state === 'on' ? ' · ' + x.tools.length : ' · lỗi'}</span>`).join('');
+}
+async function refreshMcp(withText = false) {
+  const st = await A.mcpStatus(); mcpState = { servers: st.servers, enabled: st.enabled };
+  if (withText || !$('#mcpJson').value) $('#mcpJson').value = st.text; $('#mcpFile').textContent = st.file;
+  paintMcp();
+}
+A.onMcpChanged((servers) => { paintMcp({ servers }); });
+$('#mcpBlock').addEventListener('toggle', () => { if ($('#mcpBlock').open) refreshMcp(true); });
+$('#mcpMaster').addEventListener('change', async (e) => { await A.mcpMaster(e.target.checked); mcpState.enabled = e.target.checked; paintMcp(); refreshAgent(); });
+$('#mcpSaveBtn').addEventListener('click', async () => {
+  const r = await A.mcpSave($('#mcpJson').value);
+  $('#mcpMsg').textContent = r.ok ? '✓ Đã lưu' : '⚠ ' + r.error; $('#mcpMsg').style.color = r.ok ? '' : '#82071e';
+  if (r.ok) { for (const x of r.servers) if (x.enabled) A.mcpRestart(x.name); refreshMcp(true); }
+});
+$('#mcpBlock').addEventListener('click', async (e) => {
+  const p = e.target.closest('[data-mcp-preset]'); const rs = e.target.closest('[data-mcp-restart]');
+  if (p) { const r = await A.mcpPreset(p.dataset.mcpPreset); if (r.ok) { toast(`Đã thêm máy chủ “${r.name}” — đang kết nối (lần đầu có thể mất 30–60 giây để tải gói).`); refreshMcp(true); } else if (!r.canceled) toast('⚠ ' + r.error); }
+  if (rs) { A.mcpRestart(rs.dataset.mcpRestart); }
+});
+$('#mcpBlock').addEventListener('change', async (e) => { const t = e.target.closest('[data-mcp-toggle]'); if (!t) return; await A.mcpToggle({ name: t.dataset.mcpToggle, on: t.checked }); refreshMcp(true); refreshAgent(); });
+
+// --- Cài đặt AIVN AGENT ---
 async function refreshAgent() {
   const info = state.agent = await A.agentInfo();
   $('#folderList').innerHTML = info.folders.length ? info.folders.map(f => `<div class="folder${f.exists ? '' : ' missing'}" title="${esc(f.path)}"><span>📁 ${esc(f.path)}</span>${f.exists ? '' : '<b class="small">không thấy</b>'}<button data-fopen="${esc(f.path)}" title="Mở thư mục">↗</button><button data-fdel="${esc(f.path)}" title="Bỏ quyền với thư mục này" aria-label="Bỏ thư mục">✕</button></div>`).join('')
-    : '<div class="folder-empty">Chưa cho phép thư mục nào. AIVN BOT sẽ không đọc hay ghi tệp.</div>';
+    : '<div class="folder-empty">Chưa cho phép thư mục nào. AIVN AGENT sẽ không đọc hay ghi tệp.</div>';
   $('#agWeb').checked = info.web;
   $('#agPy').checked = info.python.enabled && info.python.available; $('#agPy').disabled = !info.python.available;
   $('#agPyNote').textContent = info.python.available ? `Python ${info.python.version} có trên máy. Chạy trong thư mục tạm, chặn mạng và tệp ngoài thư mục tạm, tối đa 10 giây (hạn chế, không cách ly tuyệt đối như JavaScript).` : 'Máy chưa có Python 3, nên chỉ chạy được JavaScript.';
@@ -815,21 +1080,25 @@ async function refreshAgent() {
   renderToolChips(info);
   paintAgentWarn(info.advice);
   paintComputer(info.computer);
+  refreshMcp().catch(() => {});
+  const al = info.alwaysAllow || []; $('#alwaysBox').hidden = !al.length;
+  $('#alwaysList').innerHTML = al.map(t => `<span class="chip">${esc(t.label)}<button type="button" data-revoke="${esc(t.name)}" title="Bỏ Luôn cho phép" aria-label="Bỏ Luôn cho phép ${esc(t.label)}">×</button></span>`).join('');
   if (isAgent() && (!state.current || !state.current.messages.length) && !state.generating) renderMessages();
 }
 function paintAgentWarn(adv) {
   const w = $('#agentWarn');
   const rec = (adv && adv.recommended) || [];
   const recBtns = rec.map(r => `<button class="btn sm" data-rec="${esc(r.id)}" data-installed="${r.installed ? 1 : 0}">${r.installed ? 'Nạp' : 'Tải'} ${esc(r.name)}</button>`).join(' ');
-  if (!state.status.loaded) { w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN BOT chạy tốt nhất với <b>Qwen3 4B/8B</b> hoặc <b>Gemma 3 4B</b> trở lên.</span>`; w.hidden = false; return; }
-  if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN BOT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để mở ứng dụng, đọc tệp, điều khiển máy đáng tin cậy, hãy dùng <b>Qwen3 4B/8B</b>.</span> ${recBtns}`; w.hidden = false; return; }
-  if (adv && adv.small) { w.innerHTML = `<span>⚠ <b>${esc(adv.model)}</b>${adv.params ? ` (khoảng ${String(adv.params).replace('.', ',')} tỉ tham số)` : ''} khá nhỏ cho AIVN BOT: có thể gọi sai công cụ, bỏ bước hoặc nói đã làm khi chưa làm. Nên dùng <b>Qwen3 4B/8B</b> hoặc <b>Gemma 3 4B</b> trở lên.</span> ${recBtns}`; w.hidden = false; return; }
+  if (!state.status.loaded) { w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN AGENT chạy tốt nhất với <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b>.</span>`; w.hidden = false; return; }
+  if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN AGENT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để mở ứng dụng, đọc tệp, điều khiển máy đáng tin cậy, hãy dùng <b>Qwen3 4B/8B</b>.</span> ${recBtns}`; w.hidden = false; return; }
+  if (adv && adv.small) { w.innerHTML = `<span>⚠ <b>${esc(adv.model)}</b>${adv.params ? ` (khoảng ${String(adv.params).replace('.', ',')} tỉ tham số)` : ''} khá nhỏ cho AIVN AGENT: có thể gọi sai công cụ, bỏ bước hoặc nói đã làm khi chưa làm. Nên dùng <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b>.</span> ${recBtns}`; w.hidden = false; return; }
+  if (adv && adv.planner === false && state.settings && state.settings.agentScreen) { w.innerHTML = `<span>🖥 Điều khiển máy đang bật với <b>${esc(adv.model)}</b>. Mô hình này chưa qua bài đo Điểm tác vụ của AIVN; để bấm/gõ đáng tin cậy, dùng <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b> làm mô hình chính (mô hình nhìn ảnh có thể đặt làm “Mô hình định vị” trong Cài đặt).</span> ${recBtns}`; w.hidden = false; return; }
   w.hidden = true;
 }
 $('#agentWarn').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-rec]'); if (!b) return;
   if (b.dataset.installed === '1') { const c = state.catalog.find(x => x.id === b.dataset.rec) || (await A.catalog()).find(x => x.id === b.dataset.rec); await refreshModels(); const m = state.models.find(x => c && x.file.toLowerCase() === c.file.toLowerCase()); if (m) loadModel(m.id); }
-  else { show('discover'); try { const j = await A.dlStart({ catalogId: b.dataset.rec }); paintJob(j); toast('Đang tải mô hình cho AIVN BOT, xem tiến độ ở mục Đang tải'); } catch (err) { toast(cleanErr(err.message), true); } }
+  else { show('discover'); try { const j = await A.dlStart({ catalogId: b.dataset.rec }); paintJob(j); toast('Đang tải mô hình cho AIVN AGENT, xem tiến độ ở mục Đang tải'); } catch (err) { toast(cleanErr(err.message), true); } }
 });
 $('#addFolder').addEventListener('click', async () => { state.agent = await A.agentAddFolder(); refreshAgent(); });
 $('#folderList').addEventListener('click', async (e) => {
@@ -880,7 +1149,7 @@ async function refreshSched() {
       ${t.kind === 'agent' ? `<div class="meta">“${esc(t.prompt.slice(0, 110))}${t.prompt.length > 110 ? '…' : ''}”</div>` : t.message ? `<div class="meta">${esc(t.message.slice(0, 120))}</div>` : ''}
       ${last ? `<div class="last${last.ok ? '' : ' err'}">Lần chạy gần nhất: ${fmtWhen(last.at)}${last.late ? ' (chạy bù)' : ''} · ${last.ok ? 'thành công' : 'lỗi: ' + esc(last.error || '')}</div>` : ''}</div>
       <div class="acts">${last && last.convoId ? `<button class="btn sm" data-sact="open" data-cid="${esc(last.convoId)}">Xem kết quả</button>` : ''}<button class="btn sm" data-sact="run">▶ Chạy ngay</button><button class="btn sm" data-sact="toggle">${t.enabled ? 'Tắt' : 'Bật'}</button><button class="btn sm" data-sact="edit">Sửa</button><button class="btn sm danger" data-sact="del" title="Xoá lịch">🗑</button></div></div>`; }).join('')
-    : '<div class="sched-empty">Chưa có lịch nào. Tạo lời nhắc ở khung bên trái, hoặc nhờ AIVN BOT: “nhắc tôi 9 giờ sáng mai nộp bài”.</div>';
+    : '<div class="sched-empty">Chưa có lịch nào. Tạo lời nhắc ở khung bên trái, hoặc nhờ AIVN AGENT: “nhắc tôi 9 giờ sáng mai nộp bài”.</div>';
   refreshSchedCount(list);
   $('#bgTray').checked = !!state.settings.keepInTray; $('#bgLogin').checked = !!state.settings.openAtLogin;
 }
@@ -889,9 +1158,9 @@ $('#schedList').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-sact]'); if (!b) return;
   const id = b.closest('.sched-item').dataset.id; const list = await A.schedList(); const t = list.find(x => x.id === id); if (!t) return;
   try {
-    if (b.dataset.sact === 'run') { b.disabled = true; toast(`Đang chạy “${t.title}”…`); const r = await A.schedRun(id); toast(r && r.ok ? `Đã chạy “${t.title}” ✓ Kết quả lưu trong AIVN BOT.` : `Lỗi: ${r && r.error}`, !(r && r.ok)); }
+    if (b.dataset.sact === 'run') { b.disabled = true; toast(`Đang chạy “${t.title}”…`); const r = await A.schedRun(id); toast(r && r.ok ? `Đã chạy “${t.title}” ✓ Kết quả lưu trong AIVN AGENT.` : `Lỗi: ${r && r.error}`, !(r && r.ok)); }
     if (b.dataset.sact === 'toggle') await A.schedUpdate({ id, enabled: !t.enabled, ...(t.repeat === 'once' && !t.enabled && t.at < Date.now() ? { at: Date.now() + 5 * 60e3 } : {}) });
-    if (b.dataset.sact === 'del') { if (await modalAsk({ title: 'Xoá lịch?', message: `Xoá “${t.title}” khỏi Lịch tự động? Kết quả đã lưu trong AIVN BOT vẫn được giữ.`, okLabel: 'Xoá lịch', icon: '⏰' })) await A.schedDelete(id); }
+    if (b.dataset.sact === 'del') { if (await modalAsk({ title: 'Xoá lịch?', message: `Xoá “${t.title}” khỏi Lịch tự động? Kết quả đã lưu trong AIVN AGENT vẫn được giữ.`, okLabel: 'Xoá lịch', icon: '⏰' })) await A.schedDelete(id); }
     if (b.dataset.sact === 'edit') {
       sf.editing = id; sf.kind = t.kind; sf.repeat = t.repeat; sf.days = new Set(t.days || []);
       $('#sfTitle').value = t.title; $('#sfMsg').value = t.message || ''; $('#sfPrompt').value = t.prompt || ''; $('#sfTime').value = t.time;
@@ -913,9 +1182,9 @@ A.onConvosOpen(({ id }) => openConvo(id));
 async function refreshMem() {
   const [list, info] = await Promise.all([A.memList(), A.agentInfo()]);
   $('#memOn').checked = info.memory.enabled;
-  $('#memMode').textContent = `Những điều AIVN BOT đã ghi nhớ về bạn (${list.length}). Chỉ lưu trên máy này. Điều liên quan tới câu hỏi được đưa vào lời nhắc của AIVN BOT, tìm ${info.memory.semantic ? 'theo ý nghĩa bằng BGE-M3' : 'theo từ khoá (tải BGE-M3 trong Cài đặt trò chuyện để tìm theo ý nghĩa)'}.`;
-  $('#memList').innerHTML = list.length ? list.map(m => `<div class="mem" data-id="${esc(m.id)}"><div class="txt">${esc(m.text)}<div class="meta">${m.source === 'user' ? 'Bạn thêm' : 'AIVN BOT ghi nhớ'} · ${new Date(m.updatedAt).toLocaleString('vi-VN')}${m.uses ? ` · đã dùng ${m.uses} lần` : ''}</div></div><div class="acts"><button class="btn sm" data-mact="edit">Sửa</button><button class="btn sm danger" data-mact="del" title="Xoá ghi nhớ này">🗑</button></div></div>`).join('')
-    : '<div class="sched-empty">Chưa có ghi nhớ nào. Hãy nói với AIVN BOT, ví dụ: “Hãy nhớ: tôi thích uống cà phê sữa đá”.</div>';
+  $('#memMode').textContent = `Những điều AIVN AGENT đã ghi nhớ về bạn (${list.length}). Chỉ lưu trên máy này. Điều liên quan tới câu hỏi được đưa vào lời nhắc của AIVN AGENT, tìm ${info.memory.semantic ? 'theo ý nghĩa bằng BGE-M3' : 'theo từ khoá (tải BGE-M3 trong Cài đặt trò chuyện để tìm theo ý nghĩa)'}.`;
+  $('#memList').innerHTML = list.length ? list.map(m => `<div class="mem" data-id="${esc(m.id)}"><div class="txt">${esc(m.text)}<div class="meta">${m.source === 'user' ? 'Bạn thêm' : 'AIVN AGENT ghi nhớ'} · ${new Date(m.updatedAt).toLocaleString('vi-VN')}${m.uses ? ` · đã dùng ${m.uses} lần` : ''}</div></div><div class="acts"><button class="btn sm" data-mact="edit">Sửa</button><button class="btn sm danger" data-mact="del" title="Xoá ghi nhớ này">🗑</button></div></div>`).join('')
+    : '<div class="sched-empty">Chưa có ghi nhớ nào. Hãy nói với AIVN AGENT, ví dụ: “Hãy nhớ: tôi thích uống cà phê sữa đá”.</div>';
   refreshMemCount(list);
 }
 async function refreshMemCount(list) { list ||= await A.memList(); $('#memCount').hidden = !list.length; $('#memCount').textContent = list.length; }
@@ -931,12 +1200,15 @@ $('#memList').addEventListener('click', async (e) => {
 $('#memClear').addEventListener('click', async () => { await A.memClear(); refreshMem(); });
 $('#memOn').addEventListener('change', async (e) => { state.settings = await A.setSettings({ agentMemory: e.target.checked }); refreshMem(); });
 
-// ---------- Truy cập máy tính (Cài đặt AIVN BOT) ----------
+// ---------- Truy cập máy tính (Cài đặt AIVN AGENT) ----------
 function paintComputer(c) {
   if (!c) return;
   $('#agComp').checked = c.enabled; $('#agAutoRO').checked = c.autoReadOnly; $('#agAutoRO').disabled = !c.enabled;
   $('#agScreen').checked = c.screen;
-  $('#agScreenNote').innerHTML = `AIVN BOT chụp màn hình, mô hình nhìn ảnh đề xuất chỗ bấm; mỗi cú bấm/gõ hiện thẻ có khung đỏ để bạn duyệt. Chỉ màn hình chính. Dừng khẩn cấp: <b>${esc(c.stopKey)}</b> hoặc nút “Dừng ngay” nổi trên cùng.${c.screen && !c.vision ? '<br><b class="warn-ink">⚠ Cần nạp mô hình nhìn ảnh (nhãn 👁, vd. Gemma 3 4B) thì công cụ này mới bật.</b>' : ''}`;
+  $('#agScreenNote').innerHTML = `AIVN AGENT tự mở ứng dụng và thao tác như bạn: đọc danh sách nút/ô của cửa sổ (Trợ năng của hệ điều hành) và chữ trên màn hình, bấm/gõ từng bước rồi kiểm tra lại. Mô hình thường (Qwen3 4B/8B) dùng được; mô hình nhìn ảnh giúp tìm phần tử khó. Luôn hỏi trước khi gửi tin nhắn, thanh toán, xoá, nộp biểu mẫu; không bao giờ gõ mật khẩu. Dừng: <b>Esc</b>, <b>${esc(c.stopKey)}</b> hoặc nút “Dừng ngay”.`;
+  $('#agGrounder').innerHTML = '<option value="">Không dùng — chỉ cây giao diện + đọc chữ</option>' + (c.grounders || []).map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join(''); $('#agGrounder').value = c.grounder || '';
+  $('#agScreenOpts').hidden = !c.screen; $('#agScreenMode').value = c.screenMode || 'each'; $('#agScreenBudget').value = String(c.screenBudget || 40);
+  paintBench();
   const g = $('#permGuide');
   if (c.platform === 'darwin' && c.screen) {
     const okS = c.perms.screen === 'granted', okA = c.perms.accessibility;
@@ -948,10 +1220,38 @@ function paintComputer(c) {
     g.hidden = false;
   } else g.hidden = true;
 }
+async function paintBench() {
+  const ms = (state.models || []).filter(m => !m.embedding && !/bge|embed/i.test(m.id));
+  const cur = state.status && state.status.id;
+  if (!$('#benchModel').dataset.busy) $('#benchModel').innerHTML = ms.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.name || m.id)}</option>`).join('') || '<option value="">(chưa có mô hình)</option>';
+  const sc = await A.benchScores().catch(() => null); if (!sc) return;
+  const rows = Object.entries(sc.local || {}).map(([id, b]) => `${(ms.find(m => m.id === id) || {}).name || id}: Điểm tác vụ ${b.score}/10 · an toàn ${b.safety === null ? '—' : b.safety ? 'đạt' : 'KHÔNG đạt'} · ${Math.round((b.seconds || 0) / 60)} phút · ${new Date(b.date).toLocaleDateString('vi-VN')}`);
+  if (!$('#benchModel').dataset.busy) $('#benchRes').textContent = rows.length ? 'Kết quả trên máy này:\n' + rows.join('\n') : 'Chưa đo lần nào trên máy này.';
+}
+$('#benchRun').addEventListener('click', async () => {
+  const id = $('#benchModel').value; if (!id) return;
+  if (!(await modalAsk({ icon: '📏', title: 'Đo Điểm tác vụ?', message: 'AIVN AGENT sẽ tự điều khiển chuột/bàn phím trong cửa sổ thử “AIVN Bench” (và mở thử một ứng dụng soạn thảo) trong 10–40 phút. Bước quan trọng (gửi) sẽ tự bị từ chối. Đừng dùng máy trong lúc đo; nhấn Esc để dừng.', okLabel: 'Bắt đầu đo', noLabel: 'Để sau' }))) return;
+  $('#benchModel').dataset.busy = '1'; $('#benchRun').hidden = true; $('#benchStop').hidden = false; $('#benchRes').textContent = 'Đang chuẩn bị…';
+  const r = await A.benchRun({ ids: [id] });
+  delete $('#benchModel').dataset.busy; $('#benchRun').hidden = false; $('#benchStop').hidden = true;
+  if (!r.ok) { $('#benchRes').textContent = 'Không đo được: ' + r.error; return; }
+  const b = r.results[id];
+  if (b) { $('#benchRes').textContent = `Điểm tác vụ: ${b.score}/10${b.done < 10 ? ` (mới làm ${b.done}/10 việc — đã dừng)` : ''} · an toàn: ${b.safety === null ? '—' : b.safety ? 'đạt' : 'KHÔNG đạt'}\n` + b.tasks.map(t => `${t.pass ? '✔' : '✘'} ${t.label} · ${t.seconds} giây${t.timeout ? ' (hết giờ)' : ''}`).join('\n'); toast(`Điểm tác vụ: ${b.score}/10`); }
+  if (!$('#sugArea').hidden) renderCatalog();
+});
+$('#benchStop').addEventListener('click', () => A.benchStop());
+$('#alwaysList').addEventListener('click', async (e) => { const b = e.target.closest('[data-revoke]'); if (!b) return; await A.agentAlwaysRevoke(b.dataset.revoke); toast('AIVN AGENT sẽ hỏi lại trước khi dùng công cụ này.'); refreshAgent(); });
+A.onBenchProgress((p) => { if ($('#benchModel').dataset.busy) $('#benchRes').textContent = `Đang đo ${p.i}/${p.n}: ${p.label}…`; });
 $('#agComp').addEventListener('change', (e) => saveAgentSetting({ agentComputer: e.target.checked }));
 $('#agAutoRO').addEventListener('change', (e) => saveAgentSetting({ agentAutoReadOnly: e.target.checked }));
+$('#agScreenMode').addEventListener('change', async (e) => {
+  if (e.target.value === 'important' && !(await modalAsk({ icon: '⚠️', title: 'Chỉ hỏi bước quan trọng?', message: 'AIVN AGENT sẽ tự bấm/gõ các bước thường mà không hỏi bạn (vẫn hiện khung đỏ trước mỗi thao tác). Gửi tin nhắn, thanh toán, xoá, nộp biểu mẫu vẫn LUÔN hỏi. Mô hình có thể bấm nhầm — chỉ chọn khi bạn đang theo dõi màn hình. Dừng bất cứ lúc nào bằng Esc.', okLabel: 'Chỉ hỏi bước quan trọng', noLabel: 'Giữ hỏi từng bước' }))) { e.target.value = 'each'; return; }
+  saveAgentSetting({ agentScreenMode: e.target.value });
+});
+$('#agGrounder').addEventListener('change', (e) => saveAgentSetting({ agentGrounder: e.target.value || '' }));
+$('#agScreenBudget').addEventListener('change', (e) => saveAgentSetting({ agentScreenBudget: Number(e.target.value) }));
 $('#agScreen').addEventListener('change', async (e) => {
-  if (e.target.checked && !(await modalAsk({ icon: '🖱', title: 'Bật Điều khiển màn hình (thử nghiệm)?', message: 'AIVN BOT sẽ chụp màn hình để mô hình trên máy bạn xem (ảnh không gửi đi đâu) và đề xuất cú bấm/gõ. Mỗi thao tác đều hiện thẻ để bạn duyệt. Mô hình nhỏ có thể chỉ sai chỗ, hãy kiểm tra khung đỏ trước khi đồng ý. Dừng khẩn cấp: Ctrl+Alt+Q (macOS: ⌘⌥Q).', okLabel: 'Bật', noLabel: 'Huỷ' }))) { e.target.checked = false; return; }
+  if (e.target.checked && !(await modalAsk({ icon: '🖱', title: 'Bật Điều khiển máy tính (thử nghiệm)?', message: 'AIVN AGENT sẽ tự điều khiển chuột/bàn phím: đọc cửa sổ đang mở (Trợ năng của hệ điều hành), chụp màn hình để đọc chữ (ảnh không gửi đi đâu), rồi bấm/gõ từng bước. Mặc định bạn duyệt TỪNG bước trên thẻ nổi (Ctrl+Enter = cho phép, Esc = từ chối). Gửi tin nhắn, thanh toán, xoá luôn hỏi; không bao giờ gõ mật khẩu. Dừng ngay: Esc hoặc Ctrl+Alt+Q (macOS: ⌘⌥Q).', okLabel: 'Bật', noLabel: 'Huỷ' }))) { e.target.checked = false; return; }
   saveAgentSetting({ agentScreen: e.target.checked });
 });
 $('#permGuide').addEventListener('click', async (e) => {
@@ -959,7 +1259,7 @@ $('#permGuide').addEventListener('click', async (e) => {
   if (b.dataset.perm === 'test') { const r = await A.computerPermTest(); toast(r.ok ? 'Chụp màn hình được ✓' : r.error, !r.ok); paintComputer(r.info); return; }
   paintComputer(await A.computerPermOpen(b.dataset.perm));
 });
-A.onComputerStopped(({ reason }) => { closeScreenModal(false); toast('■ Đã dừng AIVN BOT (' + reason + ')', true); });
+A.onComputerStopped(({ reason }) => { closeScreenModal(false); toast('■ Đã dừng AIVN AGENT (' + reason + ')', true); });
 $('#openLogs').addEventListener('click', () => A.openLogs());
 document.addEventListener('click', async (e) => {
   const lb = e.target.closest('[data-logs]');
@@ -972,7 +1272,7 @@ document.addEventListener('click', async (e) => {
       const r = await A.scanTest(q);
       const lines = [`Hệ điều hành: ${r.platform} · ${r.total} ứng dụng · ${r.ms} ms`, 'Nguồn: ' + (Object.entries(r.sources).map(([k, v]) => k + ' = ' + v).join(', ') || 'không có'), 'Lỗi: ' + (r.errors.length ? r.errors.join('; ') : 'không'),
         ...(r.dirs ? ['Desktop: ' + (r.dirs.desktop || []).join(' | '), 'Start Menu: ' + (r.dirs.start || []).join(' | ')] : []), '', `Tìm "${r.query}": ` + (r.best ? `${r.best.name} → ${r.best.path || r.best.appId || '?'}` : 'KHÔNG thấy mục nào khớp'), ...r.matches.map(m => `  • ${m.name} · ${m.path || m.appId || ''}${m.target ? ' → ' + m.target : ''}`)];
-      const ok = await modalAsk({ icon: r.best ? '✅' : '⚠', title: 'Kết quả quét ứng dụng', message: r.best ? `Đã thấy "${r.best.name}". AIVN BOT sẽ mở được ứng dụng này.` : `Chưa thấy ứng dụng khớp "${r.query}". Hãy chụp màn hình này hoặc bấm Sao chép rồi gửi cho người hỗ trợ.`, preview: lines.join('\n'), okLabel: 'Sao chép kết quả', noLabel: 'Đóng' });
+      const ok = await modalAsk({ icon: r.best ? '✅' : '⚠', title: 'Kết quả quét ứng dụng', message: r.best ? `Đã thấy "${r.best.name}". AIVN AGENT sẽ mở được ứng dụng này.` : `Chưa thấy ứng dụng khớp "${r.query}". Hãy chụp màn hình này hoặc bấm Sao chép rồi gửi cho người hỗ trợ.`, preview: lines.join('\n'), okLabel: 'Sao chép kết quả', noLabel: 'Đóng' });
       if (ok) { await A.copyText(lines.join('\n')); toast('Đã sao chép kết quả quét.'); }
     } catch (err) { toast(cleanErr(err.message), true); }
     finally { sb.disabled = false; sb.textContent = old; }
@@ -993,7 +1293,7 @@ function placeBox() {
 }
 A.onAgentScreen((req) => {
   scReq = req; scPick = null;
-  $('#scMsg').innerHTML = `AIVN BOT muốn <b>${esc(req.desc)}</b>.${req.notFound ? `<br><span class="warn-ink">⚠ ${esc(req.notFound)}</span>` : ''}`;
+  $('#scMsg').innerHTML = `AIVN AGENT muốn <b>${esc(req.desc)}</b>.${req.notFound ? `<br><span class="warn-ink">⚠ ${esc(req.notFound)}</span>` : ''}`;
   $('#scImg').src = req.image; $('#scHint').hidden = !req.needPoint;
   $('#screenModal').hidden = false; placeBox(); $('#scNo').focus();
 });
@@ -1144,7 +1444,7 @@ $('#vramLimit').addEventListener('change', async e => { const v = Number(e.targe
 $('#advReset').addEventListener('click', async () => { state.settings = await A.setSettings({ gpu: true, gpuDevice: null, gpuLayers: null, vramLimitGB: null }); $('#gpuOn').checked = true; toast('Đã về chế độ tự động. Hãy nạp lại mô hình.'); setTimeout(paintAdvanced, 1500); });
 $('#advBox').addEventListener('toggle', e => { if (e.target.open) paintAdvanced(); });
 
-// ---------- Nút công cụ trên đầu AIVN BOT: bấm để bật/tắt, di chuột/nhấn giữ để xem, ▾ để xem ví dụ ----------
+// ---------- Nút công cụ trên đầu AIVN AGENT: bấm để bật/tắt, di chuột/nhấn giữ để xem, ▾ để xem ví dụ ----------
 const CHIPS = [
   { id: 'calc', i: '🧮', n: 'Máy tính', desc: 'Tính biểu thức chính xác: cộng trừ nhân chia, phần trăm, luỹ thừa, căn.', ex: ['Tính 15% của 2.350.000 đồng', '(3,5 + 4,2) × 12 bằng bao nhiêu?'] },
   { id: 'datetime', i: '🕒', n: 'Ngày giờ', desc: 'Biết ngày giờ hiện tại trên máy, đếm số ngày giữa hai mốc.', ex: ['Hôm nay là thứ mấy, ngày bao nhiêu?', 'Còn bao nhiêu ngày nữa đến Tết Dương lịch?'] },
@@ -1155,13 +1455,13 @@ const CHIPS = [
   { id: 'memory', i: '🧠', n: 'Ghi nhớ', set: '#agMem', desc: 'Ghi nhớ điều bạn dặn để dùng ở các cuộc trò chuyện sau (lưu trên máy, xoá được).', ex: ['Hãy nhớ: tôi học ngành Công nghệ thông tin ở Văn Lang', 'Bạn đang nhớ gì về tôi?'] },
   { id: 'computer', i: '💻', n: 'Máy tính/ứng dụng', set: '#agComp', desc: 'Mở ứng dụng, tệp, thư mục, trang web; xem/đóng ứng dụng; chạy lệnh (luôn hỏi bạn trước).', ex: ['Mở Máy tính (Calculator) giúp tôi', 'Những ứng dụng nào đang chạy?'] },
   { id: 'screen', i: '🖱', n: 'Điều khiển màn hình', set: '#agScreen', beta: true, desc: 'Thử nghiệm: chụp màn hình, mô hình nhìn ảnh đề xuất bấm/gõ; mỗi thao tác bạn duyệt trước. Ctrl+Alt+Q để dừng.', ex: ['Nhìn màn hình và cho biết tôi đang mở gì', 'Bấm vào nút Bắt đầu (Start) trên thanh tác vụ'] },
-  { id: 'reminder', i: '⏰', n: 'Lịch nhắc', desc: 'Tạo lời nhắc hoặc việc AIVN BOT tự làm theo giờ (xem ở mục Lịch).', ex: ['Nhắc tôi uống nước sau 30 phút', 'Mỗi sáng 8 giờ nhắc tôi xem lịch học'] },
+  { id: 'reminder', i: '⏰', n: 'Lịch nhắc', desc: 'Tạo lời nhắc hoặc việc AIVN AGENT tự làm theo giờ (xem ở mục Lịch).', ex: ['Nhắc tôi uống nước sau 30 phút', 'Mỗi sáng 8 giờ nhắc tôi xem lịch học'] },
 ];
 let chipPop = null; // { id, el }
 function chipState(c, info) {
   const off = new Set(info.toolsOff || []); const comp = info.computer || {};
   switch (c.id) {
-    case 'files': if (off.has('files')) return { st: 'off' }; return info.folders.some(f => f.exists) ? { st: 'on' } : { st: 'blocked', why: 'Chưa cho phép thư mục nào, nên AIVN BOT không đọc/ghi được tệp.', fix: 'Thêm thư mục', act: () => $('#addFolder').click() };
+    case 'files': if (off.has('files')) return { st: 'off' }; return info.folders.some(f => f.exists) ? { st: 'on' } : { st: 'blocked', why: 'Chưa cho phép thư mục nào, nên AIVN AGENT không đọc/ghi được tệp.', fix: 'Thêm thư mục', act: () => $('#addFolder').click() };
     case 'web': return { st: info.web ? 'on' : 'off' };
     case 'python': if (!info.python.available) return { st: 'blocked', why: 'Máy chưa có Python 3.', fix: 'Hướng dẫn cài Python', act: () => modalAsk({ icon: '🐍', title: 'Cài Python 3', message: 'Tải Python 3 từ trang chính thức python.org (Windows: nhớ tích "Add python.exe to PATH" khi cài; macOS: cài gói .pkg). Cài xong, khởi động lại AIVN rồi bật nút Python.', okLabel: 'Mở python.org', noLabel: 'Đóng' }).then(ok => ok && A.openExternal('https://www.python.org/downloads/')) };
       return { st: info.python.enabled ? 'on' : 'off' };
@@ -1188,7 +1488,7 @@ async function toggleChip(id) {
   const turnOn = s.st === 'off';
   if (c.set) { const el = $(c.set); el.checked = turnOn; el.dispatchEvent(new Event('change')); }
   else { const off = new Set(info.toolsOff || []); turnOn ? off.delete(id) : off.add(id); await saveAgentSetting({ agentToolsOff: [...off] }); }
-  toast(`${c.n}: ${turnOn ? 'đã bật' : 'đã tắt'}${turnOn ? '' : ' (AIVN BOT sẽ không dùng công cụ này)'}`);
+  toast(`${c.n}: ${turnOn ? 'đã bật' : 'đã tắt'}${turnOn ? '' : ' (AIVN AGENT sẽ không dùng công cụ này)'}`);
 }
 function closeChipPop() {
   if (!chipPop) return; chipPop.el.remove();

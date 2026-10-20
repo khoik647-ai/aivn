@@ -4,7 +4,7 @@ const fs = require('fs'); const path = require('path');
 const TP = require('../src/agent/textproto');
 const GEMMA = fs.readFileSync(path.join(__dirname, 'fixtures', 'gemma3.jinja'), 'utf8');
 const tools = [{ name: 'open_app', description: 'Mở ứng dụng theo tên', parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] } }];
-const hist = [{ role: 'system', content: 'Bạn là AIVN BOT.' }, { role: 'system', content: 'Ghi nhớ: tên người dùng là Khôi' }, { role: 'user', content: 'chào' }, { role: 'user', content: 'mở zalo' },
+const hist = [{ role: 'system', content: 'Bạn là AIVN AGENT.' }, { role: 'system', content: 'Ghi nhớ: tên người dùng là Khôi' }, { role: 'user', content: 'chào' }, { role: 'user', content: 'mở zalo' },
   { role: 'assistant', content: '', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'open_app', arguments: '{"name":"Zalo"}' } }] }, { role: 'tool', tool_call_id: 'c1', content: 'Đã mở ứng dụng "Zalo".' }];
 
 test('nhận ra mẫu chat Gemma 3 bắt buộc xen kẽ, không có tools', () => {
@@ -17,7 +17,7 @@ test('nhận ra mẫu chat Gemma 3 bắt buộc xen kẽ, không có tools', () 
 test('chuẩn hoá: bắt đầu bằng user, xen kẽ, system gộp vào lượt đầu, tool thành văn bản', () => {
   const m = TP.normalizeMessages(hist, { tools });
   assert.deepStrictEqual(m.map(x => x.role), ['user', 'assistant', 'user']);
-  assert.match(m[0].content, /Bạn là AIVN BOT\.[\s\S]*Ghi nhớ[\s\S]*# Công cụ[\s\S]*open_app[\s\S]*chào\n\nmở zalo$/);
+  assert.match(m[0].content, /Bạn là AIVN AGENT\.[\s\S]*Ghi nhớ[\s\S]*# Công cụ[\s\S]*open_app[\s\S]*chào\n\nmở zalo$/);
   assert.match(m[1].content, /<tool_call>\{"name":"open_app","arguments":\{"name":"Zalo"\}\}<\/tool_call>/);
   assert.match(m[2].content, /<tool_result name="open_app">\nĐã mở ứng dụng "Zalo"\.\n<\/tool_result>/);
   for (let i = 0; i < m.length; i++) assert.strictEqual(m[i].role, i % 2 ? 'assistant' : 'user');
@@ -47,7 +47,7 @@ test('luồng chữ không lộ khối <tool_call>', () => {
 // Chạy thật với llama-server (b11751) + mẫu Gemma 3 nếu có sẵn trên máy kiểm thử
 const SERVER = path.join(__dirname, '..', 'build', 'llama', `${process.platform}-${process.arch}`, process.platform === 'win32' ? 'llama-server.exe' : 'llama-server');
 const MODEL = process.env.AIVN_TINY_GGUF || '/tmp/q05.gguf';
-test('llama-server + mẫu Gemma 3: AIVN BOT gọi được công cụ ("mở zalo")', { skip: !(fs.existsSync(SERVER) && fs.existsSync(MODEL)) && 'thiếu llama-server hoặc mô hình nhỏ', timeout: 120000 }, async () => {
+test('llama-server + mẫu Gemma 3: AIVN AGENT gọi được công cụ ("mở zalo")', { skip: !(fs.existsSync(SERVER) && fs.existsSync(MODEL)) && 'thiếu llama-server hoặc mô hình nhỏ', timeout: 120000 }, async () => {
   process.env.AIVN_TEST_CHAT_TEMPLATE = path.join(__dirname, 'fixtures', 'gemma3.jinja');
   const logs = []; const vs = require('../src/vision-server').createVisionServer({ log: (m) => logs.push(m) });
   try {

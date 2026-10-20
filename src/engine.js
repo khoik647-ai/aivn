@@ -1,4 +1,5 @@
 // Bộ máy suy luận: bọc node-llama-cpp
+const SMP = require('./agent/sampling');
 const path = require('path');
 const os = require('os');
 const TP = require('./agent/textproto');
@@ -43,7 +44,7 @@ async function hardwareInfo() {
   const vram = await vramInfo(l).catch(() => null);
   let devices = []; try { devices = await l.getGpuDeviceNames(); } catch {}
   const cpu = (os.cpus()[0] || {}).model || '';
-  return { gpu: l.gpu || false, vram, devices, ram: os.totalmem(), freeRam: os.freemem(), cpus: os.cpus().length, cpu, platform: process.platform, arch: process.arch, cpuOnly: process.env.AIVN_GPU === 'off' };
+  return { gpu: l.gpu || false, vram, devices, ram: os.totalmem(), freeRam: os.freemem(), cpus: os.cpus().length, mathCores: l.cpuMathCores || null, cpu, platform: process.platform, arch: process.arch, cpuOnly: process.env.AIVN_GPU === 'off' };
 }
 
 // Đọc số lớp + kích thước KV từ GGUF để tự chọn số lớp đưa lên GPU (có chừa khoảng trống)
@@ -65,7 +66,7 @@ async function modelGeometry(modelPath) {
 }
 const MB = 1024 * 1024;
 // Kế hoạch nạp: thử lần lượt từ nhanh nhất tới an toàn nhất
-function loadPlans({ gpu, vram, fileSize, geo, ctx, userLayers }) {
+function loadPlans({ gpu, vram, fileSize, geo, ctx, userLayers, kvScale = 1 }) {
   const plans = []; const add = (p) => { if (!plans.some(x => x.gpuLayers === p.gpuLayers && x.ctx === p.ctx)) plans.push(p); };
   const small = Math.min(ctx, 2048);
   if (gpu) {
@@ -74,7 +75,7 @@ function loadPlans({ gpu, vram, fileSize, geo, ctx, userLayers }) {
     let fitN = null;
     if (L && vram && vram.total > 0 && gpu !== 'metal') {
       const perLayer = fileSize / L;
-      const kv = geo.kvPerToken ? geo.kvPerToken * ctx : 0.4 * 1024 * MB;
+      const kv = (geo.kvPerToken ? geo.kvPerToken * ctx : 0.4 * 1024 * MB) * kvScale; // KV q8_0 ≈ ½ f16
       const budget = Math.min(vram.free || vram.total, vram.total) * 0.9 - 350 * MB - kv * 0.6;
       fitN = Math.max(0, Math.min(L, Math.floor(budget / perLayer)));
     }
@@ -121,13 +122,22 @@ async function loadModel(id, modelPath, opts = {}) {
     const vram = await vramInfo(l).catch(() => null);
     const geo = await modelGeometry(modelPath);
     let fileSize = opts.fileSize || 0; if (!fileSize) { try { fileSize = require('fs').statSync(modelPath).size; } catch {} }
-    const plans = loadPlans({ gpu: l.gpu, vram, fileSize, geo, ctx: ctxMax, userLayers: opts.gpuLayers });
+    const pf = opts.perf || {};
+    const kvQuant = !!pf.kvQuant;
+    const plans = loadPlans({ gpu: l.gpu, vram, fileSize, geo, ctx: ctxMax, userLayers: opts.gpuLayers, kvScale: kvQuant ? 0.55 : 1 });
+    const ctxOpts = (plan, kv) => ({ contextSize: { min: Math.min(512, plan.ctx), max: plan.ctx },
+      ...(pf.threads ? { threads: pf.threads } : {}), ...(pf.batchSize ? { batchSize: Math.min(pf.batchSize, plan.ctx) } : {}), ...(pf.flashAttention != null ? { flashAttention: kv ? true : pf.flashAttention } : {}),
+      ...(kv ? { experimentalKvCacheKeyType: 'Q8_0', experimentalKvCacheValueType: 'Q8_0' } : {}) });
     for (const plan of plans) {
       let model = null;
       try {
         model = await l.loadModel({ modelPath, gpuLayers: plan.gpuLayers });
-        const context = await model.createContext({ contextSize: { min: Math.min(512, plan.ctx), max: plan.ctx } });
-        current = { id, path: modelPath, model, context, loadedAt: Date.now(), mode: plan.mode, meta: { name: geo.name, arch: geo.arch, sizeLabel: geo.sizeLabel, toolTemplate: geo.toolTemplate }, gpuLayers: model.gpuLayers, totalLayers: geo.layers ? geo.layers + 1 : null, attempts: attempts.map(a => a.mode + ': ' + a.message) };
+        let context, kvUsed = kvQuant;
+        try { context = await model.createContext(ctxOpts(plan, kvUsed)); }
+        catch (e) { if (!kvUsed) throw e; kvUsed = false; attempts.push({ mode: `${plan.mode} KV q8_0`, message: String(e && e.message || e) }); context = await model.createContext(ctxOpts(plan, false)); } // KV nén lỗi (mô hình/GPU không hỗ trợ) → f16
+        let tokenPredictor; if (pf.lookup) { try { const { InputLookupTokenPredictor } = await getLib(); tokenPredictor = new InputLookupTokenPredictor(); } catch {} }
+        current = { id, path: modelPath, model, context, tokenPredictor, loadedAt: Date.now(), mode: plan.mode, meta: { name: geo.name, arch: geo.arch, sizeLabel: geo.sizeLabel, toolTemplate: geo.toolTemplate }, gpuLayers: model.gpuLayers, totalLayers: geo.layers ? geo.layers + 1 : null, attempts: attempts.map(a => a.mode + ': ' + a.message),
+          perf: { threads: pf.threads || l.cpuMathCores || null, batchSize: pf.batchSize || 512, kv: kvUsed ? 'q8_0' : 'f16', flashAttention: context.flashAttention ?? null, lookup: !!tokenPredictor, profile: pf.effective || null } };
         return;
       } catch (e) {
         attempts.push({ mode: `${plan.mode} (${plan.gpuLayers} lớp GPU, ngữ cảnh ${plan.ctx})`, message: String(e && e.message || e), stack: String(e && e.stack || '') });
@@ -155,11 +165,11 @@ async function unloadModel() {
 
 function status() {
   if (visionOn) { const v = getVision().status(); if (v) return { loaded: true, id: v.id, path: v.path, contextSize: v.contextSize, vision: true, gpu: llama && llama.gpu, toolMode: v.textTools ? 'text' : 'native', meta: v.template ? { toolTemplate: !!v.template.nativeTools } : null }; }
-  return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, meta: current.meta || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: !!loading };
+  return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, meta: current.meta || null, perf: current.perf || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: !!loading };
 }
 
 // Một chuỗi ngữ cảnh dùng lại giữa các lượt (giữ bộ nhớ đệm KV: lượt sau chỉ tính phần mới của lời nhắc)
-function seqFor(c) { if (!c.seq || c.seq.disposed) c.seq = c.context.getSequence(); return c.seq; }
+function seqFor(c) { if (!c.seq || c.seq.disposed) c.seq = c.context.getSequence(c.tokenPredictor ? { tokenPredictor: c.tokenPredictor } : undefined); return c.seq; }
 
 function normalizeContent(c) {
   if (typeof c === 'string') return c;
@@ -171,9 +181,9 @@ function normalizeContent(c) {
  * Sinh câu trả lời từ danh sách messages kiểu OpenAI.
  * onToken(text) được gọi cho từng đoạn văn bản. Trả về { text, usage, finishReason }.
  */
-function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal, onToken } = {}) {
+function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal, onToken, sampling = null } = {}) {
   const run = async () => {
-    if (visionOn) return getVision().generate(messages, { temperature, maxTokens, topP, signal, onToken });
+    if (visionOn) return getVision().generate(messages, { temperature, maxTokens, topP, signal, onToken, sampling });
     if (!current) throw new Error('Chưa nạp mô hình nào.');
     const { LlamaChatSession } = await getLib();
     const msgs = messages.map(m => ({ role: m.role, content: normalizeContent(m.content) }));
@@ -196,7 +206,7 @@ function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal,
     let finishReason = 'stop';
     try {
       const res = await session.promptWithMeta(prompt, {
-        temperature, topP, maxTokens, signal, stopOnAbortSignal: true,
+        temperature, topP, maxTokens, signal, stopOnAbortSignal: true, ...SMP.toLlamaCpp(sampling), ...(topP != null ? { topP } : {}),
         onTextChunk: (chunk) => { text += chunk; onToken && onToken(chunk); },
       });
       if (res && res.stopReason === 'maxTokens') finishReason = 'length';
@@ -267,9 +277,9 @@ function toolModeFor(chat) {
   return mode;
 }
 
-function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = null, temperature = 0.7, maxTokens = 1024, topP, signal, onToken } = {}) {
+function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = null, temperature = 0.7, maxTokens = 1024, topP, signal, onToken, sampling = null } = {}) {
   const run = async (messages, tools) => {
-    if (visionOn) return getVision().chatStep(messages, { tools, toolChoice, responseFormat, temperature, maxTokens, topP, signal, onToken });
+    if (visionOn) return getVision().chatStep(messages, { tools, toolChoice, responseFormat, temperature, maxTokens, topP, signal, onToken, sampling });
     if (!current) throw new Error('Chưa nạp mô hình nào.');
     const { LlamaChat } = await getLib();
     const l = await getLlama();
@@ -311,6 +321,7 @@ function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = 
         onTextChunk: (chunk) => { streamed += chunk; if (grammar) return; if (filt) filt.push(chunk); else onToken && onToken(chunk); } };
       if (!textMode && (useFns || (hasCalls && !grammar))) Object.assign(opts, { functions, documentFunctionParams: true, maxParallelFunctionCalls: 4 });
       if (grammar) opts.grammar = grammar;
+      else if (sampling) { Object.assign(opts, SMP.toLlamaCpp(sampling)); if (topP != null) opts.topP = topP; } // chống lặp (không áp cho sinh JSON có ngữ pháp)
       const res = await chat.generateResponse(history, opts);
       const stop = res.metadata && res.metadata.stopReason;
       let text = (typeof res.response === 'string' ? res.response : streamed).replace(/^\s+/, '');

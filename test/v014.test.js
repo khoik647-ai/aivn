@@ -1,4 +1,4 @@
-// Kiểm thử v0.14: truy cập máy tính (chặn/cho phép lệnh, tìm ứng dụng, đường dẫn), kích hoạt Ed25519, trang Quản trị, Khóa ứng dụng, phân tích toạ độ màn hình, danh tính AIVN BOT
+// Kiểm thử v0.14: truy cập máy tính (chặn/cho phép lệnh, tìm ứng dụng, đường dẫn), kích hoạt Ed25519, trang Quản trị, Khóa ứng dụng, phân tích toạ độ màn hình, danh tính AIVN AGENT
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -115,16 +115,16 @@ test('màn hình: đọc khung toạ độ từ mô hình, phím tắt bị ch�
   assert.deepStrictEqual(SC.parseKeys('Ctrl+S'), { key: 's', mods: ['control'] });
   assert.throws(() => SC.parseKeys('alt+f4')); assert.throws(() => SC.parseKeys('ctrl+alt+delete'));
 });
-test('AIVN BOT: danh tính, lời chào, cha đỡ đầu; công cụ máy tính được ghép vào', async () => {
-  assert.match(IDENTITY, /AIVN BOT/); assert.match(IDENTITY, /Nguyễn Ngọc Khôi/); assert.match(IDENTITY, /Văn Lang/);
+test('AIVN AGENT: danh tính, lời chào, cha đỡ đầu; công cụ máy tính được ghép vào', async () => {
+  assert.match(IDENTITY, /AIVN AGENT/); assert.match(IDENTITY, /Nguyễn Ngọc Khôi/); assert.match(IDENTITY, /Văn Lang/);
   assert.match(IDENTITY, /NGUYỄN NGỌC KHÔI SINH VIÊN VLU/);
-  assert.match(WELCOME, /AIVN BOT/); assert.match(WELCOME, /cha đỡ đầu/i); assert.match(WELCOME, /Nguyễn Ngọc Khôi/);
+  assert.match(WELCOME, /AIVN AGENT/); assert.match(WELCOME, /cha đỡ đầu/i); assert.match(WELCOME, /Nguyễn Ngọc Khôi/);
   const ct = createComputerTools({ getSettings: () => ({ agentComputer: true }), openPath: async () => '', openExternal: async () => {}, visionReady: () => false, screen: {} });
   let sys = null;
   const engine = { status: () => ({ loaded: true, contextSize: 4096 }), chatStep: async (msgs) => { sys = msgs[0].content; return { text: 'Chào bạn!', toolCalls: [], finishReason: 'stop', usage: {} }; } };
   const ag = createAgent({ engine, getSettings: () => ({ agentComputer: true }), memory: { count: () => 0 }, scheduler: {}, extractFile: async () => ({}), embedForMemory: async () => ({}), computer: ct });
   assert.ok(ag.activeTools().includes('open_app'));
   const r = await ag.run({ messages: [{ role: 'user', content: 'Bạn là ai?' }], confirm: async () => false });
-  assert.match(sys, /Bạn là AIVN BOT/); assert.match(sys, /open_app/);
+  assert.match(sys, /Bạn là AIVN AGENT/); assert.match(sys, /open_app/);
   assert.ok(r.tools.includes('run_command'));
 });

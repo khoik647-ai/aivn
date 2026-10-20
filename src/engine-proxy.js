@@ -5,7 +5,7 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
   let child = null, readyP = null, seq = 0;
   const pending = new Map(); // id -> {resolve, reject}
   const tokenCbs = new Map(); // reqId -> onToken
-  let cached = { loaded: false };
+  let cached = { loaded: false }; let groundCached = { loaded: false };
   let loading = null;
   let ratio = 1 / 3;
   let extraEnv = {}, restarting = false, killReason = null; const inflight = new Map(); // id -> tên lệnh (ghi vào nhật ký khi bộ máy dừng) // token / ký tự, được hiệu chỉnh theo văn bản thật
@@ -26,7 +26,7 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
       child.on('error', (e) => { log('[engine] lỗi khởi động: ' + e.message); reject(e); });
       child.on('exit', (code, signal) => {
         const wasLoaded = cached.loaded || !!loading;
-        child = null; readyP = null; cached = { loaded: false };
+        child = null; readyP = null; cached = { loaded: false }; groundCached = { loaded: false };
         const busy = [...inflight.values()]; inflight.clear();
         const why = killReason; killReason = null;
         // signal (SIGTERM…) chỉ có khi chính AIVN dừng tiến trình; sập thật (thiếu bộ nhớ, lỗi driver) cho mã thoát
@@ -84,6 +84,15 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
       if (n > 0) ratio = n / chars;
     },
     ocr: (buf) => call('ocr', Buffer.from(buf).toString('base64')),
+    ocrLines: (buf) => call('ocrLines', Buffer.from(buf).toString('base64')),
+    groundLoad: async (id, p, mm, o) => { groundCached = await call('groundLoad', id, p, mm, o); groundCached.loaded = true; return groundCached; },
+    groundUnload: async () => { groundCached = { loaded: false }; if (child) await call('groundUnload'); },
+    groundStatus: () => groundCached,
+    async groundGenerate(messages, { signal, ...opts } = {}) {
+      const reqId = 'G' + (++seq); const onAbort = () => { try { child && child.send({ type: 'abort', reqId }); } catch {} };
+      signal?.addEventListener('abort', onAbort);
+      try { return await call('groundGenerate', messages, opts, reqId); } finally { signal?.removeEventListener('abort', onAbort); }
+    },
     embedLoad: (id, p, opts) => call('embedLoad', id, p, opts),
     embedUnload: () => call('embedUnload'),
     embedStatus: () => call('embedStatus'),

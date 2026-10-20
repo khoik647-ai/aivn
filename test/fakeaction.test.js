@@ -52,25 +52,31 @@ test('bước giả → buộc chọn công cụ → mô hình gọi open_app th
 });
 
 test('trả lời bình thường không bị chặn', async () => {
-  const { agent, calls } = mkAgent([say('Xin chào! Mình là AIVN BOT.')]);
+  const { agent, calls } = mkAgent([say('Xin chào! Mình là AIVN AGENT.')]);
   const r = await agent.run({ messages: [{ role: 'user', content: 'chào bạn' }], confirm: async () => true });
   assert.strictEqual(calls.length, 1); assert.strictEqual(r.warning, null);
 });
 
-test('bấm Gửi / Enter luôn hỏi duyệt riêng; từ chối thì không thao tác', async () => {
+test('bước quan trọng (gửi/thanh toán/xoá, Enter sau khi gõ) luôn hỏi; bước thường thì không', () => {
+  const { riskOf } = require('../src/agent/desk-policy');
+  assert.ok(riskOf('click', { el: { name: 'Gửi' } }));
+  assert.ok(riskOf('click', { query: 'nút Thanh toán' }));
+  assert.ok(riskOf('click', { el: { name: 'Xoá cuộc trò chuyện' } }));
+  assert.ok(riskOf('hotkey', { keys: 'enter', lastAction: { action: 'type_text' } }));
+  assert.ok(riskOf('type_text', { text: 'Chúc buổi tối vui vẻ\n' }));
+  assert.ok(!riskOf('click', { el: { name: 'Tìm kiếm' } }));
+  assert.ok(!riskOf('click', { el: { name: 'Trần Quỳnh Anh' } }));
+  assert.ok(!riskOf('type_text', { text: 'Chúc buổi tối vui vẻ' }));
+  assert.ok(!riskOf('hotkey', { keys: 'enter', lastAction: { action: 'click' } }));
   assert.ok(CT.isSendAction({ action: 'click', target: 'nút Gửi' }));
-  assert.ok(CT.isSendAction({ action: 'key', keys: 'enter' }));
-  assert.ok(CT.isSendAction({ action: 'type', text: 'Chúc buổi tối vui vẻ\n' }));
-  assert.ok(!CT.isSendAction({ action: 'click', target: 'ô tìm kiếm' }));
-  assert.ok(!CT.isSendAction({ action: 'type', text: 'Chúc buổi tối vui vẻ' }));
-  const acted = []; const asked = [];
-  const tools = CT.createComputerTools({ getSettings: () => ({ agentComputer: true, agentScreen: true }), visionReady: () => true, screen: { act: async (a) => { acted.push(a); return { forModel: 'ok', summary: 'ok' }; } } });
-  const no = await tools.exec('screen_act', { action: 'click', target: 'nút Gửi' }, { confirm: async (req) => { asked.push(req); return false; } });
-  assert.strictEqual(no.refused, true); assert.strictEqual(acted.length, 0); assert.strictEqual(asked[0].kind, 'send-message');
-  await tools.exec('screen_act', { action: 'click', target: 'nút Gửi' }, { confirm: async () => true });
+});
+test('screen_act chuyển cho desktop agent (xin phép ở đó)', async () => {
+  const acted = [];
+  const tools = CT.createComputerTools({ getSettings: () => ({ agentComputer: true, agentScreen: true }), visionReady: () => false, screen: { act: async (a) => { acted.push(a); return { forModel: 'ok', summary: 'ok' }; } } });
+  assert.ok(tools.names().includes('screen_act'), 'không cần mô hình nhìn ảnh');
+  assert.ok(tools.names().includes('read_screen_text'));
+  await tools.exec('screen_act', { action: 'click', element: 'e3' }, {});
   assert.strictEqual(acted.length, 1);
-  await tools.exec('screen_act', { action: 'click', target: 'ô chat Trần Quỳnh Anh' }, { confirm: async () => { throw new Error('không được hỏi'); } });
-  assert.strictEqual(acted.length, 2);
 });
 
 test('nhãn hỗ trợ công cụ', () => {
@@ -83,7 +89,7 @@ test('nhãn hỗ trợ công cụ', () => {
 
 test('yêu cầu thao tác bị lờ đi cũng bị bắt', () => {
   const names = ['open_app'];
-  assert.strictEqual(fakeActionCheck('Xin chào! Mình là AIVN BOT. Bạn muốn mình làm gì?', [], names, 'gửi tin nhắn cho trần quỳnh anh'), 'ignored');
+  assert.strictEqual(fakeActionCheck('Xin chào! Mình là AIVN AGENT. Bạn muốn mình làm gì?', [], names, 'gửi tin nhắn cho trần quỳnh anh'), 'ignored');
   assert.strictEqual(fakeActionCheck('Mình không thể gửi tin nhắn vì chưa bật Điều khiển màn hình.', [], names, 'gửi tin nhắn cho trần quỳnh anh'), null);
   assert.strictEqual(fakeActionCheck('Hà Nội.', [], names, 'thủ đô Việt Nam?'), null);
 });
