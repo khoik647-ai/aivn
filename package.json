@@ -1,7 +1,7 @@
 {
   "name": "aivn",
   "productName": "AIVN",
-  "version": "0.15.0",
+  "version": "0.15.1",
   "description": "AIVN - Chạy mô hình AI ngay trên máy tính của bạn",
   "author": {
     "name": "NGUYỄN NGỌC KHÔI SINH VIÊN VLU"
@@ -79,6 +79,7 @@
       "src/engine-host.js",
       "src/vision-server.js",
       "src/agent/textproto.js",
+      "src/agent/sampling.js",
       "src/schema.js",
       "src/ocr.js",
       "src/llama-archs.json",
