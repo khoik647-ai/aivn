@@ -151,6 +151,7 @@ function lockNow(reason) {
   loadUi(); return true;
 }
 function startServices() {
+  if (!servicesOn) LOG.log('app', 'Đã kích hoạt: khởi động bộ máy AI, lịch tự động, máy chủ API');
   if (servicesOn) return; servicesOn = true;
   hw().then(h => LOG.log('app', 'Phần cứng', { gpu: h.gpu || 'không', thietBi: h.devices, vramGB: h.vram ? +(h.vram.total / 1024 ** 3).toFixed(2) : 0, vramTrongGB: h.vram ? +(h.vram.free / 1024 ** 3).toFixed(2) : 0, ramGB: +(h.ram / 1024 ** 3).toFixed(1), chiCPU: !!h.cpuOnly })).catch(e => LOG.log('app', 'Không đọc được phần cứng: ' + e.message));
   applyBackgroundPrefs();
@@ -1621,6 +1622,7 @@ else {
     registerIpc();
     createWindow({ hidden: process.argv.includes('--hidden') && settings.data.keepInTray });
     if (activated()) startServices(); // chưa kích hoạt: không chạy lịch, API, mô hình
+    else LOG.log('app', 'Máy chưa kích hoạt: chờ nhập mã (bộ máy AI, lịch tự động, máy chủ API chưa chạy)');
     licenseCheck().catch(() => {});
     startGateTimers();
     if (app.isPackaged || process.env.AIVN_UPDATE_CHECK === '1') setTimeout(() => updater.check({ silent: true }), Number(process.env.AIVN_UPDATE_DELAY || 5000));
