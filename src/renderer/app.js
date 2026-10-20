@@ -836,11 +836,11 @@ function apShow() {
   $('#apFields').innerHTML = (c.fields || []).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('');
   $('#apPreview').hidden = !c.preview; $('#apPreview').textContent = c.preview || '';
   $('#apDiff').hidden = !c.diff;
-  $('#apDiff').innerHTML = c.diff ? c.diff.text.split('\n').map(l => `<span class="${l.startsWith('+ ') ? 'add' : l.startsWith('- ') ? 'del' : 'ctx'}">${esc(l) || ' '}</span>`).join('') : '';
+  $('#apDiff').innerHTML = c.diff ? c.diff.text.split('\n').map(l => { const k = l.startsWith('+ ') ? 'add' : l.startsWith('- ') ? 'del' : 'ctx'; return `<span class="${k}"><i class="g" aria-label="${k === 'add' ? 'thêm' : k === 'del' ? 'bỏ' : ''}">${k === 'add' ? '+' : k === 'del' ? '−' : ' '}</i>${esc(k === 'ctx' ? l.replace(/^ {2}/, '') : l.slice(2)) || ' '}</span>`; }).join('') : '';
   $('#apReasonBox').hidden = true; $('#apReason').value = '';
   $('#apAlwaysRow').hidden = !c.allowAlways; $('#apAlways').checked = false; $('#apWarn').hidden = true; // không bao giờ bật sẵn
   card.hidden = false; setPhase('ask');
-  $('#apDeny').focus();
+  $('#apDeny').focus({ preventScroll: true }); card.scrollTop = 0;
   card.scrollIntoView({ block: 'nearest' });
 }
 function apAnswer(ok, withReason = false) {
@@ -882,7 +882,7 @@ async function renderCrm() {
       const d = await C('dashboard');
       body.innerHTML = `<div class="kpis"><div class="kpi">Cơ hội đang mở<b>${d.open.n}</b><span class="small muted">${vnd(d.open.sum)} · dự kiến ${vnd(d.open.weighted)}</span></div><div class="kpi">Thắng trong tháng<b>${d.wonMonth.n}</b><span class="small muted">${vnd(d.wonMonth.sum)}</span></div><div class="kpi">Tỉ lệ thắng<b>${d.winRate == null ? '—' : Math.round(d.winRate) + '%'}</b><span class="small muted">90 ngày: ${d.winRate90 == null ? '—' : Math.round(d.winRate90) + '%'}</span></div><div class="kpi">Việc cần làm<b>${d.activities.open}</b><span class="small muted">${d.activities.overdue} quá hạn · ${d.activities.today} hôm nay</span></div></div>
         <h3>Theo giai đoạn</h3><table class="crm-table"><tr><th>Giai đoạn</th><th>Số cơ hội</th><th>Giá trị</th></tr>${d.byStage.map(x => `<tr><td>${esc(x.name)}</td><td>${x.n}</td><td>${vnd(x.sum)}</td></tr>`).join('')}</table>
-        <h3>Sắp tới</h3>${(d.upcoming || []).length ? `<table class="crm-table">${d.upcoming.map(a => `<tr><td>${esc(a.type_vi || '')}</td><td>${esc(a.title)}</td><td>${esc(a.contact_name || '')}</td><td>${a.due_at ? new Date(a.due_at).toLocaleString('vi-VN') : 'chưa hẹn giờ'}</td></tr>`).join('')}</table>` : '<div class="empty-state"><div class="big">📅</div>Chưa có việc nào sắp tới.</div>'}`;
+        <h3>Sắp tới</h3>${(d.upcoming || []).length ? `<table class="crm-table">${d.upcoming.map(a => `<tr><td>${esc(a.type_vi || '')}</td><td>${esc(a.title)}</td><td>${esc(a.contact_name || '')}</td><td>${a.due_at ? new Date(a.due_at).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }) : 'chưa hẹn giờ'}</td></tr>`).join('')}</table>` : '<div class="empty-state"><div class="big">📅</div>Chưa có việc nào sắp tới.</div>'}`;
     } else if (crm.tab === 'contacts') {
       const r = await C('listContacts', { q }); crm.contacts = r.rows;
       body.innerHTML = r.rows.length ? `<table class="crm-table"><tr><th>Tên</th><th>Loại</th><th>Điện thoại</th><th>Email</th><th>Thẻ</th><th>Phụ trách</th><th></th></tr>${r.rows.map(c => `<tr><td><b>${esc(c.name)}</b>${c.job_title ? `<div class="small muted">${esc(c.job_title)}</div>` : ''}</td><td>${esc(c.kind_vi)}</td><td>${esc(c.phone_fmt || c.phone || '')}</td><td>${esc(c.email || '')}</td><td>${(c.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join(' ')}</td><td>${esc(c.owner || '')}</td><td><button class="btn sm" data-crm-edit="${esc(c.id)}">Sửa</button> <button class="btn sm ghost" data-crm-del="${esc(c.id)}" title="Xoá liên hệ">🗑</button></td></tr>`).join('')}</table><p class="small muted">${r.total} liên hệ</p>`
@@ -893,7 +893,7 @@ async function renderCrm() {
       body.innerHTML = `<div class="kanban">${ST.map(([id, n]) => { const col = rows.filter(l => l.stage === id); return `<div class="kcol" data-stage="${id}"><h4>${n}<span class="muted">${col.length}</span></h4>${col.map(l => `<div class="kcard" draggable="true" data-lead="${esc(l.id)}"><b>${esc(l.title)}</b><div class="small muted">${esc(l.contact_name || '')}</div><div class="small">${vnd(l.expected_revenue)} · ${l.probability}%</div></div>`).join('') || '<div class="small muted">Kéo thẻ vào đây</div>'}</div>`; }).join('')}</div>`;
     } else {
       const r = await C('listActivities', { status: 'open' });
-      body.innerHTML = r.length ? `<table class="crm-table"><tr><th></th><th>Việc</th><th>Loại</th><th>Khách hàng</th><th>Hạn</th></tr>${r.map(a => `<tr><td><input type="checkbox" data-crm-done="${esc(a.id)}" aria-label="Đánh dấu xong"></td><td>${esc(a.title)}${a.overdue ? ' <span class="tag" style="color:#82071e">quá hạn</span>' : ''}</td><td>${esc(a.type_vi)}</td><td>${esc(a.contact_name || '')}</td><td>${a.due_at ? new Date(a.due_at).toLocaleString('vi-VN') : '—'}</td></tr>`).join('')}</table>` : '<div class="empty-state"><div class="big">✅</div>Không còn việc nào cần làm.</div>';
+      body.innerHTML = r.length ? `<table class="crm-table"><tr><th></th><th>Việc</th><th>Loại</th><th>Khách hàng</th><th>Hạn</th></tr>${r.map(a => `<tr><td><input type="checkbox" data-crm-done="${esc(a.id)}" aria-label="Đánh dấu xong"></td><td>${esc(a.title)}${a.overdue ? ' <span class="tag" style="color:#82071e">quá hạn</span>' : ''}</td><td>${esc(a.type_vi)}</td><td>${esc(a.contact_name || '')}</td><td>${a.due_at ? new Date(a.due_at).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td></tr>`).join('')}</table>` : '<div class="empty-state"><div class="big">✅</div>Không còn việc nào cần làm.</div>';
     }
   } catch (e) { body.innerHTML = `<div class="empty-state">⚠ ${esc(e.message)}</div>`; }
 }

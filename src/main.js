@@ -1281,6 +1281,7 @@ async function qaCU() {
   out.load = await loadById(id, { force: true }).then(st => ({ ok: true, ms: Date.now() - t0, ctx: st.contextSize, mode: st.mode })).catch(e => ({ ok: false, error: e.message })); save();
   send('model:status', engine.status());
   await js('show("agent")'); await until('!!state.agent', 20000); await sleep(800);
+  if (process.env.AIVN_QACU_HISTORY) { await js(`(() => { const h = ${fs.readFileSync(process.env.AIVN_QACU_HISTORY, 'utf8')}; if (!state.current) state.current = { id: uid(), title: 'QA', messages: [], createdAt: Date.now(), updatedAt: Date.now(), mode: 'agent' }; state.current.messages.push(...h); renderMessages(); })()`).catch(e => { out.historyError = e.message; }); await sleep(500); }
   await js(`(() => { const i = document.querySelector('#input'); i.value = ${JSON.stringify(process.env.AIVN_QACU_TASK)}; i.dispatchEvent(new Event('input')); document.querySelector('#sendBtn').click(); })()`);
   const tStart = Date.now(); const timer = setInterval(snap, 4000);
   await until('state.generating', 20000);
@@ -1305,19 +1306,18 @@ async function qaUI() {
   const step = async (n, code) => { try { if (code) await js(code); await shot(n); } catch (e) { out[n] = 'lỗi: ' + e.message; } };
   if (process.env.AIVN_QAUI_ONBOARD) await step('00-onboarding', 'startOnboard(true)');
   await js('document.querySelectorAll(".modal-back").forEach(m => m.hidden = true)');
-  const c = await (async () => { const { openDb } = require('./crm/db'); const { createCrm } = require('./crm/crm'); return createCrm({ db: await openDb(path.join(app.getPath('userData'), 'crm.db')), defaultOwner: () => 'Khôi' }); })();
-  if (!c.listContacts({}).total) {
-    const a = c.saveContact({ name: 'Trần Quỳnh Anh', phone: '0912345678', email: 'quynhanh@example.vn', tags: 'VIP, Hà Nội', job_title: 'Giám đốc mua hàng' });
-    const b = c.saveContact({ name: 'Công ty TNHH Sen Vàng', kind: 'company', phone: '02838123456', email: 'lienhe@senvang.vn', tags: 'Đại lý' });
-    const d = c.saveContact({ name: 'Lê Minh Tuấn', phone: '0987654321', email: 'tuan.le@example.vn', tags: 'Khách lẻ' });
-    c.saveLead({ title: 'Gói phần mềm 20 máy', contact_id: b.id, expected_revenue: 45000000, stage: 'quoted' });
-    c.saveLead({ title: 'Đơn hàng quý IV', contact_id: a.id, expected_revenue: 120000000, stage: 'negotiation' });
-    c.saveLead({ title: 'Tư vấn lắp đặt', contact_id: d.id, expected_revenue: 8000000, stage: 'new' });
-    c.saveLead({ title: 'Hợp đồng bảo trì', contact_id: b.id, expected_revenue: 15000000, stage: 'won' });
-    c.saveActivity({ title: 'Gọi lại chị Quỳnh Anh về báo giá', type: 'call', contact_id: a.id, due_at: Date.now() + 3600e3 });
-    c.saveActivity({ title: 'Gửi hợp đồng cho Sen Vàng', type: 'email', contact_id: b.id, due_at: Date.now() - 86400e3 });
-  }
-  crmP = null;
+  await js(`(async () => { const C = async (fn, ...a) => { const r = await A.crm(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+    if ((await C('listContacts', {})).total) return;
+    const a = await C('saveContact', { name: 'Trần Quỳnh Anh', phone: '0912345678', email: 'quynhanh@example.vn', tags: 'VIP, Hà Nội', job_title: 'Giám đốc mua hàng' });
+    const b = await C('saveContact', { name: 'Công ty TNHH Sen Vàng', kind: 'company', phone: '02838123456', email: 'lienhe@senvang.vn', tags: 'Đại lý' });
+    const d = await C('saveContact', { name: 'Lê Minh Tuấn', phone: '0987654321', email: 'tuan.le@example.vn', tags: 'Khách lẻ' });
+    await C('saveLead', { title: 'Gói phần mềm 20 máy', contact_id: b.id, expected_revenue: 45000000, stage: 'quoted' });
+    await C('saveLead', { title: 'Đơn hàng quý IV', contact_id: a.id, expected_revenue: 120000000, stage: 'negotiation' });
+    await C('saveLead', { title: 'Tư vấn lắp đặt', contact_id: d.id, expected_revenue: 8000000, stage: 'new' });
+    await C('saveLead', { title: 'Hợp đồng bảo trì', contact_id: b.id, expected_revenue: 15000000, stage: 'won' });
+    await C('saveActivity', { title: 'Gọi lại chị Quỳnh Anh về báo giá', type: 'call', contact_id: a.id, due_at: Date.now() + 3600e3 });
+    await C('saveActivity', { title: 'Gửi hợp đồng cho Sen Vàng', type: 'email', contact_id: b.id, due_at: Date.now() - 86400e3 });
+  })()`).catch(e => { out.seed = e.message; });
   await step('01-crm-tong-quan', 'show("crm"); crm.tab = "dash"; renderCrm()');
   await step('02-crm-lien-he', 'crm.tab = "contacts"; renderCrm()');
   await step('03-crm-co-hoi', 'crm.tab = "leads"; renderCrm()');
