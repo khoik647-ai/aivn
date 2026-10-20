@@ -865,6 +865,43 @@ document.addEventListener('keydown', (e) => {
 A.onAgentApprove((c) => { apQueue.push(c); apShow(); });
 A.onAgentApproveCancel(({ id }) => { if (apOpen && apOpen.id === id) { apOpen = null; $('#approveCard').hidden = true; apShow(); } const i = apQueue.findIndex(x => x.id === id); if (i >= 0) apQueue.splice(i, 1); });
 
+// --- Kết nối (MCP) ---
+let mcpState = { servers: [] };
+function paintMcp(st) {
+  if (st) mcpState = { ...mcpState, ...st };
+  const list = mcpState.servers || [];
+  const on = list.filter(x => x.state === 'on');
+  $('#mcpSum').textContent = list.length ? `${on.length}/${list.length} máy chủ đang kết nối · ${on.reduce((a, x) => a + x.tools.length, 0)} công cụ` : 'chưa có máy chủ nào';
+  if (typeof mcpState.enabled === 'boolean') $('#mcpMaster').checked = mcpState.enabled;
+  const stLbl = { on: 'đang kết nối', off: 'đã tắt', starting: 'đang khởi động…', error: 'lỗi' };
+  $('#mcpList').innerHTML = list.map(x => `<div class="mcp-srv"><div class="hd"><label class="check"><input type="checkbox" data-mcp-toggle="${esc(x.name)}" ${x.enabled ? 'checked' : ''}> <b>${esc(x.name)}</b></label><span class="st ${x.state}">${stLbl[x.state] || x.state}</span><span class="muted small">${esc(x.kind)} · ${esc(x.command).slice(0, 90)}</span><button type="button" class="btn sm" data-mcp-restart="${esc(x.name)}">Kết nối lại</button></div>
+    ${x.error ? `<div class="small" style="color:#82071e">${esc(x.error)}</div>` : ''}
+    ${x.tools.length ? `<div class="small muted">Công cụ: ${x.tools.map(t => `<code title="${esc(t.description)}">${esc(t.name)}</code>`).join(' ')}</div>` : ''}
+    <details><summary class="small">Nhật ký máy chủ</summary><pre>${esc(x.logs.join('\n') || '(trống)')}</pre></details></div>`).join('') || '<div class="small muted">Chưa có máy chủ. Thêm nhanh bằng các nút ở trên hoặc sửa mcp.json.</div>';
+  const b = $('#mcpBadges'); const shown = list.filter(x => x.enabled && (x.state === 'on' || x.state === 'error'));
+  b.hidden = !(isAgent() && mcpState.enabled !== false && shown.length);
+  b.innerHTML = shown.map(x => `<span class="${x.state === 'error' ? 'error' : ''}" title="${esc(x.state === 'error' ? x.error || '' : x.tools.map(t => t.name).join(', '))}">🔌 ${esc(x.name)}${x.state === 'on' ? ' · ' + x.tools.length : ' · lỗi'}</span>`).join('');
+}
+async function refreshMcp(withText = false) {
+  const st = await A.mcpStatus(); mcpState = { servers: st.servers, enabled: st.enabled };
+  if (withText || !$('#mcpJson').value) $('#mcpJson').value = st.text; $('#mcpFile').textContent = st.file;
+  paintMcp();
+}
+A.onMcpChanged((servers) => { paintMcp({ servers }); });
+$('#mcpBlock').addEventListener('toggle', () => { if ($('#mcpBlock').open) refreshMcp(true); });
+$('#mcpMaster').addEventListener('change', async (e) => { await A.mcpMaster(e.target.checked); mcpState.enabled = e.target.checked; paintMcp(); refreshAgent(); });
+$('#mcpSaveBtn').addEventListener('click', async () => {
+  const r = await A.mcpSave($('#mcpJson').value);
+  $('#mcpMsg').textContent = r.ok ? '✓ Đã lưu' : '⚠ ' + r.error; $('#mcpMsg').style.color = r.ok ? '' : '#82071e';
+  if (r.ok) { for (const x of r.servers) if (x.enabled) A.mcpRestart(x.name); refreshMcp(true); }
+});
+$('#mcpBlock').addEventListener('click', async (e) => {
+  const p = e.target.closest('[data-mcp-preset]'); const rs = e.target.closest('[data-mcp-restart]');
+  if (p) { const r = await A.mcpPreset(p.dataset.mcpPreset); if (r.ok) { toast(`Đã thêm máy chủ “${r.name}” — đang kết nối (lần đầu có thể mất 30–60 giây để tải gói).`); refreshMcp(true); } else if (!r.canceled) toast('⚠ ' + r.error); }
+  if (rs) { A.mcpRestart(rs.dataset.mcpRestart); }
+});
+$('#mcpBlock').addEventListener('change', async (e) => { const t = e.target.closest('[data-mcp-toggle]'); if (!t) return; await A.mcpToggle({ name: t.dataset.mcpToggle, on: t.checked }); refreshMcp(true); refreshAgent(); });
+
 // --- Cài đặt AIVN AGENT ---
 async function refreshAgent() {
   const info = state.agent = await A.agentInfo();
@@ -878,6 +915,7 @@ async function refreshAgent() {
   renderToolChips(info);
   paintAgentWarn(info.advice);
   paintComputer(info.computer);
+  refreshMcp().catch(() => {});
   const al = info.alwaysAllow || []; $('#alwaysBox').hidden = !al.length;
   $('#alwaysList').innerHTML = al.map(t => `<span class="chip">${esc(t.label)}<button type="button" data-revoke="${esc(t.name)}" title="Bỏ Luôn cho phép" aria-label="Bỏ Luôn cho phép ${esc(t.label)}">×</button></span>`).join('');
   if (isAgent() && (!state.current || !state.current.messages.length) && !state.generating) renderMessages();

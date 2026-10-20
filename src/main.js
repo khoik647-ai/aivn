@@ -123,7 +123,8 @@ function initStores() {
   scheduler = createScheduler({ file: path.join(ud, 'schedules.json'), onFire: onScheduleFire, log: (m) => { console.log(m); log(m); } });
   computerTools = createComputerTools({ getSettings: () => settings.data, openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => LOG.block('apps', 'Quét ứng dụng đã cài (AIVN AGENT)', [`nguồn: ${JSON.stringify(d.sources)}`, `lỗi: ${d.errors.length ? d.errors.join('; ') : 'không'}`, `thư mục Desktop: ${d.dirs ? d.dirs.desktop.join(' | ') : '—'}`, `thư mục Start Menu: ${d.dirs ? d.dirs.start.join(' | ') : '—'}`, `thời gian tìm sâu: ${d.ms ?? '?'} ms`]),
     keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: (a, ctx) => deskWrap(getDesk().look, a, ctx), act: (a, ctx) => deskWrap(getDesk().act, a, ctx), readText: (a, ctx) => deskWrap(getDesk().readText, a, ctx) } });
-  agent = createAgent({ engine, getSettings: () => settings.data, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: docsPool.extractFile, embedForMemory, log, computer: computerTools,
+  mcp = require('./mcp').createMcpManager({ dir: app.getPath('userData'), log: (sc, m) => LOG.log(sc, m), onChange: () => send('mcp:changed', mcp.status()) });
+  agent = createAgent({ engine, mcp, getSettings: () => settings.data, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: docsPool.extractFile, embedForMemory, log, computer: computerTools,
     logTool: (x) => LOG.log('tool', `${x.auto ? '(tự động) ' : ''}${x.name} → ${x.status} sau ${x.ms ?? '?'} ms`, { args: Object.fromEntries(Object.entries(x.args || {}).map(([k, v]) => [k, typeof v === 'string' && v.length > 200 ? v.slice(0, 200) + '…' : v])), ketQua: String(x.summary || '').slice(0, 300) }),
     trash: async (p) => { try { await shell.trashItem(p); } catch (e) { throw new Error('Không chuyển được tệp vào Thùng rác (' + e.message + '). Tệp vẫn còn nguyên.'); } } });
   lic = createLicenseState({ file: path.join(ud, 'license.json'), isPackaged: app.isPackaged, log: (m) => { log(m); if (isTest) console.log(m); }, fetchJson });
@@ -466,6 +467,7 @@ async function runAgentTurn({ reqId, convoId, messages, headless = false, signal
 }
 // ---------- Điều khiển máy tính kiểu desktop agent (quan sát → thao tác → kiểm tra) ----------
 let desk = null;
+let mcp = null;
 function getDesk() {
   if (desk) return desk;
   const { createDesktopAgent } = require('./desktop-agent');
@@ -868,6 +870,21 @@ function registerIpc() {
   ipcMain.handle('bench:run', async (_e, { ids }) => { try { return { ok: true, results: await runAgentBench(Array.isArray(ids) ? ids.slice(0, 4) : []) }; } catch (e) { return { ok: false, error: e.message }; } });
   ipcMain.handle('bench:stop', () => { if (benchRun) benchRun.abort(); stopComputer('dừng bài đo'); return true; });
   ipcMain.handle('bench:scores', () => benchScores());
+  // ---- Kết nối (MCP) ----
+  ipcMain.handle('mcp:status', () => ({ servers: mcp.status(), text: mcp.readText(), file: mcp.file, enabled: settings.data.agentMcp !== false }));
+  ipcMain.handle('mcp:save', async (_e, text) => { try { await mcp.saveText(String(text)); LOG.log('mcp', 'Đã lưu mcp.json'); return { ok: true, servers: mcp.status() }; } catch (e) { return { ok: false, error: e.message }; } });
+  ipcMain.handle('mcp:toggle', async (_e, { name, on }) => { try { return { ok: true, server: await mcp.setEnabled(name, !!on) }; } catch (e) { return { ok: false, error: e.message }; } });
+  ipcMain.handle('mcp:restart', async (_e, name) => { try { return { ok: true, server: await mcp.start(name) }; } catch (e) { return { ok: false, error: e.message }; } });
+  ipcMain.handle('mcp:preset', async (_e, kind) => {
+    let folder = null;
+    if (kind === 'filesystem') { const r = await dialog.showOpenDialog(win, { title: 'Chọn thư mục cho máy chủ MCP filesystem', properties: ['openDirectory'] }); if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }; folder = r.filePaths[0]; }
+    const P = require('./mcp').presets({ folder }); if (!P[kind]) return { ok: false, error: 'Không có mẫu này.' };
+    const cfg = mcp.config(); let name = kind; let i = 2; while (cfg.mcpServers[name]) name = `${kind}-${i++}`;
+    cfg.mcpServers[name] = P[kind];
+    try { await mcp.saveText(JSON.stringify(cfg)); mcp.start(name).catch(() => {}); return { ok: true, name }; } catch (e) { return { ok: false, error: e.message }; }
+  });
+  ipcMain.handle('mcp:master', (_e, on) => { settings.data.agentMcp = !!on; settings.save(); return true; });
+  setTimeout(() => mcp.startEnabled().catch(() => {}), 4000);
   ipcMain.handle('bench:ground', async (_e, { id }) => { try { return { ok: true, result: await runGroundingBench(id) }; } catch (e) { return { ok: false, error: e.message }; } });
   ipcMain.handle('logs:open', () => { const d = LOG.dir || path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(d, { recursive: true }); LOG.log('app', 'Người dùng mở thư mục nhật ký'); shell.openPath(LOG.file && fs.existsSync(LOG.file) ? d : d); return d; });
   ipcMain.handle('apps:scan-test', async (_e, q) => { const r = await computerTools.scanReport(String(q || 'zalo').slice(0, 60)); LOG.block('apps', `Kiểm tra quét ứng dụng (tìm "${r.query}")`, [`tổng: ${r.total} mục · ${r.ms} ms`, `nguồn: ${JSON.stringify(r.sources)}`, `lỗi: ${r.errors.length ? r.errors.join('; ') : 'không'}`, `khớp tốt nhất: ${r.best ? r.best.name + ' → ' + (r.best.path || r.best.appId || '?') : 'không có'}`, ...r.matches.map(m => `- ${m.name} · ${m.path || m.appId || ''}${m.target ? ' → ' + m.target : ''}`)]); return r; });
@@ -1836,5 +1853,5 @@ else {
   app.on('window-all-closed', async () => {
     if (settings && settings.data.keepInTray && tray && !quitting) return; // vẫn chạy trong khay
     await api.stop().catch(() => {}); await engine.unloadModel().catch(() => {}); await engine.stop().catch(() => {}); app.quit(); });
-  app.on('will-quit', () => { scheduler && scheduler.stop(); engine.stop().catch(() => {}); });
+  app.on('will-quit', () => { mcp && mcp.stopAll().catch(() => {}); scheduler && scheduler.stop(); engine.stop().catch(() => {}); });
 }

@@ -259,10 +259,12 @@ function createAgent(deps) {
     if (s.agentMemory !== false) names.push('save_memory');
     if (!headless) names.push('create_reminder');
     if (deps.computer) names.push(...deps.computer.names({ headless }));
+    if (deps.mcp && !headless && s.agentMcp !== false) { try { names.push(...deps.mcp.names()); } catch {} }
     return names;
   }
-  const defOf = (n) => DEFS[n] || (deps.computer && deps.computer.defs[n]) || null;
-  const allDefs = () => ({ ...DEFS, ...(deps.computer ? deps.computer.defs : {}) });
+  const mcpDefs = () => { try { return deps.mcp ? deps.mcp.defs() : {}; } catch { return {}; } };
+  const defOf = (n) => DEFS[n] || (deps.computer && deps.computer.defs[n]) || (/^mcp__/.test(n) ? mcpDefs()[n] : null) || null;
+  const allDefs = () => ({ ...DEFS, ...(deps.computer ? deps.computer.defs : {}), ...mcpDefs() });
   const specs = (names) => names.map(n => ({ name: n, description: defOf(n).description, parameters: defOf(n).parameters }));
 
   // ---------- Thực thi công cụ ----------
@@ -390,6 +392,7 @@ function createAgent(deps) {
         return { forModel: `Đã tạo lịch "${t.title}": ${t.schedule}. Lần chạy tới: ${t.nextRun ? nowVi(new Date(t.nextRun)) : 'không có'}.`, summary: `${t.title} · ${t.schedule}`, scheduleId: t.id };
       }
       default:
+        if (deps.mcp && /^mcp__/.test(name) && deps.mcp.has(name)) return deps.mcp.exec(name, a, ctx);
         if (deps.computer && deps.computer.has(name)) return deps.computer.exec(name, a, ctx);
         throw new ToolError(`Không có công cụ "${name}".`);
     }

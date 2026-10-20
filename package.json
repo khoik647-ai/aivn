@@ -15,6 +15,7 @@
     "dist:mac": "node build/mac-build.cjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@node-llama-cpp/mac-arm64-metal": "3.22.2",
     "@node-llama-cpp/mac-x64": "3.22.2",
     "@node-llama-cpp/win-x64": "3.22.2",
@@ -28,6 +29,7 @@
     "fflate": "0.8.2",
     "mammoth": "1.13.0",
     "node-llama-cpp": "3.22.2",
+    "npm": "^10.9.9",
     "pdfjs-dist": "5.6.205",
     "sql.js": "1.13.0",
     "tesseract.js": "7.0.0"

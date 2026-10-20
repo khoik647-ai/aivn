@@ -427,3 +427,13 @@ details.adv[open]{display:flex;flex-direction:column;gap:10px}
 .always-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .always-list .chip { display: inline-flex; gap: 4px; align-items: center; border: 1px solid #f0c27a; background: #fff4e5; border-radius: 999px; padding: 2px 8px; font-size: 12px; }
 .always-list .chip button { border: none; background: none; cursor: pointer; color: #8a0c20; }
+.mcp-warn { color: #8a4b00; background: #fff4e5; border: 1px solid #f0c27a; border-radius: 8px; padding: 6px 8px; margin: 6px 0; }
+.mcp-json { width: 100%; font: 12px/1.4 ui-monospace, Consolas, monospace; border-radius: 8px; border: 1px solid var(--line, #ccc); padding: 6px 8px; }
+.mcp-srv { border: 1px solid var(--line, #ddd); border-radius: 8px; padding: 6px 8px; margin: 6px 0; font-size: 13px; }
+.mcp-srv .hd { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mcp-srv .st { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: #eee; }
+.mcp-srv .st.on { background: #e8f6ec; color: #17603a; } .mcp-srv .st.error { background: #ffebe9; color: #82071e; } .mcp-srv .st.starting { background: #fff4e5; color: #8a4b00; }
+.mcp-srv pre { max-height: 140px; overflow: auto; font-size: 11px; background: var(--code-bg, #f6f6f6); padding: 6px; border-radius: 6px; white-space: pre-wrap; }
+.mcp-badges { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin: 2px auto 4px; font-size: 12px; }
+.mcp-badges span { border: 1px solid #8fd1a8; background: #e8f6ec; color: #17603a; border-radius: 999px; padding: 1px 9px; }
+.mcp-badges span.error { border-color: #f5b5c0; background: #ffebe9; color: #82071e; }

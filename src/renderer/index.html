@@ -54,6 +54,7 @@
         <div class="doc-warn offer rag-offer" id="sysNotice" hidden></div>
         <div class="doc-warn offer rag-offer" id="ragOffer" hidden></div>
         <div class="chips" id="chips" hidden></div>
+        <div class="mcp-badges" id="mcpBadges" hidden></div>
         <div class="phase-strip" id="phaseStrip" hidden aria-live="polite"><span data-ph="think">Nghĩ</span><i>→</i><span data-ph="ask">Xin phép</span><i>→</i><span data-ph="act">Làm</span><i>→</i><span data-ph="done">Kết quả</span></div>
         <section class="approve-card" id="approveCard" hidden role="alertdialog" aria-labelledby="apTitle">
           <div class="ap-head"><span class="ap-icon" id="apIcon">🔧</span><div><b id="apTitle"></b><div class="muted small" id="apSub"></div></div></div>
@@ -91,6 +92,16 @@
           <label class="check toggle"><input type="checkbox" id="agPy"> <span><b>🐍 Cho phép chạy Python</b><small id="agPyNote">Đang kiểm tra Python trên máy…</small></span></label>
           <label class="check toggle"><input type="checkbox" id="agMem"> <span><b>🧠 Cho phép ghi nhớ</b><small id="agMemNote">AIVN AGENT lưu điều cần nhớ lâu dài và tự nhắc lại khi liên quan.</small></span></label>
           <div class="set-block comp-block">
+            <details class="set-block mcp-block" id="mcpBlock"><summary><b>🔌 Kết nối (MCP)</b> <span class="muted small" id="mcpSum"></span></summary>
+              <div class="mcp-warn small">⚠ Máy chủ MCP là chương trình chạy trên máy bạn (stdio) hoặc dịch vụ bên ngoài (http/SSE) và có thể đọc/ghi dữ liệu. Chỉ thêm máy chủ bạn tin tưởng. AIVN luôn xin phép trước mỗi lần gọi công cụ MCP (trừ khi bạn chọn “Luôn cho phép”).</div>
+              <label class="check toggle"><input type="checkbox" id="mcpMaster"> <span><b>Cho AIVN AGENT dùng công cụ MCP</b></span></label>
+              <div class="row wrap"><span class="small muted">Thêm nhanh:</span><button type="button" class="btn sm" data-mcp-preset="filesystem">📁 filesystem (chọn thư mục)</button><button type="button" class="btn sm" data-mcp-preset="fetch">🌐 fetch</button><button type="button" class="btn sm" data-mcp-preset="memory">🧠 memory</button></div>
+              <div class="mcp-list" id="mcpList"></div>
+              <label class="small">mcp.json <span class="muted" id="mcpFile"></span></label>
+              <textarea id="mcpJson" class="mcp-json" rows="9" spellcheck="false" aria-label="Nội dung mcp.json"></textarea>
+              <div class="row wrap"><button type="button" class="btn sm primary" id="mcpSaveBtn">Lưu &amp; kết nối lại</button><span class="small" id="mcpMsg"></span></div>
+              <small class="muted">Dạng: {"mcpServers": {"tên": {"command": "npx", "args": ["-y", "gói"], "env": {}}}} hoặc {"tên": {"url": "https://…/mcp"}} (thêm "type": "sse" cho SSE). Máy không có Node thì AIVN dùng Node đi kèm để chạy npx.</small>
+            </details>
             <div class="always-box small" id="alwaysBox" hidden><b>✅ Luôn cho phép (không hỏi lại):</b> <span class="muted">bấm × để AIVN AGENT hỏi lại trước khi dùng.</span><div class="always-list" id="alwaysList"></div></div>
             <label class="check toggle"><input type="checkbox" id="agComp"> <span><b>💻 Truy cập máy tính</b><small>Mở ứng dụng, tệp, thư mục, trang web; xem/đóng ứng dụng; chạy lệnh terminal; khoá màn hình, âm lượng… Chạy lệnh, đóng ứng dụng, tắt máy luôn hỏi bạn trước. Lệnh nguy hiểm (xoá hàng loạt, định dạng ổ đĩa, tải mã về chạy, quyền quản trị) bị chặn.</small></span></label>
             <label class="check toggle sub"><input type="checkbox" id="agAutoRO"> <span><b>Không hỏi lại với lệnh chỉ đọc</b><small>Ví dụ dir, ls, ipconfig, git status. Mặc định tắt: mọi lệnh đều hiện thẻ duyệt.</small></span></label>
