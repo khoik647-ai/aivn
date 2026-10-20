@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld('aivn', {
   overlayOn: on('overlay:state'), overlayMouse: (inside) => ipcRenderer.send('overlay:mouse', !!inside), overlayStop: () => ipcRenderer.send('overlay:stop'), overlayAnswer: (r) => ipcRenderer.send('overlay:answer', r),
   initialTheme: themeArg && themeArg.endsWith('=dark') ? 'dark' : 'light',
   info: inv('app:info'), getSettings: inv('settings:get'), setSettings: inv('settings:set'),
-  catalog: inv('catalog:list'), hfSearch: inv('hf:search'), hfRepo: inv('hf:repo'), hwInfo: inv('hw:info'),
+  catalog: inv('catalog:list'), hfSearch: inv('hf:search'), hfRepo: inv('hf:repo'), hwInfo: inv('hw:info'), sysStats: inv('sys:stats'),
   dlStart: inv('dl:start'), dlPause: inv('dl:pause'), dlResume: inv('dl:resume'), dlRemove: inv('dl:remove'), dlList: inv('dl:list'),
   models: inv('models:list'), importModel: inv('models:import'), loadModel: inv('models:load'), unloadModel: inv('models:unload'),
   deleteModel: inv('models:delete'), reveal: inv('models:reveal'), modelStatus: inv('model:status'),

@@ -858,6 +858,15 @@ function registerIpc() {
   ipcMain.handle('dl:remove', (_e, id) => downloader.remove(id));
   ipcMain.handle('dl:list', () => downloader.list());
   ipcMain.handle('hw:info', () => hw());
+  // Thanh trạng thái (0.16): RAM và CPU của cả máy, đo nhẹ (không gọi bộ máy AI)
+  let cpuPrev = null;
+  ipcMain.handle('sys:stats', () => {
+    const os_ = require('os'); const cs = os_.cpus(); let idle = 0, tot = 0;
+    for (const c of cs) { const t = c.times; idle += t.idle; tot += t.user + t.nice + t.sys + t.idle + t.irq; }
+    let cpu = null; if (cpuPrev && tot > cpuPrev.tot) cpu = Math.max(0, Math.min(100, 100 * (1 - (idle - cpuPrev.idle) / (tot - cpuPrev.tot)))); cpuPrev = { idle, tot };
+    const st = engine.status ? engine.status() : {};
+    return { ramTotal: os_.totalmem(), ramFree: os_.freemem(), cpu, cpus: cs.length, gpu: hwCache && hwCache.gpu || null, vram: hwCache && hwCache.vram || null, loaded: !!st.loaded };
+  });
   // Đo tốc độ mô hình đang nạp (thời gian ra chữ đầu, token/giây) — lưu lịch sử để so sánh trước/sau khi đổi chế độ hiệu năng
   ipcMain.handle('perf:speed', async () => {
     const st = engine.status(); if (!st.loaded) return { ok: false, error: 'Chưa nạp mô hình.' };
@@ -1311,6 +1320,28 @@ async function qaCU() {
   save(); app.quit();
 }
 
+// QA tương đương LM Studio (chỉ khi phát triển): AIVN_QAPAR=thư mục ảnh, AIVN_QAPAR_STEPS=tệp JSON [{n, js, w?, h?, wait?}]
+async function qaPar() {
+  const dir = process.env.AIVN_QAPAR; fs.mkdirSync(dir, { recursive: true });
+  const steps = JSON.parse(fs.readFileSync(process.env.AIVN_QAPAR_STEPS, 'utf8'));
+  const errs = global.__qaErrs || [];
+  const wc = win.webContents; const js = (c) => wc.executeJavaScript(c);
+  const until = async (c, ms = 60000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await js(c)) return true; } catch {} await sleep(150); } return false; };
+  await until('typeof show === "function" && !!state.settings', 60000);
+  await js('document.querySelectorAll(".modal-back").forEach(m => m.hidden = true)');
+  const out = {};
+  for (const st of steps) {
+    try {
+      if (st.w) { win.setBounds({ x: 0, y: 0, width: st.w, height: st.h }); await sleep(300); }
+      const r = st.js ? await js(`(async () => { ${st.js} })()`) : undefined;
+      if (st.until) out[st.n + ':until'] = await until(st.until, st.untilMs || 30000);
+      await sleep(st.wait ?? 600);
+      if (!st.noshot) fs.writeFileSync(path.join(dir, st.n + '.png'), (await wc.capturePage()).toPNG());
+      out[st.n] = r === undefined ? true : r;
+    } catch (e) { out[st.n] = 'LỖI: ' + e.message; }
+  }
+  out._consoleErrors = errs; fs.writeFileSync(path.join(dir, 'qapar.json'), JSON.stringify(out, null, 2)); app.exit(0);
+}
 // QA 0.15.0 giao diện (AIVN_QAUI=thư mục, chỉ khi phát triển): chụp 1280x720 các màn hình mới
 async function qaUI() {
   const dir = process.env.AIVN_QAUI; fs.mkdirSync(dir, { recursive: true });
@@ -1946,6 +1977,8 @@ else {
     if (app.isPackaged || process.env.AIVN_UPDATE_CHECK === '1') setTimeout(() => updater.check({ silent: true }), Number(process.env.AIVN_UPDATE_DELAY || 5000));
     if (process.env.AIVN_SHOTS141) win.webContents.once('did-finish-load', () => setTimeout(() => shots141().catch(e => { console.error('SHOTS lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_AGENTBENCH && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaBench().catch(e => { console.error('BENCH lỗi', e); app.exit(2); }), 2500));
+    if (process.env.AIVN_QAPAR && !app.isPackaged) { global.__qaErrs = []; win.webContents.on('console-message', (e, level, message, line, src) => { const lv = e && e.level != null ? e.level : level; const msg = (e && e.message) || message; if (lv === 3 || lv === 'error' || /Uncaught/.test(String(msg))) global.__qaErrs.push(String(msg).slice(0, 400) + ' @' + ((e && e.lineNumber) || line)); }); }
+    if (process.env.AIVN_QAPAR && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaPar().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QAUI && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaUI().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QACU && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaCU().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QA144 && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qa144().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));

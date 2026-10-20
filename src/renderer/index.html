@@ -9,25 +9,20 @@
 </head>
 <body>
 <div class="shell">
-  <nav class="rail">
-    <div class="brand">
-      <img src="logo-tile.svg" alt="" width="32" height="32">
-      <span>AIVN</span>
-    </div>
-    <button class="nav-item active" data-view="chat"><i>💬</i><span>Trò chuyện</span></button>
-    <div class="nav-group" aria-label="AIVN AGENT">
-      <button class="nav-item" data-view="agent"><i>🤖</i><span>AIVN AGENT</span><b class="nav-new">Mới</b></button>
-      <button class="nav-item sub" data-view="schedule"><i>⏰</i><span>Lịch tự động</span><b class="pill-count" id="schedCount" hidden></b></button>
-      <button class="nav-item sub" data-view="memory"><i>🧠</i><span>Ghi nhớ</span><b class="pill-count" id="memCount" hidden></b></button>
-    </div>
-    <div class="nav-group small muted" data-crm-nav hidden>Kinh doanh</div>
-    <button class="nav-item" data-view="crm" data-crm-nav hidden><i>👥</i><span>Khách hàng</span></button>
-    <button class="nav-item" data-view="discover"><i>🗃</i><span>Kho mô hình</span></button>
-    <button class="nav-item" data-view="models"><i>📦</i><span>Mô hình của tôi</span></button>
-    <button class="nav-item" data-view="server"><i>⚡</i><span>Máy chủ API</span><b class="pill-dot" id="srvDot"></b></button>
-    <button class="nav-item" data-view="security"><i>🔐</i><span>Bảo mật &amp; Quản trị</span></button>
-    <div class="rail-foot"><div id="hwInfo">Đang kiểm tra phần cứng…</div>
-      <div class="theme-row" id="themeRow" role="group" aria-label="Giao diện"><button type="button" data-theme="light" title="Giao diện sáng">☀ Sáng</button><button type="button" data-theme="dark" title="Giao diện tối">☾ Tối</button><button type="button" data-theme="system" title="Theo hệ điều hành">Tự động</button></div></div>
+  <nav class="rail" id="rail" aria-label="Điều hướng chính">
+    <div class="brand"><img src="logo-tile.svg" alt="" width="28" height="28"><span class="lbl">AIVN</span><button type="button" class="rail-toggle" id="railToggle" title="Thu gọn thanh bên (Ctrl+B)" aria-label="Thu gọn thanh bên"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 6.5L9 12l5.5 5.5"/></svg></button></div>
+    <button class="nav-item active" data-view="chat" data-tip="Trò chuyện (Ctrl+1)" aria-label="Trò chuyện"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 5.5h15v10h-9l-4.5 3.5v-3.5h-1.5z"/></svg><span class="lbl">Trò chuyện</span><kbd class="nk">1</kbd></button>
+    <button class="nav-item" data-view="server" data-tip="Nhà phát triển (Ctrl+2)" aria-label="Nhà phát triển"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M7.5 9.5l3 2.5-3 2.5M12.5 15h4"/></svg><span class="lbl">Nhà phát triển</span><b class="pill-dot" id="srvDot"></b><kbd class="nk">2</kbd></button>
+    <button class="nav-item" data-view="models" data-tip="Mô hình của tôi (Ctrl+3)" aria-label="Mô hình của tôi"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l7.5 4.2v8.6L12 20.5l-7.5-4.2V7.7z"/><path d="M4.5 7.7L12 12l7.5-4.3M12 12v8.5"/></svg><span class="lbl">Mô hình của tôi</span><kbd class="nk">3</kbd></button>
+    <button class="nav-item" data-view="discover" data-tip="Khám phá (Ctrl+4)" aria-label="Khám phá"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"/><path d="M15.5 15.5l4.5 4.5"/></svg><span class="lbl">Khám phá</span><b class="pill-count" id="dlCount" hidden></b><kbd class="nk">4</kbd></button>
+    <div class="nav-sep" role="presentation"><span class="lbl">AIVN AGENT</span></div>
+    <button class="nav-item" data-view="agent" data-tip="AIVN AGENT" aria-label="AIVN AGENT"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></svg><span class="lbl">AIVN AGENT</span><b class="nav-new">Mới</b></button>
+    <button class="nav-item" data-view="schedule" data-tip="Lịch tự động" aria-label="Lịch tự động"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.3"/><path d="M12 7.5V12l3 2"/></svg><span class="lbl">Lịch tự động</span><b class="pill-count" id="schedCount" hidden></b></button>
+    <button class="nav-item" data-view="memory" data-tip="Ghi nhớ" aria-label="Ghi nhớ"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-3.8-5.5 3.8z"/></svg><span class="lbl">Ghi nhớ</span><b class="pill-count" id="memCount" hidden></b></button>
+    <div class="nav-sep" data-crm-nav hidden><span class="lbl">Kinh doanh</span></div>
+    <button data-crm-nav hidden class="nav-item" data-view="crm" data-tip="Khách hàng" aria-label="Khách hàng"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3.3"/><path d="M3.5 19.5c0-3.1 2.5-5.5 5.5-5.5s5.5 2.4 5.5 5.5"/><path d="M15.5 5.3a3.3 3.3 0 010 6.4M17.5 14.3c1.8.6 3 2.6 3 5.2"/></svg><span class="lbl">Khách hàng</span></button>
+    <div class="rail-spacer"></div>
+    <button class="nav-item" data-view="settings" data-tip="Cài đặt (Ctrl+,)" aria-label="Cài đặt"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5h9M17 7.5h3M4 16.5h3M11 16.5h9"/><circle cx="15" cy="7.5" r="2"/><circle cx="9" cy="16.5" r="2"/></svg><span class="lbl">Cài đặt</span><kbd class="nk">,</kbd></button>
   </nav>
 
   <main class="content">
@@ -88,7 +83,7 @@
           <button type="button" class="btn icon" id="attachBtn" title="Đính kèm tệp (PDF có lớp chữ, DOCX, TXT, MD, CSV, JSON, mã nguồn, ảnh · tối đa 20 MB)" aria-label="Đính kèm tệp">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.4 11.6-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
           </button>
-          <textarea id="input" rows="1" placeholder="Nhập tin nhắn… (Enter để gửi, Shift+Enter xuống dòng, kéo thả tệp hoặc dán ảnh bằng Ctrl+V)"></textarea>
+          <textarea id="input" rows="1" placeholder="Nhập tin nhắn… (Enter gửi · Shift+Enter xuống dòng · kéo thả hoặc dán tệp, ảnh)"></textarea>
           <button type="button" class="btn danger" id="stopBtn" hidden>■ Dừng</button>
           <button type="submit" class="btn primary" id="sendBtn">Gửi ↑</button>
         </form>
@@ -132,11 +127,6 @@
             </div>
             <div class="perm-guide" id="permGuide" hidden></div>
           </div>
-<div class="set-block diag-block">
-            <div class="set-head"><b>🧾 Nhật ký &amp; chẩn đoán</b></div>
-            <div class="row wrap"><button type="button" class="btn sm" data-logs="open">Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy" title="Sao chép 200 dòng nhật ký cuối để dán vào tin nhắn hỗ trợ">Sao chép nhật ký</button></div>
-            <div class="row wrap scan-row"><input type="text" class="scan-q" value="zalo" aria-label="Tên ứng dụng cần tìm" maxlength="60"><button type="button" class="btn sm" data-scan="1" title="Quét lại mọi nguồn (Desktop, Start Menu, sổ đăng ký, Store…) và cho biết số mục, lỗi, mục khớp">Kiểm tra quét ứng dụng</button></div>
-          </div>
                     <p class="small"><button class="linkish" data-goto="memory">Quản lý ghi nhớ →</button> · <button class="linkish" data-goto="schedule">Lịch tự động →</button></p>
           <p class="small muted">JavaScript luôn chạy trong hộp cát riêng: không đọc tệp, không vào mạng, tối đa 3 giây.</p>
         </div>
@@ -152,58 +142,6 @@
         <label>Số token tối đa
           <input type="number" id="maxTok" min="16" max="8192" step="16">
         </label>
-        <label class="check"><input type="checkbox" id="gpuOn"> Tăng tốc bằng GPU (Vulkan/CUDA/Metal)<small>Tắt nếu nạp mô hình bị lỗi. AIVN tự chuyển sang CPU khi GPU nạp lỗi. Đổi cài đặt này sẽ gỡ mô hình đang nạp.</small></label>
-        <div class="row wrap"><button type="button" class="btn sm" id="openLogs2">🧾 Mở thư mục nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>
-        <details class="adv" id="advBox">
-          <summary>Nâng cao: phần cứng &amp; ghi đè</summary>
-          <div class="hw-info small" id="hwInfo">Đang đọc phần cứng…</div>
-          <p class="small muted">Mặc định AIVN tự chọn: GPU rời (CUDA/Vulkan), Metal trên Mac, hoặc CPU; tự tính số lớp đưa lên GPU theo VRAM riêng còn trống và tự giảm dần nếu nạp lỗi. Chỉ đổi khi bạn biết mình cần gì.</p>
-          <label>Thiết bị GPU (Vulkan)
-            <select id="gpuDevice"><option value="">Tự động (ưu tiên GPU rời)</option><option value="0">Thiết bị Vulkan #0</option><option value="1">Thiết bị Vulkan #1</option><option value="2">Thiết bị Vulkan #2</option><option value="3">Thiết bị Vulkan #3</option></select>
-          </label>
-          <label>Số lớp đưa lên GPU <b id="gpuLayersVal">Tự động</b>
-            <input type="range" id="gpuLayers" min="-1" max="100" step="1" value="-1">
-            <small>Kéo về trái hết = Tự động. 0 = chỉ CPU. Áp dụng khi nạp lại mô hình.</small>
-          </label>
-          <label>Giới hạn VRAM (GB, để trống = tự đo)
-            <input type="number" id="vramLimit" min="0" max="256" step="0.5" placeholder="Tự đo">
-          </label>
-          <button type="button" class="btn sm" id="advReset">Về mặc định (tự động)</button>
-          <div class="diag-block mt"><b class="small">Chẩn đoán</b>
-            <div class="row wrap"><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button><button type="button" class="btn sm" data-logs="open">Mở nhật ký</button></div>
-            <div class="row wrap scan-row"><input type="text" class="scan-q" value="zalo" aria-label="Tên ứng dụng cần tìm" maxlength="60"><button type="button" class="btn sm" data-scan="1">Kiểm tra quét ứng dụng</button></div>
-          </div>
-        </details>
-        <div class="perf-box" id="perfBox">
-          <h3>⚡ Hiệu năng</h3>
-          <p class="small" id="perfTier">Đang nhận biết máy…</p>
-          <label>Chế độ <select id="perfMode"><option value="auto">Tự động (theo máy)</option><option value="saver">Tiết kiệm — máy yếu, ít RAM</option><option value="balanced">Cân bằng</option><option value="max">Tối đa — máy mạnh/GPU rời</option></select></label>
-          <div class="perf-cfg small" id="perfCfg"></div>
-          <ul class="small muted" id="perfTips"></ul>
-          <div class="row wrap"><button type="button" class="btn sm" id="perfSpeedBtn" title="Sinh 128 token với mô hình đang nạp">⏱ Đo tốc độ mô hình đang nạp</button><span class="small" id="perfSpeedMsg"></span></div>
-          <table class="perf-runs small" id="perfRuns"></table>
-        </div>
-        <label>Độ dài ngữ cảnh (áp dụng khi nạp lại)
-          <select id="ctxSize"><option>2048</option><option>4096</option><option>8192</option><option>16384</option></select>
-        </label>
-        <div class="rag-box" id="ragBox">
-          <h3>Tìm kiếm trong tài liệu</h3>
-          <p class="small muted" id="ragText">Đang kiểm tra…</p>
-          <div class="progress" id="ragProg" hidden><div></div></div>
-          <div class="row"><button class="btn sm primary" id="ragDl" hidden>Tải mô hình tìm kiếm</button><button class="btn sm" id="ragDel" hidden>Xoá</button></div>
-          <label class="check"><input type="checkbox" id="ragOn"> Dùng tìm kiếm ngữ nghĩa cho tài liệu dài</label>
-        </div>
-        </div>
-        <div class="about">
-          <h3>Giới thiệu</h3>
-          <p><b>AIVN</b> <span id="aboutVer"></span><br>Chạy mô hình AI ngay trên máy tính của bạn, riêng tư và không cần Internet.</p>
-          <div class="update-box" id="updateBox">
-            <div id="updateText" class="muted">Bạn đang dùng bản mới nhất mà AIVN biết.</div>
-            <div class="progress" id="updateProg" hidden><div></div></div>
-            <div class="row"><button class="btn sm" id="updCheck">Kiểm tra cập nhật</button><button class="btn sm primary" id="updAction" hidden></button></div>
-          </div>
-          <p>Phát triển bởi<br><b class="dev">NGUYỄN NGỌC KHÔI SINH VIÊN VLU</b></p>
-          <p class="muted">© 2026 AIVN · NGUYỄN NGỌC KHÔI SINH VIÊN VLU<br>Sử dụng node-llama-cpp / llama.cpp và llama-server (MIT), Electron (MIT), tesseract.js (Apache 2.0).</p>
         </div>
       </aside>
     </section>
@@ -331,9 +269,71 @@
         <div class="mem-list" id="memList"></div>
       </div>
     </section>
-    <section class="view" id="view-security">
-      <div class="page narrow">
-        <div class="page-head"><div><h2>🔐 Bảo mật &amp; Quản trị</h2><p class="muted">Kích hoạt của máy này, Khóa ứng dụng bằng mật khẩu, và trang Quản trị dành cho chủ sở hữu.</p></div></div>
+    <!-- CÀI ĐẶT -->
+    <section class="view" id="view-settings">
+      <div class="set-shell">
+        <nav class="set-nav" role="tablist" aria-label="Mục cài đặt" id="setNav">
+          <h2 class="set-title">Cài đặt</h2>
+          <button type="button" role="tab" data-stab="general" class="on">Chung</button>
+          <button type="button" role="tab" data-stab="hardware">Phần cứng &amp; bộ máy</button>
+          <button type="button" role="tab" data-stab="perf">Hiệu năng</button>
+          <button type="button" role="tab" data-stab="docs">Tìm trong tài liệu</button>
+          <button type="button" role="tab" data-stab="security">Bảo mật &amp; Quản trị</button>
+          <button type="button" role="tab" data-stab="logs">Nhật ký &amp; chẩn đoán</button>
+          <button type="button" role="tab" data-stab="about">Cập nhật &amp; giới thiệu</button>
+        </nav>
+        <div class="set-body" id="setBody">
+          <section class="set-pane on" data-spane="general" role="tabpanel"><h3 class="pane-title">Chung</h3>
+            <div class="set-row"><div><b>Giao diện</b><small>Sáng, tối, hoặc theo hệ điều hành.</small></div><div id="themeSlot"><div class="theme-row" id="themeRow" role="group" aria-label="Giao diện"><button type="button" data-theme="light" title="Giao diện sáng">☀ Sáng</button><button type="button" data-theme="dark" title="Giao diện tối">☾ Tối</button><button type="button" data-theme="system" title="Theo hệ điều hành">Tự động</button></div></div></div>
+            <div class="set-row"><div><b>Mức hiển thị</b><small>Cơ bản ẩn các tham số kỹ thuật (lớp GPU, batch, DRY…). Nâng cao hiện đầy đủ.</small></div><div class="seg" id="uiModeSeg" role="radiogroup" aria-label="Mức hiển thị"><button type="button" role="radio" data-uimode="basic">Cơ bản</button><button type="button" role="radio" data-uimode="advanced">Nâng cao</button></div></div>
+            <div class="set-row"><div><b>Thanh điều hướng thu gọn</b><small>Chỉ hiện biểu tượng (Ctrl+B).</small></div><label class="switch"><input type="checkbox" id="railCompactChk"><span></span></label></div>
+            <div class="set-row"><div><b>Phím tắt</b><small>Ctrl+1…4 chuyển màn hình chính, Ctrl+L nạp mô hình, Ctrl+K bảng lệnh.</small></div><button type="button" class="btn sm" id="setKeys">Xem tất cả phím tắt</button></div>
+          </section>
+          <section class="set-pane" data-spane="hardware" role="tabpanel"><h3 class="pane-title">Phần cứng &amp; bộ máy</h3>
+            <div class="set-card">
+          <div class="hw-info small" id="hwInfo">Đang đọc phần cứng…</div>
+            </div>
+            <div class="set-card">
+        <label class="check"><input type="checkbox" id="gpuOn"> Tăng tốc bằng GPU (Vulkan/CUDA/Metal)<small>Tắt nếu nạp mô hình bị lỗi. AIVN tự chuyển sang CPU khi GPU nạp lỗi. Đổi cài đặt này sẽ gỡ mô hình đang nạp.</small></label>
+          <p class="small muted">Mặc định AIVN tự chọn: GPU rời (CUDA/Vulkan), Metal trên Mac, hoặc CPU; tự tính số lớp đưa lên GPU theo VRAM riêng còn trống và tự giảm dần nếu nạp lỗi. Chỉ đổi khi bạn biết mình cần gì.</p>
+          <label>Thiết bị GPU (Vulkan)
+            <select id="gpuDevice"><option value="">Tự động (ưu tiên GPU rời)</option><option value="0">Thiết bị Vulkan #0</option><option value="1">Thiết bị Vulkan #1</option><option value="2">Thiết bị Vulkan #2</option><option value="3">Thiết bị Vulkan #3</option></select>
+          </label>
+          <label>Số lớp đưa lên GPU <b id="gpuLayersVal">Tự động</b>
+            <input type="range" id="gpuLayers" min="-1" max="100" step="1" value="-1">
+            <small>Kéo về trái hết = Tự động. 0 = chỉ CPU. Áp dụng khi nạp lại mô hình.</small>
+          </label>
+          <label>Giới hạn VRAM (GB, để trống = tự đo)
+            <input type="number" id="vramLimit" min="0" max="256" step="0.5" placeholder="Tự đo">
+          </label>
+          <button type="button" class="btn sm" id="advReset">Về mặc định (tự động)</button>
+        <label>Độ dài ngữ cảnh (áp dụng khi nạp lại)
+          <select id="ctxSize"><option>2048</option><option>4096</option><option>8192</option><option>16384</option></select>
+        </label>
+            </div>
+          </section>
+          <section class="set-pane" data-spane="perf" role="tabpanel"><h3 class="pane-title">Hiệu năng</h3>
+        <div class="perf-box" id="perfBox">
+          <h3>⚡ Hiệu năng</h3>
+          <p class="small" id="perfTier">Đang nhận biết máy…</p>
+          <label>Chế độ <select id="perfMode"><option value="auto">Tự động (theo máy)</option><option value="saver">Tiết kiệm — máy yếu, ít RAM</option><option value="balanced">Cân bằng</option><option value="max">Tối đa — máy mạnh/GPU rời</option></select></label>
+          <div class="perf-cfg small" id="perfCfg"></div>
+          <ul class="small muted" id="perfTips"></ul>
+          <div class="row wrap"><button type="button" class="btn sm" id="perfSpeedBtn" title="Sinh 128 token với mô hình đang nạp">⏱ Đo tốc độ mô hình đang nạp</button><span class="small" id="perfSpeedMsg"></span></div>
+          <table class="perf-runs small" id="perfRuns"></table>
+        </div>
+          </section>
+          <section class="set-pane" data-spane="docs" role="tabpanel"><h3 class="pane-title">Tìm trong tài liệu</h3>
+        <div class="rag-box" id="ragBox">
+          <h3>Tìm kiếm trong tài liệu</h3>
+          <p class="small muted" id="ragText">Đang kiểm tra…</p>
+          <div class="progress" id="ragProg" hidden><div></div></div>
+          <div class="row"><button class="btn sm primary" id="ragDl" hidden>Tải mô hình tìm kiếm</button><button class="btn sm" id="ragDel" hidden>Xoá</button></div>
+          <label class="check"><input type="checkbox" id="ragOn"> Dùng tìm kiếm ngữ nghĩa cho tài liệu dài</label>
+        </div>
+          </section>
+          <section class="set-pane" data-spane="security" role="tabpanel"><h3 class="pane-title">Bảo mật &amp; Quản trị</h3>
+            <p class="muted small">Kích hoạt của máy này, Khóa ứng dụng bằng mật khẩu, và trang Quản trị dành cho chủ sở hữu.</p>
         <div class="sec-card" id="secLicense"></div>
         <div class="sec-card">
           <h3>🔒 Khóa ứng dụng</h3>
@@ -352,9 +352,39 @@
           <div id="admBody"></div>
         </div>
         <p class="small muted honest">Lưu ý trung thực: mã nguồn AIVN công khai trên GitHub, nên người rành kỹ thuật có thể tự sửa và build lại để bỏ bước kích hoạt. Cơ chế này giúp chủ sở hữu kiểm soát ai dùng bản AIVN chính thức, không phải biện pháp chống bẻ khoá tuyệt đối.</p>
+          </section>
+          <section class="set-pane" data-spane="logs" role="tabpanel"><h3 class="pane-title">Nhật ký &amp; chẩn đoán</h3>
+            <div class="set-row"><div><b>Nhật ký của AIVN</b><small>Ghi lại việc nạp mô hình, lỗi bộ máy AI và công cụ. Không chứa nội dung trò chuyện.</small></div><div class="row"><button type="button" class="btn sm" data-logs="open">Mở thư mục</button><button type="button" class="btn sm" data-logs="copy" title="Sao chép 200 dòng nhật ký cuối để dán vào tin nhắn hỗ trợ">Sao chép 200 dòng cuối</button></div></div>
+            <div class="set-row"><div><b>Kiểm tra quét ứng dụng</b><small>Xem AIVN AGENT có tìm thấy một ứng dụng trên máy không (Desktop, Start Menu, thư mục cài đặt).</small></div><div class="row scan-row"><input type="text" class="scan-q" value="zalo" aria-label="Tên ứng dụng cần tìm" maxlength="60"><button type="button" class="btn sm" data-scan="1">Quét</button></div></div>
+          </section>
+          <section class="set-pane" data-spane="about" role="tabpanel"><h3 class="pane-title">Cập nhật &amp; giới thiệu</h3>
+        <div class="about">
+          <h3>Giới thiệu</h3>
+          <p><b>AIVN</b> <span id="aboutVer"></span><br>Chạy mô hình AI ngay trên máy tính của bạn, riêng tư và không cần Internet.</p>
+          <div class="update-box" id="updateBox">
+            <div id="updateText" class="muted">Bạn đang dùng bản mới nhất mà AIVN biết.</div>
+            <div class="progress" id="updateProg" hidden><div></div></div>
+            <div class="row"><button class="btn sm" id="updCheck">Kiểm tra cập nhật</button><button class="btn sm primary" id="updAction" hidden></button></div>
+          </div>
+          <p>Phát triển bởi<br><b class="dev">NGUYỄN NGỌC KHÔI SINH VIÊN VLU</b></p>
+          <p class="muted">© 2026 AIVN · NGUYỄN NGỌC KHÔI SINH VIÊN VLU<br>Sử dụng node-llama-cpp / llama.cpp và llama-server (MIT), Electron (MIT), tesseract.js (Apache 2.0).</p>
+        </div>
+          </section>
+        </div>
       </div>
     </section>
   </main>
+  <footer class="statusbar" id="statusBar" aria-label="Trạng thái">
+    <span class="sb-item" id="sbModel" title="Mô hình đang nạp"><i class="sb-dot off"></i><span>Chưa nạp mô hình</span></span>
+    <span class="sb-item" id="sbSpeed" title="Tốc độ của câu trả lời gần nhất" hidden></span>
+    <span class="sb-grow"></span>
+    <button type="button" class="sb-item sb-btn" id="sbServer" title="Máy chủ API cục bộ" data-goto="server">API: tắt</button>
+    <span class="sb-item" id="sbRam" title="RAM của máy đang dùng">RAM …</span>
+    <span class="sb-item" id="sbVram" title="Bộ nhớ GPU" hidden></span>
+    <span class="sb-item" id="sbCpu" title="CPU đang dùng">CPU …</span>
+    <span class="seg sb-seg" id="sbMode" role="radiogroup" aria-label="Mức hiển thị"><button type="button" role="radio" data-uimode="basic">Cơ bản</button><button type="button" role="radio" data-uimode="advanced">Nâng cao</button></span>
+    <span class="sb-item muted" id="sbVer"></span>
+  </footer>
 </div>
 <div class="modal-back" id="screenModal" hidden>
   <div class="modal wide" role="alertdialog" aria-modal="true" aria-labelledby="scTitle">

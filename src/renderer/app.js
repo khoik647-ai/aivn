@@ -35,7 +35,9 @@ function md(src) {
 }
 
 // ---------- Điều hướng ----------
-function show(view) {
+function show(view, opts = {}) {
+  const rt = document.querySelector('.rail-tip'); if (rt) rt.hidden = true;
+  if (view === 'security') { opts = { ...opts, tab: 'security' }; view = 'settings'; }
   clearInfoToasts();
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   const target = view === 'agent' ? 'chat' : view;
@@ -47,8 +49,10 @@ function show(view) {
   if (view === 'models') refreshModels();
   if (view === 'crm') renderCrm();
   if (view === 'server') refreshServer();
-  if (view === 'security') refreshSecurity().catch(err => toast(cleanErr(err.message), true));
+  if (view === 'settings') setTab(opts.tab || setTab.cur || 'general');
+  document.title = 'AIVN · ' + (VIEW_TITLES[view] || 'Trò chuyện');
 }
+const VIEW_TITLES = { chat: 'Trò chuyện', agent: 'AIVN AGENT', server: 'Nhà phát triển', models: 'Mô hình của tôi', discover: 'Khám phá', schedule: 'Lịch tự động', memory: 'Ghi nhớ', settings: 'Cài đặt', crm: 'Khách hàng' };
 $$('.nav-item').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
 document.addEventListener('click', (e) => { const g = e.target.closest('[data-goto]'); if (g) show(g.dataset.goto); });
 // Trò chuyện thường và AIVN AGENT dùng chung khung chat; mỗi chế độ có danh sách cuộc trò chuyện riêng
@@ -142,6 +146,7 @@ function setStatus(st) {
   el.title = el.textContent;
   $('#ejectBtn').disabled = !st.loaded;
   $('#modelSelect').disabled = !!st.loading;
+  paintSbModel(st);
 }
 A.onModelStatus(st => { setStatus(st); if (!st.loading) refreshModels(); if (!st.loading && isAgent()) refreshAgent(); });
 
@@ -533,6 +538,7 @@ $('#composer').addEventListener('submit', async (e) => {
       images: directImgs.map(a => a.vis) });
     reply.content = r.text || reply.content;
     if (r.finishReason === 'abort' && r.stoppedBy && r.stoppedBy !== 'người dùng bấm Dừng') reply.content += `\n\n_Đã dừng (${r.stoppedBy})._`;
+    paintSbSpeed(r.usage);
     $('#genStats').textContent = `${r.usage.completion_tokens} token · ${r.usage.tokensPerSecond.toFixed(1)} token/giây · ${r.usage.seconds.toFixed(1)} giây${r.finishReason === 'abort' ? ' · đã dừng' : r.finishReason === 'length' ? ' · chạm giới hạn token' : ''}`;
   } catch (err) {
     reply.error = true; reply.content = (reply.content ? reply.content + '\n\n' : '') + '⚠ ' + err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
@@ -577,6 +583,7 @@ function paintServer(st) {
   $('#srvState').textContent = st.running ? 'Đang chạy' : 'Đang tắt';
   $('#srvUrl').textContent = `http://localhost:${port}/v1`;
   $('#srvPort').disabled = st.running; $('#curlEx').textContent = curlExample(port);
+  const sb = $('#sbServer'); sb.textContent = st.running ? `API: đang chạy · cổng ${port}` : 'API: tắt'; sb.classList.toggle('on', !!st.running);
 }
 async function refreshServer() { const st = await A.serverStatus(); $('#srvLog').innerHTML = ''; st.log.forEach(logLine); paintServer(st); }
 $('#srvToggle').addEventListener('change', async (e) => {
@@ -962,16 +969,19 @@ $('#keysClose').addEventListener('click', () => { $('#keysModal').hidden = true;
 $('#keysModal').addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#keysModal').hidden = true; });
 function paletteCommands() {
   const cmds = [
-    { i: '💬', t: 'Trò chuyện thường', run: () => show('chat') },
+    { i: '💬', t: 'Trò chuyện thường', k: 'Ctrl+1', run: () => show('chat') },
     { i: '🤖', t: 'AIVN AGENT', run: () => show('agent') },
     { i: '＋', t: 'Cuộc trò chuyện mới', k: 'Ctrl+N', run: () => $('#newChat').click() },
-    { i: '🗃', t: 'Kho mô hình (tải mô hình)', run: () => show('discover') },
+    { i: '🔎', t: 'Khám phá (tìm và tải mô hình)', k: 'Ctrl+4', run: () => show('discover') },
     ...(CRM_ON ? [{ i: '👥', t: 'Kinh doanh → Khách hàng', run: () => show('crm') }] : []),
-    { i: '📦', t: 'Mô hình của tôi', run: () => show('models') },
+    { i: '📦', t: 'Mô hình của tôi', k: 'Ctrl+3', run: () => show('models') },
     { i: '⏰', t: 'Lịch tự động', run: () => show('schedule') },
     { i: '🧠', t: 'Ghi nhớ', run: () => show('memory') },
-    { i: '⚡', t: 'Máy chủ API', run: () => show('server') },
-    { i: '🔐', t: 'Bảo mật & Quản trị', run: () => show('security') },
+    { i: '⚡', t: 'Nhà phát triển (máy chủ API)', k: 'Ctrl+2', run: () => show('server') },
+    { i: '⚙', t: 'Cài đặt', k: 'Ctrl+,', run: () => show('settings') },
+    { i: '🔐', t: 'Bảo mật & Quản trị', run: () => show('settings', { tab: 'security' }) },
+    { i: '🖥', t: 'Phần cứng & bộ máy', run: () => show('settings', { tab: 'hardware' }) },
+    { i: '⇤', t: 'Thu gọn / mở rộng thanh bên', k: 'Ctrl+B', run: () => toggleRail() },
     { i: '🔌', t: 'Kết nối (MCP)', run: () => { show('agent'); togglePanel(false); $('#mcpBlock').open = true; refreshMcp(true); $('#mcpBlock').scrollIntoView({ block: 'start' }); } },
     { i: '⏱', t: 'Đo tốc độ mô hình đang nạp', run: () => { $('#perfSpeedBtn').scrollIntoView({ block: 'center' }); $('#perfSpeedBtn').click(); } },
     { i: '📏', t: 'Đo Điểm tác vụ (điều khiển máy)', run: () => { show('agent'); togglePanel(false); $('#benchBox').scrollIntoView({ block: 'center' }); } },
@@ -1009,6 +1019,9 @@ document.addEventListener('keydown', (e) => {
   else if (mod && e.key === '.') { e.preventDefault(); togglePanel(); }
   else if (mod && e.key === '/') { e.preventDefault(); openKeys(); }
   else if (mod && (e.key === 'n' || e.key === 'N') && !e.shiftKey) { e.preventDefault(); $('#newChat').click(); }
+  else if (mod && !e.shiftKey && !e.altKey && ['1', '2', '3', '4'].includes(e.key)) { e.preventDefault(); show({ 1: 'chat', 2: 'server', 3: 'models', 4: 'discover' }[e.key]); }
+  else if (mod && e.key === ',') { e.preventDefault(); show('settings'); }
+  else if (mod && (e.key === 'b' || e.key === 'B') && !e.shiftKey) { e.preventDefault(); toggleRail(); }
 });
 // Giới thiệu nhanh lần đầu (4 bước)
 const OB = [
@@ -1295,7 +1308,6 @@ document.addEventListener('click', async (e) => {
     finally { sb.disabled = false; sb.textContent = old; }
   }
 });
-$('#openLogs2').addEventListener('click', () => A.openLogs());
 $('#gpuOn').addEventListener('change', async (e) => { state.settings = await A.setSettings({ gpu: e.target.checked }); toast(e.target.checked ? 'Đã bật GPU. Hãy nạp lại mô hình.' : 'Đã chuyển sang chỉ dùng CPU. Hãy nạp lại mô hình.'); setTimeout(refreshModels, 1500); });
 
 // --- Thẻ duyệt thao tác màn hình ---
@@ -1368,7 +1380,7 @@ function paintAdmin(a) {
     <div class="adm-list">${a.codes.length ? a.codes.map(c => `<div class="adm-row${c.revoked ? ' off' : ''}"><div><b>${esc(c.name)}</b> · máy ${esc(c.machineCode.slice(0, 5) + '-' + c.machineCode.slice(5))} · ${c.expiresAt ? 'đến ' + fmtDate(c.expiresAt) : 'vĩnh viễn'}<br><small class="muted">ID ${esc(c.id)} · cấp ${fmtDate(c.issuedAt)}</small></div>${c.revoked ? '<span class="tag">Đã thu hồi</span>' : `<button class="btn sm" data-copycode="${esc(c.code)}">Sao chép mã</button><button class="btn sm danger" data-revoke="${esc(c.id)}" data-name="${esc(c.name)}">Thu hồi</button>`}</div>`).join('') : '<p class="small muted">Chưa cấp mã nào trong ứng dụng. (Mã cấp bằng issue.sh trên máy khác không hiện ở đây; vẫn thu hồi được bằng ID.)</p>'}</div>
     <form class="row" id="admRevokeForm"><input id="admRevokeId" maxlength="12" placeholder="Thu hồi theo ID mã (12 ký tự)"><button class="btn sm danger" type="submit">Thu hồi ID</button></form>`;
 }
-$('#view-security').addEventListener('click', async (e) => {
+$('[data-spane="security"]').addEventListener('click', async (e) => {
   const t = e.target.closest('button'); if (!t) return;
   try {
     if (t.id === 'secCopyMc') { await A.copyText($('#secMachine').textContent); toast('Đã chép Mã máy ✓'); }
@@ -1391,7 +1403,7 @@ async function doRevoke(id, name) {
   toast(r.published ? 'Đã thu hồi và đăng revoked.json ✓' : r.savedTo ? 'Đã thu hồi, lưu revoked.json tại ' + r.savedTo + '. Hãy tải lên gh-pages.' : 'Đã thu hồi trên máy này nhưng CHƯA đăng.', !r.published && !r.savedTo);
   paintAdmin(r.state);
 }
-$('#view-security').addEventListener('submit', async (e) => {
+$('[data-spane="security"]').addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
     if (e.target.id === 'lockForm') { await A.lockSet({ password: $('#lkNew').value, confirm: $('#lkNew2').value, current: $('#lkCur').value }); for (const i of ['#lkNew', '#lkNew2', '#lkCur']) $(i).value = ''; toast('Đã bật Khóa ứng dụng ✓'); refreshSecurity(); }
@@ -1423,7 +1435,7 @@ $('#lkSleep').addEventListener('change', async (e) => { await A.lockOptions({ lo
   renderMessages();
   const info = await A.info();
   const h = info.hardware || {};
-  $('#hwInfo').innerHTML = `RAM: ${fmtBytes(h.ram)} · ${h.cpus || '?'} luồng CPU<br>Tăng tốc: ${h.gpu ? '<b style="color:var(--accent-ink)">GPU ' + esc(String(h.gpu)) + '</b>' : 'CPU'}${h.vram && h.vram.total ? ' · VRAM ' + fmtBytes(h.vram.total) : ''}<br>Phiên bản ${info.version}`;
+  $('#sbVer').textContent = 'AIVN ' + info.version;
   $('#aboutVer').textContent = 'phiên bản ' + info.version;
   paintUpdate(await A.updateState());
   resetForm(); refreshSchedCount(); refreshMemCount();
@@ -1459,7 +1471,7 @@ $('#gpuLayers').addEventListener('change', async e => { const n = Number(e.targe
 $('#gpuDevice').addEventListener('change', async e => { const v = e.target.value; state.settings = await A.setSettings({ gpuDevice: v === '' ? null : Number(v) }); toast('Đã đổi thiết bị GPU. Hãy nạp lại mô hình.'); setTimeout(paintAdvanced, 1500); });
 $('#vramLimit').addEventListener('change', async e => { const v = Number(e.target.value); state.settings = await A.setSettings({ vramLimitGB: v > 0 ? v : null }); toast('Đã đổi giới hạn VRAM. Hãy nạp lại mô hình.'); setTimeout(paintAdvanced, 1500); });
 $('#advReset').addEventListener('click', async () => { state.settings = await A.setSettings({ gpu: true, gpuDevice: null, gpuLayers: null, vramLimitGB: null }); $('#gpuOn').checked = true; toast('Đã về chế độ tự động. Hãy nạp lại mô hình.'); setTimeout(paintAdvanced, 1500); });
-$('#advBox').addEventListener('toggle', e => { if (e.target.open) paintAdvanced(); });
+
 
 // ---------- Nút công cụ trên đầu AIVN AGENT: bấm để bật/tắt, di chuột/nhấn giữ để xem, ▾ để xem ví dụ ----------
 const CHIPS = [
@@ -1550,3 +1562,73 @@ document.addEventListener('pointerdown', (e) => { if (chipPop && !e.target.close
 window.addEventListener('resize', closeChipPop);
 
 $('#messages').addEventListener('click', (e) => { if (e.target.closest('[data-rec-go]')) show('discover'); });
+
+// ---------- Khung ứng dụng 0.16: thanh điều hướng thu gọn, Cài đặt, mức hiển thị, thanh trạng thái ----------
+function toggleRail(force) {
+  const on = typeof force === 'boolean' ? force : !document.documentElement.classList.contains('rail-compact');
+  document.documentElement.classList.toggle('rail-compact', on); localStorage.setItem('aivn.railCompact', on ? '1' : '0');
+  const t = $('#railToggle'); t.title = on ? 'Mở rộng thanh bên (Ctrl+B)' : 'Thu gọn thanh bên (Ctrl+B)'; t.setAttribute('aria-label', t.title); t.setAttribute('aria-expanded', String(!on));
+  $('#railCompactChk').checked = on;
+}
+toggleRail(localStorage.getItem('aivn.railCompact') === '1' || (localStorage.getItem('aivn.railCompact') === null && innerWidth < 1200));
+$('#railToggle').addEventListener('click', () => toggleRail());
+$('#railCompactChk').addEventListener('change', (e) => toggleRail(e.target.checked));
+// Chú thích khi rê chuột ở chế độ thu gọn (tự vẽ, không dùng title để hiện ngay và đúng chủ đề)
+const railTip = (() => { const d = document.createElement('div'); d.className = 'rail-tip'; d.setAttribute('role', 'tooltip'); d.hidden = true; document.body.appendChild(d); return d; })();
+$('#rail').addEventListener('mouseover', (e) => {
+  const b = e.target.closest('.nav-item'); if (!b || !document.documentElement.classList.contains('rail-compact')) { railTip.hidden = true; return; }
+  const r = b.getBoundingClientRect(); railTip.textContent = b.dataset.tip || ''; railTip.style.top = (r.top + r.height / 2) + 'px'; railTip.style.left = (r.right + 8) + 'px'; railTip.hidden = false;
+});
+$('#rail').addEventListener('mouseleave', () => { railTip.hidden = true; });
+$('#rail').addEventListener('focusin', (e) => { const b = e.target.closest('.nav-item'); if (b && document.documentElement.classList.contains('rail-compact')) { const r = b.getBoundingClientRect(); railTip.textContent = b.dataset.tip || ''; railTip.style.top = (r.top + r.height / 2) + 'px'; railTip.style.left = (r.right + 8) + 'px'; railTip.hidden = false; } });
+$('#rail').addEventListener('focusout', () => { railTip.hidden = true; });
+// Trang Cài đặt: các thẻ bên trái, phím ↑↓ di chuyển giữa thẻ
+function setTab(tab) {
+  if (!document.querySelector(`[data-spane="${tab}"]`)) tab = 'general';
+  setTab.cur = tab;
+  $$('#setNav [data-stab]').forEach(b => { const on = b.dataset.stab === tab; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
+  $$('#setBody [data-spane]').forEach(p => p.classList.toggle('on', p.dataset.spane === tab));
+  $('#setBody').scrollTop = 0;
+  if (tab === 'hardware') paintAdvanced();
+  if (tab === 'security') refreshSecurity().catch(err => toast(cleanErr(err.message), true));
+}
+$('#setNav').addEventListener('click', (e) => { const b = e.target.closest('[data-stab]'); if (b) setTab(b.dataset.stab); });
+$('#setNav').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return; e.preventDefault();
+  const bs = $$('#setNav [data-stab]'); const i = bs.findIndex(b => b.dataset.stab === setTab.cur); const n = bs[(i + (e.key === 'ArrowDown' ? 1 : bs.length - 1)) % bs.length];
+  setTab(n.dataset.stab); n.focus();
+});
+$('#setKeys').addEventListener('click', openKeys);
+// Mức hiển thị: Cơ bản ẩn các phần có lớp .adv-only
+function setUiMode(m) {
+  m = m === 'advanced' ? 'advanced' : 'basic'; document.documentElement.dataset.ui = m; localStorage.setItem('aivn.uiMode', m);
+  $$('[data-uimode]').forEach(b => { const on = b.dataset.uimode === m; b.classList.toggle('on', on); b.setAttribute('aria-checked', String(on)); });
+}
+setUiMode(localStorage.getItem('aivn.uiMode') || 'basic');
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-uimode]'); if (b) setUiMode(b.dataset.uimode); });
+// Thanh trạng thái
+const gb1 = (b) => (b / 1024 ** 3).toFixed(1).replace('.', ',');
+function paintSbModel(st) {
+  const el = $('#sbModel'); if (!el) return;
+  const name = st && st.id ? ((state.models || []).find(m => m.id === st.id) || {}) : {};
+  const label = name.catalog ? name.catalog.name : (name.name || (st && st.id) || '');
+  if (st && st.loading) el.innerHTML = `<i class="sb-dot busy"></i><span>Đang nạp ${esc(label)}…</span>`;
+  else if (st && st.loaded) el.innerHTML = `<i class="sb-dot"></i><span>${esc(label)}</span><span class="muted">· ngữ cảnh ${Number(st.contextSize || 0).toLocaleString('vi-VN')} · ${st.gpu ? (st.totalLayers ? `GPU ${st.gpuLayers || 0}/${st.totalLayers} lớp` : 'GPU') : 'CPU'}</span>`;
+  else el.innerHTML = '<i class="sb-dot off"></i><span>Chưa nạp mô hình</span>';
+  el.title = el.textContent;
+}
+function paintSbSpeed(u) {
+  const el = $('#sbSpeed'); if (!el || !u || !u.tokensPerSecond) return;
+  el.hidden = false; el.textContent = `${u.tokensPerSecond.toFixed(1).replace('.', ',')} token/giây`;
+  el.title = `Câu trả lời gần nhất: ${u.completion_tokens} token trong ${u.seconds.toFixed(1)} giây`;
+}
+async function pollSb() {
+  try {
+    const x = await A.sysStats(); const used = x.ramTotal - x.ramFree; const pct = used / x.ramTotal;
+    const r = $('#sbRam'); r.textContent = `RAM ${gb1(used)} / ${gb1(x.ramTotal)} GB`; r.classList.toggle('warn', pct > 0.9);
+    r.title = `RAM của máy đang dùng: ${Math.round(pct * 100)}%`;
+    if (x.cpu != null) { $('#sbCpu').textContent = `CPU ${Math.round(x.cpu)}%`; $('#sbCpu').title = `${x.cpus} luồng CPU`; }
+    const v = $('#sbVram'); if (x.gpu && x.vram && x.vram.total) { v.hidden = false; v.textContent = `${x.gpu === 'metal' ? 'Bộ nhớ GPU' : 'VRAM'} ${gb1(x.vram.total)} GB`; } else v.hidden = true;
+  } catch {}
+}
+pollSb(); setInterval(() => { if (!document.hidden) pollSb(); }, 2000);
