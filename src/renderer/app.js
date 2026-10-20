@@ -5,7 +5,7 @@ const A = window.aivn;
 const state = { settings: null, models: [], status: { loaded: false }, convos: [], current: null, generating: null, catalog: [] };
 
 const fmtBytes = (b) => { if (!b) return '0 B'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; const i = Math.min(4, Math.floor(Math.log(b) / Math.log(1024))); return (b / 1024 ** i).toFixed(i >= 3 ? 2 : 0).replace('.', ',') + ' ' + u[i]; };
-const esc = (s) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 let toastTimer;
 function toast(msg, err = false) { const t = $('#toast'); t.textContent = msg; t.className = 'toast show' + (err ? ' err' : ''); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = 'toast', 3500); }
@@ -23,7 +23,7 @@ function md(src) {
 function show(view) {
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   $$('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + view));
-  if (view === 'discover') renderCatalog();
+  if (view === 'discover' && !$('#sugArea').hidden) renderCatalog();
   if (view === 'models') refreshModels();
   if (view === 'server') refreshServer();
 }
@@ -65,7 +65,7 @@ async function loadModel(id) {
 }
 $('#modelSelect').addEventListener('change', e => e.target.value && loadModel(e.target.value));
 $('#ejectBtn').addEventListener('click', async () => { await A.unloadModel(); refreshModels(); });
-const doImport = async () => { state.models = await A.importModel(); refreshModels(); renderCatalog(); };
+const doImport = async () => { state.models = await A.importModel(); refreshModels(); if (!$('#sugArea').hidden) renderCatalog(); };
 $('#importBtn').addEventListener('click', doImport); $('#importBtn2').addEventListener('click', doImport);
 $('#openDir').addEventListener('click', () => A.reveal());
 
@@ -81,36 +81,137 @@ function setStatus(st) {
 A.onModelStatus(st => { setStatus(st); if (!st.loading) refreshModels(); });
 
 // ---------- Khám phá ----------
-const COLORS = { Qwen: '#2ee6a6', Llama: '#7cc7ff', Gemma: '#ffb547' };
+const COLORS = { Qwen: '#2ee6a6', Llama: '#7cc7ff', Gemma: '#ffb547', Mistral: '#ff8a65', Phi: '#b69cff', DeepSeek: '#5c9dff', SmolLM: '#ffd54f', VyLinh: '#ff6b8b', 'GPT-OSS': '#9ad0c2' };
+const jobs = new Map(); // id -> snapshot
+const disc = { fam: 'all', results: null, repo: null, lastQuery: null };
+const fmtNum = (n) => n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' Tr' : n >= 1e3 ? (n / 1e3).toFixed(1).replace('.', ',') + ' N' : String(n || 0);
+const fmtEta = (s) => s == null ? '' : s < 60 ? Math.ceil(s) + ' giây' : s < 3600 ? Math.ceil(s / 60) + ' phút' : Math.floor(s / 3600) + ' giờ ' + Math.round((s % 3600) / 60) + ' phút';
+const fmtAgo = (iso) => { if (!iso) return ''; const d = (Date.now() - new Date(iso)) / 864e5; return d < 1 ? 'hôm nay' : d < 30 ? Math.floor(d) + ' ngày trước' : d < 365 ? Math.floor(d / 30) + ' tháng trước' : Math.floor(d / 365) + ' năm trước'; };
+const fmtParams = (n) => !n ? '' : n >= 1e9 ? (n / 1e9).toFixed(n >= 1e10 ? 0 : 1).replace('.', ',') + 'B tham số' : Math.round(n / 1e6) + 'M tham số';
+const cleanErr = (m) => String(m).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+const fitBadge = (f) => f ? `<span class="fit ${f.level}" title="${esc(f.hint)}">${esc(f.label)}</span>` : '';
+const jobIdFor = (repo, file) => `${repo}::${file}`;
+
+function progressHtml(j) {
+  const pct = j.total ? j.received / j.total * 100 : 0;
+  const active = j.status === 'downloading' || j.status === 'queued';
+  const info = j.status === 'queued' ? 'Đang chờ trong hàng đợi…'
+    : j.status === 'paused' ? `Đã tạm dừng · ${fmtBytes(j.received)} / ${fmtBytes(j.total)}`
+    : j.status === 'error' ? esc(j.error || 'Lỗi tải')
+    : `${pct.toFixed(1).replace('.', ',')}% · ${fmtBytes(j.received)} / ${fmtBytes(j.total)}${j.speed ? ' · ' + fmtBytes(j.speed) + '/s' : ''}${j.eta ? ' · còn ' + fmtEta(j.eta) : ''}${j.parts > 1 ? ` · phần ${j.part || 1}/${j.parts}` : ''}`;
+  return `<div class="dl-wrap"><div class="dl-row"><div class="progress${j.status === 'error' ? ' bad' : ''}"><div style="width:${pct.toFixed(1)}%"></div></div>
+    ${active ? `<button class="btn sm" data-act="pause" data-jid="${esc(j.id)}" title="Tạm dừng">⏸</button>` : `<button class="btn sm primary" data-act="resume" data-jid="${esc(j.id)}">Tiếp tục</button>`}
+    <button class="btn sm danger" data-act="remove" data-jid="${esc(j.id)}" title="Huỷ và xoá phần đã tải">Huỷ</button></div>
+    <span class="${j.status === 'error' ? 'err' : ''}">${info}</span></div>`;
+}
+// item: { installed, partial, size, job } ; startAttrs: thuộc tính cho nút Tải
+function footHtml(item, startAttrs, file) {
+  const j = item.job && jobs.get(item.job.id) || item.job;
+  if (j && j.status !== 'done') return progressHtml(j);
+  if (item.installed || (j && j.status === 'done')) return `<span class="ok">✓ Có trên máy</span><button class="btn sm primary" data-act="use" data-file="${esc(file)}">Nạp & trò chuyện</button>`;
+  if (item.partial > 0) return `<span>Đã tải ${fmtBytes(item.partial)} / ${fmtBytes(item.size)}</span><button class="btn sm primary" ${startAttrs}>⬇ Tải tiếp</button>`;
+  return `<span>${fmtBytes(item.size)}</span><button class="btn sm primary" ${startAttrs}>⬇ Tải về</button>`;
+}
+
 async function renderCatalog() {
   state.catalog = await A.catalog();
-  $('#catalog').innerHTML = state.catalog.map(c => `<div class="card" data-id="${c.id}">
-    <div class="card-top"><div class="av" style="background:${COLORS[c.family] || '#b69cff'}">${c.family.slice(0, 2)}</div><div><h4>${esc(c.name)}</h4><div class="sub">${c.params} tham số · ${c.quant} · ${fmtBytes(c.size)}</div></div></div>
+  const fams = ['all', ...new Set(state.catalog.map(c => c.family))];
+  $('#famFilter').innerHTML = fams.map(f => `<button class="chip-btn ${disc.fam === f ? 'on' : ''}" data-fam="${esc(f)}">${f === 'all' ? 'Tất cả' : esc(f)}</button>`).join('');
+  const list = state.catalog.filter(c => disc.fam === 'all' || c.family === disc.fam);
+  $('#catalog').innerHTML = list.map(c => `<div class="card" data-id="${esc(c.id)}">
+    <div class="card-top"><div class="av" style="background:${COLORS[c.family] || '#b69cff'}">${esc(c.family.slice(0, 2))}</div><div><h4>${esc(c.name)}</h4><div class="sub">${esc(c.params)} tham số · ${esc(c.quant)} · ${fmtBytes(c.size)}</div></div></div>
     <p>${esc(c.desc)}</p>
-    <div class="tags">${c.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span>${c.installed ? '<span class="tag ok">✓ Đã tải</span>' : ''}</div>
-    <div class="card-foot">${footFor(c)}</div></div>`).join('');
+    <div class="tags">${fitBadge(c.fit)}${c.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.vision ? '<span class="tag" title="Mô hình có khả năng xem ảnh, AIVN hiện chỉ dùng phần văn bản">Chưa hỗ trợ ảnh</span>' : ''}</div>
+    <div class="card-foot" data-job="${esc(jobIdFor(c.repo, c.file))}">${footHtml(c, `data-act="dl-cat" data-id="${esc(c.id)}"`, c.file)}</div>
+    <button class="linkish" data-act="open-repo" data-repo="${esc(c.repo)}">Các bản lượng tử khác · ${esc(c.repo)}</button></div>`).join('');
 }
-function footFor(c) {
-  if (c.downloading) return dlBar(c.downloading.received, c.downloading.total);
-  if (c.installed) return `<span>Có trên máy</span><button class="btn sm primary" data-act="use">Nạp & trò chuyện</button>`;
-  return `<span>Hugging Face</span><button class="btn sm primary" data-act="dl">⬇ Tải về</button>`;
+
+function renderDlPanel() {
+  const list = [...jobs.values()].filter(j => j.status !== 'done');
+  $('#dlPanel').hidden = !list.length;
+  $('#dlList').innerHTML = list.map(j => `<div class="dl-item"><div class="dl-name"><b>${esc(j.name)}</b><span class="muted small">${esc(j.repo)}</span></div><div data-job="${esc(j.id)}">${progressHtml(j)}</div></div>`).join('');
 }
-function dlBar(rec, total, speed) {
-  const pct = total ? (rec / total * 100) : 0;
-  return `<div class="dl-wrap"><div class="dl-row"><div class="progress"><div style="width:${pct.toFixed(1)}%"></div></div><button class="btn sm danger" data-act="cancel">Huỷ</button></div>
-    <span>${pct.toFixed(1).replace('.', ',')}% · ${fmtBytes(rec)} / ${fmtBytes(total)}${speed ? ' · ' + fmtBytes(speed) + '/s' : ''}</span></div>`;
+function paintJob(j) {
+  const prev = jobs.get(j.id); jobs.set(j.id, j);
+  for (const el of $$(`[data-job="${CSS.escape(j.id)}"]`)) el.innerHTML = j.status === 'done' ? '<span class="ok">✓ Tải xong</span>' : progressHtml(j);
+  if (!prev || prev.status !== j.status) renderDlPanel();
 }
-$('#catalog').addEventListener('click', async (e) => {
-  const b = e.target.closest('button[data-act]'); if (!b) return;
-  const id = b.closest('.card').dataset.id; const c = state.catalog.find(x => x.id === id);
-  if (b.dataset.act === 'dl') { await A.download(id); b.closest('.card-foot').innerHTML = dlBar(0, c.size); }
-  if (b.dataset.act === 'cancel') await A.cancelDownload(id);
-  if (b.dataset.act === 'use') { await refreshModels(); const m = state.models.find(x => x.file.toLowerCase() === c.file.toLowerCase()); show('chat'); if (m) loadModel(m.id); }
+A.onDl(paintJob);
+A.onDlDone(async (j) => { toast(`Tải xong ${j.name} ✓`); jobs.set(j.id, j); renderDlPanel(); await refreshModels(); if (!$('#sugArea').hidden) renderCatalog(); if (disc.repo) openRepo(disc.repo.id, true); });
+A.onDlRemoved(({ id }) => { jobs.delete(id); renderDlPanel(); renderCatalog(); if (disc.repo) openRepo(disc.repo.id, true); });
+
+// --- Tìm kiếm Hugging Face ---
+async function doSearch() {
+  const q = $('#searchQ').value.trim(), sort = $('#searchSort').value;
+  disc.lastQuery = { q, sort };
+  $('#hfArea').hidden = false; $('#repoArea').hidden = true; $('#sugArea').hidden = true;
+  $('#hfTitle').textContent = q ? `Kết quả cho “${q}”` : 'Mô hình GGUF phổ biến trên Hugging Face';
+  $('#hfResults').innerHTML = '<div class="muted pad">Đang tìm trên Hugging Face…</div>';
+  try {
+    const res = await A.hfSearch({ q, sort });
+    if (disc.lastQuery.q !== q || disc.lastQuery.sort !== sort) return;
+    disc.results = res;
+    $('#hfResults').innerHTML = res.length ? res.map(r => `<div class="hf-item" data-repo="${esc(r.id)}">
+      <div class="hf-main"><div><b>${esc(r.name)}</b> <span class="muted">· ${esc(r.author)}</span></div>
+        <div class="meta">⬇ ${fmtNum(r.downloads)} lượt tải · ♥ ${fmtNum(r.likes)} · cập nhật ${fmtAgo(r.lastModified)}${r.params ? ' · ' + fmtParams(r.params) : ''}</div>
+        <div class="tags">${r.license ? `<span class="tag lic">${esc(r.license)}</span>` : ''}${r.arch ? `<span class="tag${r.archSupported === false ? ' warn' : ''}" title="${r.archSupported === false ? 'Kiến trúc này có thể chưa được hỗ trợ trong AIVN' : 'Kiến trúc mô hình'}">${esc(r.arch)}${r.archSupported === false ? ' · chưa hỗ trợ?' : ''}</span>` : ''}${r.gated ? '<span class="tag warn">🔒 Cần chấp nhận giấy phép</span>' : ''}${r.vision ? '<span class="tag">Có thị giác · AIVN chưa hỗ trợ ảnh</span>' : ''}${r.embedding ? '<span class="tag warn">Embedding · không dùng để trò chuyện</span>' : ''}</div></div>
+      <button class="btn sm" data-act="open-repo" data-repo="${esc(r.id)}">Xem tệp →</button></div>`).join('') : '<div class="muted pad">Không tìm thấy mô hình GGUF nào. Thử từ khoá khác (vd. tên họ mô hình như “qwen”, “llama”, “gemma”).</div>';
+  } catch (err) { $('#hfResults').innerHTML = `<div class="err pad">${esc(cleanErr(err.message))}</div>`; }
+}
+let searchTimer;
+$('#searchForm').addEventListener('submit', (e) => { e.preventDefault(); clearTimeout(searchTimer); doSearch(); });
+$('#searchQ').addEventListener('input', () => { clearTimeout(searchTimer); if ($('#searchQ').value.trim().length >= 2) searchTimer = setTimeout(doSearch, 450); });
+$('#searchSort').addEventListener('change', () => { if (!$('#hfArea').hidden || $('#searchQ').value.trim()) doSearch(); });
+$('#hfClose').addEventListener('click', () => { $('#hfArea').hidden = true; $('#repoArea').hidden = true; $('#sugArea').hidden = false; disc.repo = null; $('#searchQ').value = ''; renderCatalog(); });
+
+async function openRepo(repo, quiet) {
+  const area = $('#repoArea');
+  if (!quiet) { area.hidden = false; $('#hfArea').hidden = true; $('#sugArea').hidden = true; area.innerHTML = `<div class="muted pad">Đang đọc danh sách tệp của ${esc(repo)}…</div>`; }
+  let r;
+  try { r = await A.hfRepo(repo); } catch (err) { area.innerHTML = `<button class="btn sm" data-act="back">← Quay lại</button><div class="err pad">${esc(cleanErr(err.message))}</div>`; return; }
+  disc.repo = r;
+  const chat = r.groups.filter(g => g.kind === 'chat' && g.complete);
+  const other = r.groups.filter(g => g.kind !== 'chat' || !g.complete);
+  const notes = [
+    r.gated ? '🔒 Repo này yêu cầu chấp nhận giấy phép trên Hugging Face. Hãy mở trang repo, đồng ý điều khoản, rồi nhập HF token (nút 🔑 phía trên) trước khi tải.' : '',
+    r.vision ? '🖼 Mô hình có khả năng xem ảnh. AIVN hiện chỉ dùng phần trò chuyện bằng văn bản, chưa hỗ trợ đầu vào ảnh (tệp mmproj không cần tải).' : '',
+    r.embedding ? '⚠ Đây là mô hình embedding (tạo vector), không dùng để trò chuyện.' : '',
+    r.archSupported === false ? `⚠ Kiến trúc “${esc(r.arch)}” có thể chưa được hỗ trợ bởi llama.cpp trong AIVN; mô hình có thể không nạp được.` : '',
+  ].filter(Boolean);
+  area.innerHTML = `<div class="repo-head"><button class="btn sm" data-act="back">← Quay lại</button>
+      <div class="grow"><h3>${esc(r.name)} <span class="muted">· ${esc(r.author)}</span></h3>
+      <div class="meta muted">⬇ ${fmtNum(r.downloads)} lượt tải · ♥ ${fmtNum(r.likes)} · cập nhật ${fmtAgo(r.lastModified)}${r.license ? ' · giấy phép ' + esc(r.license) : ''}${r.arch ? ' · kiến trúc ' + esc(r.arch) : ''}${r.params ? ' · ' + fmtParams(r.params) : ''}${r.contextLength ? ' · ngữ cảnh tối đa ' + fmtNum(r.contextLength) : ''}</div></div>
+      <button class="btn sm" data-act="open-hf" data-url="${esc(r.url)}">Mở trên Hugging Face ↗</button></div>
+    ${notes.map(n => `<div class="note">${n}</div>`).join('')}
+    <div class="qtable">${chat.length ? `<div class="qr head"><span>Tệp mô hình</span><span>Lượng tử</span><span>Dung lượng</span><span>Máy bạn</span><span></span></div>` + chat.map(g => `<div class="qr${g.recommended ? ' rec' : ''}">
+        <span class="fname" title="${esc(g.files.map(f => f.path).join('\n'))}">${esc(g.name)}${g.split ? ` <span class="tag">${g.parts} phần · tải tất cả</span>` : ''}${g.recommended ? ' <span class="tag ok">★ Khuyên dùng</span>' : ''}${g.folder ? `<div class="muted small">${esc(g.folder)}/</div>` : ''}</span>
+        <span><b>${esc(g.quant || '—')}</b></span><span>${fmtBytes(g.size)}</span><span>${fitBadge(g.fit)}</span>
+        <span class="foot" data-job="${esc(jobIdFor(r.id, g.files[0].path))}">${footHtml(g, `data-act="dl-group" data-key="${esc(g.key)}"`, g.files[0].path)}</span></div>`).join('') : '<div class="muted pad">Repo này không có tệp GGUF dùng để trò chuyện.</div>'}</div>
+    ${other.length ? `<details class="others"><summary>Tệp không dùng để trò chuyện (${other.length})</summary>${other.map(g => `<div class="qr other"><span class="fname">${esc(g.name)}</span><span>${esc(g.quant || '')}</span><span>${fmtBytes(g.size)}</span><span class="muted small">${!g.complete ? 'Thiếu phần, không tải được' : g.kind === 'mmproj' ? 'Tệp thị giác (mmproj) · AIVN chưa hỗ trợ ảnh' : 'Mô hình embedding'}</span></div>`).join('')}</details>` : ''}`;
+}
+
+$('#view-discover').addEventListener('click', async (e) => {
+  const fam = e.target.closest('[data-fam]'); if (fam) { disc.fam = fam.dataset.fam; renderCatalog(); return; }
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const act = b.dataset.act;
+  try {
+    if (act === 'dl-cat') { const j = await A.dlStart({ catalogId: b.dataset.id }); paintJob(j); renderCatalog(); }
+    if (act === 'dl-group') { const g = disc.repo.groups.find(x => x.key === b.dataset.key); const j = await A.dlStart({ repo: disc.repo.id, files: g.files.map(f => ({ path: f.path, size: f.size })), name: g.name, quant: g.quant }); paintJob(j); }
+    if (act === 'pause') await A.dlPause(b.dataset.jid);
+    if (act === 'resume') await A.dlResume(b.dataset.jid);
+    if (act === 'remove') await A.dlRemove(b.dataset.jid);
+    if (act === 'open-repo') openRepo(b.dataset.repo);
+    if (act === 'open-hf') A.openExternal(b.dataset.url);
+    if (act === 'back') { disc.repo = null; $('#repoArea').hidden = true; if (disc.results) $('#hfArea').hidden = false; else { $('#sugArea').hidden = false; renderCatalog(); } }
+    if (act === 'use') { await refreshModels(); const name = b.dataset.file.split('/').pop().toLowerCase(); const m = state.models.find(x => x.file.toLowerCase() === name); show('chat'); if (m) loadModel(m.id); }
+  } catch (err) { toast(cleanErr(err.message), true); }
 });
-A.onDownloadProgress(p => { const f = $(`.card[data-id="${p.id}"] .card-foot`); if (f) f.innerHTML = dlBar(p.received, p.total, p.speed); });
-A.onDownloadDone(p => { toast('Tải xong ✓'); renderCatalog(); refreshModels(); });
-A.onDownloadError(p => { toast('Lỗi tải: ' + p.message, true); renderCatalog(); });
-A.onDownloadCancelled(() => { toast('Đã huỷ tải (có thể tiếp tục sau)'); renderCatalog(); });
+
+// --- Token Hugging Face ---
+function paintToken() { $('#tokenState').textContent = state.settings.hfTokenSet ? '✓ Đã lưu token trên máy này' : 'Chưa có token'; $('#tokenBtn').classList.toggle('on', !!state.settings.hfTokenSet); }
+$('#tokenBtn').addEventListener('click', () => { $('#tokenBox').hidden = !$('#tokenBox').hidden; paintToken(); });
+$('#tokenSave').addEventListener('click', async () => { const v = $('#hfToken').value.trim(); if (!v) return toast('Hãy dán token trước khi lưu', true); state.settings = await A.setSettings({ hfToken: v }); $('#hfToken').value = ''; paintToken(); toast('Đã lưu token (chỉ trên máy này) ✓'); });
+$('#tokenClear').addEventListener('click', async () => { state.settings = await A.setSettings({ hfToken: '' }); $('#hfToken').value = ''; paintToken(); toast('Đã xoá token'); });
 
 // ---------- Trò chuyện ----------
 async function loadConvos() { state.convos = await A.convos(); renderConvos(); }
@@ -122,6 +223,11 @@ $('#convoList').addEventListener('click', async (e) => {
   if (e.target.classList.contains('del')) { await A.deleteConvo(row.dataset.id); if (state.current && state.current.id === row.dataset.id) state.current = null; await loadConvos(); renderMessages(); return; }
   state.current = state.convos.find(c => c.id === row.dataset.id); renderConvos(); renderMessages();
 });
+$('#messages').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-copy]'); if (!b || !state.current) return;
+  await A.copyText(state.current.messages[Number(b.dataset.copy)].content); toast('Đã sao chép ✓');
+});
+A.onEngineCrash((e) => toast(e.message, true));
 $('#newChat').addEventListener('click', () => { state.current = null; renderConvos(); renderMessages(); $('#input').focus(); });
 
 function renderMessages() {
@@ -133,9 +239,10 @@ function renderMessages() {
     return;
   }
   box.innerHTML = msgs.map((m, i) => {
-    const atts = m.attachments && m.attachments.length ? `<div class="atts">${m.attachments.map(a => `<span class="att">${fileIcon(a.kind)} ${esc(a.name)} · ${fmtBytes(a.size)}</span>`).join('')}</div>` : '';
-    const warn = m.docWarning ? `<div class="doc-warn">⚠ ${esc(m.docWarning)}</div>` : '';
-    return `<div class="msg ${m.role}${m.error ? ' error' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">AIVN${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div></div>${warn}`;
+    const atts = m.attachments && m.attachments.length ? `<div class="atts">${m.attachments.map(a => `<span class="att">${a.kind === 'image' && a.thumb && /^data:image\/jpeg;base64,/.test(a.thumb) ? `<img class="thumb" src="${a.thumb}" alt="">` : fileIcon(a.kind)} ${esc(a.name)} · ${fmtBytes(a.size)}</span>`).join('')}</div>` : '';
+    const warn = (m.ocrNote ? `<div class="doc-warn ocr">🖼 ${esc(m.ocrNote)}.</div>` : '') + (m.docWarning ? `<div class="doc-warn">⚠ ${esc(m.docWarning)}</div>` : '');
+    const copyBtn = m.role === 'assistant' && m.content && !m.error ? `<button class="copy-btn" data-copy="${i}" title="Sao chép câu trả lời">⧉ Sao chép</button>` : '';
+    return `<div class="msg ${m.role}${m.error ? ' error' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">AIVN${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${copyBtn}</div>${warn}`;
   }).join('');
   box.scrollTop = box.scrollHeight;
 }
@@ -143,15 +250,59 @@ function renderMessages() {
 // ---------- Tệp đính kèm ----------
 let pending = []; // [{id, name, size, kind, text, ok, loading}]
 const MAX_FILES = 5;
-function fileIcon(kind) { return kind === 'pdf' ? '📕' : kind === 'docx' ? '📘' : '📄'; }
+function fileIcon(kind) { return kind === 'pdf' ? '📕' : kind === 'docx' ? '📘' : kind === 'image' ? '🖼' : '📄'; }
+const IMG_EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
+const OCR_NOTE = 'Mô hình hiện tại không nhìn được ảnh, AIVN đã đọc chữ trong ảnh';
+const MAX_BYTES = 20 * 1024 * 1024;
+// Ảnh → (thu nhỏ để hiện chip) + PNG đã chuẩn hoá kích thước để OCR. GIF chỉ lấy khung hình đầu.
+async function imageToPng(blob) {
+  const bmp = await createImageBitmap(blob);
+  const long = Math.max(bmp.width, bmp.height);
+  let scale = long < 1600 ? Math.min(2, 1600 / long) : long > 4000 ? 4000 / long : 1; // phóng ảnh chụp màn hình nhỏ để đọc chữ tốt hơn
+  const c = document.createElement('canvas'); c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.imageSmoothingQuality = 'high'; g.drawImage(bmp, 0, 0, c.width, c.height);
+  const t = document.createElement('canvas'); const ts = 96 / Math.max(bmp.width, bmp.height); t.width = Math.max(1, Math.round(bmp.width * ts)); t.height = Math.max(1, Math.round(bmp.height * ts));
+  t.getContext('2d').drawImage(bmp, 0, 0, t.width, t.height);
+  const png = await new Promise(r => c.toBlob(r, 'image/png'));
+  return { png: new Uint8Array(await png.arrayBuffer()), thumb: t.toDataURL('image/jpeg', 0.75), width: bmp.width, height: bmp.height };
+}
+async function addImageBlobs(list) { // list: [{blob, name, size}]
+  const room = MAX_FILES - pending.length;
+  if (room <= 0) { toast(`Chỉ gửi kèm tối đa ${MAX_FILES} tệp mỗi lần`, true); return; }
+  if (list.length > room) toast(`Chỉ gửi kèm tối đa ${MAX_FILES} tệp mỗi lần, đã bỏ bớt ${list.length - room} tệp`, true);
+  for (const { blob, name, size } of list.slice(0, room)) {
+    if (size > MAX_BYTES) { toast(`"${name}" quá lớn (${fmtBytes(size)}). Giới hạn là 20 MB mỗi tệp.`, true); continue; }
+    const it = { id: uid(), name, size, kind: 'image', loading: true };
+    pending.push(it); renderChips();
+    (async () => {
+      try {
+        const img = await imageToPng(blob);
+        it.thumb = img.thumb; renderChips();
+        const r = await A.ocrImage(img.png);
+        if (!pending.includes(it)) return;
+        if (!r || r.chars < 3) { pending = pending.filter(a => a !== it); renderChips(); toast(`Không tìm thấy chữ trong ảnh "${name}". Mô hình hiện tại không nhìn được ảnh nên AIVN chưa dùng được ảnh này.`, true); return; }
+        Object.assign(it, { loading: false, ok: true, text: r.text, ocrChars: r.chars, ocrConf: r.confidence });
+      } catch (err) {
+        pending = pending.filter(a => a !== it); toast(`Không đọc được ảnh "${name}": ${cleanErr(err.message)}`, true);
+      }
+      renderChips();
+    })();
+  }
+}
 function renderChips() {
   const el = $('#chips');
   el.hidden = !pending.length;
-  el.innerHTML = pending.map(a => `<div class="chip${a.loading ? ' loading' : ''}" data-id="${a.id}" title="${esc(a.name)}${a.pages ? ' · ' + a.pages + ' trang' : ''}"><span class="ic">${fileIcon(a.kind)}</span><span class="nm">${esc(a.name)}</span><span class="sz">${a.size ? fmtBytes(a.size) : ''}${a.pages ? ' · ' + a.pages + ' trang' : ''}</span><button type="button" title="Bỏ tệp này" aria-label="Bỏ tệp">✕</button></div>`).join('');
+  el.innerHTML = pending.map(a => `<div class="chip${a.loading ? ' loading' : ''}${a.kind === 'image' ? ' img' : ''}" data-id="${a.id}" title="${esc(a.name)}${a.pages ? ' · ' + a.pages + ' trang' : ''}${a.kind === 'image' ? (a.loading ? ' · đang đọc chữ trong ảnh…' : ` · OCR ${a.ocrChars} ký tự, tin cậy ${a.ocrConf}%`) : ''}">${a.kind === 'image' && a.thumb ? `<img class="thumb" src="${a.thumb}" alt="">` : `<span class="ic">${fileIcon(a.kind)}</span>`}<span class="nm">${esc(a.name)}</span><span class="sz">${a.size ? fmtBytes(a.size) : ''}${a.pages ? ' · ' + a.pages + ' trang' : ''}${a.kind === 'image' ? (a.loading ? ' · đang đọc chữ…' : ` · ${a.ocrChars} ký tự`) : ''}</span><button type="button" title="Bỏ tệp này" aria-label="Bỏ tệp">✕</button></div>`).join('');
 }
 $('#chips').addEventListener('click', (e) => { const c = e.target.closest('.chip'); if (c && e.target.closest('button')) { pending = pending.filter(a => a.id !== c.dataset.id); renderChips(); } });
 async function addFiles(paths) {
   paths = paths.filter(Boolean);
+  const imgs = paths.filter(p => IMG_EXT.test(p)); paths = paths.filter(p => !IMG_EXT.test(p));
+  if (imgs.length) {
+    const list = [];
+    for (const p of imgs) { try { const r = await A.readImage(p); list.push({ blob: new Blob([r.bytes]), name: r.name, size: r.size }); } catch (err) { toast(cleanErr(err.message), true); } }
+    await addImageBlobs(list);
+  }
   if (!paths.length) return;
   const room = MAX_FILES - pending.length;
   if (room <= 0) { toast(`Chỉ gửi kèm tối đa ${MAX_FILES} tệp mỗi lần`, true); return; }
@@ -173,8 +324,30 @@ chatPane.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].inc
 chatPane.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; dz.classList.remove('on'); } });
 chatPane.addEventListener('drop', (e) => {
   e.preventDefault(); dragDepth = 0; dz.classList.remove('on');
-  addFiles([...e.dataTransfer.files].map(f => A.pathForFile(f)));
+  const files = [...e.dataTransfer.files];
+  const imgs = files.filter(f => /^image\//.test(f.type) || IMG_EXT.test(f.name));
+  if (imgs.length) addImageBlobs(imgs.map(f => ({ blob: f, name: f.name, size: f.size })));
+  addFiles(files.filter(f => !imgs.includes(f)).map(f => A.pathForFile(f)));
 });
+// Dán ảnh (Ctrl+V / Cmd+V): ảnh chụp màn hình, ảnh sao chép từ trình duyệt hoặc trình xem ảnh
+function imagesFromClipboard(e) {
+  const dt = e.clipboardData; if (!dt) return [];
+  const hasText = [...dt.types].includes('text/plain') && dt.getData('text/plain').trim();
+  if (hasText) return []; // có chữ thì dán chữ bình thường (vd. sao chép từ Word/Excel)
+  const out = [];
+  for (const item of dt.items) if (item.kind === 'file' && /^image\//.test(item.type)) { const f = item.getAsFile(); if (f) out.push(f); }
+  return out;
+}
+function onPasteImages(e) {
+  const imgs = imagesFromClipboard(e); if (!imgs.length) return;
+  e.preventDefault();
+  if (!$('#view-chat').classList.contains('active')) show('chat');
+  const stamp = new Date().toTimeString().slice(0, 8).replace(/:/g, '');
+  addImageBlobs(imgs.map((f, i) => ({ blob: f, name: f.name && f.name !== 'image.png' ? f.name : `anh-dan-${stamp}${imgs.length > 1 ? '-' + (i + 1) : ''}.${(f.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`, size: f.size })));
+  $('#input').focus();
+}
+$('#input').addEventListener('paste', onPasteImages);
+document.addEventListener('paste', (e) => { if (e.target === $('#input')) return; if (e.target.closest && e.target.closest('input,textarea,[contenteditable]')) return; if ($('#view-chat').classList.contains('active')) onPasteImages(e); });
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault()); // không cho cửa sổ mở tệp bị thả nhầm chỗ
 
@@ -187,13 +360,14 @@ $('#composer').addEventListener('submit', async (e) => {
   if (state.generating) return;
   if (pending.some(a => a.loading)) { toast('Đang đọc tệp, vui lòng đợi một chút…'); return; }
   const docsToSend = pending.filter(a => a.ok);
-  if (!text && docsToSend.length) text = 'Hãy tóm tắt nội dung chính của tài liệu đính kèm.';
+  if (!text && docsToSend.length) text = docsToSend.every(a => a.kind === 'image') ? 'Hãy cho biết nội dung chữ trong ảnh và tóm tắt ý chính.' : 'Hãy tóm tắt nội dung chính của tài liệu đính kèm.';
   if (!text) return;
   if (!state.status.loaded) { toast('Hãy nạp một mô hình trước khi trò chuyện', true); return; }
   if (!state.current) state.current = { id: uid(), title: text.slice(0, 48), messages: [], createdAt: Date.now(), updatedAt: Date.now() };
   const conv = state.current;
   const userMsg = { role: 'user', content: text };
-  if (docsToSend.length) userMsg.attachments = docsToSend.map(a => ({ name: a.name, size: a.size, kind: a.kind, pages: a.pages || null }));
+  if (docsToSend.length) userMsg.attachments = docsToSend.map(a => ({ name: a.name, size: a.size, kind: a.kind, pages: a.pages || null, ...(a.kind === 'image' ? { thumb: a.thumb, ocrChars: a.ocrChars } : {}) }));
+  if (docsToSend.some(a => a.kind === 'image')) userMsg.ocrNote = OCR_NOTE;
   conv.messages.push(userMsg);
   pending = []; renderChips();
   const reply = { role: 'assistant', content: '', model: state.status.id };
@@ -208,7 +382,7 @@ $('#composer').addEventListener('submit', async (e) => {
   const prior = conv.messages.slice(0, -2).filter(m => !m.error);
   const lastCtxIdx = docsToSend.length ? -1 : prior.map(m => !!m.context).lastIndexOf(true);
   const history = [{ role: 'system', content: s.systemPrompt }, ...prior.map((m, i) => ({ role: m.role,
-      content: m.context && i === lastCtxIdx ? m.context : (m.attachments ? `[Đã gửi kèm: ${m.attachments.map(a => a.name).join(', ')}]\n` : '') + m.content })),
+      content: m.context && i === lastCtxIdx ? m.context : (m.attachments ? `[Đã gửi kèm: ${m.attachments.map(a => a.name + (a.kind === 'image' ? ' (ảnh, đã đọc chữ bằng OCR)' : '')).join(', ')}]\n` : '') + m.content })),
     { role: 'user', content: text }];
   const offInfo = A.onDocInfo((info) => {
     if (info.reqId !== reqId) return;
@@ -313,6 +487,8 @@ A.onUpdate((st) => A.updateState().then(full => paintUpdate({ ...full, ...st }))
 (async () => {
   state.settings = await A.getSettings();
   bindSettings();
+  for (const j of await A.dlList()) jobs.set(j.id, j);
+  renderDlPanel();
   setStatus(await A.modelStatus());
   await Promise.all([refreshModels(), loadConvos(), refreshServer()]);
   renderMessages();

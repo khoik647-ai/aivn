@@ -1,7 +1,7 @@
 {
   "name": "aivn",
   "productName": "AIVN",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "AIVN - Chạy mô hình AI ngay trên máy tính của bạn",
   "author": {
     "name": "NGUYỄN NGỌC KHÔI SINH VIÊN VLU"
@@ -19,10 +19,13 @@
     "@node-llama-cpp/mac-x64": "3.22.2",
     "@node-llama-cpp/win-x64": "3.22.2",
     "@node-llama-cpp/win-x64-vulkan": "3.22.2",
+    "@tesseract.js-data/eng": "1.0.0",
+    "@tesseract.js-data/vie": "1.0.0",
     "electron-updater": "6.8.9",
     "mammoth": "1.13.0",
     "node-llama-cpp": "3.22.2",
-    "pdfjs-dist": "5.6.205"
+    "pdfjs-dist": "5.6.205",
+    "tesseract.js": "7.0.0"
   },
   "devDependencies": {
     "electron": "44.9.0",
@@ -53,13 +56,18 @@
       "!node_modules/pdfjs-dist/legacy/build/*.min.mjs",
       "!node_modules/pdfjs-dist/legacy/build/pdf.sandbox*",
       "!test/**",
-      "!node_modules/@napi-rs/**"
+      "!node_modules/@napi-rs/**",
+      "!node_modules/@tesseract.js-data/*/4.0.0/**",
+      "!node_modules/tesseract.js/{dist,docs,examples,benchmarks,tests}/**"
     ],
     "asar": true,
     "asarUnpack": [
-      "node_modules/node-llama-cpp/**",
-      "node_modules/@node-llama-cpp/**",
-      "node_modules/pdfjs-dist/**"
+      "node_modules/**",
+      "src/engine.js",
+      "src/engine-host.js",
+      "src/ocr.js",
+      "src/llama-archs.json",
+      "package.json"
     ],
     "npmRebuild": false,
     "nodeGypRebuild": false,
@@ -91,7 +99,18 @@
       "signtoolOptions": {
         "publisherName": "NGUYỄN NGỌC KHÔI SINH VIÊN VLU"
       },
-      "verifyUpdateCodeSignature": false
+      "verifyUpdateCodeSignature": false,
+      "extraResources": [
+        {
+          "from": "build/node/win-x64",
+          "to": "node",
+          "filter": [
+            "node",
+            "node.exe",
+            "LICENSE"
+          ]
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -130,7 +149,18 @@
           "Name": "AIVN",
           "Comment": "Chạy mô hình AI ngay trên máy tính"
         }
-      }
+      },
+      "extraResources": [
+        {
+          "from": "build/node/linux-x64",
+          "to": "node",
+          "filter": [
+            "node",
+            "node.exe",
+            "LICENSE"
+          ]
+        }
+      ]
     },
     "mac": {
       "category": "public.app-category.productivity",

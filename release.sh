@@ -52,6 +52,9 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
   step "Kiểm thử trích xuất tài liệu"
   node --test test/
 
+  step "Tải Node.js thuần (bộ máy suy luận chạy ngoài Electron) cho Windows/macOS, kiểm SHA-256"
+  node build/fetch-node.cjs
+
   step "Build Windows (NSIS) → dist/AIVN-Setup-$VERSION.exe + latest.yml + blockmap"
   rm -rf dist
   npx electron-builder --win nsis --x64 --publish never
@@ -110,14 +113,26 @@ if ! gh repo view "$OWNER/$REPO" >/dev/null 2>&1; then
     && git remote add origin "https://github.com/$OWNER/$REPO.git" && gh auth setup-git && git push -q origin main )
   rm -rf "$TMPSRC"
 else
-  echo "Repo đã tồn tại, không đẩy lại mã nguồn."
+  # Repo đã có: cập nhật nhánh main bằng một commit mới (không ghi đè lịch sử, không force-push)
+  TMPSRC="$(mktemp -d)"
+  gh repo clone "$OWNER/$REPO" "$TMPSRC" -- -q --branch main
+  ( cd "$TMPSRC" && git rm -rqf --ignore-unmatch . >/dev/null )
+  tar -C "$ROOT" --exclude=./node_modules --exclude=./dist --exclude=./.git -cf - . | tar -C "$TMPSRC" -xf -
+  ( cd "$TMPSRC" && git add -A \
+    && if git diff --cached --quiet; then echo "Mã nguồn không đổi."; else
+         git -c user.name="AIVN release" -c user.email="release@aivn.local" commit -qm "AIVN $VERSION" && gh auth setup-git && git push -q origin main && echo "Đã cập nhật mã nguồn trên nhánh main."; fi )
+  rm -rf "$TMPSRC"
 fi
 
 step "Tạo GitHub Release $TAG"
 NOTES="AIVN $VERSION · Phát triển bởi NGUYỄN NGỌC KHÔI SINH VIÊN VLU
 
-- Hỏi đáp với tài liệu: PDF có lớp chữ, DOCX, TXT/MD/CSV/JSON, mã nguồn (tối đa 20 MB)
-- Tự động cập nhật (Windows cài tại chỗ; macOS báo có bản mới)
+- Khám phá: tìm mọi mô hình GGUF trên Hugging Face (sắp xếp theo lượt tải / mới nhất / lượt thích), gộp tệp chia nhỏ, nhãn vừa RAM, gợi ý Q4_K_M; 26 mô hình gợi ý đã kiểm tra (Qwen3, Gemma 3, Llama 3.x, Phi-4, Mistral, DeepSeek R1, gpt-oss, VyLinh tiếng Việt…)
+- Tải mô hình có hàng đợi, tạm dừng/tải tiếp, tốc độ và thời gian còn lại; mã truy cập Hugging Face tuỳ chọn (chỉ lưu trên máy)
+- Ảnh: dán Ctrl+V / Cmd+V hoặc kéo thả PNG/JPG/WEBP/GIF; AIVN đọc chữ trong ảnh (OCR tiếng Việt + tiếng Anh, offline). Mô hình hiện tại chưa nhìn được hình.
+- Menu Sửa và menu chuột phải (Cắt/Sao chép/Dán/Chọn tất cả), nút sao chép câu trả lời
+- Bộ máy suy luận mới (llama.cpp mới hơn: Qwen3, Gemma 3, gpt-oss) chạy trong tiến trình riêng, sửa lỗi sập khi nạp mô hình 7B trên CPU
+- Hỏi đáp với tài liệu, máy chủ API tương thích OpenAI, tự động cập nhật (Windows cài tại chỗ; macOS báo có bản mới)
 
 Tải về:
 - Windows 10/11: AIVN-Setup.exe

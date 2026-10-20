@@ -260,7 +260,7 @@ footer{border-top:1px solid var(--line);padding:56px 0 32px;background:var(--bg2
 <section class="hero">
   <div class="wrap hero-grid">
     <div>
-      <span class="badge"><span class="dot"></span>Phiên bản 0.10.0 · Mới: hỏi đáp với tài liệu</span>
+      <span class="badge"><span class="dot"></span>Phiên bản 0.11.0 · Mới: tìm mô hình GGUF trên Hugging Face, đọc chữ trong ảnh</span>
       <h1>Trí tuệ nhân tạo,<br><span class="grad-text">chạy ngay trên máy bạn.</span></h1>
       <p class="lead">AIVN giúp bạn tải về và trò chuyện với các mô hình ngôn ngữ mã nguồn mở mà không cần Internet, không cần tài khoản, và dữ liệu không bao giờ rời khỏi máy tính.</p>
       <div class="dl-row" id="tai-ve">
@@ -336,9 +336,9 @@ footer{border-top:1px solid var(--line);padding:56px 0 32px;background:var(--bg2
       <p class="lead">Không cần biết lập trình. Mở ứng dụng, chọn mô hình, bắt đầu hỏi. Khi muốn nâng cao, mọi tùy chỉnh đều nằm trong tầm tay.</p>
     </div>
     <div class="feat-grid">
-      <div class="feat reveal"><div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 19h16"/></svg></div><h3>Tải mô hình một chạm</h3><p>Chọn trong danh sách mô hình mở, xem dung lượng và mức RAM cần thiết rồi tải về. Đã có tệp GGUF thì nhập thẳng vào AIVN.</p></div>
+      <div class="feat reveal"><div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 19h16"/></svg></div><h3>Tìm và tải mọi mô hình GGUF</h3><p>Tìm kiếm trực tiếp các kho GGUF công khai trên Hugging Face, sắp xếp theo lượt tải, mới nhất hoặc lượt thích. AIVN gợi ý bản lượng tử Q4_K_M và báo mô hình có vừa RAM máy bạn không. Tải xuống có hàng đợi, tạm dừng và tải tiếp được. Đã có tệp GGUF thì nhập thẳng vào AIVN.</p></div>
       <div class="feat reveal"><div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg></div><h3>Trò chuyện riêng tư</h3><p>Lịch sử lưu ngay trên máy. Tùy chỉnh lời nhắc hệ thống, nhiệt độ, độ dài ngữ cảnh, có nút Dừng khi trả lời quá dài.</p></div>
-      <div class="feat reveal"><div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 14h8M8 18h5"/></svg></div><h3>Hỏi đáp với tài liệu</h3><p>Bấm ghim hoặc kéo thả PDF có lớp chữ, DOCX, TXT/MD/CSV/JSON hay tệp mã nguồn (tối đa 20 MB) rồi đặt câu hỏi. Tệp được đọc ngay trên máy. PDF scan và ảnh chưa được hỗ trợ.</p></div>
+      <div class="feat reveal"><div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 14h8M8 18h5"/></svg></div><h3>Hỏi đáp với tài liệu và ảnh</h3><p>Kéo thả hoặc ghim PDF có lớp chữ, DOCX, TXT/MD/CSV/JSON, tệp mã nguồn hay ảnh PNG/JPG/WEBP/GIF (tối đa 20 MB). Dán ảnh chụp màn hình bằng Ctrl+V / Cmd+V. AIVN đọc chữ trong ảnh (OCR tiếng Việt và tiếng Anh) ngay trên máy, không cần mạng. Mô hình chưa “nhìn” được hình vẽ, chỉ dùng phần chữ đọc được.</p></div>
       <div class="feat reveal"><div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m8 9-4 3 4 3M16 9l4 3-4 3M14 5l-4 14"/></svg></div><h3>Máy chủ API tương thích OpenAI</h3><p>Biến máy tính thành máy chủ AI nội bộ. Các thư viện và công cụ quen thuộc kết nối được ngay, chỉ cần đổi địa chỉ.</p></div>
       <div class="feat reveal"><div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg></div><h3>Tận dụng phần cứng</h3><p>Tự dùng GPU để tăng tốc: Vulkan (NVIDIA, AMD, Intel) trên Windows, Metal trên Mac Apple Silicon. Không có GPU vẫn chạy được bằng CPU.</p></div>
       <div class="feat reveal"><div class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/></svg></div><h3>Tự động cập nhật</h3><p>AIVN tự kiểm tra bản mới khi mở. Trên Windows chỉ cần bấm Tải về rồi Khởi động lại; trên Mac, AIVN báo có bản mới và mở trang tải về.</p></div>
@@ -352,8 +352,8 @@ footer{border-top:1px solid var(--line);padding:56px 0 32px;background:var(--bg2
     <div class="models-head reveal">
       <div>
         <span class="eyebrow">Mô hình</span>
-        <h2>Mô hình mở nhỏ gọn,<br>chọn cái hợp với máy bạn</h2>
-        <p class="lead">Mục Khám phá trong AIVN có sẵn 6 mô hình dưới đây, ghi rõ dung lượng tải và mức RAM cần thiết. Bạn cũng có thể nhập tệp GGUF của riêng mình.</p>
+        <h2>Hàng nghìn mô hình mở,<br>chọn cái hợp với máy bạn</h2>
+        <p class="lead">Mục Khám phá trong AIVN tìm được mọi kho GGUF công khai trên Hugging Face, kèm 26 gợi ý đã kiểm tra sẵn (Qwen3, Gemma 3, Llama, Phi-4, Mistral, DeepSeek R1, gpt-oss, VyLinh tiếng Việt…). Dưới đây là một số gợi ý, với dung lượng tải thật của bản Q4_K_M.</p>
       </div>
       <label class="search">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -361,44 +361,62 @@ footer{border-top:1px solid var(--line);padding:56px 0 32px;background:var(--bg2
       </label>
     </div>
     <div class="model-grid" id="modelGrid">
-      <div class="model reveal" data-name="qwen 0.5b">
-        <div class="model-top"><div class="m-av" style="background:#2ee6a6">Qw</div><div><h4>Qwen2.5 0.5B Instruct</h4><span class="org">Họ mô hình Qwen</span></div></div>
-        <p>Siêu nhỏ, chạy trên hầu hết mọi máy. Phù hợp để thử nhanh, nhưng hay trả lời sai.</p>
-        <div class="tags"><span class="tag">0.5B tham số</span><span class="tag">Q4_K_M · ~469 MB</span><span class="tag">Siêu nhẹ</span></div>
-        <div class="model-foot"><span>Cần ≥ 2 GB RAM</span><span>Có trong AIVN</span></div>
-      </div>
-      <div class="model reveal" data-name="qwen 1.5b">
-        <div class="model-top"><div class="m-av" style="background:#2ee6a6">Qw</div><div><h4>Qwen2.5 1.5B Instruct</h4><span class="org">Họ mô hình Qwen</span></div></div>
+      <div class="model reveal" data-name="qwen2.5 1.5b instruct qwen khuyên dùng đa ngôn ngữ">
+        <div class="model-top"><div class="m-av" style="background:#2ee6a6">Qw</div><div><h4>Qwen2.5 1.5B Instruct</h4><span class="org">Họ mô hình Qwen · Apache 2.0</span></div></div>
         <p>Cân bằng tốt giữa tốc độ và chất lượng, trả lời tiếng Việt khá ổn.</p>
-        <div class="tags"><span class="tag">1.5B tham số</span><span class="tag">Q4_K_M · ~1,04 GB</span><span class="tag">Khuyên dùng</span></div>
-        <div class="model-foot"><span>Cần ≥ 4 GB RAM</span><span>Có trong AIVN</span></div>
+        <div class="tags"><span class="tag">1.5B tham số</span><span class="tag">Q4_K_M · ~1,12 GB</span><span class="tag">Khuyên dùng</span></div>
+        <div class="model-foot"><span>Cần ≥ 2 GB RAM</span><span>Gợi ý trong AIVN</span></div>
       </div>
-      <div class="model reveal" data-name="qwen 3b">
-        <div class="model-top"><div class="m-av" style="background:#2ee6a6">Qw</div><div><h4>Qwen2.5 3B Instruct</h4><span class="org">Họ mô hình Qwen</span></div></div>
-        <p>Thông minh hơn rõ rệt, tốt cho tóm tắt, viết lách và lập trình cơ bản.</p>
-        <div class="tags"><span class="tag">3B tham số</span><span class="tag">Q4_K_M · ~1,96 GB</span><span class="tag">Đa ngôn ngữ</span></div>
-        <div class="model-foot"><span>Cần ≥ 6 GB RAM</span><span>Có trong AIVN</span></div>
+      <div class="model reveal" data-name="gemma 3 1b it gemma">
+        <div class="model-top"><div class="m-av" style="background:#ffb547">Ge</div><div><h4>Gemma 3 1B it</h4><span class="org">Họ mô hình Gemma · Gemma</span></div></div>
+        <p>Gemma thế hệ 3 bản siêu nhẹ, nhanh trên mọi máy.</p>
+        <div class="tags"><span class="tag">1B tham số</span><span class="tag">Q4_K_M · ~806 MB</span><span class="tag">Siêu nhẹ</span></div>
+        <div class="model-foot"><span>Cần ≥ 2 GB RAM</span><span>Gợi ý trong AIVN</span></div>
       </div>
-      <div class="model reveal" data-name="llama 1b">
-        <div class="model-top"><div class="m-av" style="background:#7cc7ff">Ll</div><div><h4>Llama 3.2 1B Instruct</h4><span class="org">Họ mô hình Llama</span></div></div>
-        <p>Nhỏ gọn, phản hồi nhanh. Mạnh nhất với tiếng Anh.</p>
-        <div class="tags"><span class="tag">1B tham số</span><span class="tag">Q4_K_M · ~770 MB</span><span class="tag">Nhanh</span></div>
-        <div class="model-foot"><span>Cần ≥ 3 GB RAM</span><span>Có trong AIVN</span></div>
+      <div class="model reveal" data-name="qwen3 4b instruct 2507 qwen khuyên dùng đa ngôn ngữ">
+        <div class="model-top"><div class="m-av" style="background:#2ee6a6">Qw</div><div><h4>Qwen3 4B Instruct 2507</h4><span class="org">Họ mô hình Qwen · Apache 2.0</span></div></div>
+        <p>Bản Qwen3 4B trả lời trực tiếp (không thinking), nhanh và chất lượng cao.</p>
+        <div class="tags"><span class="tag">4B tham số</span><span class="tag">Q4_K_M · ~2,50 GB</span><span class="tag">Thế hệ mới</span></div>
+        <div class="model-foot"><span>Cần ≥ 4 GB RAM</span><span>Gợi ý trong AIVN</span></div>
       </div>
-      <div class="model reveal" data-name="llama 3b">
-        <div class="model-top"><div class="m-av" style="background:#7cc7ff">Ll</div><div><h4>Llama 3.2 3B Instruct</h4><span class="org">Họ mô hình Llama</span></div></div>
-        <p>Đa năng, phù hợp làm trợ lý hằng ngày.</p>
-        <div class="tags"><span class="tag">3B tham số</span><span class="tag">Q4_K_M · ~1,88 GB</span><span class="tag">Đa năng</span></div>
-        <div class="model-foot"><span>Cần ≥ 6 GB RAM</span><span>Có trong AIVN</span></div>
+      <div class="model reveal" data-name="arcee vylinh 3b (tiếng việt) vylinh tiếng việt">
+        <div class="model-top"><div class="m-av" style="background:#ff7a90">Vy</div><div><h4>Arcee VyLinh 3B (tiếng Việt)</h4><span class="org">Họ mô hình VyLinh · Apache 2.0</span></div></div>
+        <p>Mô hình 3B tinh chỉnh riêng cho tiếng Việt (Arcee AI, nền Qwen2.5).</p>
+        <div class="tags"><span class="tag">3B tham số</span><span class="tag">Q4_K_M · ~2,10 GB</span><span class="tag">Tiếng Việt</span></div>
+        <div class="model-foot"><span>Cần ≥ 3 GB RAM</span><span>Gợi ý trong AIVN</span></div>
       </div>
-      <div class="model reveal" data-name="gemma 2b">
-        <div class="model-top"><div class="m-av" style="background:#ffb547">Ge</div><div><h4>Gemma 2 2B it</h4><span class="org">Họ mô hình Gemma</span></div></div>
-        <p>Văn phong tự nhiên, gọn nhẹ, chạy tốt trên laptop không có card rời.</p>
-        <div class="tags"><span class="tag">2B tham số</span><span class="tag">Q4_K_M · ~1,59 GB</span><span class="tag">Gọn nhẹ</span></div>
-        <div class="model-foot"><span>Cần ≥ 4 GB RAM</span><span>Có trong AIVN</span></div>
+      <div class="model reveal" data-name="gemma 3 4b it gemma đa ngôn ngữ">
+        <div class="model-top"><div class="m-av" style="background:#ffb547">Ge</div><div><h4>Gemma 3 4B it</h4><span class="org">Họ mô hình Gemma · Gemma</span></div></div>
+        <p>Đa ngôn ngữ tốt, ngữ cảnh dài. AIVN dùng phần văn bản (chưa hỗ trợ ảnh).</p>
+        <div class="tags"><span class="tag">4B tham số</span><span class="tag">Q4_K_M · ~2,49 GB</span><span class="tag">Đa ngôn ngữ</span></div>
+        <div class="model-foot"><span>Cần ≥ 4 GB RAM</span><span>Gợi ý trong AIVN</span></div>
+      </div>
+      <div class="model reveal" data-name="llama 3.2 3b instruct llama đa năng">
+        <div class="model-top"><div class="m-av" style="background:#7cc7ff">Ll</div><div><h4>Llama 3.2 3B Instruct</h4><span class="org">Họ mô hình Llama · Llama 3.2 Community</span></div></div>
+        <p>Đa năng, ngữ cảnh dài, phù hợp làm trợ lý hằng ngày.</p>
+        <div class="tags"><span class="tag">3B tham số</span><span class="tag">Q4_K_M · ~2,02 GB</span><span class="tag">Đa năng</span></div>
+        <div class="model-foot"><span>Cần ≥ 3 GB RAM</span><span>Gợi ý trong AIVN</span></div>
+      </div>
+      <div class="model reveal" data-name="phi-4 mini instruct phi suy luận">
+        <div class="model-top"><div class="m-av" style="background:#b69cff">Ph</div><div><h4>Phi-4 mini Instruct</h4><span class="org">Họ mô hình Phi · MIT</span></div></div>
+        <p>Phi thế hệ 4 bản nhỏ, đa ngôn ngữ tốt hơn Phi-3.5.</p>
+        <div class="tags"><span class="tag">3.8B tham số</span><span class="tag">Q4_K_M · ~2,49 GB</span><span class="tag">Suy luận</span></div>
+        <div class="model-foot"><span>Cần ≥ 4 GB RAM</span><span>Gợi ý trong AIVN</span></div>
+      </div>
+      <div class="model reveal" data-name="qwen2.5 coder 7b instruct qwen lập trình">
+        <div class="model-top"><div class="m-av" style="background:#2ee6a6">Qw</div><div><h4>Qwen2.5 Coder 7B Instruct</h4><span class="org">Họ mô hình Qwen · Apache 2.0</span></div></div>
+        <p>Chuyên viết, giải thích và sửa mã nguồn.</p>
+        <div class="tags"><span class="tag">7B tham số</span><span class="tag">Q4_K_M · ~4,68 GB</span><span class="tag">Lập trình</span></div>
+        <div class="model-foot"><span>Cần ≥ 6 GB RAM</span><span>Gợi ý trong AIVN</span></div>
+      </div>
+      <div class="model reveal" data-name="gpt-oss 20b gpt-oss mạnh suy luận">
+        <div class="model-top"><div class="m-av" style="background:#e6e6e6">GP</div><div><h4>gpt-oss 20B</h4><span class="org">Họ mô hình GPT-OSS · Apache 2.0</span></div></div>
+        <p>Mô hình mở của OpenAI (MoE), suy luận mạnh. Cần từ 16 GB RAM.</p>
+        <div class="tags"><span class="tag">20B (MoE) tham số</span><span class="tag">MXFP4 · ~12,11 GB</span><span class="tag">Máy mạnh</span></div>
+        <div class="model-foot"><span>Cần ≥ 16 GB RAM</span><span>Gợi ý trong AIVN</span></div>
       </div>
     </div>
-    <p class="disclaimer">* Tải trực tiếp từ Hugging Face trong ứng dụng. Mức RAM mang tính tham khảo; mỗi mô hình tuân theo giấy phép riêng của nhà phát hành (Qwen, Llama, Gemma).</p>
+    <p class="disclaimer">* Tải trực tiếp từ Hugging Face trong ứng dụng. Mức RAM mang tính tham khảo. Mỗi mô hình tuân theo giấy phép riêng của nhà phát hành; AIVN không sở hữu hay phân phối lại mô hình. Kho cần đăng nhập (gated) cần mã truy cập Hugging Face của bạn, được lưu riêng trên máy. Mô hình có khả năng nhìn ảnh (như Gemma 3 4B) hiện chỉ được dùng phần văn bản.</p>
   </div>
 </section>
 
@@ -486,10 +504,12 @@ console.<span class="f">log</span>(data.choices[<span class="n">0</span>].messag
     </div>
     <div class="faq">
       <div class="qa reveal"><button aria-expanded="false">AIVN có miễn phí không?<span class="pm">+</span></button><div class="ans"><p>Có. AIVN miễn phí cho mục đích cá nhân và học tập. Các mô hình bạn tải về tuân theo giấy phép riêng của từng nhà phát hành.</p></div></div>
-      <div class="qa reveal"><button aria-expanded="false">Máy tính của tôi cần cấu hình thế nào?<span class="pm">+</span></button><div class="ans"><p>Windows 10/11 64-bit hoặc macOS 13 trở lên (Apple Silicon hoặc Intel), tối thiểu 4 GB RAM (khuyên dùng 8 GB), khoảng 0,5 GB cho ứng dụng cộng 0,5–2,1 GB cho mỗi mô hình. Card đồ họa hỗ trợ Vulkan (Windows) hoặc chip Apple M-series giúp trả lời nhanh hơn nhưng không bắt buộc.</p></div></div>
-      <div class="qa reveal"><button aria-expanded="false">Có thật sự dùng được khi không có Internet?<span class="pm">+</span></button><div class="ans"><p>Đúng vậy. Bạn chỉ cần mạng lúc tải ứng dụng, tải mô hình và khi kiểm tra cập nhật. Trò chuyện, đọc tài liệu và máy chủ API đều chạy offline.</p></div></div>
-      <div class="qa reveal"><button aria-expanded="false">Mô hình có hiểu tiếng Việt không?<span class="pm">+</span></button><div class="ans"><p>Có, ở mức khác nhau. Qwen2.5 1.5B hoặc 3B trả lời tiếng Việt khá ổn và được khuyên dùng. Mô hình rất nhỏ (0.5B) nhanh nhưng hay trả lời sai.</p></div></div>
-      <div class="qa reveal"><button aria-expanded="false">Tôi gửi được những loại tệp nào?<span class="pm">+</span></button><div class="ans"><p>PDF có lớp chữ (bôi đen được chữ), DOCX, TXT, MD, CSV, JSON và các tệp mã nguồn phổ biến, tối đa 20 MB mỗi tệp và 5 tệp mỗi lần. PDF scan/ảnh chụp, tệp .doc cũ và hình ảnh chưa được hỗ trợ. Nếu tài liệu dài hơn giới hạn ngữ cảnh của mô hình, AIVN chỉ dùng phần mở đầu và các đoạn liên quan nhất tới câu hỏi, và sẽ báo cho bạn biết.</p></div></div>
+      <div class="qa reveal"><button aria-expanded="false">Máy tính của tôi cần cấu hình thế nào?<span class="pm">+</span></button><div class="ans"><p>Windows 10/11 64-bit hoặc macOS 13 trở lên (Apple Silicon hoặc Intel), tối thiểu 4 GB RAM (khuyên dùng 8 GB trở lên), khoảng 0,7 GB cho ứng dụng cộng dung lượng mô hình (từ 0,5 GB với mô hình nhỏ tới 5–12 GB với mô hình 7B–20B). AIVN hiển thị nhãn “Vừa máy / Có thể chậm / Quá lớn” cho từng bản tải. Card đồ họa hỗ trợ Vulkan (Windows) hoặc chip Apple M-series giúp trả lời nhanh hơn nhưng không bắt buộc.</p></div></div>
+      <div class="qa reveal"><button aria-expanded="false">Có thật sự dùng được khi không có Internet?<span class="pm">+</span></button><div class="ans"><p>Đúng vậy. Bạn chỉ cần mạng lúc tải ứng dụng, tải mô hình và khi kiểm tra cập nhật. Trò chuyện, đọc tài liệu, đọc chữ trong ảnh và máy chủ API đều chạy offline.</p></div></div>
+      <div class="qa reveal"><button aria-expanded="false">Mô hình có hiểu tiếng Việt không?<span class="pm">+</span></button><div class="ans"><p>Có, ở mức khác nhau. Qwen2.5 1.5B/3B, Qwen3 4B và Arcee VyLinh 3B (tinh chỉnh riêng cho tiếng Việt) trả lời tiếng Việt khá ổn. Máy mạnh hơn có thể dùng Qwen2.5 7B hoặc Qwen3 8B. Mô hình rất nhỏ (0.5–0.6B) nhanh nhưng hay trả lời sai.</p></div></div>
+      <div class="qa reveal"><button aria-expanded="false">Tôi gửi được những loại tệp nào?<span class="pm">+</span></button><div class="ans"><p>PDF có lớp chữ (bôi đen được chữ), DOCX, TXT, MD, CSV, JSON, các tệp mã nguồn phổ biến và ảnh PNG/JPG/WEBP/GIF/BMP, tối đa 20 MB mỗi tệp và 5 tệp mỗi lần. Với ảnh, AIVN đọc phần chữ trong ảnh bằng OCR (tiếng Việt và tiếng Anh, chạy offline). PDF scan nhiều trang và tệp .doc cũ chưa được hỗ trợ. Nếu tài liệu dài hơn giới hạn ngữ cảnh của mô hình, AIVN chỉ dùng phần mở đầu và các đoạn liên quan nhất tới câu hỏi, và sẽ báo cho bạn biết.</p></div></div>
+      <div class="qa reveal"><button aria-expanded="false">AIVN có nhìn và hiểu được ảnh không?<span class="pm">+</span></button><div class="ans"><p>Chưa hẳn. Bộ máy chạy mô hình hiện tại chưa hỗ trợ mô hình thị giác, nên AIVN đọc <b>chữ</b> trong ảnh (OCR ngay trên máy) rồi đưa cho mô hình, và ghi rõ: “Mô hình hiện tại không nhìn được ảnh, AIVN đã đọc chữ trong ảnh”. Cách này hợp với ảnh chụp màn hình, lịch thi, hoá đơn, trang sách; còn hình vẽ, biểu đồ không có chữ thì mô hình chưa hiểu được. Chữ đọc từ ảnh có thể sai chính tả nhỏ.</p></div></div>
+      <div class="qa reveal"><button aria-expanded="false">Tôi tải được những mô hình nào?<span class="pm">+</span></button><div class="ans"><p>Bất kỳ kho GGUF công khai nào trên Hugging Face mà kiến trúc được bộ máy llama.cpp trong AIVN hỗ trợ (Qwen2.5, Qwen3, Gemma 2/3, Llama 3.x, Phi-3/4, Mistral, DeepSeek R1 Distill, gpt-oss…). AIVN gộp các tệp chia nhỏ (-00001-of-0000N) thành một mô hình, ẩn tệp không dùng để trò chuyện (mmproj, embedding) và cảnh báo nếu kiến trúc chưa được hỗ trợ. Kho cần đăng nhập thì nhập mã truy cập Hugging Face trong mục Khám phá; mã chỉ lưu trên máy bạn.</p></div></div>
       <div class="qa reveal"><button aria-expanded="false">AIVN cập nhật như thế nào?<span class="pm">+</span></button><div class="ans"><p>Khi mở, AIVN kiểm tra bản mới (cần Internet). Trên Windows bạn bấm “Tải về”, rồi “Khởi động lại để cập nhật”, không cần cài lại thủ công. Trên Mac, vì bản Mac chưa được Apple ký số, AIVN chỉ báo có bản mới và mở trang tải về để bạn thay ứng dụng.</p></div></div>
       <div class="qa reveal"><button aria-expanded="false">Tôi có thể dùng AIVN cho dự án lập trình không?<span class="pm">+</span></button><div class="ans"><p>Được. Bật máy chủ API trong AIVN, sau đó trỏ ứng dụng của bạn tới http://localhost:1234/v1 như khi dùng một dịch vụ tương thích OpenAI.</p></div></div>
     </div>

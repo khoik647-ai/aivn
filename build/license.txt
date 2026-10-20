@@ -1,4 +1,4 @@
-AIVN 0.10.0 - Giấy phép sử dụng (MIT)
+AIVN 0.11.0 - Giấy phép sử dụng (MIT)
 Phát triển bởi NGUYỄN NGỌC KHÔI SINH VIÊN VLU · © 2026 AIVN
 
 Phần mềm này được cung cấp miễn phí "NGUYÊN TRẠNG", không kèm bất kỳ bảo đảm nào.

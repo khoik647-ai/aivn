@@ -7,6 +7,7 @@ const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const TEXT_EXT = new Set(['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'jsonl', 'xml', 'yaml', 'yml', 'toml', 'ini', 'log', 'html', 'htm', 'css', 'scss',
   'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'py', 'java', 'c', 'h', 'cpp', 'hpp', 'cc', 'cs', 'go', 'rs', 'rb', 'php', 'swift', 'kt', 'kts', 'scala',
   'sql', 'sh', 'bash', 'ps1', 'bat', 'r', 'm', 'lua', 'pl', 'dart', 'vue', 'svelte', 'tex', 'srt', 'vtt', 'env', 'gitignore', 'dockerfile']);
+const OCR_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp']);
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'heic', 'heif', 'tif', 'tiff', 'svg', 'ico']);
 
 class DocError extends Error { constructor(msg) { super(msg); this.userMessage = msg; } }
@@ -84,7 +85,7 @@ async function extractFile(file) {
   let st;
   try { st = fs.statSync(file); } catch { throw new DocError(`Không mở được tệp "${name}".`); }
   if (!st.isFile()) throw new DocError(`"${name}" không phải là tệp.`);
-  if (IMAGE_EXT.has(ext)) throw new DocError(`AIVN chưa hỗ trợ ảnh ("${name}"). Bạn có thể gửi PDF có lớp chữ, DOCX, TXT hoặc tệp mã nguồn.`);
+  if (IMAGE_EXT.has(ext)) throw new DocError(OCR_EXT.has(ext) ? `"${name}" là ảnh, AIVN sẽ đọc chữ trong ảnh bằng OCR.` : `AIVN chưa đọc được định dạng ảnh .${ext} ("${name}"). Hãy dùng PNG, JPG, WEBP, GIF hoặc BMP.`);
   if (st.size > MAX_FILE_BYTES) throw new DocError(`"${name}" quá lớn (${(st.size / 1048576).toFixed(1)} MB). Giới hạn là 20 MB mỗi tệp.`);
   if (st.size === 0) throw new DocError(`"${name}" là tệp rỗng.`);
   const buf = fs.readFileSync(file);
@@ -129,9 +130,12 @@ function scoreChunk(chunk, kws) {
  */
 function packDocuments(question, docs, budgetTokens, countTokens) {
   const est = countTokens || ((t) => Math.ceil(t.length / 3));
-  const header = (d, part) => `<<<TÀI LIỆU: ${d.name}${part ? ' (chỉ trích một phần)' : ''}>>>`;
-  const footer = '<<<HẾT TÀI LIỆU>>>';
-  const fullBlocks = docs.map((d) => `${header(d, false)}\n${d.text.trim()}\n${footer}`);
+  // Ảnh: mô hình không nhìn được ảnh, chỉ nhận chữ AIVN đọc được bằng OCR
+  const header = (d, part) => d.kind === 'image'
+    ? `<<<CHỮ ĐỌC ĐƯỢC TRONG ẢNH (OCR, có thể sai sót): ${d.name}${part ? ' (chỉ trích một phần)' : ''}>>>`
+    : `<<<TÀI LIỆU: ${d.name}${part ? ' (chỉ trích một phần)' : ''}>>>`;
+  const footerOf = (d) => (d.kind === 'image' ? '<<<HẾT ẢNH>>>' : '<<<HẾT TÀI LIỆU>>>');
+  const fullBlocks = docs.map((d) => `${header(d, false)}\n${d.text.trim()}\n${footerOf(d)}`);
   if (est(fullBlocks.join('\n\n')) <= budgetTokens) return { block: fullBlocks.join('\n\n'), truncated: false, files: docs.map((d) => ({ name: d.name, usedPct: 100, truncated: false })) };
 
   const kws = keywords(question);
@@ -141,7 +145,7 @@ function packDocuments(question, docs, budgetTokens, countTokens) {
     const chunks = chunkText(d.text.trim());
     const total = chunks.reduce((a, c) => a + c.length, 0);
     const chosen = new Set();
-    let used = est(header(d, true) + footer) + 10;
+    let used = est(header(d, true) + footerOf(d)) + 10;
     const tryAdd = (i) => { if (chosen.has(i)) return true; const t = est(chunks[i]) + 4; if (used + t > per) return false; chosen.add(i); used += t; return true; };
     // 1) phần mở đầu (tiêu đề, mục lục, giới thiệu)
     for (let i = 0; i < Math.min(2, chunks.length); i++) tryAdd(i);
@@ -157,14 +161,14 @@ function packDocuments(question, docs, budgetTokens, countTokens) {
     if (idx.length && idx[idx.length - 1] !== chunks.length - 1) body += '\n\n[...]';
     const usedChars = idx.reduce((a, i) => a + chunks[i].length, 0);
     files.push({ name: d.name, usedPct: total ? Math.round((usedChars / total) * 100) : 100, truncated });
-    blocks.push(`${header(d, truncated)}\n${body}\n${footer}`);
+    blocks.push(`${header(d, truncated)}\n${body}\n${footerOf(d)}`);
   }
   return { block: blocks.join('\n\n'), truncated: files.some((f) => f.truncated), files };
 }
 
 function buildUserContent(question, packedBlock) {
   if (!packedBlock) return question;
-  return `Dưới đây là nội dung tài liệu người dùng gửi kèm. Hãy dựa vào tài liệu để trả lời; nếu tài liệu không có thông tin, hãy nói rõ.\n\n${packedBlock}\n\nCâu hỏi: ${question}`;
+  return `Dưới đây là nội dung tài liệu người dùng gửi kèm. Hãy dựa vào tài liệu để trả lời; nếu tài liệu không có thông tin, hãy nói rõ. Phần chữ đọc từ ảnh (OCR) có thể có lỗi chính tả nhỏ.\n\n${packedBlock}\n\nCâu hỏi: ${question}`;
 }
 
-module.exports = { extractFile, packDocuments, buildUserContent, keywords, chunkText, DocError, MAX_FILE_BYTES, IMAGE_EXT, TEXT_EXT };
+module.exports = { OCR_EXT, extractFile, packDocuments, buildUserContent, keywords, chunkText, DocError, MAX_FILE_BYTES, IMAGE_EXT, TEXT_EXT };

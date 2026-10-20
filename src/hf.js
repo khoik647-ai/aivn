@@ -1,0 +1,147 @@
+// Tìm kiếm mô hình GGUF trên Hugging Face (API công khai) và phân tích danh sách tệp của một repo.
+// Không phụ thuộc Electron để có thể kiểm thử bằng node.
+const ARCHS = require('./llama-archs.json');
+
+const HF = 'https://huggingface.co';
+const UA = 'AIVN-desktop';
+const SORTS = { downloads: 'downloads', newest: 'lastModified', likes: 'likes' };
+const QUANT_PREF = ['Q4_K_M', 'Q4_K_S', 'IQ4_XS', 'Q4_K_XL', 'Q4_0', 'IQ4_NL', 'Q5_K_M', 'Q5_K_S', 'Q6_K', 'MXFP4', 'Q8_0', 'Q3_K_L', 'Q3_K_M', 'Q3_K_XL', 'IQ3_M', 'Q3_K_S', 'Q2_K', 'IQ2_M'];
+const SPLIT_RE = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i;
+
+function authHeaders(url, token) {
+  const h = { 'User-Agent': UA, Accept: 'application/json' };
+  try { if (token && new URL(url).hostname === 'huggingface.co') h.Authorization = 'Bearer ' + token; } catch {}
+  return h;
+}
+
+class HfError extends Error { constructor(msg, status) { super(msg); this.status = status; this.userMessage = msg; } }
+
+async function getJson(url, { token, fetchImpl = fetch, timeout = 20000 } = {}) {
+  let res;
+  try { res = await fetchImpl(url, { headers: authHeaders(url, token), signal: AbortSignal.timeout(timeout) }); }
+  catch (e) { throw new HfError('Không kết nối được Hugging Face. Hãy kiểm tra Internet.', 0); }
+  if (res.status === 401 || res.status === 403) throw new HfError('Repo này yêu cầu đăng nhập Hugging Face. Hãy nhập HF token trong mục Khám phá → Token Hugging Face.', res.status);
+  if (res.status === 404) throw new HfError('Không tìm thấy repo trên Hugging Face.', 404);
+  if (res.status === 429) throw new HfError('Hugging Face đang giới hạn số lượt truy vấn, vui lòng thử lại sau ít phút.', 429);
+  if (!res.ok) throw new HfError(`Hugging Face trả về lỗi ${res.status}.`, res.status);
+  return res.json();
+}
+
+function archSupported(arch) {
+  if (!arch) return null;
+  const a = String(arch).toLowerCase();
+  // một số tên bị trình biên dịch gộp làm hậu tố của tên dài hơn (vd. "qwen2" nằm trong "rwkv6qwen2")
+  return ARCHS.archs.some(x => x === a || (a.length >= 4 && x.endsWith(a)));
+}
+
+function licenseOf(m) {
+  const t = (m.tags || []).find(x => x.startsWith('license:'));
+  return (m.cardData && m.cardData.license) || (t ? t.slice(8) : null);
+}
+
+function classifyRepo(m) {
+  const tags = m.tags || [];
+  const pipe = m.pipeline_tag || '';
+  const arch = (m.gguf && m.gguf.architecture) || null;
+  const embedding = /sentence-similarity|feature-extraction/.test(pipe) || tags.includes('sentence-transformers') || /bert|embed/i.test(arch || '') || /embed/i.test(m.id);
+  const vision = /image-text-to-text|image-to-text|visual-question/.test(pipe) || tags.includes('vision');
+  return { embedding, vision, arch };
+}
+
+function summarize(m) {
+  const { embedding, vision, arch } = classifyRepo(m);
+  const [author, ...rest] = m.id.split('/');
+  return {
+    id: m.id, author: m.author || author, name: rest.join('/'),
+    downloads: m.downloads || 0, likes: m.likes || 0, lastModified: m.lastModified || m.createdAt || null,
+    license: licenseOf(m), gated: m.gated ? String(m.gated) : false, pipeline: m.pipeline_tag || null,
+    arch, archSupported: archSupported(arch), params: (m.gguf && m.gguf.total) || null,
+    contextLength: (m.gguf && m.gguf.context_length) || null, vision, embedding,
+  };
+}
+
+async function search({ q = '', sort = 'downloads', limit = 30, token, fetchImpl } = {}) {
+  const p = new URLSearchParams({ filter: 'gguf', sort: SORTS[sort] || 'downloads', direction: '-1', limit: String(Math.min(100, limit)) });
+  if (q.trim()) p.set('search', q.trim());
+  for (const e of ['author', 'downloads', 'likes', 'lastModified', 'gated', 'pipeline_tag', 'tags', 'gguf']) p.append('expand[]', e);
+  const list = await getJson(`${HF}/api/models?${p}`, { token, fetchImpl });
+  return list.map(summarize);
+}
+
+function parseQuant(file) {
+  const base = file.split('/').pop().replace(SPLIT_RE, '$1').replace(/\.gguf$/i, '');
+  const m = base.match(/(?:^|[-_.])((?:UD-)?(?:I?Q\d(?:_[0-9A-Z]+)*|BF16|F16|F32|FP16|MXFP4(?:_MOE)?|TQ\d_\d))$/i)
+    || base.match(/(?:^|[-_.])((?:UD-)?(?:I?Q\d(?:_[0-9A-Z]+)*|BF16|F16|F32|FP16|MXFP4(?:_MOE)?|TQ\d_\d))(?=[-_.])/i);
+  return m ? m[1].toUpperCase().replace(/^UD-/, '').replace(/^FP16$/, 'F16') : null;
+}
+
+function fileKind(file, repoInfo) {
+  const n = file.split('/').pop();
+  if (/mmproj/i.test(n)) return 'mmproj';
+  if (repoInfo && repoInfo.embedding) return 'embedding';
+  if (/embed/i.test(n)) return 'embedding';
+  return 'chat';
+}
+
+// Ước lượng mức vừa máy: Vừa máy / Có thể chậm / Quá lớn
+function fitFor(size, hw) {
+  if (!size || !hw || !hw.ram) return null;
+  const need = size * 1.1 + 0.4 * 1024 ** 3; // trọng số + ngữ cảnh/bộ đệm
+  const vram = hw.gpu && hw.vram && hw.vram.total ? hw.vram.total : 0;
+  if (vram && need <= vram * 0.9) return { level: 'fit', label: 'Vừa máy', hint: 'Vừa với bộ nhớ GPU' };
+  if (need <= hw.ram * 0.6) return { level: 'fit', label: 'Vừa máy', hint: 'Vừa với RAM' };
+  if (need <= hw.ram * 0.9 + vram * 0.5) return { level: 'slow', label: 'Có thể chậm', hint: 'Gần hết bộ nhớ, máy có thể chậm' };
+  return { level: 'big', label: 'Quá lớn', hint: 'Lớn hơn bộ nhớ của máy' };
+}
+
+// Gom tệp .gguf: các phần -00001-of-0000N thành một mô hình
+function groupFiles(entries, repoInfo = {}, hw = null) {
+  const groups = new Map();
+  for (const e of entries) {
+    if (e.type && e.type !== 'file') continue;
+    const p = e.path || e.rfilename;
+    if (!p || !/\.gguf$/i.test(p)) continue;
+    const size = (e.lfs && e.lfs.size) || e.size || 0;
+    const m = p.match(SPLIT_RE);
+    const key = m ? `${m[1]}-of-${m[3]}` : p.replace(/\.gguf$/i, '');
+    let g = groups.get(key);
+    if (!g) { g = { key, files: [], parts: m ? Number(m[3]) : 1, split: !!m }; groups.set(key, g); }
+    g.files.push({ path: p, size, part: m ? Number(m[2]) : 1 });
+  }
+  const out = [];
+  for (const g of groups.values()) {
+    g.files.sort((a, b) => a.part - b.part);
+    const first = g.files[0].path;
+    const size = g.files.reduce((s, f) => s + f.size, 0);
+    const kind = fileKind(first, repoInfo);
+    out.push({
+      key: g.key, name: (g.split ? g.key.replace(/-of-\d{5}$/, '') : g.key).split('/').pop(), folder: g.key.includes('/') ? g.key.slice(0, g.key.lastIndexOf('/')) : '',
+      quant: parseQuant(first), size, parts: g.parts, split: g.split, files: g.files,
+      complete: g.files.length === g.parts && g.files.every((f, i) => f.part === i + 1), kind,
+      fit: kind === 'chat' ? fitFor(size, hw) : null,
+    });
+  }
+  out.sort((a, b) => (a.kind === 'chat' ? 0 : 1) - (b.kind === 'chat' ? 0 : 1) || a.size - b.size);
+  const chat = out.filter(g => g.kind === 'chat' && g.complete);
+  const rank = (g) => { const i = QUANT_PREF.indexOf(g.quant || ''); return i < 0 ? 99 : i; };
+  let rec = chat.find(g => g.quant === 'Q4_K_M' && !g.split) || chat.find(g => g.quant === 'Q4_K_M');
+  if (!rec) rec = [...chat].sort((a, b) => rank(a) - rank(b) || a.size - b.size).find(g => !g.fit || g.fit.level !== 'big') || chat[0];
+  if (rec) rec.recommended = true;
+  return out;
+}
+
+async function repoFiles(repo, { token, hw, fetchImpl } = {}) {
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new HfError('Tên repo không hợp lệ.', 400);
+  const p = new URLSearchParams();
+  for (const e of ['author', 'downloads', 'likes', 'lastModified', 'gated', 'pipeline_tag', 'tags', 'gguf', 'cardData']) p.append('expand[]', e);
+  const [info, tree] = await Promise.all([
+    getJson(`${HF}/api/models/${repo}?${p}`, { token, fetchImpl }),
+    getJson(`${HF}/api/models/${repo}/tree/main?recursive=true`, { token, fetchImpl }),
+  ]);
+  const sum = summarize({ ...info, id: info.id || repo });
+  return { ...sum, url: `${HF}/${repo}`, groups: groupFiles(tree, sum, hw) };
+}
+
+function resolveUrl(repo, file) { return `${HF}/${repo}/resolve/main/${file.split('/').map(encodeURIComponent).join('/')}`; }
+
+module.exports = { search, repoFiles, groupFiles, parseQuant, fitFor, archSupported, resolveUrl, summarize, HfError, QUANT_PREF, SPLIT_RE, llamaCpp: ARCHS.llamaCpp };

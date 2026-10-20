@@ -21,8 +21,10 @@ test('PDF có lớp chữ', async () => {
 test('PDF scan không có chữ -> thông báo tiếng Việt', async () => {
   await assert.rejects(extractFile(F('scan-khong-chu.pdf')), (e) => e instanceof DocError && /không có lớp chữ/.test(e.userMessage));
 });
-test('Ảnh -> chưa hỗ trợ ảnh', async () => {
-  await assert.rejects(extractFile(F('anh.png')), (e) => /chưa hỗ trợ ảnh/.test(e.userMessage));
+test('Ảnh không đi đường tài liệu (chuyển sang OCR); định dạng lạ bị từ chối rõ ràng', async () => {
+  await assert.rejects(extractFile(F('anh.png')), (e) => /OCR/.test(e.userMessage));
+  const fs = require('fs'), os = require('os'); const p = path.join(os.tmpdir(), 'aivn-x.heic'); fs.writeFileSync(p, 'x');
+  await assert.rejects(extractFile(p), (e) => /chưa đọc được định dạng ảnh \.heic/.test(e.userMessage)); fs.unlinkSync(p);
 });
 test('CSV', async () => { assert.match((await extractFile(F('diem.csv'))).text, /Binh,7/); });
 test('Tệp > 20 MB bị từ chối', async () => {

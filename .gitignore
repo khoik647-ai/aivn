@@ -17,3 +17,4 @@ out/
 Thumbs.db
 *.log
 npm-debug.log*
+build/node/

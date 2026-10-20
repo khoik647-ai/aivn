@@ -130,3 +130,44 @@ h4{font-size:13px;margin:0 0 8px;color:var(--muted);text-transform:uppercase;let
 .update-box{display:flex;flex-direction:column;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px}
 .update-box .row{flex-wrap:wrap}
 .update-box .ok{color:var(--accent)}.update-box .err{color:#ffb3b3}
+/* ---- Khám phá v0.11: tìm kiếm Hugging Face ---- */
+.searchbar{display:flex;gap:8px;margin:4px 0 16px}
+.searchbar input{flex:1;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;outline:none}
+.row.between{justify-content:space-between;align-items:center;margin:6px 0 10px}
+.fam-filter{display:flex;gap:6px;flex-wrap:wrap}
+.chip-btn{border:1px solid var(--line);background:none;border-radius:999px;padding:3px 10px;font-size:12px;color:var(--muted);cursor:pointer}
+.chip-btn.on{border-color:rgba(46,230,166,.5);color:var(--accent);background:rgba(46,230,166,.08)}
+.fit{font-size:11px;border-radius:999px;padding:2px 8px;font-weight:600}
+.fit.fit{background:rgba(46,230,166,.12);color:var(--accent)}.fit.slow{background:rgba(255,181,71,.13);color:var(--warm)}.fit.big{background:rgba(255,107,107,.13);color:var(--danger)}
+.tag.warn{border-color:rgba(255,181,71,.45);color:var(--warm)}.tag.lic{color:#9fb3c8}
+.linkish{background:none;border:none;color:var(--muted);font-size:11.5px;text-align:left;cursor:pointer;padding:0}.linkish:hover{color:var(--accent2)}
+.hf-results{display:flex;flex-direction:column;gap:8px;margin-bottom:18px}
+.hf-item{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.hf-item:hover{border-color:#2e3e50}.hf-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+.hf-main b{word-break:break-all}.meta{font-size:12px;color:var(--muted)}
+.pad{padding:18px 4px}.err{color:var(--danger)}.ok{color:var(--accent)}
+.repo-head{display:flex;gap:12px;align-items:flex-start;margin-bottom:12px}.repo-head .grow{flex:1;min-width:0}.repo-head h3{word-break:break-all}
+.note{background:rgba(255,181,71,.07);border:1px solid rgba(255,181,71,.25);border-radius:10px;padding:9px 12px;font-size:12.5px;margin-bottom:8px;line-height:1.5}
+.qtable{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:10px 0}
+.qr{display:grid;grid-template-columns:minmax(220px,2.2fr) 90px 100px 110px minmax(230px,1.6fr);gap:10px;align-items:center;padding:10px 14px;border-top:1px solid var(--line);font-size:13px}
+.qr:first-child{border-top:none}.qr.head{background:var(--bg2);color:var(--muted);font-size:12px;font-weight:600}
+.qr.rec{background:rgba(46,230,166,.05)}.qr .fname{word-break:break-all}
+.qr .foot{display:flex;justify-content:flex-end;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.qr.other{grid-template-columns:minmax(220px,2.2fr) 90px 100px 1fr;opacity:.75}
+.others{margin:8px 0 16px;font-size:13px}.others summary{cursor:pointer;color:var(--muted);margin-bottom:8px}
+.dl-panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:16px}
+.dl-panel h4{margin-bottom:8px}.dl-item{display:grid;grid-template-columns:minmax(180px,1fr) 2fr;gap:12px;align-items:center;padding:6px 0;border-top:1px dashed var(--line);font-size:12px}
+.dl-item:first-of-type{border-top:none}.dl-name{display:flex;flex-direction:column;min-width:0}.dl-name b{word-break:break-all}
+.progress.bad div{background:var(--danger)}
+.token-box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px;display:flex;flex-direction:column;gap:8px}
+.token-box input{flex:1;min-width:240px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:8px 10px;outline:none}
+#tokenBtn.on{border-color:rgba(46,230,166,.5)}
+/* ---- Ảnh dán/thả + OCR ---- */
+.chip .thumb{width:30px;height:30px;object-fit:cover;border-radius:6px;flex:none;background:#fff}
+.chip.img{padding-left:4px}
+.att .thumb{width:22px;height:22px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:2px;background:#fff}
+.doc-warn.ocr{border-color:rgba(58,184,255,.35);background:rgba(58,184,255,.07);color:#bfe3ff}
+.msg{position:relative}
+.copy-btn{margin-top:6px;background:none;border:1px solid var(--line);border-radius:7px;color:var(--muted);font-size:11.5px;padding:2px 8px;cursor:pointer;opacity:.75}
+.copy-btn:hover{opacity:1;color:var(--text)}
+.messages,.msg .body{user-select:text}

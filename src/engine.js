@@ -94,6 +94,7 @@ function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal,
       if (res && res.stopReason === 'maxTokens') finishReason = 'length';
       if (res && res.stopReason === 'abort') finishReason = 'abort';
       if (res && typeof res.responseText === 'string') text = res.responseText;
+      text = text.replace(/^\s+/, '');
     } catch (e) {
       if (!(signal && signal.aborted)) throw e;
       finishReason = 'abort';
