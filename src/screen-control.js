@@ -25,7 +25,7 @@ function permissions({ prompt = false } = {}) {
 const PERM_URLS = { screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture', accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility' };
 
 // Chụp màn hình chính; trả ảnh JPEG (≤ maxW) + thông tin quy đổi toạ độ
-async function capture({ maxW = 1280 } = {}) {
+async function capture({ maxW = 1280, align = 0 } = {}) {
   const d = screen.getPrimaryDisplay();
   const phys = { width: Math.round(d.size.width * d.scaleFactor), height: Math.round(d.size.height * d.scaleFactor) };
   const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: phys });
@@ -33,31 +33,74 @@ async function capture({ maxW = 1280 } = {}) {
   if (!src || src.thumbnail.isEmpty()) throw new Error(process.platform === 'darwin' ? 'Không chụp được màn hình: hãy cấp quyền Ghi màn hình cho AIVN (Cài đặt hệ thống → Quyền riêng tư & Bảo mật → Ghi màn hình), rồi mở lại AIVN.' : 'Không chụp được màn hình.');
   let img = src.thumbnail; const full = img.getSize();
   if (full.width > maxW) img = img.resize({ width: maxW, quality: 'good' });
+  // Qwen2.5-VL / UI-TARS trả toạ độ điểm ảnh của ảnh SAU khi mô hình chia ô (bội số 28; Qwen3-VL: 32): tự đưa ảnh về đúng bội số đó
+  // để toạ độ mô hình trả về khớp đúng ảnh AIVN đã gửi (quy đổi theo từng trục ở parseBox)
+  if (align > 1) { const s0 = img.getSize(); const w = Math.max(align, Math.round(s0.width / align) * align), h = Math.max(align, Math.round(s0.height / align) * align); if (w !== s0.width || h !== s0.height) img = img.resize({ width: w, height: h, quality: 'good' }); }
   const sz = img.getSize();
   return { dataUrl: 'data:image/jpeg;base64,' + img.toJPEG(80).toString('base64'), width: sz.width, height: sz.height, display: { id: d.id, bounds: d.bounds, scaleFactor: d.scaleFactor } };
 }
 
-// Hỏi mô hình nhìn ảnh vị trí của phần tử; trả khung chuẩn hoá 0..1 hoặc null
-const LOCATE_PROMPT = (target, W, H) => `Đây là ảnh chụp màn hình máy tính (rộng ${W}, cao ${H} điểm ảnh). Hãy tìm phần tử giao diện sau: "${target}".
+// Mỗi họ mô hình định vị theo cách riêng: Qwen2.5-VL & UI-TARS-1.5 trả điểm ảnh tuyệt đối (ảnh đã chia ô 28),
+// Qwen3-VL & phần lớn mô hình khác trả thang 0-1000. Biết họ mô hình thì không phải đoán.
+function groundingFamily(id) {
+  const s = String(id || '').toLowerCase().replace(/_/g, '-');
+  if (/ui-?tars/.test(s)) return 'uitars';
+  if (/qwen2\.?5-?vl|qwen2-?vl/.test(s)) return 'qwen25vl';
+  if (/qwen3-?vl/.test(s)) return 'qwen3vl';
+  if (/holo|showui|os-?atlas|gui-?actor|ui-?venus/.test(s)) return 'qwen25vl'; // đều dựa trên Qwen2.5-VL, toạ độ điểm ảnh
+  return 'generic';
+}
+const FAMILY = {
+  qwen25vl: { coords: 'pixel', align: 28 },
+  uitars: { coords: 'pixel', align: 28 },
+  qwen3vl: { coords: 'norm1000', align: 32 },
+  generic: { coords: 'auto', align: 0 },
+};
+const familyInfo = (id) => FAMILY[groundingFamily(id)];
+const LOCATE_PROMPT = (target, W, H, fam = 'generic') => {
+  if (fam === 'qwen25vl') return `Ảnh chụp màn hình rộng ${W}, cao ${H} điểm ảnh. Tìm phần tử giao diện: "${target}". Trả lời đúng MỘT dòng JSON: {"bbox_2d": [x1, y1, x2, y2], "label": "chữ trên phần tử"} với toạ độ điểm ảnh tuyệt đối trên ảnh này. Nếu không thấy: {"found": false, "why": "lý do ngắn"}.`;
+  if (fam === 'uitars') return `You are a GUI agent. Screenshot size ${W}x${H}. Task: click on "${target}". Output only one line: click(start_box='(x,y)') using absolute pixel coordinates of the screenshot. If the element is not visible output: not_found`;
+  if (fam === 'qwen3vl') return `Ảnh chụp màn hình máy tính. Tìm phần tử giao diện: "${target}". Trả lời đúng MỘT dòng JSON: {"bbox_2d": [x1, y1, x2, y2], "label": "chữ trên phần tử"} với toạ độ tương đối thang 0-1000 (0,0 góc trên trái; 1000,1000 góc dưới phải). Nếu không thấy: {"found": false, "why": "lý do ngắn"}.`;
+  return `Đây là ảnh chụp màn hình máy tính (rộng ${W}, cao ${H} điểm ảnh). Hãy tìm phần tử giao diện sau: "${target}".
 Chỉ trả lời MỘT dòng JSON, không giải thích: {"found": true, "x1": số, "y1": số, "x2": số, "y2": số, "label": "chữ trên phần tử"} với toạ độ khung bao quanh phần tử tính theo thang 0-1000 (0,0 là góc trên trái; 1000,1000 là góc dưới phải). Nếu không thấy: {"found": false, "why": "lý do ngắn"}.`;
-function parseBox(text, W, H) {
-  const m = String(text || '').match(/\{[\s\S]*?\}/); if (!m) return null;
-  let j; try { j = JSON.parse(m[0].replace(/'/g, '"')); } catch { return null; }
-  if (j.found === false) return { found: false, why: j.why || '' };
-  let nums = ['x1', 'y1', 'x2', 'y2'].map(k => Number(j[k]));
-  if (nums.some(n => !Number.isFinite(n))) { const b = Array.isArray(j.bbox) ? j.bbox.map(Number) : Array.isArray(j.box) ? j.box.map(Number) : null; if (!b || b.length < 4) { if (Number.isFinite(+j.x) && Number.isFinite(+j.y)) nums = [+j.x - 15, +j.y - 15, +j.x + 15, +j.y + 15]; else return null; } else nums = b.slice(0, 4); }
+};
+// coords: 'pixel' | 'norm1000' | 'auto' (đoán: > 1000 hoặc vượt khung 0-1000 theo tỉ lệ ảnh → điểm ảnh)
+function parseBox(text, W, H, { coords = 'auto' } = {}) {
+  const t = String(text || '');
+  if (/^\s*not_found/i.test(t)) return { found: false, why: 'mô hình không thấy phần tử' };
+  let nums = null, label = '', j = null;
+  // UI-TARS: click(start_box='(x,y)') / '<|box_start|>(x,y)<|box_end|>' / (x1,y1,x2,y2); <point>x y</point>
+  const pt = t.match(/start_box=['"]?\(?\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?:\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?))?/) || t.match(/<\|box_start\|>\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)(?:\s*,?\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\))?/) || t.match(/<point>\s*(-?\d+(?:\.\d+)?)[\s,]+(-?\d+(?:\.\d+)?)\s*<\/point>/);
+  if (pt) { const [x, y] = [+pt[1], +pt[2]]; nums = pt[3] != null ? [x, y, +pt[3], +pt[4]] : [x - 12, y - 12, x + 12, y + 12]; }
+  if (!nums) {
+    const m = t.match(/\{[\s\S]*?\}(?=[^{}]*$|\s*[,\]\n])/) || t.match(/\{[\s\S]*?\}/) || (/\(\s*\d+(?:\.\d+)?\s*,\s*\d+(?:\.\d+)?\s*\)/.test(t) ? ['{}'] : null); if (!m) return null;
+    try { j = JSON.parse(m[0].replace(/'/g, '"')); } catch { const m2 = t.match(/\{[^{}]*\}/); try { j = JSON.parse(m2 && m2[0]); } catch { j = { found: !/"found"\s*:\s*false/.test(t) || undefined }; if (/"found"\s*:\s*false/.test(t)) return { found: false, why: '' }; } } // JSON hỏng (dấu nháy trong câu): vẫn thử lấy điểm (x, y)
+    if (Array.isArray(j)) j = j[0]; if (!j || typeof j !== 'object') return null;
+    if (j.found === false) return { found: false, why: j.why || '' };
+    label = j.label || '';
+    nums = ['x1', 'y1', 'x2', 'y2'].map(k => Number(j[k]));
+    if (nums.some(n => !Number.isFinite(n))) {
+      const b = [j.bbox_2d, j.bbox, j.box, j.box_2d].find(Array.isArray);
+      if (b && b.length >= 4) nums = b.slice(0, 4).map(Number);
+      else if (Array.isArray(j.point_2d) || Array.isArray(j.point)) { const [x, y] = (j.point_2d || j.point).map(Number); nums = [x - 12, y - 12, x + 12, y + 12]; }
+      else if (Number.isFinite(+j.x) && Number.isFinite(+j.y)) nums = [+j.x - 15, +j.y - 15, +j.x + 15, +j.y + 15];
+      else { const pp = t.match(/\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*\)/); if (!pp) return null; const [x, y] = [+pp[1], +pp[2]]; nums = [x - 12, y - 12, x + 12, y + 12]; } // vd. Holo: điểm ghi trong câu
+    }
+  }
+  if (nums.some(n => !Number.isFinite(n))) return null;
   let [x1, y1, x2, y2] = nums;
-  const pixel = Math.max(x1, x2) > 1000 || Math.max(y1, y2) > 1000; // một số mô hình trả điểm ảnh tuyệt đối
+  const pixel = coords === 'pixel' ? true : coords === 'norm1000' ? false : (Math.max(x1, x2) > 1000 || Math.max(y1, y2) > 1000);
   const nx = (v) => pixel ? v / W : v / 1000, ny = (v) => pixel ? v / H : v / 1000;
   const c = (v) => Math.min(1, Math.max(0, v));
   const box = { x1: c(nx(Math.min(x1, x2))), y1: c(ny(Math.min(y1, y2))), x2: c(nx(Math.max(x1, x2))), y2: c(ny(Math.max(y1, y2))) };
   if (box.x2 - box.x1 < 0.003) { box.x1 = c(box.x1 - 0.01); box.x2 = c(box.x2 + 0.01); }
   if (box.y2 - box.y1 < 0.003) { box.y1 = c(box.y1 - 0.01); box.y2 = c(box.y2 + 0.01); }
-  return { found: true, ...box, label: j.label || '' };
+  return { found: true, ...box, label, coords: pixel ? 'pixel' : 'norm1000' };
 }
-async function locate(engine, shot, target, { signal } = {}) {
-  const r = await engine.generate([{ role: 'user', content: [{ type: 'text', text: LOCATE_PROMPT(target, shot.width, shot.height) }, { type: 'image_url', image_url: { url: shot.dataUrl } }] }], { temperature: 0, maxTokens: 160, signal });
-  return { box: parseBox(r.text, shot.width, shot.height), raw: String(r.text || '').slice(0, 400) };
+async function locate(engine, shot, target, { signal, modelId = '' } = {}) {
+  const fam = groundingFamily(modelId); const fi = FAMILY[fam];
+  const r = await engine.generate([{ role: 'user', content: [{ type: 'text', text: LOCATE_PROMPT(target, shot.width, shot.height, fam) }, { type: 'image_url', image_url: { url: shot.dataUrl } }] }], { temperature: 0, maxTokens: 160, signal });
+  return { box: parseBox(r.text, shot.width, shot.height, { coords: fi.coords }), raw: String(r.text || '').slice(0, 400), family: fam };
 }
 async function describe(engine, shot, question, { signal } = {}) {
   const q = question ? `Câu hỏi về màn hình: ${question}\n` : '';
@@ -96,12 +139,14 @@ async function perform({ action, nx, ny, text, keys, display, amount }) {
   }
   if (action === 'type') {
     const t = String(text || ''); if (!t) throw new Error('Thiếu chữ cần gõ');
-    const prev = clipboard.readText(); clipboard.writeText(t); // dán từ bộ nhớ tạm: gõ đúng tiếng Việt có dấu
+    // dán từ bộ nhớ tạm: gõ đúng tiếng Việt có dấu. Electron 44: clipboard.readText/writeText có thể trả Promise → luôn await
+    const prev = await Promise.resolve(clipboard.readText()).catch(() => '');
+    await Promise.resolve(clipboard.writeText(t));
     n.keyTap('v', process.platform === 'darwin' ? 'command' : 'control'); await sleep(250);
-    setTimeout(() => { try { if (clipboard.readText() === t) clipboard.writeText(prev); } catch {} }, 1500);
+    setTimeout(async () => { try { if (await Promise.resolve(clipboard.readText()) === t) await Promise.resolve(clipboard.writeText(prev)); } catch {} }, 1500);
   }
   if (action === 'key') { const k = parseKeys(keys); n.keyTap(k.key, k.mods.length ? k.mods : undefined); await sleep(150); }
   if (action === 'scroll') { const a = Math.max(-20, Math.min(20, Math.round(Number(amount) || -5))); n.scrollMouse(0, process.platform === 'win32' ? a * 120 : a); await sleep(150); }
 }
 
-module.exports = { permissions, PERM_URLS, capture, locate, describe, parseBox, parseKeys, perform, toNut, libnut, LOCATE_PROMPT };
+module.exports = { groundingFamily, familyInfo, FAMILY, permissions, PERM_URLS, capture, locate, describe, parseBox, parseKeys, perform, toNut, libnut, LOCATE_PROMPT };

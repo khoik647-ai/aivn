@@ -27,7 +27,7 @@ test('Windows: đọc sổ đăng ký Uninstall/App Paths và Get-StartApps (Sto
     { s: 'apppath', n: 'chrome.exe', i: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' },
     { s: 'start', n: 'WhatsApp', a: '5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App' },
   ]);
-  const list = await C.deepApps({ platform: 'win32', run: async (cmd, args) => { assert.strictEqual(cmd, 'powershell.exe'); assert.match(args.join(' '), /Uninstall[\s\S]*App Paths[\s\S]*Get-StartApps/); return json; } });
+  const list = await C.deepApps({ platform: 'win32', run: async (cmd, args) => { assert.strictEqual(cmd, 'powershell.exe'); const enc = args[args.indexOf('-EncodedCommand') + 1]; assert.ok(args.includes('-NoProfile') && args.includes('Bypass')); assert.match(Buffer.from(enc, 'base64').toString('utf16le'), /OutputEncoding[\s\S]*Uninstall[\s\S]*App Paths[\s\S]*Get-StartApps[\s\S]*GetFolderPath/); return json; } });
   const zalo = C.findApp('zalo', list); assert.strictEqual(zalo.path, path.join(dir, 'Zalo.exe'));
   assert.strictEqual(C.findApp('whatsapp', list).appId, '5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App');
   assert.ok(C.findApp('chrome', list).path.endsWith('chrome.exe'));

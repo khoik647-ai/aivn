@@ -306,6 +306,66 @@ const CATALOG = [
   "agent": true
  },
  {
+  "id": "qwen3-vl-4b-instruct-q4_k_m",
+  "name": "Qwen3-VL 4B Instruct",
+  "family": "Qwen",
+  "params": "4B",
+  "quant": "Q4_K_M",
+  "repo": "Qwen/Qwen3-VL-4B-Instruct-GGUF",
+  "file": "Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+  "size": 2497281664,
+  "mmproj": {
+   "file": "mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf",
+   "size": 453974304,
+   "url": "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf"
+  },
+  "ram": "≥ 6 GB RAM",
+  "license": "Apache 2.0",
+  "arch": "qwen3vl",
+  "desc": "Nhìn màn hình, chỉ đúng nút cần bấm (toạ độ 0-1000) và gọi công cụ gốc. Hợp laptop GPU 4 GB và Mac M1 8 GB.",
+  "tags": [
+   "Nhìn được ảnh",
+   "Điều khiển máy tính"
+  ],
+  "url": "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+  "vision": true,
+  "computer": true,
+  "toolLevel": "good",
+  "screenPriority": 9,
+  "grounding": "qwen3vl",
+  "computerNote": "Đã kiểm tra 0.14.3: đọc ảnh đúng, chỉ đúng nút Gửi trên ảnh chụp Zalo, gọi open_app thật."
+ },
+ {
+  "id": "qwen3-vl-8b-instruct-q4_k_m",
+  "name": "Qwen3-VL 8B Instruct",
+  "family": "Qwen",
+  "params": "8B",
+  "quant": "Q4_K_M",
+  "repo": "Qwen/Qwen3-VL-8B-Instruct-GGUF",
+  "file": "Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+  "size": 5027784800,
+  "mmproj": {
+   "file": "mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf",
+   "size": 752289728,
+   "url": "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf"
+  },
+  "ram": "≥ 10 GB RAM",
+  "license": "Apache 2.0",
+  "arch": "qwen3vl",
+  "desc": "Bản lớn hơn của Qwen3-VL: hiểu giao diện và làm nhiều bước chắc chắn hơn. Cho máy GPU 8 GB trở lên hoặc Mac 16 GB.",
+  "tags": [
+   "Nhìn được ảnh",
+   "Điều khiển máy tính"
+  ],
+  "url": "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
+  "vision": true,
+  "computer": true,
+  "toolLevel": "good",
+  "screenPriority": 10,
+  "grounding": "qwen3vl",
+  "computerNote": "Đã kiểm tra 0.14.3: đọc ảnh, chỉ đúng nút, gọi open_app thật."
+ },
+ {
   "id": "qwen2.5-vl-3b-instruct-q4_k_m",
   "name": "Qwen2.5-VL 3B Instruct",
   "family": "Qwen",
@@ -322,13 +382,108 @@ const CATALOG = [
   "ram": "≥ 5 GB RAM",
   "license": "Qwen Research (phi thương mại)",
   "arch": "qwen2vl",
-  "desc": "Hiểu ảnh, đọc chữ trong ảnh và tài liệu chụp tốt, trả lời tiếng Việt khá.",
+  "desc": "Hiểu ảnh, đọc chữ trong ảnh tốt; định vị nút theo điểm ảnh. Nhỏ, hợp máy yếu.",
   "tags": [
    "Nhìn được ảnh",
-   "Đọc tài liệu"
+   "Điều khiển máy tính"
   ],
   "url": "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
-  "vision": true
+  "vision": true,
+  "computer": true,
+  "toolLevel": "good",
+  "screenPriority": 7,
+  "grounding": "qwen25vl",
+  "computerNote": "Đã kiểm tra 0.14.3: chỉ đúng nút (toạ độ điểm ảnh), gọi công cụ qua giao thức văn bản của AIVN."
+ },
+ {
+  "id": "holo1.5-3b-q4_k_m",
+  "name": "Holo1.5 3B (định vị giao diện)",
+  "family": "Holo",
+  "params": "3B",
+  "quant": "Q4_K_M",
+  "repo": "mradermacher/Holo1.5-3B-GGUF",
+  "file": "Holo1.5-3B.Q4_K_M.gguf",
+  "size": 2104932256,
+  "mmproj": {
+   "file": "Holo1.5-3B.mmproj-Q8_0.gguf",
+   "size": 847768768,
+   "url": "https://huggingface.co/mradermacher/Holo1.5-3B-GGUF/resolve/main/Holo1.5-3B.mmproj-Q8_0.gguf"
+  },
+  "ram": "≥ 5 GB RAM",
+  "license": "Holo / Qwen Research (phi thương mại)",
+  "arch": "qwen2vl",
+  "desc": "Mô hình chuyên tìm phần tử giao diện (dựa trên Qwen2.5-VL). Nhỏ, gọi công cụ qua giao thức văn bản.",
+  "tags": [
+   "Nhìn được ảnh",
+   "Điều khiển máy tính"
+  ],
+  "url": "https://huggingface.co/mradermacher/Holo1.5-3B-GGUF/resolve/main/Holo1.5-3B.Q4_K_M.gguf",
+  "vision": true,
+  "computer": true,
+  "toolLevel": "good",
+  "screenPriority": 6,
+  "grounding": "qwen25vl",
+  "computerNote": "Đã kiểm tra 0.14.3: gọi open_app thật; vị trí nút trả trong câu, AIVN tự tách toạ độ."
+ },
+ {
+  "id": "qwen2.5-vl-7b-instruct-q4_k_m",
+  "name": "Qwen2.5-VL 7B Instruct",
+  "family": "Qwen",
+  "params": "7B",
+  "quant": "Q4_K_M",
+  "repo": "ggml-org/Qwen2.5-VL-7B-Instruct-GGUF",
+  "file": "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
+  "size": 4683072032,
+  "mmproj": {
+   "file": "mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf",
+   "size": 853119712,
+   "url": "https://huggingface.co/ggml-org/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf"
+  },
+  "ram": "≥ 9 GB RAM",
+  "license": "Apache 2.0",
+  "arch": "qwen2vl",
+  "desc": "Định vị nút rất chính xác; nhưng khi tự quyết gọi công cụ đôi lúc từ chối. Dùng tốt cho \"Nhìn màn hình\".",
+  "tags": [
+   "Nhìn được ảnh",
+   "Điều khiển máy tính"
+  ],
+  "url": "https://huggingface.co/ggml-org/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
+  "vision": true,
+  "computer": true,
+  "toolLevel": "limited",
+  "screenPriority": 4,
+  "grounding": "qwen25vl",
+  "computerNote": "Đã kiểm tra 0.14.3: chỉ đúng nút; lần thử gọi open_app bị mô hình từ chối → Hạn chế."
+ },
+ {
+  "id": "ui-tars-1.5-7b-q4_k_m",
+  "name": "UI-TARS-1.5 7B (tác tử giao diện)",
+  "family": "UI-TARS",
+  "params": "7B",
+  "quant": "Q4_K_M",
+  "repo": "mradermacher/UI-TARS-1.5-7B-GGUF",
+  "file": "UI-TARS-1.5-7B.Q4_K_M.gguf",
+  "size": 4683073856,
+  "mmproj": {
+   "file": "UI-TARS-1.5-7B.mmproj-Q8_0.gguf",
+   "size": 856130240,
+   "url": "https://huggingface.co/mradermacher/UI-TARS-1.5-7B-GGUF/resolve/main/UI-TARS-1.5-7B.mmproj-Q8_0.gguf"
+  },
+  "ram": "≥ 9 GB RAM",
+  "license": "Apache 2.0",
+  "arch": "qwen2vl",
+  "desc": "Huấn luyện riêng để bấm/gõ trên giao diện: định vị chuẩn (click(start_box)). Không theo định dạng gọi công cụ chung nên mở ứng dụng kém.",
+  "tags": [
+   "Nhìn được ảnh",
+   "Điều khiển máy tính"
+  ],
+  "url": "https://huggingface.co/mradermacher/UI-TARS-1.5-7B-GGUF/resolve/main/UI-TARS-1.5-7B.Q4_K_M.gguf",
+  "vision": true,
+  "computer": true,
+  "toolLevel": "limited",
+  "screenPriority": 3,
+  "grounding": "uitars",
+  "computerNote": "Đã kiểm tra 0.14.3: chỉ đúng nút Gửi; không gọi được open_app → Hạn chế."
  },
  {
   "id": "qwen3-vl-2b-instruct-q8_0",
@@ -598,6 +753,7 @@ const CATALOG = [
   ],
   "agent": true
  }
+
 ];
 
 // Mô hình nhúng cho hỏi đáp tài liệu (RAG): tải khi dùng lần đầu

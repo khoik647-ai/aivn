@@ -83,7 +83,7 @@ function initStores() {
   rag = createRagStore(path.join(ud, 'rag'));
   memory = createMemoryStore(path.join(ud, 'memory.json'));
   scheduler = createScheduler({ file: path.join(ud, 'schedules.json'), onFire: onScheduleFire, log: (m) => { console.log(m); log(m); } });
-  computerTools = createComputerTools({ getSettings: () => settings.data, openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log,
+  computerTools = createComputerTools({ getSettings: () => settings.data, openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => engineLog('Quét ứng dụng đã cài (AIVN BOT)', null, { 'nguồn': d.sources, 'lỗi': d.errors.length ? d.errors : 'không', 'thư mục Desktop': d.dirs ? d.dirs.desktop : [], 'thư mục Start Menu': d.dirs ? d.dirs.start : [], 'thời gian tìm sâu (ms)': d.ms }),
     keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: screenLook, act: screenAct } });
   agent = createAgent({ engine, getSettings: () => settings.data, memory, scheduler, extractFile: docs.extractFile, embedForMemory, log, computer: computerTools,
     trash: async (p) => { try { await shell.trashItem(p); } catch (e) { throw new Error('Không chuyển được tệp vào Thùng rác (' + e.message + '). Tệp vẫn còn nguyên.'); } } });
@@ -336,7 +336,7 @@ function agentAdvice() {
   const p = m && m.catalog && m.catalog.params ? parseFloat(String(m.catalog.params).replace(',', '.')) : null;
   const small = p != null ? p < 3.5 : m ? m.size < 2.2e9 : false;
   const recommended = catalog.filter(c => c.agent && ['qwen3-4b-instruct-2507-q4_k_m', 'qwen_qwen3-8b-q4_k_m'].includes(c.id)).map(c => ({ id: c.id, name: c.name, size: c.size + (c.mmproj ? c.mmproj.size : 0), installed: isInstalled(c.file) }));
-  const tools = toolSupport({ id: m && m.catalog ? m.catalog.id : '', name: m && m.catalog ? m.catalog.name : '', file: m ? m.file : st.id, params: m && m.catalog ? m.catalog.params : null });
+  const tools = toolSupport({ toolLevel: m && m.catalog ? m.catalog.toolLevel : null, id: m && m.catalog ? m.catalog.id : '', name: m && m.catalog ? m.catalog.name : (m && m.name) || '', file: m ? m.file : st.id, params: m && m.catalog ? m.catalog.params : null, meta: st.meta, toolMode: st.toolMode, wrapper: st.chatWrapper, size: m ? m.size : 0 });
   return { model: m ? (m.catalog ? m.catalog.name : m.file) : st.id, params: p, small, good: !!(m && m.catalog && m.catalog.agent), recommended, tools, toolMode: st.toolMode || null };
 }
 function agentInfo() {
@@ -412,12 +412,12 @@ async function withWindowAway(fn) {
 }
 function screenGuard(signal) {
   if (!settings.data.agentScreen) throw new computerTools.CompError('Điều khiển màn hình đang tắt (Cài đặt AIVN BOT → Điều khiển màn hình).');
-  if (!engine.status().vision) throw new computerTools.CompError('Cần nạp một mô hình nhìn được ảnh (có nhãn "Nhìn ảnh", vd. Gemma 3 4B hoặc Qwen2.5-VL) để điều khiển màn hình.');
+  if (!engine.status().vision) throw new computerTools.CompError('Cần nạp một mô hình nhìn được ảnh (có nhãn "Nhìn ảnh", vd. Qwen3-VL 4B — xem mục "Mô hình điều khiển máy tính" trong Kho mô hình) để điều khiển màn hình.');
   const p = SC.permissions();
   if (p.needed && (p.screen !== 'granted' || !p.accessibility)) throw new computerTools.CompError('macOS chưa cấp quyền cho AIVN: ' + [p.screen !== 'granted' && 'Ghi màn hình', !p.accessibility && 'Trợ năng'].filter(Boolean).join(' và ') + '. Hướng dẫn người dùng mở Cài đặt AIVN BOT → Điều khiển màn hình → "Hướng dẫn cấp quyền macOS".');
   if (signal && signal.aborted) throw new computerTools.CompError('Đã dừng.');
 }
-async function captureAway() { return withWindowAway(() => process.env.AIVN_FAKE_SCREEN && !app.isPackaged ? fakeShot() : SC.capture()); }
+async function captureAway() { const st = engine.status(); const fi = SC.familyInfo((st && (st.path || st.id)) || ''); return withWindowAway(() => process.env.AIVN_FAKE_SCREEN && !app.isPackaged ? fakeShot() : SC.capture({ align: fi.align })); }
 function fakeShot() { // chỉ để kiểm thử: ảnh màn hình giả từ tệp
   const img = nativeImage.createFromPath(process.env.AIVN_FAKE_SCREEN); const sz = img.getSize();
   return { dataUrl: 'data:image/jpeg;base64,' + img.toJPEG(80).toString('base64'), width: sz.width, height: sz.height, display: require('electron').screen.getPrimaryDisplay() };
@@ -438,7 +438,7 @@ async function screenAct(a, ctx) {
   if (needPoint && !String(a.target || '').trim()) throw new computerTools.CompError('Cần mô tả target (phần tử cần bấm).');
   const shot = await captureAway();
   let box = null, raw = '';
-  if (needPoint) { const r = await SC.locate(engine, shot, String(a.target), { signal: ctx.signal }); box = r.box; raw = r.raw; }
+  if (needPoint) { const st = engine.status(); const r = await SC.locate(engine, shot, String(a.target), { signal: ctx.signal, modelId: (st && (st.path || st.id)) || '' }); box = r.box; raw = r.raw; }
   if (ctx.signal && ctx.signal.aborted) throw new computerTools.CompError('Đã dừng.');
   const desc = action === 'type' ? `gõ “${String(a.text).slice(0, 200)}”${a.target ? ` vào ${a.target}` : ' vào ô đang chọn'}` : action === 'key' ? `bấm phím ${a.keys}` : action === 'scroll' ? `cuộn ${Number(a.amount) < 0 || a.amount == null ? 'xuống' : 'lên'} ${Math.abs(Number(a.amount) || 5)} nấc` : `${ACT_VI[action]} “${a.target}”`;
   const req = { action, desc, target: a.target || null, image: shot.dataUrl, w: shot.width, h: shot.height, needPoint: !!needPoint,
@@ -597,7 +597,7 @@ const api = createApiServer({ engine, models: listModels, ensureModel, log, isBl
     return { id: EMBED.id };
   },
   embed: (texts) => engine.embed(texts, 'passage'),
-  count: (texts) => engine.embedCount(texts).then(a => a.reduce((s, x) => s + x, 0)),
+  count: (texts) => Promise.resolve(engine.embedCount(texts)).then(a => a.reduce((s, x) => s + x, 0)), // engine trong tiến trình trả mảng ngay, qua proxy trả Promise
 } });
 const updater = createUpdater({ send, log: (m) => console.log(m) });
 
@@ -610,15 +610,19 @@ function annotateGroup(repo, g) {
   return { ...g, installed: part.complete || isInstalled(g.files[0].path), partial: part.complete ? 0 : part.received, job };
 }
 function catalogList() {
-  return hw().then(h => catalog.map(c => {
+  let H = null;
+  return hw().then(h => (H = h, catalog.map(c => {
     const job = downloader.get(`${c.repo}::${c.file}`);
     const part = downloader.partialFor(c.repo, [{ path: c.file, size: c.size }, ...(c.mmproj ? [{ path: c.mmproj.file, size: c.mmproj.size }] : [])]);
-    return { ...c, installed: part.complete || isInstalled(c.file), partial: part.complete ? 0 : part.received, job, fit: hf.fitFor(c.size, h), tools: toolSupport(c) };
-  })).then(list => {
+    return { ...c, installed: part.complete || isInstalled(c.file), partial: part.complete ? 0 : part.received, job, fit: hf.fitFor(c.size + (c.mmproj ? c.mmproj.size : 0), h), tools: toolSupport(c) };
+  }))).then(list => {
     // Gợi ý một mô hình cho máy này: mô hình lớn nhất (thường giỏi nhất) vẫn "Chạy tốt", ưu tiên loại gọi công cụ tốt
     const good = list.filter(c => c.fit && c.fit.level === 'fit' && !c.embedding);
     const w = (c) => c.size * (c.tools && c.tools.level === 'good' ? 1.4 : 1); const best = good.sort((a, b) => w(b) - w(a))[0];
-    return list.map(c => c === best ? { ...c, recommended: true } : c);
+    // Gợi ý cho điều khiển màn hình: mô hình nhìn ảnh + công cụ tốt lớn nhất vẫn "Chạy tốt"; không có thì bản nhỏ nhất
+    const comp = list.filter(c => c.computer && c.tools && c.tools.level === 'good');
+    const pri = (c) => c.screenPriority || 0; const compFit = comp.filter(c => hf.screenFit(c.size + (c.mmproj ? c.mmproj.size : 0), H)).sort((a, b) => pri(b) - pri(a))[0] || comp.filter(c => c.fit && c.fit.level !== 'big').sort((a, b) => a.size - b.size)[0];
+    return list.map(c => ({ ...c, ...(c === best ? { recommended: true } : {}), ...(c === compFit ? { recScreen: true } : {}) }));
   });
 }
 
@@ -1015,6 +1019,119 @@ async function selfTestUi() {
   save(); app.quit();
 }
 
+// QA 0.14.3 (AIVN_QA143=thư mục, chỉ khi phát triển): nút công cụ, đính kèm ở cả hai chế độ, đổi giao diện + giảm chuyển động, tìm trong Kho
+async function qa143() {
+  const { clipboard, ClipboardItem } = require('electron');
+  const dir = process.env.AIVN_QA143; fs.mkdirSync(dir, { recursive: true });
+  const wc = win.webContents; const js = (c) => wc.executeJavaScript(c);
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const until = async (c, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await js(c)) return true; } catch {} await sleep(150); } return false; };
+  const out = { stages: {} }; const save = () => fs.writeFileSync(path.join(dir, 'ui.json'), JSON.stringify(out, null, 2));
+  const shot = async (n) => { await sleep(300); fs.writeFileSync(path.join(dir, n), (await wc.capturePage()).toPNG()); };
+  const stage = async (k, f) => { console.log('[qa143] ' + k); try { out.stages[k] = (await f()) || { ok: true }; } catch (e) { out.stages[k] = { error: e.stack || String(e) }; } save(); };
+  win.setBounds({ x: 0, y: 0, width: 1400, height: 900 });
+  await until('typeof show === "function" && !!state.settings && !!document.querySelector("#input")');
+  const fx = process.env.AIVN_QA_FIXTURES; // thư mục có ghi-chu.txt và anh.png
+  await stage('chips', async () => {
+    await js('show("agent")'); await until('!!state.agent && document.querySelectorAll("#toolChips .tool-chip").length > 0');
+    const ids = await js('CHIPS.map(c => c.id)'); const rows = [];
+    for (const id of ids) {
+      const before = await js(`document.querySelector('[data-chip="${id}"]').className.replace('tool-chip ', '')`);
+      const toolsBefore = agent.activeTools();
+      await js(`document.querySelector('[data-chip="${id}"] .tc-main').click()`); await sleep(500);
+      const consent = await js('!!modalOpen && document.querySelector("#cfTitle").textContent'); if (consent) { await js('document.querySelector("#cfYes").click()'); await sleep(900); } else await sleep(400);
+      const after = await js(`document.querySelector('[data-chip="${id}"]').className.replace('tool-chip ', '')`);
+      const pop = await js('!!document.querySelector(".chip-pop")');
+      const toolsAfter = agent.activeTools();
+      const removed = toolsBefore.filter(n => !toolsAfter.includes(n)), added = toolsAfter.filter(n => !toolsBefore.includes(n));
+      if (before !== 'blocked' || pop) { await js('closeChipPop()'); }
+      if (after !== before && before !== 'blocked') { await js(`document.querySelector('[data-chip="${id}"] .tc-main').click()`); await sleep(900); }
+      const restored = await js(`document.querySelector('[data-chip="${id}"]').className.replace('tool-chip ', '')`);
+      rows.push({ id, consent: consent || undefined, before, after, popoverForBlocked: before === 'blocked' ? pop : undefined, removed, added, restored, toolsOff: settings.data.agentToolsOff });
+    }
+    // bàn phím: Tab tới nút, Enter bật/tắt
+    await js('document.querySelector(\'[data-chip="calc"] .tc-main\').focus()');
+    wc.sendInputEvent({ type: 'keyDown', keyCode: 'Space' }); wc.sendInputEvent({ type: 'char', keyCode: ' ' }); wc.sendInputEvent({ type: 'keyUp', keyCode: 'Space' }); await sleep(900);
+    const kb = await js('document.querySelector(\'[data-chip="calc"]\').className');
+    await js('document.querySelector(\'[data-chip="calc"] .tc-main\').focus()');
+    wc.sendInputEvent({ type: 'keyDown', keyCode: 'Return' }); wc.sendInputEvent({ type: 'char', keyCode: '\r' }); wc.sendInputEvent({ type: 'keyUp', keyCode: 'Return' }); await sleep(900);
+    return { rows, keyboardSpace: kb, afterEnter: await js('document.querySelector(\'[data-chip="calc"]\').className') };
+  });
+  const attachSuite = async (mode) => {
+    await js(`show("${mode}"); pending = []; renderChips();`); await sleep(400);
+    const r = {};
+    // chép/dán chữ
+    clipboard.writeText('Dán chữ tiếng Việt: Văn Lang ✓'); await js('document.querySelector("#input").value=""; document.querySelector("#input").focus()'); wc.paste(); await sleep(300);
+    r.pasteText = await js('document.querySelector("#input").value');
+    await js('document.querySelector("#input").select()'); wc.copy(); await sleep(200); r.copyBack = await clipboard.readText();
+    await js('document.querySelector("#input").value=""');
+    // dán ảnh
+    clipboard.write([new ClipboardItem({ 'image/png': new Blob([fs.readFileSync(path.join(fx, 'anh.png'))], { type: 'image/png' }) })]);
+    await js('document.querySelector("#input").focus()'); wc.paste();
+    r.pasteImage = await until('!!document.querySelector(".chip.img:not(.loading)")', 60000) && await js('document.querySelector(".chip.img").innerText');
+    await js('pending = []; renderChips()');
+    // kéo thả (sự kiện drop với DataTransfer chứa ảnh)
+    const b64 = fs.readFileSync(path.join(fx, 'anh.png')).toString('base64');
+    await js(`(() => { const bin = atob(${JSON.stringify(b64)}); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+      const dt = new DataTransfer(); dt.items.add(new File([u], 'keo-tha.png', { type: 'image/png' })); dt.items.add(new File(['xin chao'], 'ao.txt', { type: 'text/plain' }));
+      const p = document.querySelector('#chatPane'); p.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true }));
+      window.__dzOn = document.querySelector('#dropzone').classList.contains('on'); p.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true })); })()`);
+    r.dropzoneShown = await js('window.__dzOn');
+    r.dropImage = await until('!!document.querySelector(".chip.img:not(.loading)")', 60000) && await js('[...document.querySelectorAll("#chips .chip")].map(c => c.innerText.replace(/\\s+/g, " "))');
+    await js('pending = []; renderChips()');
+    // chọn tệp (hộp thoại giả lập trả 2 tệp)
+    const orig = dialog.showOpenDialog; dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path.join(fx, 'ghi-chu.txt'), path.join(fx, 'anh.png')] });
+    await js('document.querySelector("#attachBtn").click()');
+    r.picker = await until('document.querySelectorAll("#chips .chip:not(.loading)").length === 2', 60000) && await js('pending.map(a => a.name + ":" + a.kind + (a.path ? ":path" : ""))');
+    dialog.showOpenDialog = orig;
+    r.attachBtnVisible = await js('!document.querySelector("#attachBtn").hidden');
+    await shot(`attach-${mode}.png`);
+    return r;
+  };
+  await stage('attachChat', () => attachSuite('chat'));
+  await stage('attachAgent', async () => {
+    const r = await attachSuite('agent');
+    if (process.env.AIVN_LOAD) {
+      const L = process.env.AIVN_LOAD; const lm = listModels().find(x => x.id === L || (x.path || '').includes(L)); await loadById(lm.id); await until('state.status && state.status.loaded', 60000);
+      await js('pending = pending.filter(a => a.kind !== "image"); renderChips()');
+      let seen = null; const origRun = agent.run; agent.run = (o) => { seen = { files: (o.attachments || o.files || []).map(f => f.name || f), last: JSON.stringify(o.messages[o.messages.length - 1].content).slice(0, 160) }; return origRun(o); };
+      const n = await js('document.querySelectorAll("#messages .msg.assistant").length');
+      await js('document.querySelector("#input").value = "Tệp ghi-chu.txt nói về môn học nào? Trả lời ngắn."; document.querySelector("#composer").requestSubmit()');
+      await sleep(600); await until(`!document.querySelector("#sendBtn").hidden && document.querySelectorAll("#messages .msg.assistant").length > ${n}`, 240000);
+      agent.run = origRun;
+      r.agentRun = seen; r.agentAnswer = await js('[...document.querySelectorAll("#messages .msg.assistant")].pop().innerText.slice(0, 300)');
+      await shot('agent-attachment-answer.png');
+    }
+    return r;
+  });
+  await stage('theme', async () => {
+    await js('show("chat"); applyTheme("light"); state.settings.theme = "light";'); await sleep(400);
+    const watch = 'window.__veil = false; window.__mo && window.__mo.disconnect(); window.__mo = new MutationObserver(() => { if (document.querySelector("#themeVeil").classList.contains("on")) window.__veil = true; }); window.__mo.observe(document.querySelector("#themeVeil"), { attributes: true }); window.__t0 = performance.now(); new MutationObserver((m, o) => { window.__applied = Math.round(performance.now() - window.__t0); o.disconnect(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });';
+    await js(watch); await js('document.querySelector("#themeRow button[data-theme=dark]").click()'); await sleep(1300);
+    const normal = { theme: await js('document.documentElement.dataset.theme'), logoVeil: await js('window.__veil'), appliedMs: await js('window.__applied'), saved: settings.data.theme };
+    // giảm chuyển động (giả lập cài đặt hệ điều hành qua CDP)
+    wc.debugger.attach('1.3'); await wc.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    const mq = await js('matchMedia("(prefers-reduced-motion: reduce)").matches');
+    await js(watch); await js('document.querySelector("#themeRow button[data-theme=light]").click()'); await sleep(60);
+    const fade = await js('document.documentElement.classList.contains("theme-anim")'); await sleep(700);
+    const reduced = { mq, theme: await js('document.documentElement.dataset.theme'), logoVeil: await js('window.__veil'), appliedMs: await js('window.__applied'), crossfadeClass: fade, vtLeft: await js('document.documentElement.classList.contains("vt-theme")') };
+    await wc.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] }); wc.debugger.detach();
+    // bấm liên tục 4 lần: kết quả cuối phải đúng nút cuối
+    await js('for (const t of ["dark","light","dark","light"]) document.querySelector(`#themeRow button[data-theme=${t}]`).click()'); await sleep(2500);
+    const rapid = { theme: await js('document.documentElement.dataset.theme'), veilLeft: await js('document.querySelector("#themeVeil").classList.contains("on")'), saved: settings.data.theme };
+    return { normal, reduced, rapid };
+  });
+  await stage('khoSearch', async () => {
+    await js('show("discover")'); await sleep(500);
+    const sel = '#searchQ';
+    await js(`(() => { const i = document.querySelector(${JSON.stringify(sel)}); i.value = "qwen3 0.6b"; i.dispatchEvent(new Event("input", { bubbles: true })); i.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); const f = i.closest("form"); if (f) f.requestSubmit(); })()`);
+    const ok = await until('document.querySelectorAll("#view-discover .res, #view-discover .result, #results .card, #hfResults > *").length > 0', 30000);
+    await shot('kho-search.png');
+    return { input: sel, ok, first: await js('(() => { const r = document.querySelector("#view-discover .res, #view-discover .result, #results .card, #hfResults > *"); return r ? r.innerText.slice(0, 160) : null; })()') };
+  });
+  save(); app.exit(0);
+}
+
 // Ảnh chụp 0.14.1 (AIVN_SHOTS141=thư mục): lời chào AIVN BOT, nút công cụ bật/tắt + bảng ví dụ, 3 khung hình đổi giao diện
 async function shots141() {
   const dir = process.env.AIVN_SHOTS141; fs.mkdirSync(dir, { recursive: true });
@@ -1386,6 +1503,7 @@ else {
     startGateTimers();
     if (app.isPackaged || process.env.AIVN_UPDATE_CHECK === '1') setTimeout(() => updater.check({ silent: true }), Number(process.env.AIVN_UPDATE_DELAY || 5000));
     if (process.env.AIVN_SHOTS141) win.webContents.once('did-finish-load', () => setTimeout(() => shots141().catch(e => { console.error('SHOTS lỗi', e); app.exit(2); }), 2500));
+    if (process.env.AIVN_QA143 && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qa143().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_SELFTEST_V14) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestV14().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1200));
     if (process.env.AIVN_SELFTEST_V13) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestV13().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));
     if (process.env.AIVN_SELFTEST_V12) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestV12().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));

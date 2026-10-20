@@ -58,7 +58,9 @@ async function modelGeometry(modelPath) {
     const kvHeads = Number(m.attention && m.attention.head_count_kv) || heads;
     const headDim = Number(m.attention && m.attention.key_length) || (m.embedding_length && heads ? m.embedding_length / heads : null);
     const kvPerToken = layers && kvHeads && headDim ? 2 * layers * kvHeads * headDim * 2 : null; // K+V, f16
-    return { arch, layers, kvPerToken };
+    const g = (info.metadata && info.metadata.general) || {};
+    const tpl = String((info.metadata && info.metadata.tokenizer && info.metadata.tokenizer.chat_template) || '');
+    return { arch, layers, kvPerToken, name: g.name || g.basename || null, sizeLabel: g.size_label || null, toolTemplate: TP.templateHasTools(tpl) };
   } catch { return { arch: null, layers: null, kvPerToken: null }; }
 }
 const MB = 1024 * 1024;
@@ -82,6 +84,7 @@ function loadPlans({ gpu, vram, fileSize, geo, ctx, userLayers }) {
     const base = fitN ?? (L || 32);
     if (base > 4) add({ mode: 'gpu-partial', gpuLayers: Math.floor(base / 2), ctx });
     if (base > 4) add({ mode: 'gpu-partial', gpuLayers: Math.floor(base / 2), ctx: small });
+    if (base > 8) add({ mode: 'gpu-partial', gpuLayers: Math.floor(base / 4), ctx }); // ít lớp → KV trên GPU cũng ít; vẫn nhanh hơn chỉ CPU
     add({ mode: 'cpu', gpuLayers: 0, ctx });
     add({ mode: 'cpu', gpuLayers: 0, ctx: small });
   } else { add({ mode: 'cpu-only', gpuLayers: 0, ctx }); add({ mode: 'cpu-only', gpuLayers: 0, ctx: small }); }
@@ -124,7 +127,7 @@ async function loadModel(id, modelPath, opts = {}) {
       try {
         model = await l.loadModel({ modelPath, gpuLayers: plan.gpuLayers });
         const context = await model.createContext({ contextSize: { min: Math.min(512, plan.ctx), max: plan.ctx } });
-        current = { id, path: modelPath, model, context, loadedAt: Date.now(), mode: plan.mode, gpuLayers: model.gpuLayers, totalLayers: geo.layers ? geo.layers + 1 : null, attempts: attempts.map(a => a.mode + ': ' + a.message) };
+        current = { id, path: modelPath, model, context, loadedAt: Date.now(), mode: plan.mode, meta: { name: geo.name, arch: geo.arch, sizeLabel: geo.sizeLabel, toolTemplate: geo.toolTemplate }, gpuLayers: model.gpuLayers, totalLayers: geo.layers ? geo.layers + 1 : null, attempts: attempts.map(a => a.mode + ': ' + a.message) };
         return;
       } catch (e) {
         attempts.push({ mode: `${plan.mode} (${plan.gpuLayers} lớp GPU, ngữ cảnh ${plan.ctx})`, message: String(e && e.message || e), stack: String(e && e.stack || '') });
@@ -151,8 +154,8 @@ async function unloadModel() {
 }
 
 function status() {
-  if (visionOn) { const v = getVision().status(); if (v) return { loaded: true, id: v.id, path: v.path, contextSize: v.contextSize, vision: true, gpu: llama && llama.gpu }; }
-  return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: !!loading };
+  if (visionOn) { const v = getVision().status(); if (v) return { loaded: true, id: v.id, path: v.path, contextSize: v.contextSize, vision: true, gpu: llama && llama.gpu, toolMode: v.textTools ? 'text' : 'native', meta: v.template ? { toolTemplate: !!v.template.nativeTools } : null }; }
+  return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, meta: current.meta || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: !!loading };
 }
 
 // Một chuỗi ngữ cảnh dùng lại giữa các lượt (giữ bộ nhớ đệm KV: lượt sau chỉ tính phần mới của lời nhắc)
@@ -265,7 +268,7 @@ function toolModeFor(chat) {
 }
 
 function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = null, temperature = 0.7, maxTokens = 1024, topP, signal, onToken } = {}) {
-  const run = async () => {
+  const run = async (messages, tools) => {
     if (visionOn) return getVision().chatStep(messages, { tools, toolChoice, responseFormat, temperature, maxTokens, topP, signal, onToken });
     if (!current) throw new Error('Chưa nạp mô hình nào.');
     const { LlamaChat } = await getLib();
@@ -330,10 +333,26 @@ function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = 
     }
     } finally { chat.dispose({ disposeSequence: false }); }
   };
-  const p = queue.then(run, run);
+  // Lời nhắc hệ thống + mô tả công cụ dài hơn ngữ cảnh (vd. ngữ cảnh 2048): thử lại với mô tả công cụ rút gọn và lịch sử ngắn,
+  // vẫn không vừa thì báo rõ cách sửa thay vì lỗi tiếng Anh của node-llama-cpp
+  const CTX_RE = TP.CTX_RE;
+  const runSafe = async () => {
+    try { return await run(messages, tools); }
+    catch (e) {
+      if (!CTX_RE.test(String(e && e.message))) throw e;
+      try { return await run(TP.trimHistory(messages), TP.compactTools(tools)); }
+      catch (e2) {
+        if (!CTX_RE.test(String(e2 && e2.message))) throw e2;
+        const n = current && current.context ? current.context.contextSize : null;
+        throw TP.ctxSmallError(n);
+      }
+    }
+  };
+  const p = queue.then(runSafe, runSafe);
   queue = p.catch(() => {});
   return p;
 }
+
 
 // ---- Nhúng văn bản (embedding) cho tìm kiếm ngữ nghĩa trong tài liệu (RAG) ----
 async function loadEmbedder(id, modelPath, { prefix = null } = {}) {

@@ -150,7 +150,16 @@ function createVisionServer({ log = () => {} } = {}) {
     return { ...r, text: p.text, toolCalls: p.toolCalls, finishReason: p.toolCalls.length ? 'tool_calls' : r.finishReason };
   }
   // Có công cụ / đầu ra JSON: llama-server tự áp mẫu hội thoại (--jinja) và ngữ pháp cho tool_calls / json_schema
-  async function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = null, ...opts } = {}) {
+  // Lời nhắc dài hơn ngữ cảnh: thử lại với công cụ rút gọn + lịch sử ngắn, rồi báo rõ cách sửa
+  async function chatStep(messages, o = {}) {
+    try { return await chatStep1(messages, o); }
+    catch (e) {
+      if (!TP.CTX_RE.test(String(e && e.message))) throw e;
+      try { return await chatStep1(TP.trimHistory(messages), { ...o, tools: TP.compactTools(o.tools || []) }); }
+      catch (e2) { if (!TP.CTX_RE.test(String(e2 && e2.message))) throw e2; throw TP.ctxSmallError(info && info.contextSize); }
+    }
+  }
+  async function chatStep1(messages, { tools = [], toolChoice = 'auto', responseFormat = null, ...opts } = {}) {
     if (info && (info.textTools || (info.template && info.template.strict))) return textStep(messages, { tools, toolChoice, responseFormat, ...opts });
     try { return await nativeStep(messages, { tools, toolChoice, responseFormat, ...opts }); }
     catch (e) {

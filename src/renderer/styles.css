@@ -381,3 +381,5 @@ details.adv[open]{display:flex;flex-direction:column;gap:10px}
 .no-action{display:flex;flex-direction:column;gap:6px;margin-top:10px;padding:10px 12px;border:1.5px solid var(--danger-line);background:var(--danger-soft);color:var(--danger);border-radius:10px;font-size:13px}
 .no-action span{color:var(--text)}.no-action .btn{align-self:flex-start}
 .tag.tools-good{background:var(--ok-soft);color:var(--ok);border-color:transparent}.tag.tools-limited{background:var(--warm-soft);color:var(--warm);border-color:transparent}.tag.tools-none{background:var(--danger-soft);color:var(--danger);border-color:transparent}
+
+.screen-area{margin:4px 0 8px}.screen-area h3.mt{margin-top:16px}.tag.comp{background:var(--accent-soft,#fde8ea);color:var(--accent,#b3121c);border-color:transparent;font-weight:600}

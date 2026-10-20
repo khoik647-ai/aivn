@@ -37,12 +37,30 @@ function createComputerTools(deps) {
   const st = () => deps.getSettings();
   let appCache = null, appCacheAt = 0;
   // Danh sách ứng dụng: lối tắt Start Menu/Desktop, %LOCALAPPDATA%\Programs, sổ đăng ký (Uninstall, App Paths), Get-StartApps (Store/UWP); macOS: /Applications…
-  let deepCache = null, deepAt = 0;
-  const quick = () => { if (!appCache || Date.now() - appCacheAt > 60e3) { appCache = C.listApps(); appCacheAt = Date.now(); } return appCache; };
+  let deepCache = null, deepAt = 0, lastDiag = null;
+  const quick = (extraDirs) => { if (!appCache || extraDirs || Date.now() - appCacheAt > 60e3) { const diag = { sources: {}, errors: [] }; appCache = C.listApps({ extraDirs: extraDirs || undefined, diag }); appCache.diag = diag; appCacheAt = Date.now(); } return appCache; };
   const apps = async () => {
-    if (!deepCache || Date.now() - deepAt > 5 * 60e3) { deepCache = await (deps.deepApps || C.deepApps)().catch(() => []); deepAt = Date.now(); }
+    if (!deepCache || Date.now() - deepAt > 5 * 60e3) {
+      deepCache = await (deps.deepApps || C.deepApps)().catch((e) => Object.assign([], { diag: { sources: {}, errors: ['tìm sâu lỗi: ' + e.message] } }));
+      deepAt = Date.now();
+      // thư mục Desktop/Start Menu thật do Windows báo (OneDrive, tên bản địa hoá…) → quét lại lối tắt ở đó
+      const dirs = deepCache.dirs; const q = quick(dirs && (dirs.desktop.length || dirs.start.length) ? dirs : null);
+      const dd = deepCache.diag || { sources: {}, errors: [] };
+      lastDiag = { sources: { ...(q.diag && q.diag.sources), ...dd.sources }, errors: [...((q.diag && q.diag.errors) || []), ...(dd.errors || [])], dirs: q.diag && q.diag.dirs, ms: dd.ms };
+      deps.log && deps.log(`[ứng dụng] quét: ${Object.entries(lastDiag.sources).map(([k, v]) => k + '=' + v).join(', ') || 'không có mục nào'}${lastDiag.errors.length ? ' · LỖI: ' + lastDiag.errors.join('; ') : ''}${lastDiag.dirs ? ' · Desktop: ' + lastDiag.dirs.desktop.join(' | ') : ''}`);
+      if (deps.logScan) deps.logScan(lastDiag);
+    }
     return C.mergeApps(quick(), deepCache);
   };
+  const failedNote = () => lastDiag && lastDiag.errors.length ? ` LƯU Ý: một số nguồn tìm bị lỗi (${lastDiag.errors.join('; ')}), nên KHÔNG được nói với người dùng là ứng dụng chưa cài.` : '';
+  // Windows: thử mở theo tên qua Get-StartApps (shell:AppsFolder) rồi Start-Process (App Paths, PATH); không hiện hộp thoại lỗi
+  const winLaunchByName = (q) => new Promise(res => {
+    const safe = String(q).replace(/'/g, "''").replace(/[\r\n*?\[\]`$]/g, ' ').slice(0, 80);
+    // chỉ mở ứng dụng đã đăng ký (Start/Store hoặc App Paths) — không chạy tên tuỳ ý trên PATH
+    const ps = `[Console]::OutputEncoding=[Text.Encoding]::UTF8\n$ErrorActionPreference='SilentlyContinue'\n$q='${safe}'\nif(Get-Command Get-StartApps){ $a = Get-StartApps | Where-Object { $_.Name -like ('*' + $q + '*') } | Select-Object -First 1; if($a){ Start-Process ('shell:AppsFolder\\' + $a.AppID); 'ok:' + $a.Name; exit } }\nforeach($r in 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\','HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\'){ $k = Get-ItemProperty -LiteralPath ($r + $q + '.exe'); if($k -and $k.'(default)'){ Start-Process -FilePath ($k.'(default)'.Trim('"')); 'ok:' + $q; exit } }\n'fail'`;
+    const run = deps.psRun || ((script) => new Promise(r => require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', C.psEncoded(script)], { timeout: 20000, windowsHide: true, encoding: 'utf8' }, (e, out) => r(String(out || '')))));
+    run(ps).then(out => { const m = String(out).match(/ok:(.+)/); res(m ? m[1].trim() : null); }, () => res(null));
+  });
   const SOURCES = process.platform === 'win32' ? 'lối tắt Start Menu (của bạn và mọi người dùng), Desktop, %LOCALAPPDATA%\\Programs, sổ đăng ký (Uninstall, App Paths) và ứng dụng Store (Get-StartApps)'
     : process.platform === 'darwin' ? '/Applications, ~/Applications, /System/Applications, Spotlight và "open -a"' : 'các tệp .desktop';
 
@@ -61,8 +79,18 @@ function createComputerTools(deps) {
   async function openApp(hit) {
     if (hit.appId) { const { spawn } = require('child_process'); spawn('explorer.exe', ['shell:AppsFolder\\' + hit.appId], { detached: true, stdio: 'ignore' }).unref(); return; }
     if (process.platform === 'win32' && hit.path && /\.exe$/i.test(hit.path)) { const { spawn } = require('child_process'); const c = spawn(hit.path, [], { detached: true, stdio: 'ignore', cwd: path.dirname(hit.path) }); c.on('error', () => {}); c.unref(); return; }
-    if (!hit.path) throw new CompError(`"${hit.name}" có trong danh sách đã cài nhưng không tìm thấy tệp chạy.`);
-    return openWith(hit.path, 'app');
+    if (!hit.path) {
+      if (process.platform === 'win32' && await winLaunchByName(hit.name)) return;
+      throw new CompError(`"${hit.name}" có trong danh sách đã cài nhưng không tìm thấy tệp chạy.`);
+    }
+    try { return await openWith(hit.path, 'app'); }
+    catch (e) {
+      // lối tắt hỏng / bị chặn: chạy thẳng tệp đích, rồi thử mở theo tên
+      deps.log && deps.log(`[ứng dụng] mở "${hit.path}" lỗi: ${e.message}`);
+      if (process.platform === 'win32' && hit.target && /\.exe$/i.test(hit.target) && fs.existsSync(hit.target)) { const { spawn } = require('child_process'); const c = spawn(hit.target, [], { detached: true, stdio: 'ignore', cwd: path.dirname(hit.target) }); c.on('error', () => {}); c.unref(); return; }
+      if (process.platform === 'win32' && await winLaunchByName(hit.name)) return;
+      throw e;
+    }
   }
   async function openWith(target, kind) {
     if (process.platform === 'linux' && kind === 'app' && target.endsWith('.desktop')) { const { spawn } = require('child_process'); spawn('gtk-launch', [path.basename(target, '.desktop')], { detached: true, stdio: 'ignore' }).unref(); return; }
@@ -78,7 +106,7 @@ function createComputerTools(deps) {
         const q = String(a.query || '').trim();
         let list = await apps(); if (q && process.platform === 'darwin' && !list.some(x => C.score(q, x.name) >= 40)) list = C.mergeApps(list, await C.macSpotlight(q)); if (q) list = list.map(x => ({ ...x, s: C.score(q, x.name) })).filter(x => x.s >= 40).sort((x, y) => y.s - x.s);
         const shown = list.slice(0, 80).map(x => x.name);
-        return { forModel: `${q ? `Ứng dụng khớp "${q}"` : 'Ứng dụng đã cài'} (${list.length}${list.length > 80 ? ', hiện 80' : ''}):\n${shown.join('\n') || `(không có mục khớp; đã kiểm tra ${SOURCES}. Đừng kết luận là chưa cài: hãy thử open_app với tên này)`}`, summary: `${list.length} ứng dụng${q ? ` khớp “${q}”` : ''}`, detail: shown.join('\n') };
+        return { forModel: `${q ? `Ứng dụng khớp "${q}"` : 'Ứng dụng đã cài'} (${list.length}${list.length > 80 ? ', hiện 80' : ''}):\n${shown.join('\n') || `(không có mục khớp; đã kiểm tra ${SOURCES}. Đừng kết luận là chưa cài: hãy thử open_app với tên này)`}${failedNote()}`, summary: `${list.length} ứng dụng${q ? ` khớp “${q}”` : ''}`, detail: shown.join('\n') };
       }
       case 'open_app': {
         const q = String(a.name || '').trim(); if (!q) throw new CompError('Thiếu tên ứng dụng');
@@ -90,8 +118,9 @@ function createComputerTools(deps) {
         if (hit) { await openApp(hit); return { forModel: `Đã mở ứng dụng "${hit.name}".`, summary: `Đã mở ${hit.name}` }; }
         if (process.platform === 'win32') { const b = C.WIN_BUILTIN[q.toLowerCase()]; if (b) { if (b.endsWith(':')) await deps.openExternal(b); else { const { spawn } = require('child_process'); spawn(b, [], { detached: true, stdio: 'ignore' }).unref(); } return { forModel: `Đã mở "${q}".`, summary: `Đã mở ${q}` }; } }
         if (process.platform === 'darwin') { const r = await new Promise(res => require('child_process').execFile('open', ['-a', q], (e) => res(!e))); if (r) return { forModel: `Đã mở ứng dụng "${q}".`, summary: `Đã mở ${q}` }; }
+        if (process.platform === 'win32' || deps.psRun) { const got = await winLaunchByName(q); if (got) return { forModel: `Đã mở ứng dụng "${got}".`, summary: `Đã mở ${got}` }; }
         const near = all.map(x => ({ n: x.name, s: C.score(q.split(/\s+/)[0], x.name) })).filter(x => x.s > 0).sort((x, y) => y.s - x.s).slice(0, 8).map(x => x.n);
-        throw new CompError(`Không tìm thấy ứng dụng "${q}" sau khi đã kiểm tra ${SOURCES}.${near.length ? ' Gần giống: ' + near.join(', ') + '.' : ''} Có thể tên khác (hỏi người dùng tên chính xác) hoặc ứng dụng chưa được cài.`);
+        throw new CompError(`Không tìm thấy ứng dụng "${q}" sau khi đã kiểm tra ${SOURCES}.${near.length ? ' Gần giống: ' + near.join(', ') + '.' : ''} Bước tiếp: thử list_apps với từ khoá ngắn${process.platform === 'win32' ? `, rồi run_command \`cmd /c start "" "${q.replace(/["`$]/g, '')}"\`` : ''}; nếu vẫn không được, hỏi người dùng tên chính xác. Không mở trang web thay thế khi chưa hỏi người dùng; đừng khẳng định ứng dụng không có trên máy.${failedNote()}`);
       }
       case 'open_path': {
         const p = C.expandPath(a.path);
