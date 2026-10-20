@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'">
+<title>AIVN</title>
+<script src="theme-init.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail">
+    <div class="brand">
+      <img src="logo-tile.svg" alt="" width="32" height="32">
+      <span>AIVN</span>
+    </div>
+    <button class="nav-item active" data-view="chat"><i>💬</i><span>Trò chuyện</span></button>
+    <div class="nav-group" aria-label="Trợ lý">
+      <button class="nav-item" data-view="agent"><i>🤖</i><span>Trợ lý</span><b class="nav-new">Mới</b></button>
+      <button class="nav-item sub" data-view="schedule"><i>⏰</i><span>Lịch tự động</span><b class="pill-count" id="schedCount" hidden></b></button>
+      <button class="nav-item sub" data-view="memory"><i>🧠</i><span>Ghi nhớ</span><b class="pill-count" id="memCount" hidden></b></button>
+    </div>
+    <button class="nav-item" data-view="discover"><i>🗃</i><span>Kho mô hình</span></button>
+    <button class="nav-item" data-view="models"><i>📦</i><span>Mô hình của tôi</span></button>
+    <button class="nav-item" data-view="server"><i>⚡</i><span>Máy chủ API</span><b class="pill-dot" id="srvDot"></b></button>
+    <div class="rail-foot"><div id="hwInfo">Đang kiểm tra phần cứng…</div>
+      <div class="theme-row" id="themeRow" role="group" aria-label="Giao diện"><button type="button" data-theme="light" title="Giao diện sáng">☀ Sáng</button><button type="button" data-theme="dark" title="Giao diện tối">☾ Tối</button><button type="button" data-theme="system" title="Theo hệ điều hành">Tự động</button></div></div>
+  </nav>
+
+  <main class="content">
+    <header class="topbar">
+      <div class="model-picker">
+        <select id="modelSelect"><option value="">— Chọn mô hình để nạp —</option></select>
+        <button class="btn sm" id="ejectBtn" title="Gỡ mô hình khỏi bộ nhớ" disabled>⏏ Gỡ</button>
+      </div>
+      <div class="model-state" id="modelState"><span class="dot off"></span>Chưa nạp mô hình</div>
+    </header>
+
+    <!-- CHAT -->
+    <section class="view active" id="view-chat">
+      <aside class="convos">
+        <button class="btn primary block" id="newChat">＋ Cuộc trò chuyện mới</button>
+        <div class="convo-list" id="convoList"></div>
+      </aside>
+      <div class="chat" id="chatPane">
+        <div class="agent-bar only-agent" id="agentBar">
+          <div class="agent-title"><b>🤖 Trợ lý</b><span class="muted small">Tự dùng công cụ ngay trên máy bạn · mỗi bước đều hiện bên dưới</span></div>
+          <div class="tool-chips" id="toolChips"></div>
+        </div>
+        <div class="doc-warn agent-warn only-agent" id="agentWarn" hidden></div>
+        <div class="dropzone" id="dropzone"><div><b>Thả tệp vào đây</b><span>PDF có lớp chữ · DOCX · TXT/MD/CSV/JSON · mã nguồn · ảnh PNG/JPG/WEBP/GIF (đọc chữ bằng OCR) · tối đa 20 MB</span></div></div>
+        <div class="messages" id="messages"></div>
+        <div class="doc-warn offer rag-offer" id="sysNotice" hidden></div>
+        <div class="doc-warn offer rag-offer" id="ragOffer" hidden></div>
+        <div class="chips" id="chips" hidden></div>
+        <form class="composer" id="composer">
+          <button type="button" class="btn icon" id="attachBtn" title="Đính kèm tệp (PDF có lớp chữ, DOCX, TXT, MD, CSV, JSON, mã nguồn, ảnh · tối đa 20 MB)" aria-label="Đính kèm tệp">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.4 11.6-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
+          </button>
+          <textarea id="input" rows="1" placeholder="Nhập tin nhắn… (Enter để gửi, Shift+Enter xuống dòng, kéo thả tệp hoặc dán ảnh bằng Ctrl+V)"></textarea>
+          <button type="button" class="btn danger" id="stopBtn" hidden>■ Dừng</button>
+          <button type="submit" class="btn primary" id="sendBtn">Gửi ↑</button>
+        </form>
+        <div class="gen-stats" id="genStats"></div>
+      </div>
+      <aside class="settings">
+        <div class="only-agent agent-settings" id="agentSettings">
+          <h3>Cài đặt Trợ lý</h3>
+          <div class="set-block">
+            <div class="set-head"><b>📂 Thư mục được phép</b><button class="btn sm" id="addFolder">＋ Thêm thư mục</button></div>
+            <div class="folder-list" id="folderList"></div>
+            <small>Trợ lý chỉ xem, đọc, ghi tệp trong các thư mục này. <b>Xoá</b> hay <b>ghi đè</b> tệp luôn hỏi bạn trước.</small>
+          </div>
+          <label class="check toggle"><input type="checkbox" id="agWeb"> <span><b>🌐 Cho phép truy cập mạng</b><small>Tìm kiếm qua DuckDuckGo (dự phòng Wikipedia) và đọc trang web. Mọi địa chỉ đã mở đều ghi dưới câu trả lời.</small></span></label>
+          <label class="check toggle"><input type="checkbox" id="agPy"> <span><b>🐍 Cho phép chạy Python</b><small id="agPyNote">Đang kiểm tra Python trên máy…</small></span></label>
+          <label class="check toggle"><input type="checkbox" id="agMem"> <span><b>🧠 Cho phép ghi nhớ</b><small id="agMemNote">Trợ lý lưu điều cần nhớ lâu dài và tự nhắc lại khi liên quan.</small></span></label>
+          <p class="small"><button class="linkish" data-goto="memory">Quản lý ghi nhớ →</button> · <button class="linkish" data-goto="schedule">Lịch tự động →</button></p>
+          <p class="small muted">JavaScript luôn chạy trong hộp cát riêng: không đọc tệp, không vào mạng, tối đa 3 giây.</p>
+        </div>
+        <div class="only-chat">
+        <h3>Cài đặt trò chuyện</h3>
+        <label>Lời nhắc hệ thống
+          <textarea id="sysPrompt" rows="6"></textarea>
+        </label>
+        <label>Nhiệt độ <output id="tempOut">0.7</output>
+          <input type="range" id="temp" min="0" max="2" step="0.05">
+          <small>Thấp: chính xác, ổn định · Cao: sáng tạo, ngẫu nhiên</small>
+        </label>
+        <label>Số token tối đa
+          <input type="number" id="maxTok" min="16" max="8192" step="16">
+        </label>
+        <label>Độ dài ngữ cảnh (áp dụng khi nạp lại)
+          <select id="ctxSize"><option>2048</option><option>4096</option><option>8192</option><option>16384</option></select>
+        </label>
+        <div class="rag-box" id="ragBox">
+          <h3>Tìm kiếm trong tài liệu</h3>
+          <p class="small muted" id="ragText">Đang kiểm tra…</p>
+          <div class="progress" id="ragProg" hidden><div></div></div>
+          <div class="row"><button class="btn sm primary" id="ragDl" hidden>Tải mô hình tìm kiếm</button><button class="btn sm" id="ragDel" hidden>Xoá</button></div>
+          <label class="check"><input type="checkbox" id="ragOn"> Dùng tìm kiếm ngữ nghĩa cho tài liệu dài</label>
+        </div>
+        </div>
+        <div class="about">
+          <h3>Giới thiệu</h3>
+          <p><b>AIVN</b> <span id="aboutVer"></span><br>Chạy mô hình AI ngay trên máy tính của bạn, riêng tư và không cần Internet.</p>
+          <div class="update-box" id="updateBox">
+            <div id="updateText" class="muted">Bạn đang dùng bản mới nhất mà AIVN biết.</div>
+            <div class="progress" id="updateProg" hidden><div></div></div>
+            <div class="row"><button class="btn sm" id="updCheck">Kiểm tra cập nhật</button><button class="btn sm primary" id="updAction" hidden></button></div>
+          </div>
+          <p>Phát triển bởi<br><b class="dev">NGUYỄN NGỌC KHÔI SINH VIÊN VLU</b></p>
+          <p class="muted">© 2026 AIVN · NGUYỄN NGỌC KHÔI SINH VIÊN VLU<br>Sử dụng node-llama-cpp / llama.cpp và llama-server (MIT), Electron (MIT), tesseract.js (Apache 2.0).</p>
+        </div>
+      </aside>
+    </section>
+
+    <!-- DISCOVER -->
+    <section class="view" id="view-discover">
+      <div class="page">
+        <div class="page-head">
+          <div><h2>Kho mô hình</h2><p class="muted">Tìm mọi mô hình GGUF trên Hugging Face, hoặc chọn nhanh trong danh sách Gợi ý của AIVN.</p></div>
+          <div class="row"><button class="btn" id="tokenBtn" title="Token Hugging Face cho mô hình yêu cầu đăng nhập">🔑 Token Hugging Face</button><button class="btn" id="importBtn2">📂 Nhập tệp GGUF</button></div>
+        </div>
+        <div class="token-box" id="tokenBox" hidden>
+          <p class="small">Chỉ cần cho mô hình <b>yêu cầu đăng nhập/chấp nhận giấy phép</b> (gated). Token được lưu <b>chỉ trên máy này</b>, chỉ gửi tới huggingface.co và không bao giờ được ghi vào nhật ký. Tạo token “Read” tại huggingface.co/settings/tokens.</p>
+          <div class="row"><input type="password" id="hfToken" placeholder="hf_…" autocomplete="off" spellcheck="false"><button class="btn sm primary" id="tokenSave">Lưu</button><button class="btn sm" id="tokenClear">Xoá token</button><span class="muted small" id="tokenState"></span></div>
+        </div>
+        <form class="searchbar" id="searchForm">
+          <input type="search" id="searchQ" placeholder="Tìm mô hình GGUF trên Hugging Face… (vd. qwen3, gemma 3, llama 3.1 8b, vietnamese)" autocomplete="off">
+          <select id="searchSort" title="Sắp xếp"><option value="downloads">Lượt tải nhiều nhất</option><option value="newest">Mới cập nhật</option><option value="likes">Lượt thích nhiều nhất</option></select>
+          <button class="btn primary" type="submit">Tìm</button>
+        </form>
+        <div class="dl-panel" id="dlPanel" hidden><h4>Đang tải</h4><div id="dlList"></div></div>
+        <div id="hfArea" hidden>
+          <div class="row between"><h3 id="hfTitle">Kết quả</h3><button class="btn sm" id="hfClose">✕ Đóng tìm kiếm</button></div>
+          <div class="hf-results" id="hfResults"></div>
+        </div>
+        <div id="repoArea" hidden></div>
+        <div id="sugArea">
+          <div class="row between"><h3>Gợi ý của AIVN</h3><div class="fam-filter" id="famFilter"></div></div>
+          <div class="cards" id="catalog"></div>
+        </div>
+        <p class="muted small">Mô hình tải từ Hugging Face. Mỗi mô hình tuân theo giấy phép riêng của nhà phát hành (Apache 2.0, MIT, Llama Community, Gemma…). Vui lòng đọc giấy phép trước khi sử dụng. Mức “Vừa máy” chỉ là ước lượng theo RAM/VRAM.</p>
+      </div>
+    </section>
+
+    <!-- MY MODELS -->
+    <section class="view" id="view-models">
+      <div class="page">
+        <div class="page-head">
+          <div><h2>Mô hình của tôi</h2><p class="muted" id="modelsDir"></p></div>
+          <div class="row"><button class="btn" id="openDir">📁 Mở thư mục</button><button class="btn primary" id="importBtn">📂 Nhập tệp GGUF</button></div>
+        </div>
+        <div class="table" id="modelTable"></div>
+      </div>
+    </section>
+
+    <!-- SERVER -->
+    <section class="view" id="view-server">
+      <div class="page">
+        <div class="page-head">
+          <div><h2>Máy chủ API cục bộ</h2><p class="muted">Tương thích OpenAI: dùng được với thư viện openai, LangChain, hay bất kỳ công cụ nào cho phép đổi base URL.</p></div>
+        </div>
+        <div class="server-card">
+          <label class="switch"><input type="checkbox" id="srvToggle"><span></span></label>
+          <div>
+            <b id="srvState">Đang tắt</b>
+            <div class="muted small" id="srvUrl">http://localhost:1234/v1</div>
+          </div>
+          <label class="port">Cổng <input type="number" id="srvPort" min="1" max="65535"></label>
+          <label class="check"><input type="checkbox" id="srvAuto"> Tự bật khi mở ứng dụng</label>
+        </div>
+        <div class="grid2">
+          <div>
+            <h4>Endpoint</h4>
+            <ul class="endpoints">
+              <li><code>GET</code> /v1/models</li>
+              <li><code>POST</code> /v1/chat/completions <span class="muted">(hỗ trợ "stream", "tools"/"tool_choice", "response_format" json_schema)</span></li>
+              <li><code>POST</code> /v1/embeddings <span class="muted">(cần BGE-M3)</span></li>
+            </ul>
+            <h4>Ví dụ</h4>
+            <pre class="code" id="curlEx"></pre>
+          </div>
+          <div>
+            <h4>Nhật ký</h4>
+            <div class="log" id="srvLog"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <!-- LỊCH TỰ ĐỘNG -->
+    <section class="view" id="view-schedule">
+      <div class="page">
+        <div class="page-head">
+          <div><h2>⏰ Lịch tự động</h2><p class="muted">Nhắc việc và việc định kỳ cho Trợ lý. Chạy khi AIVN đang mở (hoặc đang chạy nền trong khay), hiện thông báo của hệ điều hành và lưu kết quả vào một cuộc trò chuyện.</p></div>
+        </div>
+        <div class="grid-sched">
+          <form class="sched-form" id="schedForm">
+            <h3 id="schedFormTitle">Tạo lịch mới</h3>
+            <label>Tên<input id="sfTitle" maxlength="120" placeholder="vd. Uống nước, Báo cáo chi tiêu tuần" required></label>
+            <div class="seg" id="sfKind" role="radiogroup"><button type="button" data-kind="reminder" class="on">🔔 Nhắc việc</button><button type="button" data-kind="agent">🤖 Việc cho Trợ lý</button></div>
+            <label id="sfMsgWrap">Nội dung nhắc<textarea id="sfMsg" rows="2" placeholder="vd. Đứng dậy vươn vai và uống một cốc nước"></textarea></label>
+            <label id="sfPromptWrap" hidden>Yêu cầu cho Trợ lý<textarea id="sfPrompt" rows="3" placeholder="vd. Đọc tệp chi-tieu.csv, tính tổng tuần này và ghi vào bao-cao-tuan.md"></textarea><small>Chạy với mô hình đang nạp (hoặc mô hình dùng gần nhất). Không thể xoá/ghi đè tệp vì không có ai xác nhận.</small></label>
+            <div class="seg" id="sfRepeat" role="radiogroup"><button type="button" data-rep="once" class="on">Một lần</button><button type="button" data-rep="daily">Hằng ngày</button><button type="button" data-rep="weekly">Hằng tuần</button></div>
+            <div class="row"><label class="grow" id="sfDateWrap">Ngày<input type="date" id="sfDate"></label><label class="grow">Giờ<input type="time" id="sfTime" required></label></div>
+            <div class="days" id="sfDays" hidden><button type="button" data-d="1">T2</button><button type="button" data-d="2">T3</button><button type="button" data-d="3">T4</button><button type="button" data-d="4">T5</button><button type="button" data-d="5">T6</button><button type="button" data-d="6">T7</button><button type="button" data-d="0">CN</button></div>
+            <div class="row"><button class="btn primary" type="submit" id="sfSave">Lưu lịch</button><button class="btn" type="button" id="sfCancel" hidden>Huỷ sửa</button></div>
+          </form>
+          <div>
+            <div class="row between"><h3>Lịch của bạn</h3><span class="muted small" id="schedNow"></span></div>
+            <div class="sched-list" id="schedList"></div>
+            <div class="bg-box">
+              <h4>Chạy nền</h4>
+              <label class="check"><input type="checkbox" id="bgTray"> Khi đóng cửa sổ, thu AIVN xuống khay hệ thống để lịch vẫn chạy</label>
+              <label class="check"><input type="checkbox" id="bgLogin"> Mở AIVN khi đăng nhập máy tính</label>
+              <button class="btn sm" id="notifyTest">🔔 Thử thông báo</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- GHI NHỚ -->
+    <section class="view" id="view-memory">
+      <div class="page narrow">
+        <div class="page-head">
+          <div><h2>🧠 Ghi nhớ của Trợ lý</h2><p class="muted" id="memMode">Những điều Trợ lý đã ghi nhớ về bạn. Chỉ lưu trên máy này; điều liên quan được đưa vào lời nhắc của Trợ lý.</p></div>
+          <div class="row mem-tools"><label class="check"><input type="checkbox" id="memOn"> Cho phép ghi nhớ</label><button class="btn danger sm" id="memClear">Xoá tất cả</button></div>
+        </div>
+        <form class="row mem-add" id="memForm"><input id="memNew" maxlength="500" placeholder="Thêm một điều cần nhớ, vd. Tôi học ngành Công nghệ thông tin ở VLU"><button class="btn primary" type="submit">Thêm</button></form>
+        <div class="mem-list" id="memList"></div>
+      </div>
+    </section>
+  </main>
+</div>
+<div class="modal-back" id="confirmModal" hidden>
+  <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="cfTitle" aria-describedby="cfMsg">
+    <div class="modal-ic" id="cfIcon">🗑</div>
+    <h3 id="cfTitle">Xoá tệp?</h3>
+    <p id="cfMsg"></p>
+    <code class="cf-path" id="cfPath"></code>
+    <pre class="cf-preview" id="cfPreview" hidden></pre>
+    <p class="small muted">Yêu cầu này do Trợ lý tạo ra. Nếu bạn không chắc, hãy chọn “Không”.</p>
+    <div class="row end"><button class="btn" id="cfNo">Không, giữ nguyên tệp</button><button class="btn danger" id="cfYes">Xoá</button></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
