@@ -470,13 +470,18 @@ function createAgent(deps) {
   }
 
   // messages: lịch sử kiểu OpenAI (không có system). Trả { text, steps, usage, finishReason, urls, memories }
-  function run(args) { return runStore.run({ attachments: (args && args.attachments) || [] }, () => runInner(args)); }
+  function run(args) {
+    const store = { attachments: (args && args.attachments) || [] };
+    // 0.15.2: lỗi giữa lượt mang theo số bước công cụ đã chạy, để bên ngoài KHÔNG chạy lại cả lượt khi đã có thao tác thật (tránh gửi tin hai lần)
+    return runStore.run(store, () => runInner(args)).catch((e) => { try { if (e && typeof e === 'object') e.stepsDone = (store.steps || []).filter(x => x.status !== 'running' || x.auto).length; } catch {} throw e; });
+  }
   async function runInner({ messages, convoId = null, signal, onToken = () => {}, onStep = () => {}, onStatus = () => {}, headless = false, confirm, confirmScreen, approve = null }) {
     const s = S_();
     const names = activeTools({ headless });
     const att = (runStore.getStore() || {}).attachments || [];
     if (att.length && !names.includes('read_file') && !(s.agentToolsOff || []).includes('files')) names.push('read_file'); // đọc tệp đính kèm
-    const tools = specs(names);
+    // 0.15.2: ngữ cảnh < 16k → mô tả công cụ gọn (tiết kiệm ~40% token); chỉ gửi công cụ đang bật (activeTools)
+    const tools = (Number((deps.engine.status() || {}).contextSize) || 8192) < 16384 ? TP.leanTools(specs(names)) : specs(names);
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
     let query = lastUser ? (typeof lastUser.content === 'string' ? lastUser.content : (lastUser.content || []).map(x => x.text || '').join(' ')) : '';
     const compOn = names.some(n => COMP.includes(n)) && !headless;
@@ -497,8 +502,21 @@ function createAgent(deps) {
     if (san.guides) deps.log && deps.log(`[aivn agent] ẩn ${san.guides} câu trả lời cũ chỉ hướng dẫn/hỏi lại (không gọi công cụ)`);
     const msgs = [{ role: 'system', content: sys.text }, ...san.messages];
     const st = deps.engine.status();
+    // 0.15.2: kiểm tra lời nhắc có vừa ngữ cảnh không TRƯỚC khi gửi (lỗi "Failed to compress chat history" của bộ máy là do thiếu ngữ cảnh)
+    { const tc = (x) => (deps.engine.countTokens ? deps.engine.countTokens(x) : Math.ceil(String(x).length / 3));
+      const mt = (m) => tc(typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')) + 8;
+      const sysTok = tc(sys.text), toolTok = tc(JSON.stringify(tools)); let histTok = msgs.slice(1).reduce((n, m) => n + mt(m), 0);
+      const reserve = Math.min(2048, Math.max(768, Math.floor((st.contextSize || 8192) * 0.15)));
+      let need = sysTok + toolTok + histTok + reserve, dropped = 0;
+      // lịch sử dài: bỏ bớt tin cũ nhất (giữ tin cuối của người dùng) trước khi đòi ngữ cảnh lớn hơn
+      while (st.contextSize && need > st.contextSize && msgs.length > 2) { const m = msgs.splice(1, 1)[0]; histTok -= mt(m); need -= mt(m); dropped++; }
+      while (dropped && msgs[1].role !== 'user' && msgs.length > 2) { histTok -= mt(msgs[1]); need -= mt(msgs[1]); msgs.splice(1, 1); dropped++; }
+      if (dropped) deps.log && deps.log(`[aivn agent] bỏ ${dropped} tin cũ để vừa ngữ cảnh`);
+      deps.log && deps.log(`[aivn agent] lời nhắc ~${sysTok} token + ${tools.length} công cụ ~${toolTok} token + lịch sử ~${histTok} token (+${reserve} để trả lời) / ngữ cảnh ${st.contextSize || '?'}`);
+      if (st.contextSize && need > st.contextSize) { const e = new Error(`Lời nhắc cần khoảng ${need} token nhưng ngữ cảnh chỉ có ${st.contextSize}.`); e.code = 'CTX_SMALL'; e.need = need; e.have = st.contextSize; throw e; } }
     const ctx = { signal, convoId, userQuery: query, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
     const steps = [], seen = new Map();
+    (runStore.getStore() || {}).steps = steps;
     let text = '', finishReason = 'stop', calls = 0, nudged = false, deskNudged = false, forcedTried = false, warning = null, fakeSeen = false, emptyNudged = false, loopRetried = false;
     const smp = SMP.samplingFor(st.id || '', 'agent', { temperature: typeof s.agentTemperature === 'number' && s.agentTemperature !== 0.2 ? s.agentTemperature : null }); // 0.2 = mặc định cũ (dễ lặp) → tự động theo mô hình
     const turnBudget = Number(s.agentTurnMaxTokens) || 6000;

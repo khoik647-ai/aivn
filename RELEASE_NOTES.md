@@ -1,22 +1,18 @@
-Bản sửa lỗi 0.15.1 — chỉ gồm sửa lỗi và tăng độ ổn định. Ai đang dùng 0.15.0 nên cập nhật ngay.
+Bản sửa lỗi 0.15.2. Ai dùng laptop có GPU 4 GB (RTX 3050/3050 Ti, GTX 1650…) nên cập nhật ngay.
 
-Lỗi nghiêm trọng đã sửa:
-- **0.15.0 trên Windows và macOS không nạp được mô hình nào** (kể cả mô hình nhỏ). Thông báo lỗi là “Bộ máy AI đã đóng đột ngột (mã 1)”, kèm “Lỗi kết nối tới AIVN API: fetch failed”.
-- Nguyên nhân: tệp mới src/agent/sampling.js (thiết lập chống lặp câu) không được đóng gói ra ngoài app.asar. Bộ máy AI chạy bằng Node.js riêng nên không đọc được tệp đó và thoát ngay khi khởi động (Cannot find module './agent/sampling').
-- Đã sửa cách đóng gói và thêm hai lớp kiểm tra để lỗi này không lặp lại: một bài kiểm thử tự động rà mọi mô-đun mà bộ máy AI cần, và bước phát hành chạy thử bộ máy AI trong bản đã đóng gói (Windows và macOS) trước khi đăng.
+Lỗi đã sửa:
+- **AIVN AGENT lỗi ở mọi tin nhắn** với thông báo tiếng Anh “Failed to compress chat history for context shift…”. Trên thanh trên cùng, độ dài ngữ cảnh chỉ còn khoảng 1437.
+- Nguyên nhân: khi VRAM không đủ chỗ, AIVN để bộ máy tự thu nhỏ ngữ cảnh, xuống thấp nhất tới 512 token. Lời nhắc hệ thống cộng mô tả công cụ của AIVN AGENT đã cần khoảng 5.000 token, nên mọi lượt đều tràn.
+- Bây giờ AIVN **không bao giờ nạp mô hình với ngữ cảnh dưới 8192** (4096 nếu bạn tự chọn 4096 cho trò chuyện thường). Thiếu VRAM thì AIVN đưa ít lớp lên GPU hơn, phần còn lại chạy trên RAM, chứ không cắt ngữ cảnh. Qwen3 4B Q4 với ngữ cảnh 8192 chạy tốt trên máy 16 GB RAM + 4 GB VRAM.
 
 Ổn định hơn:
-- Khi bộ máy AI không khởi động được, thông báo nêu đúng dòng lỗi thật (không còn đoán “thiếu bộ nhớ”). Chi tiết được ghi vào nhật ký.
-- AIVN tự kiểm tra bộ máy ngay khi mở ứng dụng.
-- Nếu bộ máy sập khi đang nạp mô hình, AIVN tự thử lại một lần ở chế độ an toàn (chỉ CPU, ngữ cảnh 4096) rồi mới báo lỗi.
-- Khi bộ máy AI bị dừng đột ngột, AIVN dọn luôn llama-server (mô hình nhìn ảnh) còn sót lại, không để nó chiếm vài GB RAM/VRAM.
+- AIVN AGENT kiểm tra trước khi gửi: lời nhắc không vừa ngữ cảnh thì AIVN tự nạp lại mô hình với ngữ cảnh lớn hơn rồi chạy tiếp. Lịch sử quá dài thì AIVN bỏ bớt tin cũ nhất, luôn giữ tin cuối của bạn.
+- Không còn lỗi tiếng Anh: khi vẫn không đủ ngữ cảnh, AIVN báo bằng tiếng Việt và có nút **Tăng ngữ cảnh** để nạp lại mô hình với ngữ cảnh gấp đôi.
+- Nếu đã có thao tác thật trong lượt (ví dụ đã mở ứng dụng), AIVN không tự chạy lại cả lượt, để không gửi tin nhắn hai lần.
+- Mô tả công cụ gửi cho mô hình gọn hơn khi ngữ cảnh dưới 16k. Chỉ các công cụ đang bật mới được gửi.
+- Chế độ an toàn (khi bộ máy sập lúc nạp) và tự phục hồi giữa lượt không còn hạ ngữ cảnh xuống 2048.
 
-Giao diện:
-- Thông báo xếp gọn ở góc phải, tối đa 3 cái, tự ẩn (lỗi giữ 10 giây), có nút ×. Thông báo thường tự xoá khi chuyển màn hình.
-- Ô nhập chữ trong mọi biểu mẫu có viền và nền rõ ràng (trước đây là “ô vô hình”).
-- Hộp chọn tệp/thư mục có nút tiếng Việt (Lưu / Mở / Chọn thư mục).
-- Dải “Nghĩ → Xin phép → Làm → Kết quả” chỉ hiện trong AIVN AGENT, không hiện ở trò chuyện thường.
-- Mục Kinh doanh → Khách hàng tạm ẩn. Bộ Kinh doanh sẽ được làm lại đầy đủ và chỉ ra mắt khi hoàn chỉnh.
+Về “Tăng tốc: GPU vulkan” trên card NVIDIA: đây là chủ ý, không phải lỗi. Bản cài AIVN dùng Vulkan (chạy được trên NVIDIA, AMD và Intel) để bộ cài nhỏ gọn. Bộ máy CUDA riêng nặng thêm khoảng 550 MB. AIVN sẽ cho tải CUDA tuỳ chọn ở bản sau.
 
 Tải về:
 - Windows 10/11: AIVN-Setup.exe

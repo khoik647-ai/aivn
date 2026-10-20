@@ -24,7 +24,7 @@ test('AIVN_VRAM_LIMIT giả lập VRAM thấp', async () => {
 test('Qwen3 8B Q4 (4,68 GB) trên 4 GB: đưa một phần lên GPU, rồi giảm dần tới CPU', () => {
   const p = e.loadPlans({ gpu: 'vulkan', vram: { total: 4 * GB, free: 3.6 * GB }, fileSize: 4.68 * GB, geo: { layers: 36, kvPerToken: 147456 }, ctx: 4096 });
   assert.strictEqual(p[0].mode, 'gpu-partial'); assert.ok(p[0].gpuLayers > 5 && p[0].gpuLayers < 37);
-  assert.ok(p.some(x => x.ctx === 2048)); assert.strictEqual(p[p.length - 1].gpuLayers, 0);
+  assert.ok(p.every(x => x.ctx >= 4096 && x.minCtx >= 4096), '0.15.2: không bao giờ dưới 4096'); assert.strictEqual(p[p.length - 1].gpuLayers, 0);
 });
 test('Llama 3.2 3B (1,88 GB) trên 4 GB: toàn bộ lên GPU', () => {
   const p = e.loadPlans({ gpu: 'vulkan', vram: { total: 4 * GB, free: 3.6 * GB }, fileSize: 1.88 * GB, geo: { layers: 28, kvPerToken: 114688 }, ctx: 4096 });

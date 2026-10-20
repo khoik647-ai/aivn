@@ -78,14 +78,43 @@ async function ensureAfterCrash() {
   LOG.log('load', 'Tự nạp lại mô hình cho lượt mới sau khi bộ máy đã dừng', { model: settings.data.lastModel, ctx: lastCtx });
   await loadById(settings.data.lastModel, { force: true, ctx: lastCtx || null, reason: 'nạp lại sau khi bộ máy dừng' });
 }
+// 0.15.2: ngữ cảnh tối thiểu. Lời nhắc hệ thống + mô tả công cụ của AIVN AGENT ~2–4 nghìn token, nên AGENT cần ≥ 8192.
+const MIN_CTX_CHAT = 4096, MIN_CTX_AGENT = 8192;
+// Lỗi "ngữ cảnh không đủ" của node-llama-cpp / llama-server (tiếng Anh) → nhận ra để tự tăng ngữ cảnh hoặc báo tiếng Việt
+const CTX_ERR_RE = /compress chat history|context shift|too long prompt|context size|exceeds? the (available )?context|input is too long|prompt is too long|n_ctx|context length/i;
+const isCtxErr = (e) => !!e && (e.code === 'CTX_SMALL' || CTX_ERR_RE.test(String(e.message || e)));
+function ctxSmallError(have, want) {
+  const x = new Error(`Cuộc trò chuyện này cần nhiều ngữ cảnh hơn mức mô hình đang có (${have || '?'} token). AIVN chưa tăng được ngữ cảnh tự động${want ? ` lên ${want}` : ''}. Hãy bấm “Tăng ngữ cảnh”, bắt đầu cuộc trò chuyện mới, hoặc chọn mô hình nhỏ hơn.`);
+  x.code = 'CTX_SMALL'; return x;
+}
+// Chạy fn; nếu lời nhắc không vừa ngữ cảnh: nạp lại mô hình với ngữ cảnh lớn hơn (giảm lớp GPU nếu cần, KHÔNG giảm ngữ cảnh) rồi thử lại MỘT lần
+async function withCtxGrow(fn, { minCtx = MIN_CTX_CHAT, onGrow } = {}) {
+  try { return await fn(); }
+  catch (e) {
+    if (!isCtxErr(e)) throw e;
+    const st = engine.status(); const have = st.contextSize || 0;
+    if (e.stepsDone) { engineLog('Hết ngữ cảnh giữa lượt (đã chạy ' + e.stepsDone + ' bước công cụ) — không tự chạy lại để tránh lặp thao tác', e, { have }); throw ctxSmallError(have, null); }
+    const train = (st.meta && st.meta.trainCtx) || 32768;
+    const need = Number(e.need) || 0;
+    const want = Math.min(train, Math.max(minCtx, Math.ceil(Math.max(need * 1.3, have * 2) / 4096) * 4096));
+    if (!settings.data.lastModel || !st.loaded || want <= have) { engineLog('Ngữ cảnh không đủ, không tăng được', e, { have, need, train }); throw ctxSmallError(have, null); }
+    engineLog(`Ngữ cảnh ${have} không đủ (cần ~${need || '?'} token): tự nạp lại mô hình với ngữ cảnh ${want}`, e, { have, need, want });
+    onGrow && onGrow(want);
+    try { await loadById(settings.data.lastModel, { force: true, ctx: want, minCtx: want, reason: 'tăng ngữ cảnh' }); }
+    catch (e2) { engineLog('Không nạp lại được với ngữ cảnh lớn hơn', e2, { want }); throw ctxSmallError(have, want); }
+    const now = engine.status().contextSize || 0;
+    try { return await fn(); }
+    catch (e3) { if (isCtxErr(e3)) throw ctxSmallError(now, null); throw e3; }
+  }
+}
 // Bộ máy AI dừng giữa lượt (sập/thiếu bộ nhớ): nạp lại mô hình với ngữ cảnh nhỏ hơn rồi thử lại MỘT lần
-async function withEngineRecovery(fn, { onRetry } = {}) {
+async function withEngineRecovery(fn, { onRetry, minCtx = MIN_CTX_CHAT } = {}) {
   try { return await fn(); }
   catch (e) {
     if (!e || e.code !== 'ENGINE_EXIT' || !settings.data.lastModel) throw e;
     engineDied = true;
     const prev = lastCtx || settings.data.contextSize || 4096;
-    const ctx = prev > 4096 ? 4096 : Math.max(2048, Math.floor(prev / 2));
+    const ctx = Math.max(minCtx, prev > 8192 ? 8192 : MIN_CTX_CHAT); // 0.15.2: không xuống dưới 4096 (AIVN AGENT: 8192)
     engineLog('Bộ máy AI dừng giữa lượt: tự nạp lại mô hình với ngữ cảnh nhỏ hơn và thử lại một lần', e, { 'ngữ cảnh cũ': prev, 'ngữ cảnh mới': ctx, 'mã thoát': e.exitCode, 'tín hiệu': e.signal, 'lý do': e.killReason || 'không rõ (sập)' });
     onRetry && onRetry(ctx);
     try { await loadById(settings.data.lastModel, { force: true, ctx, reason: 'tự phục hồi sau khi bộ máy dừng' }); }
@@ -309,7 +338,7 @@ function startIdleUnload() {
   }, 60000);
   if (idleUnloadTimer.unref) idleUnloadTimer.unref();
 }
-async function loadById(id, { force = false, ctx = null, reason = null } = {}) {
+async function loadById(id, { force = false, ctx = null, reason = null, minCtx = null } = {}) {
   const m = listModels().find(x => x.id === id);
   if (!m) throw new Error(`Không tìm thấy mô hình "${id}"`);
   send('model:status', { loading: true, id });
@@ -331,11 +360,12 @@ async function loadById(id, { force = false, ctx = null, reason = null } = {}) {
     const gl = settings.data.gpuLayers;
     const pf = await perfProfile();
     let ctxWant = ctx || settings.data.contextSize || pf.ctx, ctxNote = null;
+    ctxWant = Math.max(MIN_CTX_CHAT, Number(ctxWant) || MIN_CTX_AGENT); // 0.15.2: không bao giờ nạp dưới 4096
     if (!ctx && ctxWant > 8192) { // GPU rời ≤ 6 GB: ngữ cảnh 16k làm bộ đệm KV tràn VRAM/RAM → giới hạn 8192
       const h = await hw(); const vt = h.gpu && h.gpu !== 'metal' && h.vram && !h.vram.integratedOnly ? h.vram.total : 0;
       if (vt > 0 && vt < 6 * 1024 ** 3) { ctxNote = `Đã giới hạn độ dài ngữ cảnh ở 8192 (bạn chọn ${ctxWant}) vì GPU chỉ có ${(vt / 1024 ** 3).toFixed(1)} GB VRAM.`; ctxWant = 8192; }
     }
-    const opts = { contextSize: ctxWant, perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj } : {}) };
+    const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj } : {}) };
     LOG.log('load', `Bắt đầu nạp ${m.file}`, { size: m.size, ctx: opts.contextSize, gpuLayers: opts.gpuLayers ?? 'tự động', vision: !!opts.mmproj });
     const tLoad = Date.now();
     try {
@@ -344,11 +374,12 @@ async function loadById(id, { force = false, ctx = null, reason = null } = {}) {
         // GPU (Vulkan/CUDA/Metal) không nạp được: ghi nhật ký, khởi động lại bộ máy ở chế độ chỉ CPU rồi thử lại một lần
         if (e.code === 'ENGINE_EXIT' && !e.startup && !e.killReason && engine.restart) {
           // 0.15.1: bộ máy sập khi đang nạp → thử lại MỘT lần với cấu hình an toàn (chỉ CPU, ngữ cảnh 4096)
-          engineLog('Bộ máy AI sập khi nạp ' + m.file + ', thử lại với cấu hình an toàn (CPU, ngữ cảnh 4096)', e, { path: m.path, size: m.size, stderr: e.detail });
+          const safeCtx = Math.max(MIN_CTX_CHAT, Math.min(MIN_CTX_AGENT, opts.contextSize || MIN_CTX_AGENT));
+          engineLog('Bộ máy AI sập khi nạp ' + m.file + ', thử lại với cấu hình an toàn (CPU, ngữ cảnh ' + safeCtx + ')', e, { path: m.path, size: m.size, stderr: e.detail });
           await engine.restart({ ...engineEnv(), AIVN_GPU: 'off' }, 'bộ máy sập khi nạp, thử lại chỉ CPU'); hwCache = null;
-          st = await engine.loadModel(m.id, m.path, { ...opts, contextSize: Math.min(4096, opts.contextSize || 4096), gpuLayers: 0 });
+          st = await engine.loadModel(m.id, m.path, { ...opts, contextSize: safeCtx, minContextSize: Math.min(opts.minContextSize, safeCtx), gpuLayers: 0 });
           st = { ...st, mode: 'cpu-only', fallbackFrom: ['bộ máy sập: ' + e.message] };
-          ctxNote = 'Đã nạp ở chế độ an toàn (chỉ CPU, ngữ cảnh 4096) vì bộ máy AI bị sập khi nạp bình thường. Xem nhật ký để biết chi tiết.';
+          ctxNote = 'Đã nạp ở chế độ an toàn (chỉ CPU, ngữ cảnh ' + safeCtx + ') vì bộ máy AI bị sập khi nạp bình thường. Xem nhật ký để biết chi tiết.';
         } else {
         if (!(e.code === 'LOAD_FAILED' && e.gpu && engine.restart)) throw e;
         engineLog('GPU không nạp được ' + m.file + ', thử lại bằng bộ máy chỉ CPU', e, { path: m.path, size: m.size });
@@ -977,7 +1008,7 @@ function registerIpc() {
       const SMP = require('./agent/sampling'); const RG = require('./agent/repeat');
       const guard = RG.createRepeatGuard((info) => { LOG.log('chat', `Phát hiện lặp (${info.kind}, ${info.count} lần): “${info.sample}” — dừng sinh`); stopReasons.set(reqId, 'mô hình bắt đầu lặp lại, AIVN tự dừng'); ac.abort(); });
       const sampling = SMP.samplingFor(engine.status().id || '', 'chat', { temperature: typeof temperature === 'number' ? temperature : null });
-      let r; try { r = await withEngineRecovery(() => engine.generate(messages, { temperature: sampling.temperature, maxTokens, sampling, signal: ac.signal, onToken: t => { guard.push(t); if (!guard.hit) tb.push(t); } }), { onRetry: (ctx) => { tb.flush(); send('chat:recover', { reqId, ctx }); } }); } finally { tb.flush(); }
+      let r; try { r = await withCtxGrow(() => withEngineRecovery(() => engine.generate(messages, { temperature: sampling.temperature, maxTokens, sampling, signal: ac.signal, onToken: t => { guard.push(t); if (!guard.hit) tb.push(t); } }), { onRetry: (ctx) => { tb.flush(); send('chat:recover', { reqId, ctx }); } }), { minCtx: MIN_CTX_CHAT, onGrow: (ctx) => { tb.flush(); send('chat:recover', { reqId, ctx, grow: true }); } }); } finally { tb.flush(); }
       if (guard.hit && typeof r.text === 'string') r = { ...r, text: r.text.slice(0, guard.hit.cut).trim() };
       return { ...r, docInfo, stoppedBy: r.finishReason === 'abort' ? (stopReasons.get(reqId) || 'không rõ') : null };
     } finally { generations.delete(reqId); stopReasons.delete(reqId); }
@@ -1039,7 +1070,7 @@ function registerIpc() {
   ipcMain.handle('agent:info', () => agentInfo());
   ipcMain.handle('agent:run', async (_e, { reqId, convoId, messages, attachments }) => {
     const ac = new AbortController(); generations.set(reqId, ac);
-    try { await ensureAfterCrash(); const r = await withEngineRecovery(() => runAgentTurn({ reqId, convoId, messages, attachments, signal: ac.signal }), { onRetry: (ctx) => send('agent:status', { reqId, stage: 'recover', ctx }) }); return { ...r, steps: r.steps.map(slimStep), model: engine.status().id, stoppedBy: r.finishReason === 'abort' ? (stopReasons.get(reqId) || 'không rõ') : null }; }
+    try { await ensureAfterCrash(); const r = await withCtxGrow(() => withEngineRecovery(() => runAgentTurn({ reqId, convoId, messages, attachments, signal: ac.signal }), { minCtx: MIN_CTX_AGENT, onRetry: (ctx) => send('agent:status', { reqId, stage: 'recover', ctx }) }), { minCtx: MIN_CTX_AGENT, onGrow: (ctx) => send('agent:status', { reqId, stage: 'recover', ctx, grow: true }) }); return { ...r, steps: r.steps.map(slimStep), model: engine.status().id, stoppedBy: r.finishReason === 'abort' ? (stopReasons.get(reqId) || 'không rõ') : null }; }
     finally { generations.delete(reqId); stopReasons.delete(reqId); }
   });
   ipcMain.handle('agent:screen-reply', (_e, { id, ok, nx, ny }) => { const f = screenConfirms.get(id); if (f) f({ ok: ok === true, nx: Number.isFinite(nx) ? Math.min(1, Math.max(0, nx)) : null, ny: Number.isFinite(ny) ? Math.min(1, Math.max(0, ny)) : null }); return !!f; });

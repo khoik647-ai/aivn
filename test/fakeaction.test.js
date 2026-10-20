@@ -26,7 +26,7 @@ test('nhận ra bước giả và lời nói đã làm khi chưa có công cụ'
 function mkAgent(replies, { names = ['open_app', 'screen_act', 'screen_look'] } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-fake-'));
   const calls = []; const done = [];
-  const engine = { status: () => ({ loaded: true, contextSize: 4096 }), chatStep: async (msgs, o) => { calls.push({ toolChoice: o.toolChoice, tools: o.tools.map(t => t.name), last: msgs[msgs.length - 1].content }); const r = replies.shift(); return typeof r === 'function' ? r(o) : r; } };
+  const engine = { status: () => ({ loaded: true, contextSize: 8192 }), chatStep: async (msgs, o) => { calls.push({ toolChoice: o.toolChoice, tools: o.tools.map(t => t.name), last: msgs[msgs.length - 1].content }); const r = replies.shift(); return typeof r === 'function' ? r(o) : r; } };
   const defs = Object.fromEntries(names.map(n => [n, CT.DEFS[n]]));
   const computer = { names: () => names, defs, has: (n) => n in defs, CompError: CT.CompError, exec: async (n, a) => { done.push({ n, a }); return { forModel: `Đã mở ứng dụng "${a.name}".`, summary: 'Đã mở ' + a.name }; } };
   const agent = createAgent({ engine, computer, getSettings: () => ({ agentFolders: [], agentMemory: false }), memory: createMemoryStore(path.join(root, 'm.json')), scheduler: {}, trash: async () => {}, extractFile: async () => ({}), embedForMemory: async () => ({}), log: () => {} });
