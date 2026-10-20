@@ -1,4 +1,4 @@
-// Truy cập máy tính cấp 1 cho AIVN BOT: liệt kê/mở ứng dụng, mở tệp/thư mục/địa chỉ web, đóng ứng dụng,
+// Truy cập máy tính cấp 1 cho AIVN AGENT: liệt kê/mở ứng dụng, mở tệp/thư mục/địa chỉ web, đóng ứng dụng,
 // chạy lệnh terminal (luôn qua thẻ xác nhận), thao tác hệ thống cơ bản. Hỗ trợ Windows và macOS (Linux: cơ bản).
 // Mọi hàm nhận deps để kiểm thử được: { openPath, openExternal, platform, home, env, exec }
 const fs = require('fs');
@@ -297,8 +297,8 @@ async function systemAction(action, { platform = process.platform, keyTap = null
   switch (action) {
     case 'lock': r = win ? await run('rundll32.exe', ['user32.dll,LockWorkStation']) : mac ? await run('pmset', ['displaysleepnow']) : await run('loginctl', ['lock-session']); break;
     case 'sleep': r = win ? await run('rundll32.exe', ['powrprof.dll,SetSuspendState', '0,1,0']) : mac ? await run('pmset', ['sleepnow']) : await run('systemctl', ['suspend']); break;
-    case 'shutdown': r = win ? await run('shutdown', ['/s', '/t', '30', '/c', 'AIVN BOT: máy sẽ tắt sau 30 giây (gõ shutdown /a để huỷ)']) : mac ? await osa('tell application "System Events" to shut down') : await run('systemctl', ['poweroff']); break;
-    case 'restart': r = win ? await run('shutdown', ['/r', '/t', '30', '/c', 'AIVN BOT: máy sẽ khởi động lại sau 30 giây (gõ shutdown /a để huỷ)']) : mac ? await osa('tell application "System Events" to restart') : await run('systemctl', ['reboot']); break;
+    case 'shutdown': r = win ? await run('shutdown', ['/s', '/t', '30', '/c', 'AIVN AGENT: máy sẽ tắt sau 30 giây (gõ shutdown /a để huỷ)']) : mac ? await osa('tell application "System Events" to shut down') : await run('systemctl', ['poweroff']); break;
+    case 'restart': r = win ? await run('shutdown', ['/r', '/t', '30', '/c', 'AIVN AGENT: máy sẽ khởi động lại sau 30 giây (gõ shutdown /a để huỷ)']) : mac ? await osa('tell application "System Events" to restart') : await run('systemctl', ['reboot']); break;
     case 'volume_up': case 'volume_down': case 'mute':
       if (mac) r = await osa(action === 'mute' ? 'set volume output muted (not (output muted of (get volume settings)))' : `set volume output volume ((output volume of (get volume settings)) ${action === 'volume_up' ? '+' : '-'} 10)`);
       else if (keyTap) { const k = { volume_up: 'audio_vol_up', volume_down: 'audio_vol_down', mute: 'audio_mute' }[action]; for (let i = 0; i < (action === 'mute' ? 1 : 5); i++) keyTap(k); r = { ok: true }; }

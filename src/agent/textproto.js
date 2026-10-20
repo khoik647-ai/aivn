@@ -132,7 +132,7 @@ function trimHistory(messages) {
 }
 const CTX_RE = /context shift strategy|fits the context size|context size is too small|too long for the context|exceeds the available context size/i;
 function ctxSmallError(n) {
-  const x = new Error(`Độ dài ngữ cảnh${n ? ' ' + n + ' token' : ''} quá nhỏ cho yêu cầu này (lời nhắc hệ thống + mô tả công cụ + lịch sử). Hãy tăng "Độ dài ngữ cảnh" lên 8192 trong Cài đặt trò chuyện rồi nạp lại mô hình, hoặc tắt bớt công cụ trên đầu AIVN BOT.`);
+  const x = new Error(`Độ dài ngữ cảnh${n ? ' ' + n + ' token' : ''} quá nhỏ cho yêu cầu này (lời nhắc hệ thống + mô tả công cụ + lịch sử). Hãy tăng "Độ dài ngữ cảnh" lên 8192 trong Cài đặt trò chuyện rồi nạp lại mô hình, hoặc tắt bớt công cụ trên đầu AIVN AGENT.`);
   x.code = 'CTX_SMALL'; return x;
 }
 

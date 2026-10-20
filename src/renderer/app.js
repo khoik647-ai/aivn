@@ -35,7 +35,7 @@ function show(view) {
 }
 $$('.nav-item').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
 document.addEventListener('click', (e) => { const g = e.target.closest('[data-goto]'); if (g) show(g.dataset.goto); });
-// Trò chuyện thường và AIVN BOT dùng chung khung chat; mỗi chế độ có danh sách cuộc trò chuyện riêng
+// Trò chuyện thường và AIVN AGENT dùng chung khung chat; mỗi chế độ có danh sách cuộc trò chuyện riêng
 function setMode(mode) {
   if (state.mode !== mode) {
     if (state.current) state.lastByMode[state.mode] = state.current.id;
@@ -44,9 +44,9 @@ function setMode(mode) {
     pending = []; renderChips();
   }
   $('#view-chat').classList.toggle('agent-mode', mode === 'agent');
-  $('#input').placeholder = mode === 'agent' ? 'Giao việc cho AIVN BOT… (vd. đọc tệp bao-cao.csv, tính tổng rồi ghi tóm tắt vào tom-tat.md)' : 'Nhập tin nhắn… (Enter để gửi, Shift+Enter xuống dòng, kéo thả tệp hoặc dán ảnh bằng Ctrl+V)';
+  $('#input').placeholder = mode === 'agent' ? 'Giao việc cho AIVN AGENT… (vd. đọc tệp bao-cao.csv, tính tổng rồi ghi tóm tắt vào tom-tat.md)' : 'Nhập tin nhắn… (Enter để gửi, Shift+Enter xuống dòng, kéo thả tệp hoặc dán ảnh bằng Ctrl+V)';
   $('#attachBtn').hidden = false;
-  $('#newChat').textContent = mode === 'agent' ? '＋ Việc mới cho AIVN BOT' : '＋ Cuộc trò chuyện mới';
+  $('#newChat').textContent = mode === 'agent' ? '＋ Việc mới cho AIVN AGENT' : '＋ Cuộc trò chuyện mới';
   renderConvos(); renderMessages();
   if (mode === 'agent') refreshAgent();
 }
@@ -276,7 +276,7 @@ $('#tokenClear').addEventListener('click', async () => { state.settings = await 
 // ---------- Trò chuyện ----------
 async function loadConvos() { state.convos = await A.convos(); renderConvos(); }
 function renderConvos() {
-  $('#convoList').innerHTML = state.convos.filter(c => convoMode(c) === state.mode).map(c => `<div class="convo ${state.current && c.id === state.current.id ? 'active' : ''}" data-id="${c.id}"><span>${esc(c.title)}</span><button class="del" title="Xoá">✕</button></div>`).join('') || `<div class="muted" style="padding:8px;font-size:12.5px">${isAgent() ? 'Chưa giao việc nào cho AIVN BOT' : 'Chưa có cuộc trò chuyện nào'}</div>`;
+  $('#convoList').innerHTML = state.convos.filter(c => convoMode(c) === state.mode).map(c => `<div class="convo ${state.current && c.id === state.current.id ? 'active' : ''}" data-id="${c.id}"><span>${esc(c.title)}</span><button class="del" title="Xoá">✕</button></div>`).join('') || `<div class="muted" style="padding:8px;font-size:12.5px">${isAgent() ? 'Chưa giao việc nào cho AIVN AGENT' : 'Chưa có cuộc trò chuyện nào'}</div>`;
 }
 $('#convoList').addEventListener('click', async (e) => {
   const row = e.target.closest('.convo'); if (!row) return;
@@ -294,8 +294,8 @@ function renderMessages() {
   const box = $('#messages');
   const msgs = state.current ? state.current.messages : [];
   if (!msgs.length && isAgent()) {
-    const welcome = (state.agent && state.agent.welcome) || 'Xin chào! Mình là **AIVN BOT**.';
-    box.innerHTML = `<div class="msg assistant agent welcome" id="botWelcome"><div class="who"><img src="logo-tile.svg" alt="" width="16" height="16"> AIVN BOT</div><div class="body">${md(welcome)}</div></div>
+    const welcome = (state.agent && state.agent.welcome) || 'Xin chào! Mình là **AIVN AGENT**.';
+    box.innerHTML = `<div class="msg assistant agent welcome" id="botWelcome"><div class="who"><img src="logo-tile.svg" alt="" width="16" height="16"> AIVN AGENT</div><div class="body">${md(welcome)}</div></div>
       <div class="empty compact"><p class="muted small">Thử giao việc:</p><div class="examples">${AGENT_EXAMPLES.map(x => `<button type="button" data-example="${esc(x)}">${esc(x)}</button>`).join('')}</div></div>`;
     return;
   }
@@ -312,7 +312,7 @@ function renderMessages() {
     const ag = m.role === 'assistant' && (m.steps || m.agent);
     const extra = m.role === 'assistant' ? webSrcHtml(m) + (m.memories && m.memories.length ? `<div class="mem-used" title="${esc(m.memories.join('\n'))}">🧠 Đã dùng ${m.memories.length} ghi nhớ liên quan</div>` : '') : '';
     const sched = m.scheduled ? `<div class="sched-tag">⏰ Lịch tự động · ${new Date(m.scheduled.at).toLocaleString('vi-VN')}${m.scheduled.late ? ' · chạy bù (trễ)' : ''}${m.scheduled.manual ? ' · chạy thủ công' : ''}</div>` : '';
-    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN BOT' : 'AIVN'}${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions"><button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning ? `<div class="no-action" role="alert"><b>⚠ Chưa có việc nào được làm</b><span>${esc(m.warning)}</span><button type="button" class="btn sm" data-rec-go="1">Mở Kho mô hình</button></div>` : ''}${srcs}${extra}${sched}${copyBtn}</div>${warn}`;
+    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN AGENT' : 'AIVN'}${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions"><button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning ? `<div class="no-action" role="alert"><b>⚠ Chưa có việc nào được làm</b><span>${esc(m.warning)}</span><button type="button" class="btn sm" data-rec-go="1">Mở Kho mô hình</button></div>` : ''}${srcs}${extra}${sched}${copyBtn}</div>${warn}`;
   }).join('');
   box.scrollTop = box.scrollHeight;
 }
@@ -676,7 +676,7 @@ A.onVcredist(() => { // Windows thiếu Visual C++ Redistributable: llama-server
 });
 $('#sysNotice').addEventListener('click', (e) => { const b = e.target.closest('[data-vc]'); if (!b) return; if (b.dataset.vc === 'dl') A.openVcredist(); $('#sysNotice').hidden = true; });
 
-// ---------- AIVN BOT ----------
+// ---------- AIVN AGENT ----------
 const AGENT_EXAMPLES = ['Bây giờ là mấy giờ, hôm nay thứ mấy? Còn bao nhiêu ngày nữa đến Tết Dương lịch?', 'Xem thư mục được phép có những tệp nào rồi tóm tắt tệp mới nhất.', 'Tính lãi kép: gửi 50 triệu, lãi 6,5%/năm trong 5 năm thì được bao nhiêu?', 'Hãy nhớ: tôi tên Khôi, đang học ở VLU.'];
 const STATUS_VI = { running: 'đang chạy', ok: 'xong', error: 'lỗi', refused: 'bị từ chối' };
 const fmtMs = (ms) => ms == null ? '' : ms < 1000 ? ms + ' ms' : (ms / 1000).toFixed(1).replace('.', ',') + ' giây';
@@ -690,7 +690,7 @@ function stepsHtml(m, openIds = new Set()) {
   if (!m.steps || !m.steps.length) return '';
   let html = '', lastPre = null;
   for (const st of m.steps) { if (st.pre && st.pre !== lastPre) { html += `<div class="step-pre">💭 ${esc(st.pre)}</div>`; lastPre = st.pre; } html += stepHtml(st, openIds.has(st.id)); }
-  return `<div class="steps" aria-label="Các bước AIVN BOT đã làm">${html}</div>`;
+  return `<div class="steps" aria-label="Các bước AIVN AGENT đã làm">${html}</div>`;
 }
 function webSrcHtml(m) {
   const urls = (m.urls || []).filter(Boolean); if (!urls.length) return '';
@@ -705,7 +705,7 @@ function agentHistory(conv) {
 }
 $('#messages').addEventListener('click', (e) => { const b = e.target.closest('[data-example]'); if (b) { input.value = b.dataset.example; input.focus(); input.dispatchEvent(new Event('input')); } });
 
-// Tệp/ảnh đính kèm cho AIVN BOT: ảnh → mô hình nhìn ảnh (nếu có) hoặc chữ đọc bằng OCR; tài liệu → nội dung chữ đưa vào lượt hỏi;
+// Tệp/ảnh đính kèm cho AIVN AGENT: ảnh → mô hình nhìn ảnh (nếu có) hoặc chữ đọc bằng OCR; tài liệu → nội dung chữ đưa vào lượt hỏi;
 // đường dẫn tệp đính kèm được phép đọc (read_file) trong việc này
 async function agentAttachments(atts, text) {
   const vision = !!state.status.vision;
@@ -765,7 +765,7 @@ async function sendAgent(text) {
   });
   try {
     const r = await A.agentRun({ reqId, convoId: conv.id, messages: [...agentHistory(conv), { role: 'user', content: pack.content }], attachments: pack.files });
-    Object.assign(reply, { content: r.text || (r.finishReason === 'abort' ? '' : r.warning ? '' : '(AIVN BOT không trả lời)'), warning: r.warning || null, steps: r.steps, urls: r.urls, memories: r.memories, model: r.model || reply.model });
+    Object.assign(reply, { content: r.text || (r.finishReason === 'abort' ? '' : r.warning ? '' : '(AIVN AGENT không trả lời)'), warning: r.warning || null, steps: r.steps, urls: r.urls, memories: r.memories, model: r.model || reply.model });
     const tools = r.steps.length;
     $('#genStats').textContent = `${tools ? tools + ' bước dùng công cụ · ' : ''}${r.usage.completion_tokens} token · ${r.usage.seconds.toFixed(1)} giây${r.finishReason === 'abort' ? ' · đã dừng' : r.finishReason === 'length' ? ' · chạm giới hạn token' : ''}`;
     if (r.finishReason === 'abort') reply.content = (reply.content ? reply.content + '\n\n' : '') + `_Đã dừng${r.stoppedBy ? ' (' + r.stoppedBy + ')' : ''}._`;
@@ -802,11 +802,11 @@ $('#confirmModal').addEventListener('click', (e) => { if (e.target.id === 'confi
 A.onAgentConfirm(async (req) => { const ok = await modalAsk({ ...req, fromAgent: true }); A.agentConfirmReply({ id: req.id, ok }); });
 A.onAgentConfirmCancel(({ id }) => { if (modalOpen && modalOpen.id === id) closeModal(false); const i = modalQueue.findIndex(x => x.id === id); if (i >= 0) modalQueue.splice(i, 1)[0].resolve(false); });
 
-// --- Cài đặt AIVN BOT ---
+// --- Cài đặt AIVN AGENT ---
 async function refreshAgent() {
   const info = state.agent = await A.agentInfo();
   $('#folderList').innerHTML = info.folders.length ? info.folders.map(f => `<div class="folder${f.exists ? '' : ' missing'}" title="${esc(f.path)}"><span>📁 ${esc(f.path)}</span>${f.exists ? '' : '<b class="small">không thấy</b>'}<button data-fopen="${esc(f.path)}" title="Mở thư mục">↗</button><button data-fdel="${esc(f.path)}" title="Bỏ quyền với thư mục này" aria-label="Bỏ thư mục">✕</button></div>`).join('')
-    : '<div class="folder-empty">Chưa cho phép thư mục nào. AIVN BOT sẽ không đọc hay ghi tệp.</div>';
+    : '<div class="folder-empty">Chưa cho phép thư mục nào. AIVN AGENT sẽ không đọc hay ghi tệp.</div>';
   $('#agWeb').checked = info.web;
   $('#agPy').checked = info.python.enabled && info.python.available; $('#agPy').disabled = !info.python.available;
   $('#agPyNote').textContent = info.python.available ? `Python ${info.python.version} có trên máy. Chạy trong thư mục tạm, chặn mạng và tệp ngoài thư mục tạm, tối đa 10 giây (hạn chế, không cách ly tuyệt đối như JavaScript).` : 'Máy chưa có Python 3, nên chỉ chạy được JavaScript.';
@@ -821,15 +821,15 @@ function paintAgentWarn(adv) {
   const w = $('#agentWarn');
   const rec = (adv && adv.recommended) || [];
   const recBtns = rec.map(r => `<button class="btn sm" data-rec="${esc(r.id)}" data-installed="${r.installed ? 1 : 0}">${r.installed ? 'Nạp' : 'Tải'} ${esc(r.name)}</button>`).join(' ');
-  if (!state.status.loaded) { w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN BOT chạy tốt nhất với <b>Qwen3 4B/8B</b> hoặc <b>Gemma 3 4B</b> trở lên.</span>`; w.hidden = false; return; }
-  if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN BOT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để mở ứng dụng, đọc tệp, điều khiển máy đáng tin cậy, hãy dùng <b>Qwen3 4B/8B</b>.</span> ${recBtns}`; w.hidden = false; return; }
-  if (adv && adv.small) { w.innerHTML = `<span>⚠ <b>${esc(adv.model)}</b>${adv.params ? ` (khoảng ${String(adv.params).replace('.', ',')} tỉ tham số)` : ''} khá nhỏ cho AIVN BOT: có thể gọi sai công cụ, bỏ bước hoặc nói đã làm khi chưa làm. Nên dùng <b>Qwen3 4B/8B</b> hoặc <b>Gemma 3 4B</b> trở lên.</span> ${recBtns}`; w.hidden = false; return; }
+  if (!state.status.loaded) { w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN AGENT chạy tốt nhất với <b>Qwen3 4B/8B</b> hoặc <b>Gemma 3 4B</b> trở lên.</span>`; w.hidden = false; return; }
+  if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN AGENT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để mở ứng dụng, đọc tệp, điều khiển máy đáng tin cậy, hãy dùng <b>Qwen3 4B/8B</b>.</span> ${recBtns}`; w.hidden = false; return; }
+  if (adv && adv.small) { w.innerHTML = `<span>⚠ <b>${esc(adv.model)}</b>${adv.params ? ` (khoảng ${String(adv.params).replace('.', ',')} tỉ tham số)` : ''} khá nhỏ cho AIVN AGENT: có thể gọi sai công cụ, bỏ bước hoặc nói đã làm khi chưa làm. Nên dùng <b>Qwen3 4B/8B</b> hoặc <b>Gemma 3 4B</b> trở lên.</span> ${recBtns}`; w.hidden = false; return; }
   w.hidden = true;
 }
 $('#agentWarn').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-rec]'); if (!b) return;
   if (b.dataset.installed === '1') { const c = state.catalog.find(x => x.id === b.dataset.rec) || (await A.catalog()).find(x => x.id === b.dataset.rec); await refreshModels(); const m = state.models.find(x => c && x.file.toLowerCase() === c.file.toLowerCase()); if (m) loadModel(m.id); }
-  else { show('discover'); try { const j = await A.dlStart({ catalogId: b.dataset.rec }); paintJob(j); toast('Đang tải mô hình cho AIVN BOT, xem tiến độ ở mục Đang tải'); } catch (err) { toast(cleanErr(err.message), true); } }
+  else { show('discover'); try { const j = await A.dlStart({ catalogId: b.dataset.rec }); paintJob(j); toast('Đang tải mô hình cho AIVN AGENT, xem tiến độ ở mục Đang tải'); } catch (err) { toast(cleanErr(err.message), true); } }
 });
 $('#addFolder').addEventListener('click', async () => { state.agent = await A.agentAddFolder(); refreshAgent(); });
 $('#folderList').addEventListener('click', async (e) => {
@@ -880,7 +880,7 @@ async function refreshSched() {
       ${t.kind === 'agent' ? `<div class="meta">“${esc(t.prompt.slice(0, 110))}${t.prompt.length > 110 ? '…' : ''}”</div>` : t.message ? `<div class="meta">${esc(t.message.slice(0, 120))}</div>` : ''}
       ${last ? `<div class="last${last.ok ? '' : ' err'}">Lần chạy gần nhất: ${fmtWhen(last.at)}${last.late ? ' (chạy bù)' : ''} · ${last.ok ? 'thành công' : 'lỗi: ' + esc(last.error || '')}</div>` : ''}</div>
       <div class="acts">${last && last.convoId ? `<button class="btn sm" data-sact="open" data-cid="${esc(last.convoId)}">Xem kết quả</button>` : ''}<button class="btn sm" data-sact="run">▶ Chạy ngay</button><button class="btn sm" data-sact="toggle">${t.enabled ? 'Tắt' : 'Bật'}</button><button class="btn sm" data-sact="edit">Sửa</button><button class="btn sm danger" data-sact="del" title="Xoá lịch">🗑</button></div></div>`; }).join('')
-    : '<div class="sched-empty">Chưa có lịch nào. Tạo lời nhắc ở khung bên trái, hoặc nhờ AIVN BOT: “nhắc tôi 9 giờ sáng mai nộp bài”.</div>';
+    : '<div class="sched-empty">Chưa có lịch nào. Tạo lời nhắc ở khung bên trái, hoặc nhờ AIVN AGENT: “nhắc tôi 9 giờ sáng mai nộp bài”.</div>';
   refreshSchedCount(list);
   $('#bgTray').checked = !!state.settings.keepInTray; $('#bgLogin').checked = !!state.settings.openAtLogin;
 }
@@ -889,9 +889,9 @@ $('#schedList').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-sact]'); if (!b) return;
   const id = b.closest('.sched-item').dataset.id; const list = await A.schedList(); const t = list.find(x => x.id === id); if (!t) return;
   try {
-    if (b.dataset.sact === 'run') { b.disabled = true; toast(`Đang chạy “${t.title}”…`); const r = await A.schedRun(id); toast(r && r.ok ? `Đã chạy “${t.title}” ✓ Kết quả lưu trong AIVN BOT.` : `Lỗi: ${r && r.error}`, !(r && r.ok)); }
+    if (b.dataset.sact === 'run') { b.disabled = true; toast(`Đang chạy “${t.title}”…`); const r = await A.schedRun(id); toast(r && r.ok ? `Đã chạy “${t.title}” ✓ Kết quả lưu trong AIVN AGENT.` : `Lỗi: ${r && r.error}`, !(r && r.ok)); }
     if (b.dataset.sact === 'toggle') await A.schedUpdate({ id, enabled: !t.enabled, ...(t.repeat === 'once' && !t.enabled && t.at < Date.now() ? { at: Date.now() + 5 * 60e3 } : {}) });
-    if (b.dataset.sact === 'del') { if (await modalAsk({ title: 'Xoá lịch?', message: `Xoá “${t.title}” khỏi Lịch tự động? Kết quả đã lưu trong AIVN BOT vẫn được giữ.`, okLabel: 'Xoá lịch', icon: '⏰' })) await A.schedDelete(id); }
+    if (b.dataset.sact === 'del') { if (await modalAsk({ title: 'Xoá lịch?', message: `Xoá “${t.title}” khỏi Lịch tự động? Kết quả đã lưu trong AIVN AGENT vẫn được giữ.`, okLabel: 'Xoá lịch', icon: '⏰' })) await A.schedDelete(id); }
     if (b.dataset.sact === 'edit') {
       sf.editing = id; sf.kind = t.kind; sf.repeat = t.repeat; sf.days = new Set(t.days || []);
       $('#sfTitle').value = t.title; $('#sfMsg').value = t.message || ''; $('#sfPrompt').value = t.prompt || ''; $('#sfTime').value = t.time;
@@ -913,9 +913,9 @@ A.onConvosOpen(({ id }) => openConvo(id));
 async function refreshMem() {
   const [list, info] = await Promise.all([A.memList(), A.agentInfo()]);
   $('#memOn').checked = info.memory.enabled;
-  $('#memMode').textContent = `Những điều AIVN BOT đã ghi nhớ về bạn (${list.length}). Chỉ lưu trên máy này. Điều liên quan tới câu hỏi được đưa vào lời nhắc của AIVN BOT, tìm ${info.memory.semantic ? 'theo ý nghĩa bằng BGE-M3' : 'theo từ khoá (tải BGE-M3 trong Cài đặt trò chuyện để tìm theo ý nghĩa)'}.`;
-  $('#memList').innerHTML = list.length ? list.map(m => `<div class="mem" data-id="${esc(m.id)}"><div class="txt">${esc(m.text)}<div class="meta">${m.source === 'user' ? 'Bạn thêm' : 'AIVN BOT ghi nhớ'} · ${new Date(m.updatedAt).toLocaleString('vi-VN')}${m.uses ? ` · đã dùng ${m.uses} lần` : ''}</div></div><div class="acts"><button class="btn sm" data-mact="edit">Sửa</button><button class="btn sm danger" data-mact="del" title="Xoá ghi nhớ này">🗑</button></div></div>`).join('')
-    : '<div class="sched-empty">Chưa có ghi nhớ nào. Hãy nói với AIVN BOT, ví dụ: “Hãy nhớ: tôi thích uống cà phê sữa đá”.</div>';
+  $('#memMode').textContent = `Những điều AIVN AGENT đã ghi nhớ về bạn (${list.length}). Chỉ lưu trên máy này. Điều liên quan tới câu hỏi được đưa vào lời nhắc của AIVN AGENT, tìm ${info.memory.semantic ? 'theo ý nghĩa bằng BGE-M3' : 'theo từ khoá (tải BGE-M3 trong Cài đặt trò chuyện để tìm theo ý nghĩa)'}.`;
+  $('#memList').innerHTML = list.length ? list.map(m => `<div class="mem" data-id="${esc(m.id)}"><div class="txt">${esc(m.text)}<div class="meta">${m.source === 'user' ? 'Bạn thêm' : 'AIVN AGENT ghi nhớ'} · ${new Date(m.updatedAt).toLocaleString('vi-VN')}${m.uses ? ` · đã dùng ${m.uses} lần` : ''}</div></div><div class="acts"><button class="btn sm" data-mact="edit">Sửa</button><button class="btn sm danger" data-mact="del" title="Xoá ghi nhớ này">🗑</button></div></div>`).join('')
+    : '<div class="sched-empty">Chưa có ghi nhớ nào. Hãy nói với AIVN AGENT, ví dụ: “Hãy nhớ: tôi thích uống cà phê sữa đá”.</div>';
   refreshMemCount(list);
 }
 async function refreshMemCount(list) { list ||= await A.memList(); $('#memCount').hidden = !list.length; $('#memCount').textContent = list.length; }
@@ -931,12 +931,12 @@ $('#memList').addEventListener('click', async (e) => {
 $('#memClear').addEventListener('click', async () => { await A.memClear(); refreshMem(); });
 $('#memOn').addEventListener('change', async (e) => { state.settings = await A.setSettings({ agentMemory: e.target.checked }); refreshMem(); });
 
-// ---------- Truy cập máy tính (Cài đặt AIVN BOT) ----------
+// ---------- Truy cập máy tính (Cài đặt AIVN AGENT) ----------
 function paintComputer(c) {
   if (!c) return;
   $('#agComp').checked = c.enabled; $('#agAutoRO').checked = c.autoReadOnly; $('#agAutoRO').disabled = !c.enabled;
   $('#agScreen').checked = c.screen;
-  $('#agScreenNote').innerHTML = `AIVN BOT chụp màn hình, mô hình nhìn ảnh đề xuất chỗ bấm; mỗi cú bấm/gõ hiện thẻ có khung đỏ để bạn duyệt. Chỉ màn hình chính. Dừng khẩn cấp: <b>${esc(c.stopKey)}</b> hoặc nút “Dừng ngay” nổi trên cùng.${c.screen && !c.vision ? '<br><b class="warn-ink">⚠ Cần nạp mô hình nhìn ảnh (nhãn 👁, vd. Gemma 3 4B) thì công cụ này mới bật.</b>' : ''}`;
+  $('#agScreenNote').innerHTML = `AIVN AGENT chụp màn hình, mô hình nhìn ảnh đề xuất chỗ bấm; mỗi cú bấm/gõ hiện thẻ có khung đỏ để bạn duyệt. Chỉ màn hình chính. Dừng khẩn cấp: <b>${esc(c.stopKey)}</b> hoặc nút “Dừng ngay” nổi trên cùng.${c.screen && !c.vision ? '<br><b class="warn-ink">⚠ Cần nạp mô hình nhìn ảnh (nhãn 👁, vd. Gemma 3 4B) thì công cụ này mới bật.</b>' : ''}`;
   const g = $('#permGuide');
   if (c.platform === 'darwin' && c.screen) {
     const okS = c.perms.screen === 'granted', okA = c.perms.accessibility;
@@ -951,7 +951,7 @@ function paintComputer(c) {
 $('#agComp').addEventListener('change', (e) => saveAgentSetting({ agentComputer: e.target.checked }));
 $('#agAutoRO').addEventListener('change', (e) => saveAgentSetting({ agentAutoReadOnly: e.target.checked }));
 $('#agScreen').addEventListener('change', async (e) => {
-  if (e.target.checked && !(await modalAsk({ icon: '🖱', title: 'Bật Điều khiển màn hình (thử nghiệm)?', message: 'AIVN BOT sẽ chụp màn hình để mô hình trên máy bạn xem (ảnh không gửi đi đâu) và đề xuất cú bấm/gõ. Mỗi thao tác đều hiện thẻ để bạn duyệt. Mô hình nhỏ có thể chỉ sai chỗ, hãy kiểm tra khung đỏ trước khi đồng ý. Dừng khẩn cấp: Ctrl+Alt+Q (macOS: ⌘⌥Q).', okLabel: 'Bật', noLabel: 'Huỷ' }))) { e.target.checked = false; return; }
+  if (e.target.checked && !(await modalAsk({ icon: '🖱', title: 'Bật Điều khiển màn hình (thử nghiệm)?', message: 'AIVN AGENT sẽ chụp màn hình để mô hình trên máy bạn xem (ảnh không gửi đi đâu) và đề xuất cú bấm/gõ. Mỗi thao tác đều hiện thẻ để bạn duyệt. Mô hình nhỏ có thể chỉ sai chỗ, hãy kiểm tra khung đỏ trước khi đồng ý. Dừng khẩn cấp: Ctrl+Alt+Q (macOS: ⌘⌥Q).', okLabel: 'Bật', noLabel: 'Huỷ' }))) { e.target.checked = false; return; }
   saveAgentSetting({ agentScreen: e.target.checked });
 });
 $('#permGuide').addEventListener('click', async (e) => {
@@ -959,7 +959,7 @@ $('#permGuide').addEventListener('click', async (e) => {
   if (b.dataset.perm === 'test') { const r = await A.computerPermTest(); toast(r.ok ? 'Chụp màn hình được ✓' : r.error, !r.ok); paintComputer(r.info); return; }
   paintComputer(await A.computerPermOpen(b.dataset.perm));
 });
-A.onComputerStopped(({ reason }) => { closeScreenModal(false); toast('■ Đã dừng AIVN BOT (' + reason + ')', true); });
+A.onComputerStopped(({ reason }) => { closeScreenModal(false); toast('■ Đã dừng AIVN AGENT (' + reason + ')', true); });
 $('#openLogs').addEventListener('click', () => A.openLogs());
 document.addEventListener('click', async (e) => {
   const lb = e.target.closest('[data-logs]');
@@ -972,7 +972,7 @@ document.addEventListener('click', async (e) => {
       const r = await A.scanTest(q);
       const lines = [`Hệ điều hành: ${r.platform} · ${r.total} ứng dụng · ${r.ms} ms`, 'Nguồn: ' + (Object.entries(r.sources).map(([k, v]) => k + ' = ' + v).join(', ') || 'không có'), 'Lỗi: ' + (r.errors.length ? r.errors.join('; ') : 'không'),
         ...(r.dirs ? ['Desktop: ' + (r.dirs.desktop || []).join(' | '), 'Start Menu: ' + (r.dirs.start || []).join(' | ')] : []), '', `Tìm "${r.query}": ` + (r.best ? `${r.best.name} → ${r.best.path || r.best.appId || '?'}` : 'KHÔNG thấy mục nào khớp'), ...r.matches.map(m => `  • ${m.name} · ${m.path || m.appId || ''}${m.target ? ' → ' + m.target : ''}`)];
-      const ok = await modalAsk({ icon: r.best ? '✅' : '⚠', title: 'Kết quả quét ứng dụng', message: r.best ? `Đã thấy "${r.best.name}". AIVN BOT sẽ mở được ứng dụng này.` : `Chưa thấy ứng dụng khớp "${r.query}". Hãy chụp màn hình này hoặc bấm Sao chép rồi gửi cho người hỗ trợ.`, preview: lines.join('\n'), okLabel: 'Sao chép kết quả', noLabel: 'Đóng' });
+      const ok = await modalAsk({ icon: r.best ? '✅' : '⚠', title: 'Kết quả quét ứng dụng', message: r.best ? `Đã thấy "${r.best.name}". AIVN AGENT sẽ mở được ứng dụng này.` : `Chưa thấy ứng dụng khớp "${r.query}". Hãy chụp màn hình này hoặc bấm Sao chép rồi gửi cho người hỗ trợ.`, preview: lines.join('\n'), okLabel: 'Sao chép kết quả', noLabel: 'Đóng' });
       if (ok) { await A.copyText(lines.join('\n')); toast('Đã sao chép kết quả quét.'); }
     } catch (err) { toast(cleanErr(err.message), true); }
     finally { sb.disabled = false; sb.textContent = old; }
@@ -993,7 +993,7 @@ function placeBox() {
 }
 A.onAgentScreen((req) => {
   scReq = req; scPick = null;
-  $('#scMsg').innerHTML = `AIVN BOT muốn <b>${esc(req.desc)}</b>.${req.notFound ? `<br><span class="warn-ink">⚠ ${esc(req.notFound)}</span>` : ''}`;
+  $('#scMsg').innerHTML = `AIVN AGENT muốn <b>${esc(req.desc)}</b>.${req.notFound ? `<br><span class="warn-ink">⚠ ${esc(req.notFound)}</span>` : ''}`;
   $('#scImg').src = req.image; $('#scHint').hidden = !req.needPoint;
   $('#screenModal').hidden = false; placeBox(); $('#scNo').focus();
 });
@@ -1144,7 +1144,7 @@ $('#vramLimit').addEventListener('change', async e => { const v = Number(e.targe
 $('#advReset').addEventListener('click', async () => { state.settings = await A.setSettings({ gpu: true, gpuDevice: null, gpuLayers: null, vramLimitGB: null }); $('#gpuOn').checked = true; toast('Đã về chế độ tự động. Hãy nạp lại mô hình.'); setTimeout(paintAdvanced, 1500); });
 $('#advBox').addEventListener('toggle', e => { if (e.target.open) paintAdvanced(); });
 
-// ---------- Nút công cụ trên đầu AIVN BOT: bấm để bật/tắt, di chuột/nhấn giữ để xem, ▾ để xem ví dụ ----------
+// ---------- Nút công cụ trên đầu AIVN AGENT: bấm để bật/tắt, di chuột/nhấn giữ để xem, ▾ để xem ví dụ ----------
 const CHIPS = [
   { id: 'calc', i: '🧮', n: 'Máy tính', desc: 'Tính biểu thức chính xác: cộng trừ nhân chia, phần trăm, luỹ thừa, căn.', ex: ['Tính 15% của 2.350.000 đồng', '(3,5 + 4,2) × 12 bằng bao nhiêu?'] },
   { id: 'datetime', i: '🕒', n: 'Ngày giờ', desc: 'Biết ngày giờ hiện tại trên máy, đếm số ngày giữa hai mốc.', ex: ['Hôm nay là thứ mấy, ngày bao nhiêu?', 'Còn bao nhiêu ngày nữa đến Tết Dương lịch?'] },
@@ -1155,13 +1155,13 @@ const CHIPS = [
   { id: 'memory', i: '🧠', n: 'Ghi nhớ', set: '#agMem', desc: 'Ghi nhớ điều bạn dặn để dùng ở các cuộc trò chuyện sau (lưu trên máy, xoá được).', ex: ['Hãy nhớ: tôi học ngành Công nghệ thông tin ở Văn Lang', 'Bạn đang nhớ gì về tôi?'] },
   { id: 'computer', i: '💻', n: 'Máy tính/ứng dụng', set: '#agComp', desc: 'Mở ứng dụng, tệp, thư mục, trang web; xem/đóng ứng dụng; chạy lệnh (luôn hỏi bạn trước).', ex: ['Mở Máy tính (Calculator) giúp tôi', 'Những ứng dụng nào đang chạy?'] },
   { id: 'screen', i: '🖱', n: 'Điều khiển màn hình', set: '#agScreen', beta: true, desc: 'Thử nghiệm: chụp màn hình, mô hình nhìn ảnh đề xuất bấm/gõ; mỗi thao tác bạn duyệt trước. Ctrl+Alt+Q để dừng.', ex: ['Nhìn màn hình và cho biết tôi đang mở gì', 'Bấm vào nút Bắt đầu (Start) trên thanh tác vụ'] },
-  { id: 'reminder', i: '⏰', n: 'Lịch nhắc', desc: 'Tạo lời nhắc hoặc việc AIVN BOT tự làm theo giờ (xem ở mục Lịch).', ex: ['Nhắc tôi uống nước sau 30 phút', 'Mỗi sáng 8 giờ nhắc tôi xem lịch học'] },
+  { id: 'reminder', i: '⏰', n: 'Lịch nhắc', desc: 'Tạo lời nhắc hoặc việc AIVN AGENT tự làm theo giờ (xem ở mục Lịch).', ex: ['Nhắc tôi uống nước sau 30 phút', 'Mỗi sáng 8 giờ nhắc tôi xem lịch học'] },
 ];
 let chipPop = null; // { id, el }
 function chipState(c, info) {
   const off = new Set(info.toolsOff || []); const comp = info.computer || {};
   switch (c.id) {
-    case 'files': if (off.has('files')) return { st: 'off' }; return info.folders.some(f => f.exists) ? { st: 'on' } : { st: 'blocked', why: 'Chưa cho phép thư mục nào, nên AIVN BOT không đọc/ghi được tệp.', fix: 'Thêm thư mục', act: () => $('#addFolder').click() };
+    case 'files': if (off.has('files')) return { st: 'off' }; return info.folders.some(f => f.exists) ? { st: 'on' } : { st: 'blocked', why: 'Chưa cho phép thư mục nào, nên AIVN AGENT không đọc/ghi được tệp.', fix: 'Thêm thư mục', act: () => $('#addFolder').click() };
     case 'web': return { st: info.web ? 'on' : 'off' };
     case 'python': if (!info.python.available) return { st: 'blocked', why: 'Máy chưa có Python 3.', fix: 'Hướng dẫn cài Python', act: () => modalAsk({ icon: '🐍', title: 'Cài Python 3', message: 'Tải Python 3 từ trang chính thức python.org (Windows: nhớ tích "Add python.exe to PATH" khi cài; macOS: cài gói .pkg). Cài xong, khởi động lại AIVN rồi bật nút Python.', okLabel: 'Mở python.org', noLabel: 'Đóng' }).then(ok => ok && A.openExternal('https://www.python.org/downloads/')) };
       return { st: info.python.enabled ? 'on' : 'off' };
@@ -1188,7 +1188,7 @@ async function toggleChip(id) {
   const turnOn = s.st === 'off';
   if (c.set) { const el = $(c.set); el.checked = turnOn; el.dispatchEvent(new Event('change')); }
   else { const off = new Set(info.toolsOff || []); turnOn ? off.delete(id) : off.add(id); await saveAgentSetting({ agentToolsOff: [...off] }); }
-  toast(`${c.n}: ${turnOn ? 'đã bật' : 'đã tắt'}${turnOn ? '' : ' (AIVN BOT sẽ không dùng công cụ này)'}`);
+  toast(`${c.n}: ${turnOn ? 'đã bật' : 'đã tắt'}${turnOn ? '' : ' (AIVN AGENT sẽ không dùng công cụ này)'}`);
 }
 function closeChipPop() {
   if (!chipPop) return; chipPop.el.remove();

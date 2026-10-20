@@ -1,4 +1,4 @@
-// 0.14.2: tìm ứng dụng cài theo người dùng (Zalo…) + tệp đính kèm trong AIVN BOT
+// 0.14.2: tìm ứng dụng cài theo người dùng (Zalo…) + tệp đính kèm trong AIVN AGENT
 const test = require('node:test'); const assert = require('node:assert');
 const fs = require('fs'); const os = require('os'); const path = require('path');
 const C = require('../src/agent/computer');
@@ -52,7 +52,7 @@ test('open_app dùng nguồn tìm sâu; không có thì nói rõ đã kiểm tra
   assert.match(l.forModel, /Đừng kết luận là chưa cài/);
 });
 
-test('AIVN BOT: tệp đính kèm đọc được bằng read_file dù chưa thêm thư mục; tệp khác vẫn bị chặn', async () => {
+test('AIVN AGENT: tệp đính kèm đọc được bằng read_file dù chưa thêm thư mục; tệp khác vẫn bị chặn', async () => {
   const dir = tmp(); const f = path.join(dir, 'bao-cao.txt'); fs.writeFileSync(f, 'Doanh thu quý 3: 120 triệu');
   const other = path.join(dir, 'bi-mat.txt'); fs.writeFileSync(other, 'mật khẩu');
   const seen = [];

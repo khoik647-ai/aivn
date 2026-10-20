@@ -344,7 +344,7 @@ input:focus-visible,textarea:focus-visible,select:focus-visible{outline:none}
 .mem-tools{flex-shrink:0;gap:12px;align-items:center;white-space:nowrap}
 .mem-tools .check{display:flex;align-items:center;gap:6px;font-size:13px}
 .mem-tools .btn{height:auto;align-self:center}
-/* ---------- 0.14: AIVN BOT, máy tính, màn hình, bảo mật ---------- */
+/* ---------- 0.14: AIVN AGENT, máy tính, màn hình, bảo mật ---------- */
 .beta{font-style:normal;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:1px 6px;border-radius:6px;background:var(--accent-soft2);color:var(--accent-ink);margin-left:4px;vertical-align:1px}
 .warn-ink{color:#b45309}:root[data-theme=dark] .warn-ink{color:#fbbf24}
 .check.toggle.sub{margin-left:26px}

@@ -1,11 +1,11 @@
-// Ước lượng khả năng gọi công cụ của một mô hình (cho chế độ AIVN BOT): good / limited / none
+// Ước lượng khả năng gọi công cụ của một mô hình (cho chế độ AIVN AGENT): good / limited / none
 // Phát triển bởi NGUYỄN NGỌC KHÔI SINH VIÊN VLU
 'use strict';
 const LABEL = { good: 'Tốt', limited: 'Hạn chế', none: 'Không' };
 const HINT = {
-  good: 'Mô hình được huấn luyện để gọi công cụ: AIVN BOT mở ứng dụng, đọc tệp… đáng tin cậy.',
-  limited: 'Mẫu chat không có gọi công cụ gốc hoặc mô hình nhỏ: AIVN dùng giao thức công cụ dạng văn bản, có thể bỏ bước hoặc gọi sai. Nên dùng Qwen3 4B/8B cho AIVN BOT.',
-  none: 'Mô hình quá nhỏ/không hợp để gọi công cụ: AIVN BOT gần như không thao tác được. Chỉ nên dùng để trò chuyện.',
+  good: 'Mô hình được huấn luyện để gọi công cụ: AIVN AGENT mở ứng dụng, đọc tệp… đáng tin cậy.',
+  limited: 'Mẫu chat không có gọi công cụ gốc hoặc mô hình nhỏ: AIVN dùng giao thức công cụ dạng văn bản, có thể bỏ bước hoặc gọi sai. Nên dùng Qwen3 4B/8B cho AIVN AGENT.',
+  none: 'Mô hình quá nhỏ/không hợp để gọi công cụ: AIVN AGENT gần như không thao tác được. Chỉ nên dùng để trò chuyện.',
 };
 function paramsOf(name, params) {
   if (params) { const p = parseFloat(String(params).replace(',', '.')); if (p) return /m\b/i.test(String(params)) && p > 20 ? p / 1000 : p; }

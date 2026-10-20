@@ -52,7 +52,7 @@ test('bước giả → buộc chọn công cụ → mô hình gọi open_app th
 });
 
 test('trả lời bình thường không bị chặn', async () => {
-  const { agent, calls } = mkAgent([say('Xin chào! Mình là AIVN BOT.')]);
+  const { agent, calls } = mkAgent([say('Xin chào! Mình là AIVN AGENT.')]);
   const r = await agent.run({ messages: [{ role: 'user', content: 'chào bạn' }], confirm: async () => true });
   assert.strictEqual(calls.length, 1); assert.strictEqual(r.warning, null);
 });
@@ -83,7 +83,7 @@ test('nhãn hỗ trợ công cụ', () => {
 
 test('yêu cầu thao tác bị lờ đi cũng bị bắt', () => {
   const names = ['open_app'];
-  assert.strictEqual(fakeActionCheck('Xin chào! Mình là AIVN BOT. Bạn muốn mình làm gì?', [], names, 'gửi tin nhắn cho trần quỳnh anh'), 'ignored');
+  assert.strictEqual(fakeActionCheck('Xin chào! Mình là AIVN AGENT. Bạn muốn mình làm gì?', [], names, 'gửi tin nhắn cho trần quỳnh anh'), 'ignored');
   assert.strictEqual(fakeActionCheck('Mình không thể gửi tin nhắn vì chưa bật Điều khiển màn hình.', [], names, 'gửi tin nhắn cho trần quỳnh anh'), null);
   assert.strictEqual(fakeActionCheck('Hà Nội.', [], names, 'thủ đô Việt Nam?'), null);
 });

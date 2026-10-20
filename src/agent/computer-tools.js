@@ -1,4 +1,4 @@
-// Công cụ "máy tính" của AIVN BOT (cấp 1: ứng dụng, tệp, web, lệnh, hệ thống; cấp 2 thử nghiệm: điều khiển màn hình).
+// Công cụ "máy tính" của AIVN AGENT (cấp 1: ứng dụng, tệp, web, lệnh, hệ thống; cấp 2 thử nghiệm: điều khiển màn hình).
 // Ghép vào vòng lặp công cụ của agent.js. Mọi thao tác có rủi ro đều đi qua thẻ xác nhận trong cửa sổ AIVN.
 const fs = require('fs');
 const os = require('os');
@@ -127,7 +127,7 @@ function createComputerTools(deps) {
         if (!fs.existsSync(p)) throw new CompError(`Không có tệp/thư mục "${p}".`);
         const isDir = fs.statSync(p).isDirectory();
         if (!isDir && C.EXEC_EXT.test(p)) {
-          const r = await confirmOrRefuse(ctx, { kind: 'open-exec', icon: '⚠️', title: 'Mở tệp chạy được?', short: 'mở ' + path.basename(p), message: `AIVN BOT muốn mở “${path.basename(p)}”. Đây là tệp có thể chạy chương trình hoặc thay đổi máy. Chỉ đồng ý nếu bạn biết rõ tệp này.`, path: p, okLabel: 'Mở tệp', noLabel: 'Không mở' }, `Người dùng KHÔNG đồng ý mở "${p}". Đừng thử lại.`);
+          const r = await confirmOrRefuse(ctx, { kind: 'open-exec', icon: '⚠️', title: 'Mở tệp chạy được?', short: 'mở ' + path.basename(p), message: `AIVN AGENT muốn mở “${path.basename(p)}”. Đây là tệp có thể chạy chương trình hoặc thay đổi máy. Chỉ đồng ý nếu bạn biết rõ tệp này.`, path: p, okLabel: 'Mở tệp', noLabel: 'Không mở' }, `Người dùng KHÔNG đồng ý mở "${p}". Đừng thử lại.`);
           if (r) return r;
         }
         await openWith(p, 'path');
@@ -150,7 +150,7 @@ function createComputerTools(deps) {
         const hit = C.matchRunning(q, await C.runningApps());
         if (!hit) throw new CompError(`Không thấy ứng dụng "${q}" đang mở. Dùng running_apps để xem.`);
         if (C.PROTECTED.test(hit.name)) throw new CompError(`Không đóng "${hit.name}": tiến trình hệ thống hoặc của AIVN.`);
-        const r = await confirmOrRefuse(ctx, { kind: 'close-app', icon: '✖', title: 'Đóng ứng dụng?', short: 'đóng ' + hit.name, message: `AIVN BOT muốn đóng “${hit.name}”${hit.title ? ` (${hit.title})` : ''}. Dữ liệu chưa lưu trong ứng dụng này có thể bị mất.`, okLabel: 'Đóng ứng dụng', noLabel: 'Không' }, `Người dùng KHÔNG đồng ý đóng "${hit.name}". Đừng thử lại.`);
+        const r = await confirmOrRefuse(ctx, { kind: 'close-app', icon: '✖', title: 'Đóng ứng dụng?', short: 'đóng ' + hit.name, message: `AIVN AGENT muốn đóng “${hit.name}”${hit.title ? ` (${hit.title})` : ''}. Dữ liệu chưa lưu trong ứng dụng này có thể bị mất.`, okLabel: 'Đóng ứng dụng', noLabel: 'Không' }, `Người dùng KHÔNG đồng ý đóng "${hit.name}". Đừng thử lại.`);
         if (r) return r;
         await C.closeApp(hit.name);
         return { forModel: `Đã gửi lệnh đóng "${hit.name}".`, summary: `Đã đóng ${hit.name}` };
@@ -162,7 +162,7 @@ function createComputerTools(deps) {
         let cwd = os.homedir(); if (a.cwd) { const c = C.expandPath(a.cwd); if (!fs.existsSync(c) || !fs.statSync(c).isDirectory()) throw new CompError('Thư mục chạy lệnh không tồn tại: ' + c); cwd = c; }
         const auto = chk.readOnly && s.agentAutoReadOnly === true;
         if (!auto) {
-          const r = await confirmOrRefuse(ctx, { kind: 'command', icon: '⌨️', title: 'Chạy lệnh này?', short: 'chạy lệnh', message: `AIVN BOT muốn chạy lệnh dưới đây trong ${process.platform === 'win32' ? 'PowerShell' : 'Terminal'} (thư mục: ${cwd}).${chk.readOnly ? ' Lệnh này có vẻ chỉ đọc thông tin.' : ' Lệnh này có thể thay đổi tệp hoặc cài đặt trên máy. Hãy đọc kỹ.'}`, preview: cmd, okLabel: 'Chạy lệnh', noLabel: 'Không chạy' }, `Người dùng KHÔNG đồng ý chạy lệnh. Không chạy lệnh này hay lệnh tương tự; hỏi lại người dùng nếu cần.`);
+          const r = await confirmOrRefuse(ctx, { kind: 'command', icon: '⌨️', title: 'Chạy lệnh này?', short: 'chạy lệnh', message: `AIVN AGENT muốn chạy lệnh dưới đây trong ${process.platform === 'win32' ? 'PowerShell' : 'Terminal'} (thư mục: ${cwd}).${chk.readOnly ? ' Lệnh này có vẻ chỉ đọc thông tin.' : ' Lệnh này có thể thay đổi tệp hoặc cài đặt trên máy. Hãy đọc kỹ.'}`, preview: cmd, okLabel: 'Chạy lệnh', noLabel: 'Không chạy' }, `Người dùng KHÔNG đồng ý chạy lệnh. Không chạy lệnh này hay lệnh tương tự; hỏi lại người dùng nếu cần.`);
           if (r) return r;
         }
         const out = await C.runCommand(cmd, { cwd, signal: ctx.signal });
@@ -171,7 +171,7 @@ function createComputerTools(deps) {
       }
       case 'system_action': {
         const act = String(a.action || ''); const d = C.SYS[act]; if (!d) throw new CompError('Thao tác không hỗ trợ: ' + act);
-        if (d.confirm) { const r = await confirmOrRefuse(ctx, { kind: 'system', icon: d.danger ? '⚠️' : '🖥', title: d.label + '?', short: d.label.toLowerCase(), message: `AIVN BOT muốn: ${d.label}.${act === 'shutdown' || act === 'restart' ? ' Hãy lưu công việc đang làm trước.' : ''}`, okLabel: d.label, noLabel: 'Không' }, `Người dùng KHÔNG đồng ý (${d.label}). Đừng thử lại.`); if (r) return r; }
+        if (d.confirm) { const r = await confirmOrRefuse(ctx, { kind: 'system', icon: d.danger ? '⚠️' : '🖥', title: d.label + '?', short: d.label.toLowerCase(), message: `AIVN AGENT muốn: ${d.label}.${act === 'shutdown' || act === 'restart' ? ' Hãy lưu công việc đang làm trước.' : ''}`, okLabel: d.label, noLabel: 'Không' }, `Người dùng KHÔNG đồng ý (${d.label}). Đừng thử lại.`); if (r) return r; }
         const lbl = await C.systemAction(act, { keyTap: deps.keyTap, openExternal: deps.openExternal });
         return { forModel: `Đã thực hiện: ${lbl}.`, summary: lbl };
       }
@@ -180,7 +180,7 @@ function createComputerTools(deps) {
         // Gửi tin nhắn cho người khác: luôn hỏi duyệt riêng lần cuối trước khi bấm Gửi / Enter
         if (isSendAction(a)) {
           const r = await confirmOrRefuse(ctx, { kind: 'send-message', icon: '✉️', title: 'Gửi tin nhắn cho người khác?', short: 'gửi tin nhắn', okLabel: 'Đồng ý gửi', noLabel: 'Không gửi',
-            message: `AIVN BOT sắp ${a.action === 'key' ? `bấm phím ${a.keys}` : `bấm “${a.target || 'nút Gửi'}”`}: thao tác này sẽ GỬI tin nhắn tới người khác và không thu hồi được dễ dàng. Hãy kiểm tra đúng người nhận và nội dung trên màn hình trước khi đồng ý.` },
+            message: `AIVN AGENT sắp ${a.action === 'key' ? `bấm phím ${a.keys}` : `bấm “${a.target || 'nút Gửi'}”`}: thao tác này sẽ GỬI tin nhắn tới người khác và không thu hồi được dễ dàng. Hãy kiểm tra đúng người nhận và nội dung trên màn hình trước khi đồng ý.` },
             'Người dùng KHÔNG đồng ý gửi tin nhắn. Dừng lại, không gửi, và báo cho người dùng.');
           if (r) return r;
         }

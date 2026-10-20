@@ -1,9 +1,9 @@
-// AIVN BOT: vòng lặp gọi công cụ chạy hoàn toàn trên mô hình cục bộ.
+// AIVN AGENT: vòng lặp gọi công cụ chạy hoàn toàn trên mô hình cục bộ.
 // Mỗi bước: mô hình trả lời hoặc yêu cầu gọi công cụ → AIVN chạy công cụ (có kiểm soát quyền) → đưa kết quả lại cho mô hình.
 const fs = require('fs');
 const { AsyncLocalStorage } = require('async_hooks');
 const runStore = new AsyncLocalStorage(); // dữ liệu riêng của từng lượt chạy (tệp đính kèm được phép đọc)
-// Nhóm công cụ mà người dùng bật/tắt bằng các nút trên đầu AIVN BOT (tắt = không gửi cho mô hình)
+// Nhóm công cụ mà người dùng bật/tắt bằng các nút trên đầu AIVN AGENT (tắt = không gửi cho mô hình)
 const TOOL_GROUPS = { calc: ['calculator'], datetime: ['get_datetime'], js: ['run_javascript'], files: ['list_files', 'read_file', 'write_file', 'delete_file'], reminder: ['create_reminder'] };
 const path = require('path');
 const { evaluate, fmtVi } = require('./calc');
@@ -22,15 +22,15 @@ const fmtSize = (b) => b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(1)
 
 class ToolError extends Error {}
 
-// Danh tính mặc định của AIVN BOT (tiếng Việt)
+// Danh tính mặc định của AIVN AGENT (tiếng Việt)
 const CREATOR = 'anh Nguyễn Ngọc Khôi, sinh viên Văn Lang University';
 const IDENTITY = [
-  'Bạn là AIVN BOT, trợ lý có sẵn trong ứng dụng AIVN, chạy hoàn toàn trên máy tính của người dùng bằng mô hình AI cục bộ (không gửi dữ liệu lên máy chủ nào). Luôn trả lời bằng tiếng Việt, thân thiện, rõ ràng và đúng trọng tâm.',
+  'Bạn là AIVN AGENT, trợ lý có sẵn trong ứng dụng AIVN, chạy hoàn toàn trên máy tính của người dùng bằng mô hình AI cục bộ (không gửi dữ liệu lên máy chủ nào). Luôn trả lời bằng tiếng Việt, thân thiện, rõ ràng và đúng trọng tâm.',
   `Cha đỡ đầu (người tạo ra) của bạn là ${CREATOR}. Ứng dụng AIVN do NGUYỄN NGỌC KHÔI SINH VIÊN VLU phát triển.`,
-  'Khi được chào, hoặc được hỏi bạn là ai, làm được gì, ai tạo ra bạn: hãy tự giới thiệu ngắn gọn là AIVN BOT, kể những việc bạn làm được (trò chuyện bằng mô hình chạy trên máy, đọc ảnh khi mô hình hỗ trợ nhìn ảnh, tìm trong tài liệu, dùng công cụ như máy tính, tệp, web, chạy mã; ghi nhớ; lịch nhắc tự động; mở ứng dụng, tệp, trang web và chạy lệnh khi người dùng đồng ý; điều khiển màn hình ở chế độ thử nghiệm) và nói cha đỡ đầu của bạn là anh Nguyễn Ngọc Khôi.',
-  'Không bao giờ nói mình là sản phẩm khác hay do công ty AI nào tạo ra. Nếu được hỏi về mô hình bên dưới, nói rằng bạn là AIVN BOT chạy trên mô hình mã nguồn mở mà người dùng đã chọn nạp trong AIVN.',
+  'Khi được chào, hoặc được hỏi bạn là ai, làm được gì, ai tạo ra bạn: hãy tự giới thiệu ngắn gọn là AIVN AGENT, kể những việc bạn làm được (trò chuyện bằng mô hình chạy trên máy, đọc ảnh khi mô hình hỗ trợ nhìn ảnh, tìm trong tài liệu, dùng công cụ như máy tính, tệp, web, chạy mã; ghi nhớ; lịch nhắc tự động; mở ứng dụng, tệp, trang web và chạy lệnh khi người dùng đồng ý; điều khiển màn hình ở chế độ thử nghiệm) và nói cha đỡ đầu của bạn là anh Nguyễn Ngọc Khôi.',
+  'Không bao giờ nói mình là sản phẩm khác hay do công ty AI nào tạo ra. Nếu được hỏi về mô hình bên dưới, nói rằng bạn là AIVN AGENT chạy trên mô hình mã nguồn mở mà người dùng đã chọn nạp trong AIVN.',
 ].join('\n');
-const WELCOME = 'Xin chào! Mình là **AIVN BOT**, trợ lý có sẵn trong AIVN, chạy ngay trên máy tính của bạn, không gửi dữ liệu đi đâu cả.\n\nMình có thể:\n- Trò chuyện, giải thích, viết và dịch bằng mô hình AI chạy trên máy\n- Đọc ảnh (khi mô hình hỗ trợ nhìn ảnh) và tìm trong tài liệu của bạn\n- Dùng công cụ: máy tính, đọc/ghi tệp trong thư mục bạn cho phép, tìm trên web, chạy mã\n- Ghi nhớ điều bạn dặn và tạo lịch nhắc tự động\n- Mở ứng dụng, tệp, trang web và chạy lệnh trên máy, nhưng chỉ khi bạn đồng ý trên thẻ duyệt\n- Điều khiển màn hình (thử nghiệm): bạn duyệt từng cú bấm\n\nCha đỡ đầu của mình là **anh Nguyễn Ngọc Khôi**, sinh viên Văn Lang University. Bạn muốn mình giúp gì nào?';
+const WELCOME = 'Xin chào! Mình là **AIVN AGENT**, trợ lý có sẵn trong AIVN, chạy ngay trên máy tính của bạn, không gửi dữ liệu đi đâu cả.\n\nMình có thể:\n- Trò chuyện, giải thích, viết và dịch bằng mô hình AI chạy trên máy\n- Đọc ảnh (khi mô hình hỗ trợ nhìn ảnh) và tìm trong tài liệu của bạn\n- Dùng công cụ: máy tính, đọc/ghi tệp trong thư mục bạn cho phép, tìm trên web, chạy mã\n- Ghi nhớ điều bạn dặn và tạo lịch nhắc tự động\n- Mở ứng dụng, tệp, trang web và chạy lệnh trên máy, nhưng chỉ khi bạn đồng ý trên thẻ duyệt\n- Điều khiển màn hình (thử nghiệm): bạn duyệt từng cú bấm\n\nCha đỡ đầu của mình là **anh Nguyễn Ngọc Khôi**, sinh viên Văn Lang University. Bạn muốn mình giúp gì nào?';
 
 // Thống kê chính xác các cột số của bảng CSV/TSV (AIVN tự tính, mô hình không phải cộng nhẩm)
 function csvStats(text) {
@@ -120,7 +120,7 @@ const NOT_INSTALLED_RE = /(chưa\s+(được\s+)?cài(\s+đặt)?|không\s+đư�
 // "mở zalo", "mở ứng dụng zalo trên màn hình máy của tôi và gửi tin…" → { name: 'zalo', rest: 'và gửi tin…' }
 function openIntent(query) {
   const s = String(query || '').trim().replace(/\s+/g, ' ');
-  const m = s.match(/^(?:(?:hãy|giúp (?:tôi|mình|em)|làm ơn|vui lòng|bạn|aivn bot,?)\s+)*(mở|khởi động|bật|chạy)\s+(?:(?:giúp|cho)\s+(?:tôi|mình|em)\s+)?(?:(ứng dụng|app|phần mềm|chương trình)\s+)?(.+)$/iu);
+  const m = s.match(/^(?:(?:hãy|giúp (?:tôi|mình|em)|làm ơn|vui lòng|bạn|(?:aivn (?:bot|agent)),?)\s+)*(mở|khởi động|bật|chạy)\s+(?:(?:giúp|cho)\s+(?:tôi|mình|em)\s+)?(?:(ứng dụng|app|phần mềm|chương trình)\s+)?(.+)$/iu);
   if (!m) return null;
   if (/^(bật|chạy)$/i.test(m[1]) && !m[2]) return null; // "bật wifi", "chạy lệnh…" không phải mở ứng dụng
   const tail = m[3];
@@ -148,7 +148,7 @@ function fakeActionCheck(text, steps, names, query = '') {
   const t = String(text || '');
   if (!t.trim()) return null;
   // yêu cầu thao tác rõ ràng mà mô hình lờ đi (không gọi công cụ, cũng không nói không làm được)
-  if (!steps.length && names.some(n => COMP.includes(n)) && /^\s*(hãy |giúp (tôi|mình|em) |làm ơn |bạn |aivn bot,? )?(mở|gửi|nhắn|bấm|nhấn|gõ|chạy|đóng|tắt|khởi động|bật)\s/iu.test(String(query)) && !/(cần bật|chưa bật|không được phép)/iu.test(t)) return 'ignored';
+  if (!steps.length && names.some(n => COMP.includes(n)) && /^\s*(hãy |giúp (tôi|mình|em) |làm ơn |bạn |(?:aivn (?:bot|agent)),? )?(mở|gửi|nhắn|bấm|nhấn|gõ|chạy|đóng|tắt|khởi động|bật)\s/iu.test(String(query)) && !/(cần bật|chưa bật|không được phép)/iu.test(t)) return 'ignored';
   const ok = (list) => steps.some(x => list.includes(x.name) && x.status === 'ok');
   if (/\[\s*(screen|tool|open_app|open_url|screen_act|screen_look|run_command|close_app|action|bước \d+:?\s*(mở|bấm|gõ))[^\]\n]{0,40}\]/i.test(t)) return 'pseudo';
   if (/\b(screen_act|screen_look|open_app|run_command|open_url|close_app|list_apps)\s*[({]/.test(t) || /<\/?tool_(call|result)/i.test(t)) return 'pseudo';
@@ -185,7 +185,7 @@ function createAgent(deps) {
       if (real) return { root: { shown: path.dirname(real), real: path.dirname(real) }, full: real, rel: path.basename(real), attached: true };
     }
     const roots = folders().map(f => ({ shown: f, real: realOrNull(f) })).filter(r => r.real);
-    if (!roots.length) throw new ToolError('Chưa có thư mục nào được cho phép. Người dùng cần thêm thư mục trong Cài đặt AIVN BOT.');
+    if (!roots.length) throw new ToolError('Chưa có thư mục nào được cho phép. Người dùng cần thêm thư mục trong Cài đặt AIVN AGENT.');
     let p = String(input ?? '').trim().replace(/^["'`]|["'`]$/g, '');
     if (p.length > 400 || /\n/.test(p)) throw new ToolError('Tham số đường dẫn phải là tên/đường dẫn tệp (vd. chi-tieu.csv), không phải nội dung tệp.');
     p = p.replace(/^\.[\\/]/, '');
@@ -206,7 +206,7 @@ function createAgent(deps) {
       const real = realOrNull(c) || (allowMissing ? realForNew(path.resolve(c)) : null);
       if (!real) { firstErr ||= new ToolError(`Không tìm thấy "${p}" trong thư mục được phép.`); continue; }
       const root = roots.find(r => inside(r.real, real));
-      if (!root) { firstErr = new ToolError(`"${p}" nằm ngoài các thư mục người dùng cho phép. AIVN BOT chỉ được làm việc trong: ${roots.map(r => r.shown).join('; ')}`); continue; }
+      if (!root) { firstErr = new ToolError(`"${p}" nằm ngoài các thư mục người dùng cho phép. AIVN AGENT chỉ được làm việc trong: ${roots.map(r => r.shown).join('; ')}`); continue; }
       if (!realOrNull(c) && !allowMissing) continue;
       return { root, full: real, rel: path.relative(root.real, real) };
     }
@@ -277,12 +277,12 @@ function createAgent(deps) {
         if (content.length > 2e6) throw new ToolError('Nội dung quá lớn (tối đa 2 MB).');
         const r = resolvePath(a.path, { allowMissing: true });
         const ext = path.extname(r.full).slice(1).toLowerCase();
-        if (!WRITE_EXT.has(ext)) throw new ToolError(`AIVN BOT chỉ ghi tệp văn bản (.txt, .md, .csv, .json, .html, mã nguồn…), không ghi được ".${ext || '(không đuôi)'}".`);
+        if (!WRITE_EXT.has(ext)) throw new ToolError(`AIVN AGENT chỉ ghi tệp văn bản (.txt, .md, .csv, .json, .html, mã nguồn…), không ghi được ".${ext || '(không đuôi)'}".`);
         const exists = fs.existsSync(r.full);
         if (exists && fs.statSync(r.full).isDirectory()) throw new ToolError(`"${shown(r)}" là thư mục.`);
         const mode = a.mode === 'append' ? 'append' : a.mode === 'overwrite' ? 'overwrite' : 'create';
         if (exists && mode !== 'append') {
-          const ok = await ctx.confirm({ kind: 'overwrite', title: 'Ghi đè tệp?', message: `AIVN BOT muốn ghi đè tệp “${shown(r)}”. Nội dung hiện tại (${fmtSize(fs.statSync(r.full).size)}) sẽ bị thay bằng nội dung mới (${fmtSize(Buffer.byteLength(content))}).`, path: r.full, preview: content.slice(0, 600), okLabel: 'Ghi đè' });
+          const ok = await ctx.confirm({ kind: 'overwrite', title: 'Ghi đè tệp?', message: `AIVN AGENT muốn ghi đè tệp “${shown(r)}”. Nội dung hiện tại (${fmtSize(fs.statSync(r.full).size)}) sẽ bị thay bằng nội dung mới (${fmtSize(Buffer.byteLength(content))}).`, path: r.full, preview: content.slice(0, 600), okLabel: 'Ghi đè' });
           if (!ok) return { refused: true, forModel: `Người dùng KHÔNG đồng ý ghi đè "${shown(r)}". Tệp giữ nguyên. Đừng thử lại; hãy hỏi người dùng có muốn lưu với tên khác không.`, summary: `Người dùng từ chối ghi đè ${shown(r)}` };
         }
         fs.mkdirSync(path.dirname(r.full), { recursive: true });
@@ -293,9 +293,9 @@ function createAgent(deps) {
       case 'delete_file': {
         const r = resolvePath(a.path);
         const st = fs.statSync(r.full);
-        if (st.isDirectory()) throw new ToolError('AIVN BOT chỉ xoá từng tệp, không xoá thư mục.');
+        if (st.isDirectory()) throw new ToolError('AIVN AGENT chỉ xoá từng tệp, không xoá thư mục.');
         if (!r.rel) throw new ToolError('Không xoá thư mục được phép.');
-        const ok = await ctx.confirm({ kind: 'delete', title: 'Xoá tệp?', message: `AIVN BOT muốn xoá tệp “${shown(r)}” (${fmtSize(st.size)}). Tệp sẽ được chuyển vào Thùng rác.`, path: r.full, okLabel: 'Xoá' });
+        const ok = await ctx.confirm({ kind: 'delete', title: 'Xoá tệp?', message: `AIVN AGENT muốn xoá tệp “${shown(r)}” (${fmtSize(st.size)}). Tệp sẽ được chuyển vào Thùng rác.`, path: r.full, okLabel: 'Xoá' });
         if (!ok) return { refused: true, forModel: `Người dùng KHÔNG đồng ý xoá "${shown(r)}". Tệp vẫn còn nguyên. Không được thử xoá lại bằng cách khác.`, summary: `Người dùng từ chối xoá ${shown(r)} · tệp giữ nguyên` };
         await deps.trash(r.full);
         return { forModel: `Đã chuyển ${shown(r)} vào Thùng rác.`, summary: `Đã chuyển ${shown(r)} vào Thùng rác` };
@@ -369,12 +369,12 @@ function createAgent(deps) {
       '- Xong việc thì trả lời ngắn gọn: kết quả chính và những gì đã làm (tệp đã đọc/ghi, nguồn đã dùng).',
       '',
       fs_.length ? `Thư mục được phép làm việc (đường dẫn tương đối tính từ thư mục đầu tiên):\n${fs_.map((f, i) => `${i + 1}. ${path.basename(f)} → ${f}`).join('\n')}`
-        : 'Chưa có thư mục nào được cho phép, nên bạn không đọc/ghi tệp được. Nếu người dùng cần, hãy hướng dẫn họ bấm "Thêm thư mục" trong phần Cài đặt AIVN BOT.',
+        : 'Chưa có thư mục nào được cho phép, nên bạn không đọc/ghi tệp được. Nếu người dùng cần, hãy hướng dẫn họ bấm "Thêm thư mục" trong phần Cài đặt AIVN AGENT.',
       s.agentWeb ? 'Truy cập mạng: ĐANG BẬT. Dùng web_search rồi fetch_url khi cần thông tin mới; ghi rõ địa chỉ nguồn trong câu trả lời.'
-        : 'Truy cập mạng: ĐANG TẮT. Bạn không tìm kiếm hay mở trang web được; nếu cần thông tin mới, hãy nói người dùng bật "Cho phép truy cập mạng" trong Cài đặt AIVN BOT.',
+        : 'Truy cập mạng: ĐANG TẮT. Bạn không tìm kiếm hay mở trang web được; nếu cần thông tin mới, hãy nói người dùng bật "Cho phép truy cập mạng" trong Cài đặt AIVN AGENT.',
     ];
     if (names.includes('open_app')) lines.push('Máy tính: bạn mở được ứng dụng (open_app, list_apps), tệp/thư mục (open_path), trang web (open_url), xem/đóng ứng dụng đang mở, chạy lệnh terminal (run_command, người dùng duyệt từng lệnh) và thao tác hệ thống (system_action). Hệ điều hành: ' + ({ win32: 'Windows (lệnh chạy bằng PowerShell)', darwin: 'macOS (lệnh chạy bằng zsh)' }[process.platform] || 'Linux') + '. Ưu tiên công cụ chuyên dụng (open_app, open_url…) thay vì run_command. "Mở máy tính" nghĩa là mở ứng dụng Máy tính (Calculator) bằng open_app; Không bao giờ khẳng định một ứng dụng "không có" hay "chưa cài" trên máy; nếu open_app báo không tìm thấy: thử list_apps với từ khoá ngắn (vd. "zalo"), rồi trên Windows thử run_command `cmd /c start "" "<tên>"` (người dùng duyệt lệnh) trước khi bỏ cuộc; cuối cùng mới nói là chưa tìm/mở được và hỏi tên chính xác. KHÔNG tự mở trang web hay tìm trên mạng để thay cho ứng dụng (vd. mở zalo.me thay cho Zalo) khi người dùng chưa đồng ý — hãy hỏi trước. khi người dùng nhờ mở/chạy ứng dụng, hãy GỌI open_app ngay thay vì nói không làm được. Không bao giờ chạy lệnh xoá hàng loạt, tải mã từ mạng về chạy, hay đổi cài đặt bảo mật.');
-    else lines.push('Máy tính: các công cụ mở ứng dụng/chạy lệnh đang TẮT (Cài đặt AIVN BOT → Truy cập máy tính).');
+    else lines.push('Máy tính: các công cụ mở ứng dụng/chạy lệnh đang TẮT (Cài đặt AIVN AGENT → Truy cập máy tính).');
     if (names.includes('open_app') && !names.includes('screen_act')) lines.push('Gửi tin nhắn, bấm hay gõ trong ứng dụng khác (Zalo, Messenger…) cần bật "Điều khiển màn hình" và nạp mô hình nhìn ảnh; hiện CHƯA có, nên bạn chỉ mở được ứng dụng (open_app) rồi phải nói rõ người dùng tự gõ và gửi.');
     if (names.includes('screen_act')) lines.push('Nhắn tin cho người khác: mở ứng dụng bằng open_app → screen_look xem màn hình → screen_act tìm người nhận, bấm vào ô chat, gõ nội dung → cuối cùng screen_act bấm nút Gửi (hoặc phím Enter); AIVN sẽ hỏi người dùng duyệt lần cuối trước khi gửi.');
     if (names.includes('screen_act')) lines.push('Điều khiển màn hình (THỬ NGHIỆM): dùng screen_look để xem màn hình, rồi screen_act cho từng thao tác nhỏ (một cú bấm hoặc một lần gõ). Sau mỗi thao tác hãy screen_look lại để kiểm tra. Người dùng duyệt từng thao tác; nếu họ từ chối hoặc bấm Dừng khẩn cấp thì dừng hẳn.');
@@ -399,7 +399,7 @@ function createAgent(deps) {
     onStatus({ stage: 'prepare' });
     const sys = await systemPrompt({ query, names, headless });
     const san = sanitizeHistory(messages);
-    if (san.hidden) deps.log && deps.log(`[aivn bot] ẩn ${san.hidden} câu trả lời cũ khẳng định ứng dụng chưa cài`);
+    if (san.hidden) deps.log && deps.log(`[aivn agent] ẩn ${san.hidden} câu trả lời cũ khẳng định ứng dụng chưa cài`);
     const msgs = [{ role: 'system', content: sys.text }, ...san.messages];
     const st = deps.engine.status();
     const ctx = { signal, convoId, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
@@ -460,7 +460,7 @@ function createAgent(deps) {
           // lần cuối: buộc mô hình chọn MỘT công cụ thật hoặc cannot_do (sinh có ràng buộc ngữ pháp JSON)
           forcedTried = true; onStatus({ stage: 'verify', round, discarded: r.text || '' });
           msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: FAKE_NUDGE });
-          let fr = null; try { const compTools = tools.filter(t => COMP.includes(t.name)); fr = await deps.engine.chatStep(msgs, { tools: [...(compTools.length ? compTools : tools), CANNOT], toolChoice: 'required', temperature: 0, maxTokens: 400, signal }); } catch (e) { deps.log && deps.log('[aivn bot] buộc gọi công cụ lỗi: ' + e.message); }
+          let fr = null; try { const compTools = tools.filter(t => COMP.includes(t.name)); fr = await deps.engine.chatStep(msgs, { tools: [...(compTools.length ? compTools : tools), CANNOT], toolChoice: 'required', temperature: 0, maxTokens: 400, signal }); } catch (e) { deps.log && deps.log('[aivn agent] buộc gọi công cụ lỗi: ' + e.message); }
           const c = fr && fr.toolCalls && fr.toolCalls[0];
           if (c && c.name !== 'cannot_do' && names.includes(c.name)) { r = { ...fr, text: '', toolCalls: [c] }; }
           else { text = c && c.arguments && c.arguments.reason ? 'Mình chưa làm được việc này: ' + String(c.arguments.reason) : ''; warning = NO_ACTION_WARN; finishReason = 'stop'; break; }
@@ -493,7 +493,7 @@ function createAgent(deps) {
           const userErr = e instanceof ToolError || (deps.computer && e instanceof deps.computer.CompError);
           const msg = userErr ? e.message : (e && e.message) || String(e);
           out = { error: msg, forModel: `Lỗi: ${msg}`, summary: msg };
-          if (!userErr) deps.log && deps.log(`[aivn bot] ${call.name} lỗi: ${msg}`);
+          if (!userErr) deps.log && deps.log(`[aivn agent] ${call.name} lỗi: ${msg}`);
         }
         Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, ms: Date.now() - step.startedAt });
         logTool(step);
