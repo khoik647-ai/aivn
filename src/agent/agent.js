@@ -27,10 +27,30 @@ const CREATOR = 'anh Nguyễn Ngọc Khôi, sinh viên Văn Lang University';
 const IDENTITY = [
   'Bạn là AIVN AGENT, trợ lý có sẵn trong ứng dụng AIVN, chạy hoàn toàn trên máy tính của người dùng bằng mô hình AI cục bộ (không gửi dữ liệu lên máy chủ nào). Luôn trả lời bằng tiếng Việt, thân thiện, rõ ràng và đúng trọng tâm.',
   `Cha đỡ đầu (người tạo ra) của bạn là ${CREATOR}. Ứng dụng AIVN do NGUYỄN NGỌC KHÔI SINH VIÊN VLU phát triển.`,
-  'Khi được chào, hoặc được hỏi bạn là ai, làm được gì, ai tạo ra bạn: hãy tự giới thiệu ngắn gọn là AIVN AGENT, kể những việc bạn làm được (trò chuyện bằng mô hình chạy trên máy, đọc ảnh khi mô hình hỗ trợ nhìn ảnh, tìm trong tài liệu, dùng công cụ như máy tính, tệp, web, chạy mã; ghi nhớ; lịch nhắc tự động; mở ứng dụng, tệp, trang web và chạy lệnh khi người dùng đồng ý; điều khiển màn hình ở chế độ thử nghiệm) và nói cha đỡ đầu của bạn là anh Nguyễn Ngọc Khôi.',
+  `CHỈ tự giới thiệu khi người dùng hỏi RÕ bạn là ai, bạn làm được gì, hoặc ai tạo ra bạn: khi đó giới thiệu ngắn gọn là AIVN AGENT, kể những việc bạn làm được (trò chuyện bằng mô hình chạy trên máy, đọc ảnh khi mô hình hỗ trợ, tìm trong tài liệu, dùng công cụ tệp/web/chạy mã, ghi nhớ, lịch nhắc, mở ứng dụng và điều khiển máy tính khi người dùng đồng ý) và nói cha đỡ đầu của bạn là ${CREATOR}. Mọi trường hợp khác: KHÔNG chào hỏi, KHÔNG tự giới thiệu, KHÔNG nhắc cha đỡ đầu — trả lời hoặc làm thẳng vào việc người dùng nhờ. Nếu người dùng chỉ chào (vd. "chào bạn"), chỉ chào lại một câu ngắn và hỏi cần giúp gì.`,
   'Không bao giờ nói mình là sản phẩm khác hay do công ty AI nào tạo ra. Nếu được hỏi về mô hình bên dưới, nói rằng bạn là AIVN AGENT chạy trên mô hình mã nguồn mở mà người dùng đã chọn nạp trong AIVN.',
 ].join('\n');
 const WELCOME = 'Xin chào! Mình là **AIVN AGENT**, trợ lý có sẵn trong AIVN, chạy ngay trên máy tính của bạn, không gửi dữ liệu đi đâu cả.\n\nMình có thể:\n- Trò chuyện, giải thích, viết và dịch bằng mô hình AI chạy trên máy\n- Đọc ảnh (khi mô hình hỗ trợ nhìn ảnh) và tìm trong tài liệu của bạn\n- Dùng công cụ: máy tính, đọc/ghi tệp trong thư mục bạn cho phép, tìm trên web, chạy mã\n- Ghi nhớ điều bạn dặn và tạo lịch nhắc tự động\n- Mở ứng dụng, tệp, trang web và chạy lệnh trên máy, nhưng chỉ khi bạn đồng ý trên thẻ duyệt\n- Điều khiển màn hình (thử nghiệm): bạn duyệt từng cú bấm\n\nCha đỡ đầu của mình là **anh Nguyễn Ngọc Khôi**, sinh viên Văn Lang University. Bạn muốn mình giúp gì nào?';
+
+// Mô hình nhỏ hay lặp lại lời tự giới thiệu ở mọi câu trả lời: chỉ giữ khi người dùng hỏi rõ
+const ASK_ID_RE = /(bạn là ai|mày là ai|em là ai|là gì vậy|giới thiệu (về )?(bản thân|bạn|mình)|làm được (những )?(gì|việc gì)|có thể làm (được )?gì|giúp được (gì|những gì)|ai (tạo|làm|phát triển|viết) ra (bạn|mày|em)|cha đỡ đầu|who are you|what can you do|who (made|created) you)/iu;
+const GREET_ONLY_RE = /^\s*(xin\s+)?(chào|hello|hi|hey|alo)(\s+(bạn|bot|aivn( agent)?|em|anh|chị))?\s*[!.?~]*\s*$/iu;
+const INTRO_PARA_RE = /(mình là\s*\**\s*AIVN|tôi là\s*\**\s*AIVN|em là\s*\**\s*AIVN|cha đỡ đầu|Nguyễn Ngọc Khôi|chạy (ngay|hoàn toàn) trên máy tính của bạn)/iu;
+function stripIntro(text, query, { history = [] } = {}) {
+  const t = String(text || '');
+  if (ASK_ID_RE.test(String(query || ''))) return t;
+  if (GREET_ONLY_RE.test(String(query || '')) && !history.some(m => m.role === 'assistant')) return t; // lời chào đầu tiên: được phép chào lại
+  const paras = t.split(/\n\s*\n/);
+  let k = 0;
+  while (k < paras.length && (INTRO_PARA_RE.test(paras[k]) || (k === 0 && /^\s*(xin chào|chào bạn)[^\n]{0,40}[!.]\s*$/iu.test(paras[k])))) k++;
+  // danh sách "Mình có thể: - ..." ngay sau lời giới thiệu cũng bỏ
+  if (k > 0) while (k < paras.length && /^\s*(mình|tôi|em) có thể( giúp)?[^\n]*:\s*(\n\s*[-*•].*)*\s*$/iu.test(paras[k])) k++;
+  if (k === 0) return t;
+  const rest = paras.slice(k).join('\n\n').trim();
+  if (rest) return rest;
+  // toàn bộ là lời chào/giới thiệu: thay bằng câu ngắn gọn
+  return GREET_ONLY_RE.test(String(query || '')) ? 'Chào bạn! Bạn cần mình giúp gì?' : t;
+}
 
 // Thống kê chính xác các cột số của bảng CSV/TSV (AIVN tự tính, mô hình không phải cộng nhẩm)
 function csvStats(text) {
@@ -141,6 +161,13 @@ function sanitizeHistory(messages) {
   const out = messages.map((m, i) => {
     if (i === messages.length - 1 || m.role !== 'assistant' || typeof m.content !== 'string' || !NOT_INSTALLED_RE.test(m.content)) return m;
     n++; return { ...m, content: STALE_NOTE };
+  }).map((m, i, arr) => { // bỏ lời tự giới thiệu cũ trong lịch sử để mô hình không bắt chước lặp lại
+    if (m.role !== 'assistant' || typeof m.content !== 'string' || i === arr.length - 1 || !INTRO_PARA_RE.test(m.content)) return m;
+    const prevUser = [...arr.slice(0, i)].reverse().find(x => x.role === 'user');
+    const q = prevUser && typeof prevUser.content === 'string' ? prevUser.content : '';
+    if (ASK_ID_RE.test(q)) return m;
+    const c = stripIntro(m.content, q === '' ? 'x' : q, { history: [{ role: 'assistant' }] });
+    return c === m.content ? m : { ...m, content: c };
   });
   return { messages: out, hidden: n };
 }
@@ -513,10 +540,11 @@ function createAgent(deps) {
     usage.seconds = (Date.now() - t0) / 1000;
     usage.tokensPerSecond = usage.seconds ? usage.completion_tokens / usage.seconds : 0;
     const urls = steps.flatMap(x => x.urls || []);
+    text = stripIntro((text || '').trim(), query, { history: messages.slice(0, -1) });
     return { text: (text || '').trim(), steps, usage, finishReason, urls, memories: sys.memories.map(m => m.text), tools: names, warning };
   }
 
   return { run, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck };
 }
 
-module.exports = { openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN };
+module.exports = { stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN };
