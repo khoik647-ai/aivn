@@ -315,7 +315,17 @@ function createDesktopAgent(deps) {
   }
 
   async function look(a, ctx) {
-    if (a && a.window) { const w = U.matchWindow(await U.windows(), String(a.window)); if (w) { await begin(ctx); await U.focus(w).catch((e) => deps.log && deps.log("desk", "Không chuyển được tới cửa sổ (có thể đang mở hộp thoại): " + e.message)); session.target = { hwnd: w.hwnd, pid: w.pid, proc: w.proc, title: w.title }; await sleep(400); } }
+    if (a && a.window) {
+      const list = await U.windows(); const w = U.matchWindow(list, String(a.window));
+      if (w) {
+        await begin(ctx);
+        const sameApp = session.target && session.target.pid && w.pid === session.target.pid;
+        // cùng ứng dụng (vd. hộp thoại "Save as" của Writer): giữ cửa sổ chính làm mục tiêu, không giành tiêu điểm khỏi hộp thoại
+        if (!(sameApp && w.active)) await U.focus(w).catch((e) => deps.log && deps.log('desk', 'Không chuyển được tới cửa sổ (có thể đang mở hộp thoại): ' + e.message));
+        if (!sameApp) session.target = { hwnd: w.hwnd, pid: w.pid, proc: w.proc, title: w.title };
+        await sleep(400);
+      }
+    }
     const o = await observe(ctx, { query: a && a.query, ocr: a && a.ocr ? 'force' : 'auto' });
     let extra = '';
     if (a && a.question && deps.engine.status().vision) { try { extra = '\nMô tả của mô hình nhìn ảnh: ' + await SC.describe(deps.engine, await withOverlayHidden(() => SC.capture({ maxW: 1280 })), a.question, { signal: ctx.signal }); } catch {} }

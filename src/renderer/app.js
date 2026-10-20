@@ -865,6 +865,83 @@ document.addEventListener('keydown', (e) => {
 A.onAgentApprove((c) => { apQueue.push(c); apShow(); });
 A.onAgentApproveCancel(({ id }) => { if (apOpen && apOpen.id === id) { apOpen = null; $('#approveCard').hidden = true; apShow(); } const i = apQueue.findIndex(x => x.id === id); if (i >= 0) apQueue.splice(i, 1); });
 
+// --- UX 0.15.0: bảng lệnh Ctrl+K, ẩn/hiện bảng phải, phím tắt, giới thiệu nhanh ---
+function togglePanel(force) {
+  const v = $('#view-chat'); const off = typeof force === 'boolean' ? force : !v.classList.contains('no-panel');
+  v.classList.toggle('no-panel', off); localStorage.setItem('aivn.noPanel', off ? '1' : '0');
+  $('#panelToggle').textContent = off ? '⇤ Hiện bảng cài đặt' : '⇥ Ẩn bảng cài đặt';
+}
+if (localStorage.getItem('aivn.noPanel') === '1' || (localStorage.getItem('aivn.noPanel') === null && innerWidth < 1100)) togglePanel(true); else togglePanel(false);
+$('#panelToggle').addEventListener('click', () => togglePanel());
+const openKeys = () => { $('#keysModal').hidden = false; $('#keysClose').focus(); };
+$('#helpKeys').addEventListener('click', openKeys);
+$('#keysClose').addEventListener('click', () => { $('#keysModal').hidden = true; });
+$('#keysModal').addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#keysModal').hidden = true; });
+function paletteCommands() {
+  const cmds = [
+    { i: '💬', t: 'Trò chuyện thường', run: () => show('chat') },
+    { i: '🤖', t: 'AIVN AGENT', run: () => show('agent') },
+    { i: '＋', t: 'Cuộc trò chuyện mới', k: 'Ctrl+N', run: () => $('#newChat').click() },
+    { i: '🗃', t: 'Kho mô hình (tải mô hình)', run: () => show('discover') },
+    { i: '📦', t: 'Mô hình của tôi', run: () => show('models') },
+    { i: '⏰', t: 'Lịch tự động', run: () => show('schedule') },
+    { i: '🧠', t: 'Ghi nhớ', run: () => show('memory') },
+    { i: '⚡', t: 'Máy chủ API', run: () => show('server') },
+    { i: '🔐', t: 'Bảo mật & Quản trị', run: () => show('security') },
+    { i: '🔌', t: 'Kết nối (MCP)', run: () => { show('agent'); togglePanel(false); $('#mcpBlock').open = true; refreshMcp(true); $('#mcpBlock').scrollIntoView({ block: 'start' }); } },
+    { i: '⏱', t: 'Đo tốc độ mô hình đang nạp', run: () => { $('#perfSpeedBtn').scrollIntoView({ block: 'center' }); $('#perfSpeedBtn').click(); } },
+    { i: '📏', t: 'Đo Điểm tác vụ (điều khiển máy)', run: () => { show('agent'); togglePanel(false); $('#benchBox').scrollIntoView({ block: 'center' }); } },
+    { i: '⇥', t: 'Ẩn/hiện bảng cài đặt', k: 'Ctrl+.', run: () => togglePanel() },
+    { i: '📋', t: 'Sao chép nhật ký', run: () => document.querySelector('[data-logs="copy"]').click() },
+    { i: '⌨', t: 'Phím tắt', k: 'Ctrl+/', run: openKeys },
+    { i: '🎓', t: 'Xem lại giới thiệu nhanh', run: () => startOnboard(true) }
+  ];
+  for (const m of (state.models || []).slice(0, 12)) cmds.push({ i: '▶', t: `Nạp mô hình: ${m.name || m.id}`, run: () => { $('#modelSelect').value = m.id; $('#modelSelect').dispatchEvent(new Event('change')); } });
+  return cmds;
+}
+let palSel = 0, palItems = [];
+const foldVi = (x) => String(x).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
+function paintPalette() {
+  const q = foldVi($('#palQ').value.trim());
+  palItems = paletteCommands().filter(c => !q || q.split(/\s+/).every(w => foldVi(c.t).includes(w)));
+  palSel = Math.min(palSel, Math.max(0, palItems.length - 1));
+  $('#palList').innerHTML = palItems.map((c, i) => `<div class="pal-item ${i === palSel ? 'sel' : ''}" role="option" data-pal="${i}"><span>${c.i}</span><span>${esc(c.t)}</span>${c.k ? `<span class="k">${c.k}</span>` : ''}</div>`).join('') || '<div class="pal-item">Không có lệnh phù hợp</div>';
+}
+function openPalette() { $('#palette').hidden = false; $('#palQ').value = ''; palSel = 0; paintPalette(); $('#palQ').focus(); }
+function runPal(i) { const c = palItems[i]; $('#palette').hidden = true; if (c) c.run(); }
+$('#paletteBtn').addEventListener('click', openPalette);
+$('#palQ').addEventListener('input', () => { palSel = 0; paintPalette(); });
+$('#palQ').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') { palSel = Math.min(palItems.length - 1, palSel + 1); paintPalette(); e.preventDefault(); }
+  else if (e.key === 'ArrowUp') { palSel = Math.max(0, palSel - 1); paintPalette(); e.preventDefault(); }
+  else if (e.key === 'Enter') { runPal(palSel); e.preventDefault(); }
+  else if (e.key === 'Escape') { $('#palette').hidden = true; }
+});
+$('#palList').addEventListener('click', (e) => { const it = e.target.closest('[data-pal]'); if (it) runPal(Number(it.dataset.pal)); });
+$('#palette').addEventListener('click', (e) => { if (e.target.id === 'palette') $('#palette').hidden = true; });
+document.addEventListener('keydown', (e) => {
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); $('#palette').hidden ? openPalette() : ($('#palette').hidden = true); }
+  else if (mod && e.key === '.') { e.preventDefault(); togglePanel(); }
+  else if (mod && e.key === '/') { e.preventDefault(); openKeys(); }
+  else if (mod && (e.key === 'n' || e.key === 'N') && !e.shiftKey) { e.preventDefault(); $('#newChat').click(); }
+});
+// Giới thiệu nhanh lần đầu (4 bước)
+const OB = [
+  { big: '🐉', h: 'Chào mừng đến với AIVN', p: 'Trợ lý AI chạy hoàn toàn trên máy bạn — không gửi dữ liệu ra ngoài. Làm quen trong 30 giây nhé.' },
+  { big: '🗃', h: 'Bước 1: Tải một mô hình', p: 'Vào Kho mô hình. Gợi ý cho trò chuyện và công cụ: Qwen3 4B Instruct 2507 (hoặc Qwen3 8B nếu máy mạnh). Mô hình có nhãn ⭐ là lựa chọn AIVN đã kiểm chứng cho máy bạn.' },
+  { big: '🤖', h: 'Bước 2: Dùng AIVN AGENT', p: 'AIVN AGENT đọc/ghi tệp trong thư mục bạn cho phép, mở ứng dụng, và (thử nghiệm) điều khiển chuột/bàn phím. Mỗi bước có tác động đều hiện thẻ xin phép: Ctrl+Enter để cho phép, Esc để từ chối.' },
+  { big: '⌘', h: 'Bước 3: Phím tắt', p: 'Ctrl+K mở bảng lệnh để làm mọi thứ nhanh; Ctrl+. ẩn/hiện bảng cài đặt; Ctrl+/ xem tất cả phím tắt.' }
+];
+let obI = 0;
+function paintOb() { const s = OB[obI]; $('#obStep').innerHTML = `<div class="big">${s.big}</div><h3 id="obTitle">${esc(s.h)}</h3><p>${esc(s.p)}</p>`; $('#obDots').innerHTML = OB.map((_, i) => `<span class="${i === obI ? 'on' : ''}"></span>`).join(''); $('#obNext').textContent = obI === OB.length - 1 ? 'Bắt đầu' : 'Tiếp'; }
+function startOnboard(force) { if (!force && localStorage.getItem('aivn.onboarded')) return; obI = 0; paintOb(); $('#onboard').hidden = false; $('#obNext').focus(); }
+const endOb = () => { $('#onboard').hidden = true; localStorage.setItem('aivn.onboarded', '1'); };
+$('#obNext').addEventListener('click', () => { if (obI < OB.length - 1) { obI++; paintOb(); } else { endOb(); if (!(state.models || []).length) show('discover'); } });
+$('#obSkip').addEventListener('click', endOb);
+$('#onboard').addEventListener('keydown', (e) => { if (e.key === 'Escape') endOb(); });
+setTimeout(() => { if (!navigator.webdriver && !A.qaMode) startOnboard(false); }, 1200);
+
 // --- Hiệu năng (0.15.0) ---
 async function paintPerf(pf) {
   try {

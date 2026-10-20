@@ -442,3 +442,26 @@ details.adv[open]{display:flex;flex-direction:column;gap:10px}
 .perf-cfg { margin: 6px 0; line-height: 1.8; }
 .perf-runs { width: 100%; border-collapse: collapse; margin-top: 6px; }
 .perf-runs td, .perf-runs th { padding: 3px 6px; border-bottom: 1px solid var(--line, #eee); text-align: left; }
+/* 0.15.0 UX: bảng lệnh, ẩn bảng phải, phím tắt, giới thiệu nhanh, thông báo không che ô nhập */
+.toast { top: 62px; bottom: auto; left: auto; right: 22px; transform: translateY(-12px); max-width: min(460px, 60vw); z-index: 60; }
+.toast.show { transform: none; }
+.top-tools { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.top-tools kbd, .keys-table kbd { font-size: 10px; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; opacity: .8; }
+#view-chat.active.no-panel { grid-template-columns: 230px 1fr 0; }
+#view-chat.no-panel aside.settings { display: none; }
+@media (max-width: 1320px) { #view-chat.active { grid-template-columns: 210px 1fr 250px; } }
+.palette-back { align-items: flex-start; padding-top: 12vh; }
+.palette { width: min(620px, 92vw); background: var(--panel, #fff); border-radius: 14px; box-shadow: 0 20px 60px rgba(0,0,0,.28); overflow: hidden; border: 1px solid var(--line, #ddd); }
+.palette input { width: 100%; border: none; border-bottom: 1px solid var(--line, #ddd); padding: 14px 16px; font-size: 16px; outline: none; background: transparent; color: inherit; }
+.pal-list { max-height: 50vh; overflow: auto; }
+.pal-item { padding: 9px 16px; display: flex; gap: 10px; align-items: center; cursor: pointer; }
+.pal-item .k { margin-left: auto; font-size: 11px; opacity: .6; }
+.pal-item.sel, .pal-item:hover { background: #fde3e7; }
+.pal-foot { padding: 6px 16px; border-top: 1px solid var(--line, #eee); }
+.keys-table td { padding: 5px 10px; }
+.onboard { max-width: 520px; }
+.ob-step h3 { margin-top: 0; } .ob-step .big { font-size: 40px; }
+.ob-actions { justify-content: space-between; align-items: center; margin-top: 14px; }
+.ob-dots span { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #ddd; margin: 0 3px; } .ob-dots span.on { background: #c8102e; }
+.empty-state { text-align: center; color: var(--muted, #777); padding: 30px 10px; }
+.empty-state .big { font-size: 34px; }
