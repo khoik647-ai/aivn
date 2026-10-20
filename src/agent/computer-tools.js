@@ -44,8 +44,10 @@ function createComputerTools(deps) {
   }
   async function openWith(target, kind) {
     if (process.platform === 'linux' && kind === 'app' && target.endsWith('.desktop')) { const { spawn } = require('child_process'); spawn('gtk-launch', [path.basename(target, '.desktop')], { detached: true, stdio: 'ignore' }).unref(); return; }
+    if (process.platform === 'darwin' && kind === 'app') { const ok = await macOpenApp(target); if (ok) return; } // open -a hoạt động cho cả đường dẫn .app lẫn tên ứng dụng
     const err = await deps.openPath(target); if (err) throw new CompError('Không mở được: ' + err);
   }
+  const macOpenApp = (nameOrPath) => new Promise(res => require('child_process').execFile('open', ['-a', nameOrPath], { timeout: 15000 }, (e) => res(!e)));
 
   async function exec(name, a, ctx) {
     const s = st();
@@ -59,6 +61,8 @@ function createComputerTools(deps) {
       case 'open_app': {
         const q = String(a.name || '').trim(); if (!q) throw new CompError('Thiếu tên ứng dụng');
         const hit = C.findApp(q, apps());
+        // macOS: tên gần đúng (điểm thấp) → thử "open -a <tên>" trước, vì LaunchServices biết cả ứng dụng ngoài /Applications (vd. Zalo cài từ App Store)
+        if (process.platform === 'darwin' && (!hit || hit.s < 60) && await macOpenApp(q)) return { forModel: `Đã mở ứng dụng "${q}".`, summary: `Đã mở ${q}` };
         if (hit) { await openWith(hit.path, 'app'); return { forModel: `Đã mở ứng dụng "${hit.name}".`, summary: `Đã mở ${hit.name}` }; }
         if (process.platform === 'win32') { const b = C.WIN_BUILTIN[q.toLowerCase()]; if (b) { if (b.endsWith(':')) await deps.openExternal(b); else { const { spawn } = require('child_process'); spawn(b, [], { detached: true, stdio: 'ignore' }).unref(); } return { forModel: `Đã mở "${q}".`, summary: `Đã mở ${q}` }; } }
         if (process.platform === 'darwin') { const r = await new Promise(res => require('child_process').execFile('open', ['-a', q], (e) => res(!e))); if (r) return { forModel: `Đã mở ứng dụng "${q}".`, summary: `Đã mở ${q}` }; }

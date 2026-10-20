@@ -1,3 +1,4 @@
+const TP = require('./agent/textproto');
 // Chế độ "nhìn ảnh": chạy llama-server chính thức của llama.cpp (MIT) với --mmproj cho mô hình thị giác.
 // Chỉ dùng cho mô hình có tệp mmproj; mô hình chữ thường vẫn chạy bằng node-llama-cpp.
 // Máy chủ chỉ nghe 127.0.0.1, cổng ngẫu nhiên, có khoá API ngẫu nhiên theo phiên.
@@ -37,9 +38,9 @@ function createVisionServer({ log = () => {} } = {}) {
     const exe = findServer();
     if (!exe) throw new VisionError('Bản AIVN này thiếu bộ máy nhìn ảnh (llama-server). Hãy cài lại AIVN.', 'NO_SERVER');
     port = await freePort(); key = crypto.randomBytes(18).toString('hex'); tail = [];
-    const args = ['-m', modelPath, '--mmproj', mmprojPath, '--host', '127.0.0.1', '--port', String(port), '--api-key', key,
+    const args = ['-m', modelPath, ...(mmprojPath ? ['--mmproj', mmprojPath] : []), ...(process.env.AIVN_TEST_CHAT_TEMPLATE ? ['--chat-template-file', process.env.AIVN_TEST_CHAT_TEMPLATE] : []), '--host', '127.0.0.1', '--port', String(port), '--api-key', key,
       '-c', String(contextSize), '-np', '1', '--no-webui', '--offline', '--jinja'];
-    if (!gpu) args.push('-ngl', '0', '--no-mmproj-offload');
+    if (!gpu) args.push('-ngl', '0', ...(mmprojPath ? ['--no-mmproj-offload'] : []));
     if (threads) args.push('-t', String(threads));
     const t0 = Date.now();
     proc = spawn(exe, args, { cwd: path.dirname(exe), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
@@ -63,9 +64,10 @@ function createVisionServer({ log = () => {} } = {}) {
       } catch {}
       if (Date.now() - t0 > 10 * 60 * 1000) { await stop(); throw new VisionError('Nạp mô hình nhìn ảnh quá lâu.', 'TIMEOUT'); }
     }
-    let ctx = contextSize;
-    try { const p = await (await fetch(`http://127.0.0.1:${port}/props`, { headers: { authorization: 'Bearer ' + key } })).json(); ctx = p?.default_generation_settings?.n_ctx || ctx; } catch {}
-    info = { id, path: modelPath, mmproj: mmprojPath, contextSize: ctx, vision: true, loadedAt: Date.now() };
+    let ctx = contextSize, template = TP.analyzeTemplate('');
+    try { const p = await (await fetch(`http://127.0.0.1:${port}/props`, { headers: { authorization: 'Bearer ' + key } })).json(); ctx = p?.default_generation_settings?.n_ctx || ctx; template = TP.analyzeTemplate(p?.chat_template); } catch {}
+    info = { id, path: modelPath, mmproj: mmprojPath, contextSize: ctx, vision: true, loadedAt: Date.now(), template, textTools: template.strict || (template.known && !template.nativeTools) };
+    if (info.textTools) log(`[vision] mẫu chat ${template.strict ? 'bắt buộc xen kẽ user/assistant' : 'không hỗ trợ tools'}: dùng giao thức công cụ dạng văn bản của AIVN`);
     log(`[vision] llama-server sẵn sàng (cổng ${port}, ${((Date.now() - t0) / 1000).toFixed(1)} s)`);
     return info;
   }
@@ -124,9 +126,32 @@ function createVisionServer({ log = () => {} } = {}) {
     if (toolCalls.length && finishReason !== 'abort') finishReason = 'tool_calls';
     return { text: text.replace(/^\s+/, ''), toolCalls, finishReason, usage: { prompt_tokens: usage?.prompt_tokens, completion_tokens: ct, tokensPerSecond: secs > 0 ? ct / secs : 0, seconds: secs } };
   }
-  const generate = (messages, opts = {}) => stream({}, messages, opts);
+  const generate = (messages, opts = {}) => stream({}, info && info.template && info.template.strict ? TP.normalizeMessages(messages) : messages, opts);
+  // Chế độ văn bản: không gửi "tools" cho llama-server (tránh bộ sinh parser --jinja), mô tả công cụ trong lời nhắc và tự tách <tool_call>
+  async function textStep(messages, { tools = [], toolChoice = 'auto', responseFormat = null, ...opts }) {
+    const offer = toolChoice === 'none' ? [] : tools;
+    const extra = {};
+    if (responseFormat) extra.response_format = responseFormat.type === 'json_schema' ? { type: 'json_schema', json_schema: { name: 'output', schema: responseFormat.schema || {} } } : { type: 'json_object' };
+    const f = TP.streamFilter(opts.onToken);
+    const r = await stream(extra, TP.normalizeMessages(messages, { tools: offer }), { ...opts, onToken: (t) => f.push(t) });
+    f.end();
+    if (!offer.length || r.finishReason === 'abort') return r;
+    const p = TP.parseToolCalls(r.text, offer.map(t => t.name));
+    return { ...r, text: p.text, toolCalls: p.toolCalls, finishReason: p.toolCalls.length ? 'tool_calls' : r.finishReason };
+  }
   // Có công cụ / đầu ra JSON: llama-server tự áp mẫu hội thoại (--jinja) và ngữ pháp cho tool_calls / json_schema
-  function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = null, ...opts } = {}) {
+  async function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = null, ...opts } = {}) {
+    if (info && (info.textTools || (info.template && info.template.strict))) return textStep(messages, { tools, toolChoice, responseFormat, ...opts });
+    try { return await nativeStep(messages, { tools, toolChoice, responseFormat, ...opts }); }
+    catch (e) {
+      if (!TP.isTemplateError(e.message) || !info) throw e;
+      // llama-server không dựng được parser cho mẫu chat này (vd. Gemma 3): chuyển hẳn sang giao thức văn bản cho mô hình này
+      log('[vision] mẫu chat lỗi với --jinja/tools, chuyển sang giao thức công cụ văn bản: ' + String(e.message).slice(0, 200));
+      info.textTools = true; info.template = { ...(info.template || {}), strict: true };
+      return textStep(messages, { tools, toolChoice, responseFormat, ...opts });
+    }
+  }
+  function nativeStep(messages, { tools = [], toolChoice = 'auto', responseFormat = null, ...opts } = {}) {
     const extra = {};
     if (tools.length) {
       extra.tools = tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description || '', parameters: t.parameters || { type: 'object', properties: {} } } }));

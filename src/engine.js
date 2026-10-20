@@ -236,7 +236,7 @@ function toChatHistory(messages) {
   for (const m of messages) {
     if (!m) continue;
     if (m.role === 'system' || m.role === 'developer') { sys.push(normalizeContent(m.content)); continue; }
-    if (m.role === 'user') { items.push({ type: 'user', text: normalizeContent(m.content) }); open = null; continue; }
+    if (m.role === 'user') { const last = items[items.length - 1]; const t = normalizeContent(m.content); if (last && last.type === 'user') last.text += '\n\n' + t; else items.push({ type: 'user', text: t }); open = null; continue; } // gộp các lượt user liền nhau (mẫu xen kẽ nghiêm ngặt)
     if (m.role === 'assistant') {
       if (!open) { open = { type: 'model', response: [] }; items.push(open); }
       const t = normalizeContent(m.content); if (t) open.response.push(t);
