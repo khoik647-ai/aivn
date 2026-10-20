@@ -171,4 +171,4 @@ function buildUserContent(question, packedBlock) {
   return `Dưới đây là nội dung tài liệu người dùng gửi kèm. Hãy dựa vào tài liệu để trả lời; nếu tài liệu không có thông tin, hãy nói rõ. Phần chữ đọc từ ảnh (OCR) có thể có lỗi chính tả nhỏ.\n\n${packedBlock}\n\nCâu hỏi: ${question}`;
 }
 
-module.exports = { OCR_EXT, extractFile, packDocuments, buildUserContent, keywords, chunkText, DocError, MAX_FILE_BYTES, IMAGE_EXT, TEXT_EXT };
+module.exports = { OCR_EXT, extractFile, packDocuments, buildUserContent, keywords, scoreChunk, chunkText, DocError, MAX_FILE_BYTES, IMAGE_EXT, TEXT_EXT };

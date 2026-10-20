@@ -1,7 +1,7 @@
 {
   "name": "aivn",
   "productName": "AIVN",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "description": "AIVN - Chạy mô hình AI ngay trên máy tính của bạn",
   "author": {
     "name": "NGUYỄN NGỌC KHÔI SINH VIÊN VLU"
@@ -66,6 +66,7 @@
       "node_modules/**",
       "src/engine.js",
       "src/engine-host.js",
+      "src/vision-server.js",
       "src/ocr.js",
       "src/llama-archs.json",
       "package.json"
@@ -109,6 +110,14 @@
             "node",
             "node.exe",
             "LICENSE"
+          ]
+        },
+        {
+          "from": "build/llama/win-x64",
+          "to": "llama",
+          "filter": [
+            "**/*",
+            "!.build"
           ]
         }
       ]
@@ -159,6 +168,14 @@
             "node",
             "node.exe",
             "LICENSE"
+          ]
+        },
+        {
+          "from": "build/llama/linux-x64",
+          "to": "llama",
+          "filter": [
+            "**/*",
+            "!.build"
           ]
         }
       ]

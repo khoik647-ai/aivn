@@ -18,7 +18,8 @@ function writeUpdateYml(arch) {
 (async () => {
   for (const [arch, other] of [['arm64', 'mac-x64'], ['x64', 'mac-arm64-metal']]) {
     // Node.js thuần đúng kiến trúc để chạy bộ máy suy luận ngoài Electron (xem src/engine-proxy.js)
-    const node = [{ from: `build/node/darwin-${arch}`, to: 'node', filter: ['node', 'LICENSE'] }];
+    const node = [{ from: `build/node/darwin-${arch}`, to: 'node', filter: ['node', 'LICENSE'] }, { from: `build/llama/darwin-${arch}`, to: 'llama', filter: ['**/*', '!.build'] }];
+    if (!fs.existsSync(path.join(__dirname, 'llama', `darwin-${arch}`, 'llama-server'))) throw new Error(`thiếu build/llama/darwin-${arch}/llama-server — chạy: node build/fetch-llama.cjs`);
     if (!fs.existsSync(path.join(__dirname, 'node', `darwin-${arch}`, 'node'))) throw new Error(`thiếu build/node/darwin-${arch}/node — chạy: node build/fetch-node.cjs`);
     const config = { ...base, mac: { ...base.mac, extraResources: node, files: [...base.mac.files, `!node_modules/@node-llama-cpp/${other}/**`] } };
     await builder.build({ targets: builder.Platform.MAC.createTarget([target], builder.Arch[arch]), config, publish: 'never' });

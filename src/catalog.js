@@ -1,6 +1,7 @@
 // Danh mục "Gợi ý" do AIVN tự tuyển chọn. Mọi URL đã được kiểm tra bằng HEAD (200) và kích thước khớp API Hugging Face (20/10/2026).
 // Không repo nào yêu cầu đăng nhập (gated). Mỗi mô hình tuân theo giấy phép riêng của nhà phát hành.
-module.exports = [
+// Mô hình "Nhìn được ảnh" có thêm tệp mmproj (bộ chiếu thị giác), được tải cùng mô hình.
+const CATALOG = [
  {
   "id": "qwen2.5-0.5b-instruct-q4_k_m",
   "name": "Qwen2.5 0.5B Instruct",
@@ -52,7 +53,7 @@ module.exports = [
   "size": 2104932768,
   "ram": "≥ 3 GB RAM",
   "url": "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
-  "license": "Qwen Research",
+  "license": "Qwen Research (phi thương mại)",
   "arch": "qwen2",
   "vision": false,
   "desc": "Thông minh hơn rõ rệt, tốt cho tóm tắt, viết lách và lập trình cơ bản.",
@@ -274,23 +275,104 @@ module.exports = [
   ]
  },
  {
-  "id": "google_gemma-3-4b-it-q4_k_m",
-  "name": "Gemma 3 4B it",
+  "id": "gemma-3-4b-it-q4_k_m",
+  "name": "Gemma 3 4B it (nhìn ảnh)",
   "family": "Gemma",
   "params": "4B",
   "quant": "Q4_K_M",
-  "repo": "bartowski/google_gemma-3-4b-it-GGUF",
-  "file": "google_gemma-3-4b-it-Q4_K_M.gguf",
-  "size": 2489758112,
-  "ram": "≥ 4 GB RAM",
-  "url": "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf",
+  "repo": "ggml-org/gemma-3-4b-it-GGUF",
+  "file": "gemma-3-4b-it-Q4_K_M.gguf",
+  "size": 2489757856,
+  "mmproj": {
+   "file": "mmproj-model-f16.gguf",
+   "size": 851251104,
+   "url": "https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/mmproj-model-f16.gguf"
+  },
+  "ram": "≥ 6 GB RAM",
   "license": "Gemma",
   "arch": "gemma3",
-  "vision": true,
-  "desc": "Đa ngôn ngữ tốt, ngữ cảnh dài. AIVN dùng phần văn bản (chưa hỗ trợ ảnh).",
+  "desc": "Đa ngôn ngữ tốt, đọc và mô tả ảnh. Bản chính thức của ggml-org kèm tệp thị giác (mmproj).",
   "tags": [
+   "Nhìn được ảnh",
    "Đa ngôn ngữ"
-  ]
+  ],
+  "url": "https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf",
+  "vision": true
+ },
+ {
+  "id": "qwen2.5-vl-3b-instruct-q4_k_m",
+  "name": "Qwen2.5-VL 3B Instruct",
+  "family": "Qwen",
+  "params": "3B",
+  "quant": "Q4_K_M",
+  "repo": "ggml-org/Qwen2.5-VL-3B-Instruct-GGUF",
+  "file": "Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+  "size": 1929901056,
+  "mmproj": {
+   "file": "mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf",
+   "size": 844757728,
+   "url": "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf"
+  },
+  "ram": "≥ 5 GB RAM",
+  "license": "Qwen Research (phi thương mại)",
+  "arch": "qwen2vl",
+  "desc": "Hiểu ảnh, đọc chữ trong ảnh và tài liệu chụp tốt, trả lời tiếng Việt khá.",
+  "tags": [
+   "Nhìn được ảnh",
+   "Đọc tài liệu"
+  ],
+  "url": "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
+  "vision": true
+ },
+ {
+  "id": "qwen3-vl-2b-instruct-q8_0",
+  "name": "Qwen3-VL 2B Instruct",
+  "family": "Qwen",
+  "params": "2B",
+  "quant": "Q8_0",
+  "repo": "ggml-org/Qwen3-VL-2B-Instruct-GGUF",
+  "file": "Qwen3-VL-2B-Instruct-Q8_0.gguf",
+  "size": 1834427296,
+  "mmproj": {
+   "file": "mmproj-Qwen3-VL-2B-Instruct-Q8_0.gguf",
+   "size": 445053056,
+   "url": "https://huggingface.co/ggml-org/Qwen3-VL-2B-Instruct-GGUF/resolve/main/mmproj-Qwen3-VL-2B-Instruct-Q8_0.gguf"
+  },
+  "ram": "≥ 4 GB RAM",
+  "license": "Apache 2.0",
+  "arch": "qwen3vl",
+  "desc": "Mô hình nhìn ảnh thế hệ Qwen3, nhỏ gọn, mô tả ảnh bằng tiếng Việt tốt.",
+  "tags": [
+   "Nhìn được ảnh",
+   "Khuyên dùng"
+  ],
+  "url": "https://huggingface.co/ggml-org/Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen3-VL-2B-Instruct-Q8_0.gguf",
+  "vision": true
+ },
+ {
+  "id": "smolvlm-500m-instruct-q8_0",
+  "name": "SmolVLM 500M Instruct",
+  "family": "SmolLM",
+  "params": "0.5B",
+  "quant": "Q8_0",
+  "repo": "ggml-org/SmolVLM-500M-Instruct-GGUF",
+  "file": "SmolVLM-500M-Instruct-Q8_0.gguf",
+  "size": 436806912,
+  "mmproj": {
+   "file": "mmproj-SmolVLM-500M-Instruct-Q8_0.gguf",
+   "size": 108783360,
+   "url": "https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/main/mmproj-SmolVLM-500M-Instruct-Q8_0.gguf"
+  },
+  "ram": "≥ 2 GB RAM",
+  "license": "Apache 2.0",
+  "arch": "llama",
+  "desc": "Siêu nhẹ, mô tả ảnh nhanh, chủ yếu bằng tiếng Anh.",
+  "tags": [
+   "Nhìn được ảnh",
+   "Siêu nhẹ"
+  ],
+  "url": "https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/main/SmolVLM-500M-Instruct-Q8_0.gguf",
+  "vision": true
  },
  {
   "id": "google_gemma-3-12b-it-q4_k_m",
@@ -305,11 +387,12 @@ module.exports = [
   "url": "https://huggingface.co/bartowski/google_gemma-3-12b-it-GGUF/resolve/main/google_gemma-3-12b-it-Q4_K_M.gguf",
   "license": "Gemma",
   "arch": "gemma3",
-  "vision": true,
+  "vision": false,
   "desc": "Chất lượng cao, cần máy mạnh (từ 16 GB RAM). Chưa hỗ trợ đầu vào ảnh.",
   "tags": [
    "Mạnh"
-  ]
+  ],
+  "visionNote": "Mô hình gốc nhìn được ảnh, nhưng bản này không kèm mmproj trong danh mục: AIVN dùng phần văn bản."
  },
  {
   "id": "mistral-7b-instruct-v0.3-q4_k_m",
@@ -506,3 +589,20 @@ module.exports = [
   ]
  }
 ];
+
+// Mô hình nhúng cho hỏi đáp tài liệu (RAG): tải khi dùng lần đầu
+const EMBEDDING = {
+ "id": "bge-m3-q8_0",
+ "name": "BGE-M3 (tìm kiếm ngữ nghĩa)",
+ "repo": "ggml-org/bge-m3-Q8_0-GGUF",
+ "file": "bge-m3-q8_0.gguf",
+ "size": 634553760,
+ "url": "https://huggingface.co/ggml-org/bge-m3-Q8_0-GGUF/resolve/main/bge-m3-q8_0.gguf",
+ "license": "MIT",
+ "dims": 1024,
+ "prefix": null
+};
+
+module.exports = CATALOG;
+module.exports.CATALOG = CATALOG;
+module.exports.EMBEDDING = EMBEDDING;

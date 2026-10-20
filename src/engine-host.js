@@ -17,7 +17,12 @@ process.on('message', async (msg) => {
       case 'loadModel': result = await engine.loadModel(args[0], args[1], args[2]); break;
       case 'unloadModel': await engine.unloadModel(); result = engine.status(); break;
       case 'status': result = engine.status(); break;
-      case 'countTokens': result = args[0].map(t => engine.countTokens(t)); break;
+      case 'countTokens': result = await engine.countTokensAsync(args[0]); break;
+      case 'embedLoad': result = await engine.loadEmbedder(args[0], args[1], args[2]); break;
+      case 'embedUnload': await engine.unloadEmbedder(); result = engine.embedStatus(); break;
+      case 'embedStatus': result = engine.embedStatus(); break;
+      case 'embedCount': result = engine.embedCount(args[0]); break;
+      case 'embed': result = (await engine.embed(args[0], args[1])).map(v => Buffer.from(v.buffer, v.byteOffset, v.byteLength).toString('base64')); break;
       case 'generate': {
         const [messages, opts, reqId] = args;
         const ac = new AbortController(); gens.set(reqId, ac);
@@ -29,7 +34,8 @@ process.on('message', async (msg) => {
       default: throw new Error('Không rõ lệnh ' + method);
     }
     reply({ id, result });
-  } catch (e) { reply({ id, error: String(e && e.message || e) }); }
+  } catch (e) { reply({ id, error: String(e && e.message || e), code: e && e.code }); }
 });
-process.on('disconnect', () => process.exit(0));
+process.on('disconnect', async () => { try { await engine.unloadModel(); } catch {} process.exit(0); });
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, async () => { try { await engine.unloadModel(); } catch {} process.exit(0); });
 reply({ type: 'ready', pid: process.pid, node: process.versions.node });

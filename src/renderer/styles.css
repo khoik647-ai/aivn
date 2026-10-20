@@ -140,7 +140,7 @@ h4{font-size:13px;margin:0 0 8px;color:var(--muted);text-transform:uppercase;let
 .update-box{display:flex;flex-direction:column;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px}
 .update-box .row{flex-wrap:wrap}
 .update-box .ok{color:var(--ok)}.update-box .err{color:var(--danger)}
-/* ---- Khám phá v0.11: tìm kiếm Hugging Face ---- */
+/* ---- Kho mô hình v0.11: tìm kiếm Hugging Face ---- */
 .searchbar{display:flex;gap:8px;margin:4px 0 16px}
 .searchbar input{flex:1;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;outline:none}
 .row.between{justify-content:space-between;align-items:center;margin:6px 0 10px}
@@ -192,3 +192,28 @@ h4{font-size:13px;margin:0 0 8px;color:var(--muted);text-transform:uppercase;let
 .progress div{background:var(--accent)}
 [hidden]{display:none!important}
 input:focus-visible,textarea:focus-visible,select:focus-visible{outline:none}
+
+/* Đổi giao diện sáng/tối mượt */
+.vt-theme::view-transition-old(root),.vt-theme::view-transition-new(root){animation:none;mix-blend-mode:normal}
+.vt-theme::view-transition-old(root){z-index:1}
+.vt-theme::view-transition-new(root){z-index:2}
+.theme-anim,.theme-anim *,.theme-anim *::before,.theme-anim *::after{transition:background-color .35s ease,color .35s ease,border-color .35s ease,fill .35s ease,stroke .35s ease,box-shadow .35s ease!important}
+@media (prefers-reduced-motion:reduce){.theme-anim,.theme-anim *{transition:none!important}::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}}
+
+/* v0.12: nhìn ảnh, nguồn trích dẫn, tìm kiếm tài liệu */
+.tag.vis,.badge.vis{background:var(--accent-soft);color:var(--accent-ink);border-color:transparent;font-weight:600}
+.vis-pill{color:var(--accent-ink);font-weight:600}
+.doc-warn.vis{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink)}
+.doc-warn.offer{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.sources{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);display:flex;flex-direction:column;gap:3px}
+.sources .src{font-size:12px;color:var(--muted);cursor:help}
+.sources .src b{color:var(--text);font-weight:600}
+.rag-box{border-top:1px solid var(--line);margin-top:6px;padding-top:12px;display:flex;flex-direction:column;gap:8px}
+.rag-box h3{margin:0}
+.rag-box p{margin:0;line-height:1.5}
+.rag-box label.check{display:flex;flex-direction:row;align-items:center;gap:8px;font-size:12.5px}
+.rag-box label.check input{width:auto}
+.qr .fname .tag{word-break:normal;white-space:nowrap;display:inline-block;margin-top:3px}
+.qr .foot{flex-wrap:wrap}
+.rag-offer{margin:0 0 8px}
+.vis-pill{white-space:nowrap}

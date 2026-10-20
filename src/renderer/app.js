@@ -34,13 +34,13 @@ async function refreshModels() {
   state.models = await A.models();
   const sel = $('#modelSelect');
   const cur = state.status.loaded ? state.status.id : '';
-  sel.innerHTML = `<option value="">${state.models.length ? '— Chọn mô hình để nạp —' : '— Chưa có mô hình, hãy vào Khám phá —'}</option>` +
-    state.models.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.catalog ? m.catalog.name : m.file)} · ${fmtBytes(m.size)}</option>`).join('');
+  sel.innerHTML = `<option value="">${state.models.length ? '— Chọn mô hình để nạp —' : '— Chưa có mô hình, hãy vào Kho mô hình —'}</option>` +
+    state.models.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${m.vision ? '👁 ' : ''}${esc(m.catalog ? m.catalog.name : m.file)} · ${fmtBytes(m.size)}</option>`).join('');
   const t = $('#modelTable');
-  if (!state.models.length) { t.innerHTML = `<div class="tr"><span class="muted">Chưa có mô hình nào. Hãy tải ở mục Khám phá hoặc nhập tệp GGUF có sẵn.</span></div>`; return; }
+  if (!state.models.length) { t.innerHTML = `<div class="tr"><span class="muted">Chưa có mô hình nào. Hãy tải ở mục Kho mô hình hoặc nhập tệp GGUF có sẵn.</span></div>`; return; }
   t.innerHTML = `<div class="tr head"><span>Tên</span><span>Dung lượng</span><span>Nguồn</span><span>Đường dẫn</span><span>Thao tác</span></div>` +
     state.models.map(m => `<div class="tr" data-id="${esc(m.id)}">
-      <span><b>${esc(m.catalog ? m.catalog.name : m.file)}</b>${m.loaded ? '<span class="badge">Đang nạp</span>' : ''}<div class="muted" style="font-size:11.5px">${esc(m.id)}</div></span>
+      <span><b>${esc(m.catalog ? m.catalog.name : m.file)}</b>${m.loaded ? '<span class="badge">Đang nạp</span>' : ''}${m.vision ? '<span class="badge vis" title="Có tệp thị giác (mmproj) cạnh mô hình">👁 Nhìn được ảnh</span>' : ''}<div class="muted" style="font-size:11.5px">${esc(m.id)}</div></span>
       <span>${fmtBytes(m.size)}</span><span>${m.source === 'imported' ? 'Đã nhập' : 'Đã tải'}</span>
       <span class="path" title="${esc(m.path)}">${esc(m.path)}</span>
       <span class="acts">${m.loaded ? '<button class="btn sm" data-act="unload">Gỡ khỏi bộ nhớ</button>' : '<button class="btn sm primary" data-act="load">Nạp</button>'}
@@ -73,14 +73,14 @@ function setStatus(st) {
   state.status = st;
   const el = $('#modelState');
   if (st.loading) el.innerHTML = `<span class="dot busy"></span>Đang nạp ${esc(st.id || '')}…`;
-  else if (st.loaded) el.innerHTML = `<span class="dot"></span>${esc(st.id)} · ngữ cảnh ${st.contextSize} · ${st.gpu ? 'GPU ' + esc(String(st.gpu)) : 'CPU'}`;
+  else if (st.loaded) el.innerHTML = `<span class="dot"></span>${esc(st.id)}${st.vision ? ' · <b class="vis-pill" title="Mô hình nhìn được ảnh: ảnh bạn dán được gửi thẳng cho mô hình">👁 nhìn ảnh</b>' : ''} · ngữ cảnh ${st.contextSize} · ${st.gpu ? 'GPU ' + esc(String(st.gpu)) : 'CPU'}`;
   else el.innerHTML = `<span class="dot off"></span>Chưa nạp mô hình`;
   $('#ejectBtn').disabled = !st.loaded;
   $('#modelSelect').disabled = !!st.loading;
 }
 A.onModelStatus(st => { setStatus(st); if (!st.loading) refreshModels(); });
 
-// ---------- Khám phá ----------
+// ---------- Kho mô hình ----------
 
 const jobs = new Map(); // id -> snapshot
 const disc = { fam: 'all', results: null, repo: null, lastQuery: null };
@@ -119,10 +119,10 @@ async function renderCatalog() {
   $('#famFilter').innerHTML = fams.map(f => `<button class="chip-btn ${disc.fam === f ? 'on' : ''}" data-fam="${esc(f)}">${f === 'all' ? 'Tất cả' : esc(f)}</button>`).join('');
   const list = state.catalog.filter(c => disc.fam === 'all' || c.family === disc.fam);
   $('#catalog').innerHTML = list.map(c => `<div class="card" data-id="${esc(c.id)}">
-    <div class="card-top"><div class="av">${esc(c.family.slice(0, 2))}</div><div><h4>${esc(c.name)}</h4><div class="sub">${esc(c.params)} tham số · ${esc(c.quant)} · ${fmtBytes(c.size)}</div></div></div>
+    <div class="card-top"><div class="av">${esc(c.family.slice(0, 2))}</div><div><h4>${esc(c.name)}</h4><div class="sub">${esc(c.params)} tham số · ${esc(c.quant)} · ${fmtBytes(c.size + (c.mmproj ? c.mmproj.size : 0))}</div></div></div>
     <p>${esc(c.desc)}</p>
-    <div class="tags">${fitBadge(c.fit)}${c.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.vision ? '<span class="tag" title="Mô hình có khả năng xem ảnh, AIVN hiện chỉ dùng phần văn bản">Chưa hỗ trợ ảnh</span>' : ''}</div>
-    <div class="card-foot" data-job="${esc(jobIdFor(c.repo, c.file))}">${footHtml(c, `data-act="dl-cat" data-id="${esc(c.id)}"`, c.file)}</div>
+    <div class="tags">${fitBadge(c.fit)}${c.vision ? `<span class="tag vis" title="Tải kèm tệp thị giác ${esc(c.mmproj.file)} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán">👁 Nhìn được ảnh</span>` : ''}${c.tags.filter(t => t !== 'Nhìn được ảnh').map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
+    <div class="card-foot" data-job="${esc(jobIdFor(c.repo, c.file))}">${footHtml({ ...c, size: c.size + (c.mmproj ? c.mmproj.size : 0) }, `data-act="dl-cat" data-id="${esc(c.id)}"`, c.file)}</div>
     <button class="linkish" data-act="open-repo" data-repo="${esc(c.repo)}">Các bản lượng tử khác · ${esc(c.repo)}</button></div>`).join('');
 }
 
@@ -174,7 +174,8 @@ async function openRepo(repo, quiet) {
   const other = r.groups.filter(g => g.kind !== 'chat' || !g.complete);
   const notes = [
     r.gated ? '🔒 Repo này yêu cầu chấp nhận giấy phép trên Hugging Face. Hãy mở trang repo, đồng ý điều khoản, rồi nhập HF token (nút 🔑 phía trên) trước khi tải.' : '',
-    r.vision ? '🖼 Mô hình có khả năng xem ảnh. AIVN hiện chỉ dùng phần trò chuyện bằng văn bản, chưa hỗ trợ đầu vào ảnh (tệp mmproj không cần tải).' : '',
+    r.mmproj ? `👁 <b>Nhìn được ảnh.</b> Repo có tệp thị giác <b>${esc(r.mmproj.name)}</b> (${fmtBytes(r.mmproj.size)}). ${r.mmprojInstalled ? 'Tệp này đã có trên máy.' : 'AIVN sẽ tải kèm tệp này cùng mô hình để mô hình xem trực tiếp ảnh bạn dán vào.'}` :
+      r.vision ? '🖼 Mô hình gốc xem được ảnh, nhưng repo này không có tệp thị giác (mmproj): AIVN chỉ dùng phần trò chuyện bằng văn bản. Hãy tìm bản GGUF có kèm mmproj (vd. của ggml-org).' : '',
     r.embedding ? '⚠ Đây là mô hình embedding (tạo vector), không dùng để trò chuyện.' : '',
     r.archSupported === false ? `⚠ Kiến trúc “${esc(r.arch)}” có thể chưa được hỗ trợ bởi llama.cpp trong AIVN; mô hình có thể không nạp được.` : '',
   ].filter(Boolean);
@@ -184,10 +185,10 @@ async function openRepo(repo, quiet) {
       <button class="btn sm" data-act="open-hf" data-url="${esc(r.url)}">Mở trên Hugging Face ↗</button></div>
     ${notes.map(n => `<div class="note">${n}</div>`).join('')}
     <div class="qtable">${chat.length ? `<div class="qr head"><span>Tệp mô hình</span><span>Lượng tử</span><span>Dung lượng</span><span>Máy bạn</span><span></span></div>` + chat.map(g => `<div class="qr${g.recommended ? ' rec' : ''}">
-        <span class="fname" title="${esc(g.files.map(f => f.path).join('\n'))}">${esc(g.name)}${g.split ? ` <span class="tag">${g.parts} phần · tải tất cả</span>` : ''}${g.recommended ? ' <span class="tag ok">★ Khuyên dùng</span>' : ''}${g.folder ? `<div class="muted small">${esc(g.folder)}/</div>` : ''}</span>
+        <span class="fname" title="${esc(g.files.map(f => f.path).join('\n'))}">${esc(g.name)}${g.split ? ` <span class="tag">${g.parts} phần · tải tất cả</span>` : ''}${g.recommended ? ' <span class="tag ok">★ Khuyên dùng</span>' : ''}${g.vision ? ' <span class="tag vis">👁 Nhìn được ảnh</span>' : ''}${g.folder ? `<div class="muted small">${esc(g.folder)}/</div>` : ''}</span>
         <span><b>${esc(g.quant || '—')}</b></span><span>${fmtBytes(g.size)}</span><span>${fitBadge(g.fit)}</span>
-        <span class="foot" data-job="${esc(jobIdFor(r.id, g.files[0].path))}">${footHtml(g, `data-act="dl-group" data-key="${esc(g.key)}"`, g.files[0].path)}</span></div>`).join('') : '<div class="muted pad">Repo này không có tệp GGUF dùng để trò chuyện.</div>'}</div>
-    ${other.length ? `<details class="others"><summary>Tệp không dùng để trò chuyện (${other.length})</summary>${other.map(g => `<div class="qr other"><span class="fname">${esc(g.name)}</span><span>${esc(g.quant || '')}</span><span>${fmtBytes(g.size)}</span><span class="muted small">${!g.complete ? 'Thiếu phần, không tải được' : g.kind === 'mmproj' ? 'Tệp thị giác (mmproj) · AIVN chưa hỗ trợ ảnh' : 'Mô hình embedding'}</span></div>`).join('')}</details>` : ''}`;
+        <span class="foot" data-job="${esc(jobIdFor(r.id, g.files[0].path))}">${footHtml(g, `data-act="dl-group" data-key="${esc(g.key)}"`, g.files[0].path)}${g.installed && r.mmproj && !r.mmprojInstalled ? `<button class="btn sm" data-act="dl-mmproj" title="Tải tệp thị giác để mô hình này xem được ảnh">⬇ Phần nhìn ảnh · ${fmtBytes(r.mmproj.size)}</button>` : ''}</span></div>`).join('') : '<div class="muted pad">Repo này không có tệp GGUF dùng để trò chuyện.</div>'}</div>
+    ${other.length ? `<details class="others"><summary>Tệp không dùng để trò chuyện (${other.length})</summary>${other.map(g => `<div class="qr other"><span class="fname">${esc(g.name)}</span><span>${esc(g.quant || '')}</span><span>${fmtBytes(g.size)}</span><span class="muted small">${!g.complete ? 'Thiếu phần, không tải được' : g.kind === 'mmproj' ? (r.mmproj && g.files[0].path === r.mmproj.path ? 'Tệp thị giác (mmproj) · AIVN tải kèm bản này' : 'Tệp thị giác (mmproj) · bản thay thế') : 'Mô hình embedding'}</span></div>`).join('')}</details>` : ''}`;
 }
 
 $('#view-discover').addEventListener('click', async (e) => {
@@ -196,7 +197,13 @@ $('#view-discover').addEventListener('click', async (e) => {
   const act = b.dataset.act;
   try {
     if (act === 'dl-cat') { const j = await A.dlStart({ catalogId: b.dataset.id }); paintJob(j); renderCatalog(); }
-    if (act === 'dl-group') { const g = disc.repo.groups.find(x => x.key === b.dataset.key); const j = await A.dlStart({ repo: disc.repo.id, files: g.files.map(f => ({ path: f.path, size: f.size })), name: g.name, quant: g.quant }); paintJob(j); }
+    if (act === 'dl-group') {
+      const r = disc.repo, g = r.groups.find(x => x.key === b.dataset.key);
+      const files = g.files.map(f => ({ path: f.path, size: f.size }));
+      if (r.mmproj && !r.mmprojInstalled) files.push({ path: r.mmproj.path, size: r.mmproj.size }); // tải kèm tệp thị giác
+      const j = await A.dlStart({ repo: r.id, files, name: g.name, quant: g.quant }); paintJob(j);
+    }
+    if (act === 'dl-mmproj') { const r = disc.repo; const j = await A.dlStart({ repo: r.id, files: [{ path: r.mmproj.path, size: r.mmproj.size }], name: `${r.name} · phần nhìn ảnh`, quant: r.mmproj.quant }); toast('Đang tải phần nhìn ảnh, xem tiến độ ở mục Đang tải'); renderDlPanel(); }
     if (act === 'pause') await A.dlPause(b.dataset.jid);
     if (act === 'resume') await A.dlResume(b.dataset.jid);
     if (act === 'remove') await A.dlRemove(b.dataset.jid);
@@ -235,14 +242,15 @@ function renderMessages() {
   const msgs = state.current ? state.current.messages : [];
   if (!msgs.length) {
     box.innerHTML = `<div class="empty"><img class="logo-big" src="logo-tile.svg" alt="">
-      <h2>Xin chào! Hôm nay bạn muốn hỏi gì?</h2><p>${state.status.loaded ? 'Mô hình đã sẵn sàng. Mọi thứ chạy ngay trên máy bạn, không cần Internet.' : 'Hãy chọn một mô hình ở thanh phía trên, hoặc vào <b>Khám phá</b> để tải mô hình đầu tiên.'}</p></div>`;
+      <h2>Xin chào! Hôm nay bạn muốn hỏi gì?</h2><p>${state.status.loaded ? 'Mô hình đã sẵn sàng. Mọi thứ chạy ngay trên máy bạn, không cần Internet.' : 'Hãy chọn một mô hình ở thanh phía trên, hoặc vào <b>Kho mô hình</b> để tải mô hình đầu tiên.'}</p></div>`;
     return;
   }
   box.innerHTML = msgs.map((m, i) => {
     const atts = m.attachments && m.attachments.length ? `<div class="atts">${m.attachments.map(a => `<span class="att">${a.kind === 'image' && a.thumb && /^data:image\/jpeg;base64,/.test(a.thumb) ? `<img class="thumb" src="${a.thumb}" alt="">` : fileIcon(a.kind)} ${esc(a.name)} · ${fmtBytes(a.size)}</span>`).join('')}</div>` : '';
-    const warn = (m.ocrNote ? `<div class="doc-warn ocr">🖼 ${esc(m.ocrNote)}.</div>` : '') + (m.docWarning ? `<div class="doc-warn">⚠ ${esc(m.docWarning)}</div>` : '');
+    const warn = (m.visionNote ? `<div class="doc-warn vis">👁 ${esc(m.visionNote)}.</div>` : '') + (m.ocrNote ? `<div class="doc-warn ocr">🖼 ${esc(m.ocrNote)}.</div>` : '') + (m.docWarning ? `<div class="doc-warn">⚠ ${esc(m.docWarning)}</div>` : '');
     const copyBtn = m.role === 'assistant' && m.content && !m.error ? `<button class="copy-btn" data-copy="${i}" title="Sao chép câu trả lời">⧉ Sao chép</button>` : '';
-    return `<div class="msg ${m.role}${m.error ? ' error' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">AIVN${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${copyBtn}</div>${warn}`;
+    const srcs = m.role === 'assistant' && Array.isArray(m.sources) && m.sources.length ? `<div class="sources">${m.sources.map(x => `<div class="src" title="${esc(x.preview || '')}">📎 Trích từ: <b>${esc(x.file)}</b>, đoạn ${x.chunk}${x.page ? ` · trang ${x.page}${x.pageEnd && x.pageEnd !== x.page ? '–' + x.pageEnd : ''}` : ''}</div>`).join('')}</div>` : '';
+    return `<div class="msg ${m.role}${m.error ? ' error' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">AIVN${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${srcs}${copyBtn}</div>${warn}`;
   }).join('');
   box.scrollTop = box.scrollHeight;
 }
@@ -253,6 +261,8 @@ const MAX_FILES = 5;
 function fileIcon(kind) { return kind === 'pdf' ? '📕' : kind === 'docx' ? '📘' : kind === 'image' ? '🖼' : '📄'; }
 const IMG_EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
 const OCR_NOTE = 'Mô hình hiện tại không nhìn được ảnh, AIVN đã đọc chữ trong ảnh';
+const VISION_NOTE = 'Mô hình nhìn ảnh trực tiếp';
+const visImgs = new WeakMap(); // tin nhắn → ảnh (data URL) đã gửi cho mô hình nhìn ảnh, chỉ giữ trong phiên làm việc
 const MAX_BYTES = 20 * 1024 * 1024;
 // Ảnh → (thu nhỏ để hiện chip) + PNG đã chuẩn hoá kích thước để OCR. GIF chỉ lấy khung hình đầu.
 async function imageToPng(blob) {
@@ -264,7 +274,11 @@ async function imageToPng(blob) {
   const t = document.createElement('canvas'); const ts = 96 / Math.max(bmp.width, bmp.height); t.width = Math.max(1, Math.round(bmp.width * ts)); t.height = Math.max(1, Math.round(bmp.height * ts));
   t.getContext('2d').drawImage(bmp, 0, 0, t.width, t.height);
   const png = await new Promise(r => c.toBlob(r, 'image/png'));
-  return { png: new Uint8Array(await png.arrayBuffer()), thumb: t.toDataURL('image/jpeg', 0.75), width: bmp.width, height: bmp.height };
+  // bản cho mô hình nhìn ảnh: cạnh dài tối đa 1024 px (đủ chi tiết, ít token ảnh)
+  const vs = Math.min(1, 1024 / long);
+  const v = document.createElement('canvas'); v.width = Math.max(1, Math.round(bmp.width * vs)); v.height = Math.max(1, Math.round(bmp.height * vs));
+  const vg = v.getContext('2d'); vg.fillStyle = '#fff'; vg.fillRect(0, 0, v.width, v.height); vg.imageSmoothingQuality = 'high'; vg.drawImage(bmp, 0, 0, v.width, v.height);
+  return { png: new Uint8Array(await png.arrayBuffer()), thumb: t.toDataURL('image/jpeg', 0.75), vis: v.toDataURL('image/jpeg', 0.92), width: bmp.width, height: bmp.height };
 }
 async function addImageBlobs(list) { // list: [{blob, name, size}]
   const room = MAX_FILES - pending.length;
@@ -277,7 +291,8 @@ async function addImageBlobs(list) { // list: [{blob, name, size}]
     (async () => {
       try {
         const img = await imageToPng(blob);
-        it.thumb = img.thumb; renderChips();
+        it.thumb = img.thumb; it.vis = img.vis; it.png = img.png; renderChips();
+        if (state.status.vision) { Object.assign(it, { loading: false, ok: true, text: '', direct: true }); renderChips(); return; }
         const r = await A.ocrImage(img.png);
         if (!pending.includes(it)) return;
         if (!r || r.chars < 3) { pending = pending.filter(a => a !== it); renderChips(); toast(`Không tìm thấy chữ trong ảnh "${name}". Mô hình hiện tại không nhìn được ảnh nên AIVN chưa dùng được ảnh này.`, true); return; }
@@ -292,7 +307,7 @@ async function addImageBlobs(list) { // list: [{blob, name, size}]
 function renderChips() {
   const el = $('#chips');
   el.hidden = !pending.length;
-  el.innerHTML = pending.map(a => `<div class="chip${a.loading ? ' loading' : ''}${a.kind === 'image' ? ' img' : ''}" data-id="${a.id}" title="${esc(a.name)}${a.pages ? ' · ' + a.pages + ' trang' : ''}${a.kind === 'image' ? (a.loading ? ' · đang đọc chữ trong ảnh…' : ` · OCR ${a.ocrChars} ký tự, tin cậy ${a.ocrConf}%`) : ''}">${a.kind === 'image' && a.thumb ? `<img class="thumb" src="${a.thumb}" alt="">` : `<span class="ic">${fileIcon(a.kind)}</span>`}<span class="nm">${esc(a.name)}</span><span class="sz">${a.size ? fmtBytes(a.size) : ''}${a.pages ? ' · ' + a.pages + ' trang' : ''}${a.kind === 'image' ? (a.loading ? ' · đang đọc chữ…' : ` · ${a.ocrChars} ký tự`) : ''}</span><button type="button" title="Bỏ tệp này" aria-label="Bỏ tệp">✕</button></div>`).join('');
+  el.innerHTML = pending.map(a => `<div class="chip${a.loading ? ' loading' : ''}${a.kind === 'image' ? ' img' : ''}" data-id="${a.id}" title="${esc(a.name)}${a.pages ? ' · ' + a.pages + ' trang' : ''}${a.kind === 'image' ? (a.loading ? ' · đang xử lý ảnh…' : a.direct ? ' · mô hình sẽ nhìn ảnh trực tiếp' : ` · OCR ${a.ocrChars} ký tự, tin cậy ${a.ocrConf}%`) : ''}">${a.kind === 'image' && a.thumb ? `<img class="thumb" src="${a.thumb}" alt="">` : `<span class="ic">${fileIcon(a.kind)}</span>`}<span class="nm">${esc(a.name)}</span><span class="sz">${a.size ? fmtBytes(a.size) : ''}${a.pages ? ' · ' + a.pages + ' trang' : ''}${a.kind === 'image' ? (a.loading ? (state.status.vision ? ' · đang chuẩn bị…' : ' · đang đọc chữ…') : a.direct ? ' · gửi ảnh trực tiếp' : ` · ${a.ocrChars} ký tự`) : ''}</span><button type="button" title="Bỏ tệp này" aria-label="Bỏ tệp">✕</button></div>`).join('');
 }
 $('#chips').addEventListener('click', (e) => { const c = e.target.closest('.chip'); if (c && e.target.closest('button')) { pending = pending.filter(a => a.id !== c.dataset.id); renderChips(); } });
 async function addFiles(paths) {
@@ -359,15 +374,25 @@ $('#composer').addEventListener('submit', async (e) => {
   let text = input.value.trim();
   if (state.generating) return;
   if (pending.some(a => a.loading)) { toast('Đang đọc tệp, vui lòng đợi một chút…'); return; }
+  const vision = !!state.status.vision;
+  // ảnh thêm lúc đang dùng mô hình nhìn ảnh nhưng giờ mô hình không nhìn được: đọc chữ (OCR) ngay lúc gửi
+  if (!vision) for (const a of pending.filter(x => x.ok && x.direct)) {
+    $('#genStats').textContent = 'Đang đọc chữ trong ảnh…';
+    try { const r = await A.ocrImage(a.png); if (r && r.chars >= 3) Object.assign(a, { direct: false, text: r.text, ocrChars: r.chars, ocrConf: r.confidence }); else a.ok = false; } catch { a.ok = false; }
+    $('#genStats').textContent = '';
+    if (!a.ok) toast(`Không đọc được chữ trong ảnh "${a.name}", ảnh này sẽ không được gửi.`, true);
+  }
   const docsToSend = pending.filter(a => a.ok);
-  if (!text && docsToSend.length) text = docsToSend.every(a => a.kind === 'image') ? 'Hãy cho biết nội dung chữ trong ảnh và tóm tắt ý chính.' : 'Hãy tóm tắt nội dung chính của tài liệu đính kèm.';
+  const directImgs = vision ? docsToSend.filter(a => a.kind === 'image' && a.vis) : [];
+  if (!text && docsToSend.length) text = docsToSend.every(a => a.kind === 'image') ? (directImgs.length ? 'Hãy mô tả chi tiết bức ảnh này.' : 'Hãy cho biết nội dung chữ trong ảnh và tóm tắt ý chính.') : 'Hãy tóm tắt nội dung chính của tài liệu đính kèm.';
   if (!text) return;
   if (!state.status.loaded) { toast('Hãy nạp một mô hình trước khi trò chuyện', true); return; }
   if (!state.current) state.current = { id: uid(), title: text.slice(0, 48), messages: [], createdAt: Date.now(), updatedAt: Date.now() };
   const conv = state.current;
   const userMsg = { role: 'user', content: text };
-  if (docsToSend.length) userMsg.attachments = docsToSend.map(a => ({ name: a.name, size: a.size, kind: a.kind, pages: a.pages || null, ...(a.kind === 'image' ? { thumb: a.thumb, ocrChars: a.ocrChars } : {}) }));
-  if (docsToSend.some(a => a.kind === 'image')) userMsg.ocrNote = OCR_NOTE;
+  if (docsToSend.length) userMsg.attachments = docsToSend.map(a => ({ name: a.name, size: a.size, kind: a.kind, pages: a.pages || null, ...(a.kind === 'image' ? { thumb: a.thumb, ocrChars: a.ocrChars, direct: !!(vision && a.vis) } : {}) }));
+  if (directImgs.length) { userMsg.visionNote = VISION_NOTE; visImgs.set(userMsg, directImgs.map(a => a.vis)); }
+  if (docsToSend.some(a => a.kind === 'image' && !(vision && a.vis))) userMsg.ocrNote = OCR_NOTE;
   conv.messages.push(userMsg);
   pending = []; renderChips();
   const reply = { role: 'assistant', content: '', model: state.status.id };
@@ -381,12 +406,22 @@ $('#composer').addEventListener('submit', async (e) => {
   // Lịch sử gửi cho mô hình: chỉ tin nhắn có tài liệu gần nhất giữ toàn bộ nội dung đã đóng gói, tin cũ hơn chỉ ghi tên tệp
   const prior = conv.messages.slice(0, -2).filter(m => !m.error);
   const lastCtxIdx = docsToSend.length ? -1 : prior.map(m => !!m.context).lastIndexOf(true);
-  const history = [{ role: 'system', content: s.systemPrompt }, ...prior.map((m, i) => ({ role: m.role,
-      content: m.context && i === lastCtxIdx ? m.context : (m.attachments ? `[Đã gửi kèm: ${m.attachments.map(a => a.name + (a.kind === 'image' ? ' (ảnh, đã đọc chữ bằng OCR)' : '')).join(', ')}]\n` : '') + m.content })),
+  // mô hình nhìn ảnh: hỏi tiếp mà không gửi ảnh mới thì gửi lại ảnh gần nhất trong phiên
+  const lastImgIdx = vision && !directImgs.length ? prior.map(m => visImgs.has(m)).lastIndexOf(true) : -1;
+  const history = [{ role: 'system', content: s.systemPrompt }, ...prior.map((m, i) => {
+      const t = m.context && i === lastCtxIdx ? m.context : (m.attachments ? `[Đã gửi kèm: ${m.attachments.map(a => a.name + (a.kind === 'image' ? (a.direct ? ' (ảnh)' : ' (ảnh, đã đọc chữ bằng OCR)') : '')).join(', ')}]\n` : '') + m.content;
+      return { role: m.role, content: i === lastImgIdx ? [{ type: 'text', text: t }, ...visImgs.get(m).map(url => ({ type: 'image_url', image_url: { url } }))] : t };
+    }),
     { role: 'user', content: text }];
+  const offRag = A.onRagProgress((p) => {
+    if (p.reqId !== reqId) return;
+    $('#genStats').textContent = p.stage === 'search' ? 'Đang tìm đoạn liên quan trong tài liệu…' : p.total ? `Đang lập chỉ mục “${p.name}”: ${p.done}/${p.total} đoạn…` : 'Đang chuẩn bị tìm kiếm tài liệu…';
+  });
   const offInfo = A.onDocInfo((info) => {
     if (info.reqId !== reqId) return;
+    if (info.mode === 'rag') { reply.sources = info.sources; $('#genStats').textContent = 'Đang suy nghĩ…'; return; }
     userMsg.context = info.context;
+    if (info.ragAvailable) offerRag();
     if (info.truncated) {
       const parts = info.files.filter(f => f.truncated).map(f => `${f.name} (~${f.usedPct}%)`).join(', ');
       userMsg.docWarning = `Tài liệu dài hơn giới hạn ngữ cảnh của mô hình, AIVN chỉ dùng một phần: ${parts}. Đã giữ phần mở đầu và các đoạn liên quan nhất tới câu hỏi. Tăng "Độ dài ngữ cảnh" trong cài đặt để dùng nhiều hơn.`;
@@ -400,14 +435,16 @@ $('#composer').addEventListener('submit', async (e) => {
     if (!rafPending) { rafPending = true; requestAnimationFrame(() => { rafPending = false; bodyEl.innerHTML = md(reply.content); const box = $('#messages'); box.scrollTop = box.scrollHeight; }); }
   });
   try {
-    const r = await A.generate({ reqId, messages: history, temperature: s.temperature, maxTokens: s.maxTokens, docs: docsToSend.map(a => ({ name: a.name, text: a.text, kind: a.kind, pages: a.pages })) });
+    const r = await A.generate({ reqId, convoId: conv.id, messages: history, temperature: s.temperature, maxTokens: s.maxTokens,
+      docs: docsToSend.filter(a => !(vision && a.kind === 'image' && a.vis)).map(a => ({ name: a.name, text: a.text, kind: a.kind, pages: a.pages })),
+      images: directImgs.map(a => a.vis) });
     reply.content = r.text || reply.content;
     $('#genStats').textContent = `${r.usage.completion_tokens} token · ${r.usage.tokensPerSecond.toFixed(1)} token/giây · ${r.usage.seconds.toFixed(1)} giây${r.finishReason === 'abort' ? ' · đã dừng' : r.finishReason === 'length' ? ' · chạm giới hạn token' : ''}`;
   } catch (err) {
     reply.error = true; reply.content = (reply.content ? reply.content + '\n\n' : '') + '⚠ ' + err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
     $('#genStats').textContent = '';
   } finally {
-    off(); offInfo(); state.generating = null; $('#sendBtn').hidden = false; $('#stopBtn').hidden = true;
+    off(); offInfo(); offRag(); state.generating = null; $('#sendBtn').hidden = false; $('#stopBtn').hidden = true;
     conv.updatedAt = Date.now(); await A.saveConvo(conv); await loadConvos(); renderMessages();
   }
 });
@@ -485,22 +522,91 @@ A.onUpdate((st) => A.updateState().then(full => paintUpdate({ ...full, ...st }))
 
 // ---------- Giao diện sáng / tối ----------
 const darkMq = window.matchMedia('(prefers-color-scheme: dark)');
-function applyTheme(t) {
+const reduceMq = window.matchMedia('(prefers-reduced-motion: reduce)');
+const resolveTheme = (t) => (t === 'dark' || (t === 'system' && darkMq.matches) ? 'dark' : 'light');
+// Đổi giao diện mượt: hiệu ứng vòng tròn lan ra từ nút bấm (View Transitions);
+// nếu không hỗ trợ thì chuyển màu 350 ms, chỉ bật trong lúc đổi; tôn trọng "giảm chuyển động" của hệ điều hành.
+function applyTheme(t, { animate = false, origin = null } = {}) {
   t = ['light', 'dark', 'system'].includes(t) ? t : 'light';
-  const dark = t === 'dark' || (t === 'system' && darkMq.matches);
-  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   for (const b of document.querySelectorAll('#themeRow button')) b.classList.toggle('on', b.dataset.theme === t);
+  const root = document.documentElement, next = resolveTheme(t);
+  if ((applyTheme.pending || root.dataset.theme) === next) return;
+  const set = () => { root.dataset.theme = next; if (applyTheme.pending === next) applyTheme.pending = null; };
+  if (!animate || reduceMq.matches) { applyTheme.pending = null; return set(); }
+  if (document.startViewTransition && origin) {
+    const r = origin.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    const rad = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+    applyTheme.pending = next;
+    root.classList.add('vt-theme');
+    let done = false;
+    const vt = document.startViewTransition(() => { done = true; set(); });
+    // nếu trình duyệt chưa kịp chụp khung hình (cửa sổ ẩn, máy bận…) thì đổi ngay, không bắt người dùng chờ
+    setTimeout(() => { if (!done) { set(); try { vt.skipTransition(); } catch {} } }, 300);
+    vt.ready.then(() => root.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${rad}px at ${x}px ${y}px)`] },
+      { duration: 480, easing: 'cubic-bezier(.4,0,.2,1)', pseudoElement: '::view-transition-new(root)' })).catch(() => {});
+    vt.finished.finally(() => root.classList.remove('vt-theme'));
+    return;
+  }
+  applyTheme.pending = null;
+  root.classList.add('theme-anim');
+  set();
+  clearTimeout(applyTheme.timer);
+  applyTheme.timer = setTimeout(() => root.classList.remove('theme-anim'), 400);
 }
-darkMq.addEventListener('change', () => applyTheme(state.settings && state.settings.theme));
+// chỉ theo hệ điều hành khi chọn "Tự động" (đổi nativeTheme khi lưu cài đặt cũng phát sự kiện này)
+darkMq.addEventListener('change', () => { if (state.settings && state.settings.theme === 'system') applyTheme('system', { animate: true }); });
 $('#themeRow').addEventListener('click', async (e) => {
   const b = e.target.closest('button[data-theme]'); if (!b) return;
-  applyTheme(b.dataset.theme); state.settings = await A.setSettings({ theme: b.dataset.theme });
+  state.settings.theme = b.dataset.theme;
+  applyTheme(b.dataset.theme, { animate: true, origin: b }); state.settings = await A.setSettings({ theme: b.dataset.theme });
 });
+// ---------- Tìm kiếm trong tài liệu (RAG) ----------
+let ragJobId = null;
+async function paintRag() {
+  const r = await A.ragInfo();
+  ragJobId = `${r.repo}::bge-m3-q8_0.gguf`;
+  const j = jobs.get(ragJobId) || r.job;
+  const busy = j && j.status !== 'done' && !r.installed;
+  $('#ragText').innerHTML = r.installed
+    ? `✓ Đã có mô hình <b>${esc(r.name)}</b> (${fmtBytes(r.size)}, giấy phép ${esc(r.license)}). Tài liệu được chia đoạn, tìm đoạn liên quan nhất cho từng câu hỏi và ghi nguồn dưới câu trả lời.`
+    : busy ? `Đang tải ${esc(r.name)}…` : `Tài liệu dài sẽ được tìm theo từ khoá. Tải <b>${esc(r.name)}</b> (${fmtBytes(r.size)}, chạy trên máy) để tìm theo ý nghĩa, chính xác hơn và có ghi nguồn.`;
+  $('#ragDl').hidden = r.installed || busy; $('#ragDel').hidden = !r.installed;
+  $('#ragProg').hidden = !busy;
+  if (busy && j.total) $('#ragProg div').style.width = (100 * j.received / j.total).toFixed(1) + '%';
+  $('#ragOn').checked = r.enabled; $('#ragOn').disabled = !r.installed;
+}
+$('#ragDl').addEventListener('click', async () => { try { await A.ragDownload(); toast('Đang tải mô hình tìm kiếm tài liệu…'); } catch (err) { toast(cleanErr(err.message), true); } paintRag(); });
+$('#ragDel').addEventListener('click', async () => { await A.ragDelete(); paintRag(); });
+$('#ragOn').addEventListener('change', async (e) => { state.settings = await A.setSettings({ rag: e.target.checked }); });
+A.onDl((j) => { if (j.id === ragJobId) paintRag(); });
+A.onDlDone((j) => { if (j.id === ragJobId) { paintRag(); toast('Đã tải xong mô hình tìm kiếm tài liệu ✓ Câu hỏi tiếp theo về tài liệu sẽ dùng tìm kiếm ngữ nghĩa.'); } });
+let ragOffered = false;
+function offerRag() { // gợi ý một lần mỗi phiên khi tài liệu được tìm theo từ khoá (đặt ngoài khung tin nhắn để không bị vẽ lại)
+  if (ragOffered || state.settings.ragOfferDismissed) return; ragOffered = true;
+  const w = $('#ragOffer');
+  w.innerHTML = `<span>🔎 Muốn AIVN tìm đúng đoạn trong tài liệu dài và ghi nguồn? Tải mô hình tìm kiếm BGE-M3 (605 MB, chạy trên máy, chỉ tải một lần).</span> <button class="btn sm primary" data-rag="dl">Tải ngay</button> <button class="btn sm" data-rag="no">Để sau</button>`;
+  w.hidden = false;
+}
+$('#ragOffer').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-rag]'); if (!b) return;
+  if (b.dataset.rag === 'dl') { try { await A.ragDownload(); toast('Đang tải mô hình tìm kiếm, xem tiến độ trong Cài đặt trò chuyện'); } catch (err) { toast(cleanErr(err.message), true); } paintRag(); }
+  else state.settings = await A.setSettings({ ragOfferDismissed: true });
+  $('#ragOffer').hidden = true;
+});
+A.onVcredist(() => { // Windows thiếu Visual C++ Redistributable: llama-server không chạy được
+  const w = $('#sysNotice');
+  w.innerHTML = '<span>🧩 Chế độ nhìn ảnh trên Windows cần <b>Microsoft Visual C++ Redistributable 2015–2022 (x64)</b>. Cài xong hãy nạp lại mô hình.</span> <button class="btn sm primary" data-vc="dl">Tải từ Microsoft</button> <button class="btn sm" data-vc="no">Đóng</button>';
+  w.hidden = false;
+});
+$('#sysNotice').addEventListener('click', (e) => { const b = e.target.closest('[data-vc]'); if (!b) return; if (b.dataset.vc === 'dl') A.openVcredist(); $('#sysNotice').hidden = true; });
+
 // ---------- Khởi động ----------
 (async () => {
   state.settings = await A.getSettings();
   applyTheme(state.settings.theme);
   bindSettings();
+  paintRag().catch(() => {});
   for (const j of await A.dlList()) jobs.set(j.id, j);
   renderDlPanel();
   setStatus(await A.modelStatus());

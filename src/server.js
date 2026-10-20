@@ -2,7 +2,7 @@
 const http = require('http');
 const crypto = require('crypto');
 
-function createApiServer({ engine, models, ensureModel, log }) {
+function createApiServer({ engine, models, ensureModel, log, embeddings = null }) {
   let server = null;
   let port = null;
 
@@ -28,7 +28,10 @@ function createApiServer({ engine, models, ensureModel, log }) {
 
     if (req.method === 'GET' && (p === '/v1/models' || p === '/models')) {
       const st = engine.status();
-      return send(res, 200, { object: 'list', data: models().map(m => ({ id: m.id, object: 'model', created: Math.floor(m.mtime / 1000), owned_by: 'aivn', loaded: st.loaded && st.id === m.id })) });
+      const data = models().map(m => ({ id: m.id, object: 'model', created: Math.floor(m.mtime / 1000), owned_by: 'aivn', loaded: st.loaded && st.id === m.id, ...(m.vision ? { vision: true } : {}) }));
+      const em = embeddings && embeddings.info();
+      if (em && em.installed) data.push({ id: em.id, object: 'model', created: Math.floor((em.mtime || Date.now()) / 1000), owned_by: 'aivn', type: 'embedding' });
+      return send(res, 200, { object: 'list', data });
     }
     if (req.method === 'GET' && (p === '' || p === '/' || p === '/health')) return send(res, 200, { status: 'ok', app: 'AIVN', model: engine.status() });
 
@@ -64,6 +67,31 @@ function createApiServer({ engine, models, ensureModel, log }) {
           id, object: 'chat.completion', created, model: st.id,
           choices: [{ index: 0, message: { role: 'assistant', content: r.text }, finish_reason: r.finishReason === 'length' ? 'length' : 'stop' }],
           usage: { prompt_tokens: 0, completion_tokens: r.usage.completion_tokens, total_tokens: r.usage.completion_tokens },
+        });
+      } catch (e) { return err(res, 500, e.message, 'server_error'); }
+    }
+    if (req.method === 'POST' && (p === '/v1/embeddings' || p === '/embeddings')) {
+      if (!embeddings) return err(res, 501, 'Máy chủ này không hỗ trợ embeddings');
+      let body;
+      try { body = JSON.parse(await readBody(req) || '{}'); } catch { return err(res, 400, 'JSON không hợp lệ'); }
+      let input = body.input;
+      if (typeof input === 'string') input = [input];
+      if (!Array.isArray(input) || !input.length) return err(res, 400, 'Thiếu trường "input" (chuỗi hoặc mảng chuỗi)');
+      if (input.some(x => typeof x !== 'string')) return err(res, 400, 'AIVN chỉ nhận "input" dạng chuỗi (chưa hỗ trợ mảng token)');
+      if (input.length > 256) return err(res, 400, 'Tối đa 256 chuỗi mỗi yêu cầu');
+      const fmt = body.encoding_format || 'float';
+      if (!['float', 'base64'].includes(fmt)) return err(res, 400, '"encoding_format" phải là "float" hoặc "base64"');
+      let info;
+      try { info = await embeddings.ensure(body.model); } catch (e) { return err(res, e.status || 400, e.message, 'model_not_found'); }
+      try {
+        const vecs = await embeddings.embed(input);
+        const dims = Number(body.dimensions) > 0 ? Math.min(Number(body.dimensions), vecs[0].length) : null;
+        const fit = (v) => { if (!dims) return v; const u = v.slice(0, dims); let n = 0; for (const x of u) n += x * x; n = Math.sqrt(n) || 1; return u.map(x => x / n); };
+        const tokens = await embeddings.count(input).catch(() => input.reduce((s, t) => s + Math.ceil(t.length / 3), 0));
+        return send(res, 200, {
+          object: 'list', model: info.id,
+          data: vecs.map((v, index) => { const f = fit(v); return { object: 'embedding', index, embedding: fmt === 'base64' ? Buffer.from(f.buffer, f.byteOffset, f.byteLength).toString('base64') : Array.from(f) }; }),
+          usage: { prompt_tokens: tokens, total_tokens: tokens },
         });
       } catch (e) { return err(res, 500, e.message, 'server_error'); }
     }

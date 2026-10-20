@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'">
 <title>AIVN</title>
+<script src="theme-init.js"></script>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -14,7 +15,7 @@
       <span>AIVN</span>
     </div>
     <button class="nav-item active" data-view="chat"><i>💬</i><span>Trò chuyện</span></button>
-    <button class="nav-item" data-view="discover"><i>🔍</i><span>Khám phá</span></button>
+    <button class="nav-item" data-view="discover"><i>🗃</i><span>Kho mô hình</span></button>
     <button class="nav-item" data-view="models"><i>📦</i><span>Mô hình của tôi</span></button>
     <button class="nav-item" data-view="server"><i>⚡</i><span>Máy chủ API</span><b class="pill-dot" id="srvDot"></b></button>
     <div class="rail-foot"><div id="hwInfo">Đang kiểm tra phần cứng…</div>
@@ -39,6 +40,8 @@
       <div class="chat" id="chatPane">
         <div class="dropzone" id="dropzone"><div><b>Thả tệp vào đây</b><span>PDF có lớp chữ · DOCX · TXT/MD/CSV/JSON · mã nguồn · ảnh PNG/JPG/WEBP/GIF (đọc chữ bằng OCR) · tối đa 20 MB</span></div></div>
         <div class="messages" id="messages"></div>
+        <div class="doc-warn offer rag-offer" id="sysNotice" hidden></div>
+        <div class="doc-warn offer rag-offer" id="ragOffer" hidden></div>
         <div class="chips" id="chips" hidden></div>
         <form class="composer" id="composer">
           <button type="button" class="btn icon" id="attachBtn" title="Đính kèm tệp (PDF có lớp chữ, DOCX, TXT, MD, CSV, JSON, mã nguồn, ảnh · tối đa 20 MB)" aria-label="Đính kèm tệp">
@@ -65,6 +68,13 @@
         <label>Độ dài ngữ cảnh (áp dụng khi nạp lại)
           <select id="ctxSize"><option>2048</option><option>4096</option><option>8192</option><option>16384</option></select>
         </label>
+        <div class="rag-box" id="ragBox">
+          <h3>Tìm kiếm trong tài liệu</h3>
+          <p class="small muted" id="ragText">Đang kiểm tra…</p>
+          <div class="progress" id="ragProg" hidden><div></div></div>
+          <div class="row"><button class="btn sm primary" id="ragDl" hidden>Tải mô hình tìm kiếm</button><button class="btn sm" id="ragDel" hidden>Xoá</button></div>
+          <label class="check"><input type="checkbox" id="ragOn"> Dùng tìm kiếm ngữ nghĩa cho tài liệu dài</label>
+        </div>
         <div class="about">
           <h3>Giới thiệu</h3>
           <p><b>AIVN</b> <span id="aboutVer"></span><br>Chạy mô hình AI ngay trên máy tính của bạn, riêng tư và không cần Internet.</p>
@@ -74,7 +84,7 @@
             <div class="row"><button class="btn sm" id="updCheck">Kiểm tra cập nhật</button><button class="btn sm primary" id="updAction" hidden></button></div>
           </div>
           <p>Phát triển bởi<br><b class="dev">NGUYỄN NGỌC KHÔI SINH VIÊN VLU</b></p>
-          <p class="muted">© 2026 AIVN · NGUYỄN NGỌC KHÔI SINH VIÊN VLU<br>Sử dụng node-llama-cpp / llama.cpp (MIT) và Electron (MIT).</p>
+          <p class="muted">© 2026 AIVN · NGUYỄN NGỌC KHÔI SINH VIÊN VLU<br>Sử dụng node-llama-cpp / llama.cpp và llama-server (MIT), Electron (MIT), tesseract.js (Apache 2.0).</p>
         </div>
       </aside>
     </section>
@@ -83,7 +93,7 @@
     <section class="view" id="view-discover">
       <div class="page">
         <div class="page-head">
-          <div><h2>Khám phá mô hình</h2><p class="muted">Tìm mọi mô hình GGUF trên Hugging Face, hoặc chọn nhanh trong danh sách Gợi ý của AIVN.</p></div>
+          <div><h2>Kho mô hình</h2><p class="muted">Tìm mọi mô hình GGUF trên Hugging Face, hoặc chọn nhanh trong danh sách Gợi ý của AIVN.</p></div>
           <div class="row"><button class="btn" id="tokenBtn" title="Token Hugging Face cho mô hình yêu cầu đăng nhập">🔑 Token Hugging Face</button><button class="btn" id="importBtn2">📂 Nhập tệp GGUF</button></div>
         </div>
         <div class="token-box" id="tokenBox" hidden>

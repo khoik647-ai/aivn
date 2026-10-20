@@ -20,7 +20,7 @@ async function getJson(url, { token, fetchImpl = fetch, timeout = 20000 } = {}) 
   let res;
   try { res = await fetchImpl(url, { headers: authHeaders(url, token), signal: AbortSignal.timeout(timeout) }); }
   catch (e) { throw new HfError('Không kết nối được Hugging Face. Hãy kiểm tra Internet.', 0); }
-  if (res.status === 401 || res.status === 403) throw new HfError('Repo này yêu cầu đăng nhập Hugging Face. Hãy nhập HF token trong mục Khám phá → Token Hugging Face.', res.status);
+  if (res.status === 401 || res.status === 403) throw new HfError('Repo này yêu cầu đăng nhập Hugging Face. Hãy nhập HF token trong mục Kho mô hình → Token Hugging Face.', res.status);
   if (res.status === 404) throw new HfError('Không tìm thấy repo trên Hugging Face.', 404);
   if (res.status === 429) throw new HfError('Hugging Face đang giới hạn số lượt truy vấn, vui lòng thử lại sau ít phút.', 429);
   if (!res.ok) throw new HfError(`Hugging Face trả về lỗi ${res.status}.`, res.status);
@@ -139,9 +139,29 @@ async function repoFiles(repo, { token, hw, fetchImpl } = {}) {
     getJson(`${HF}/api/models/${repo}/tree/main?recursive=true`, { token, fetchImpl }),
   ]);
   const sum = summarize({ ...info, id: info.id || repo });
-  return { ...sum, url: `${HF}/${repo}`, groups: groupFiles(tree, sum, hw) };
+  const groups = groupFiles(tree, sum, hw);
+  const mmproj = pickMmproj(groups);
+  if (mmproj) for (const g of groups) if (g.kind === 'chat') g.vision = true;
+  return { ...sum, url: `${HF}/${repo}`, groups, mmproj, vision: sum.vision || !!mmproj };
+}
+
+// Chọn tệp thị giác (mmproj) phù hợp nhất trong repo: ưu tiên Q8_0 (nhỏ, chất lượng gần như gốc), rồi F16/BF16/F32
+const MMPROJ_PREF = ['Q8_0', 'F16', 'BF16', 'F32'];
+function pickMmproj(groups) {
+  const mm = groups.filter(g => g.kind === 'mmproj' && g.complete && !g.split);
+  if (!mm.length) return null;
+  const rank = (g) => { const q = (g.quant || (/f16/i.test(g.name) ? 'F16' : '')).toUpperCase(); const i = MMPROJ_PREF.indexOf(q); return i < 0 ? 9 : i; };
+  const best = [...mm].sort((a, b) => rank(a) - rank(b) || a.size - b.size)[0];
+  return { path: best.files[0].path, size: best.size, quant: best.quant || null, name: best.name };
+}
+// Chọn mmproj trong một thư mục (dùng khi quét mô hình trên máy)
+function pickMmprojFile(names) {
+  const mm = names.filter(n => /mmproj/i.test(n) && /\.gguf$/i.test(n));
+  if (!mm.length) return null;
+  const rank = (n) => { const q = (parseQuant(n) || (/f16/i.test(n) ? 'F16' : '')).toUpperCase(); const i = MMPROJ_PREF.indexOf(q); return i < 0 ? 9 : i; };
+  return [...mm].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))[0];
 }
 
 function resolveUrl(repo, file) { return `${HF}/${repo}/resolve/main/${file.split('/').map(encodeURIComponent).join('/')}`; }
 
-module.exports = { search, repoFiles, groupFiles, parseQuant, fitFor, archSupported, resolveUrl, summarize, HfError, QUANT_PREF, SPLIT_RE, llamaCpp: ARCHS.llamaCpp };
+module.exports = { search, repoFiles, groupFiles, pickMmproj, pickMmprojFile, parseQuant, fitFor, archSupported, resolveUrl, summarize, HfError, QUANT_PREF, SPLIT_RE, llamaCpp: ARCHS.llamaCpp };

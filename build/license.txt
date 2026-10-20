@@ -1,8 +1,9 @@
-AIVN 0.11.1 - Giấy phép sử dụng (MIT)
+AIVN 0.12.0 - Giấy phép sử dụng (MIT)
 Phát triển bởi NGUYỄN NGỌC KHÔI SINH VIÊN VLU · © 2026 AIVN
 
 Phần mềm này được cung cấp miễn phí "NGUYÊN TRẠNG", không kèm bất kỳ bảo đảm nào.
-AIVN sử dụng thư viện mã nguồn mở node-llama-cpp và llama.cpp (giấy phép MIT) cùng Electron (giấy phép MIT).
+AIVN sử dụng thư viện mã nguồn mở node-llama-cpp và llama.cpp / llama-server (giấy phép MIT, xem resources/llama/LICENSE-llama.cpp.txt), Electron và Node.js (giấy phép MIT), tesseract.js và pdfjs-dist (Apache 2.0), mammoth (BSD-2-Clause).
+Trên Windows, chế độ nhìn ảnh cần Microsoft Visual C++ Redistributable 2015-2022 (x64), tải riêng từ Microsoft; AIVN không đóng gói thư viện này.
 
 Các mô hình AI tải về qua AIVN thuộc quyền của nhà phát hành tương ứng (Qwen, Llama, Gemma...) và tuân theo giấy phép riêng của từng mô hình.
 Nội dung do mô hình tạo ra có thể không chính xác; hãy kiểm chứng trước khi sử dụng.

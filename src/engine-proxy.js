@@ -12,7 +12,7 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
   function start() {
     if (readyP) return readyP;
     readyP = new Promise((resolve, reject) => {
-      const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE; delete env.NODE_OPTIONS;
+      const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE; delete env.NODE_OPTIONS; if (process.resourcesPath && !env.AIVN_RESOURCES) env.AIVN_RESOURCES = process.resourcesPath;
       child = fork(hostScript, [], { execPath: nodePath, execArgv: [], serialization: 'json', stdio: ['ignore', 'pipe', 'pipe', 'ipc'], env, windowsHide: true });
       child.stdout.on('data', (d) => log(String(d).trimEnd()));
       child.stderr.on('data', (d) => log(String(d).trimEnd()));
@@ -20,7 +20,7 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
         if (m.type === 'ready') { log(`[engine] tiến trình ${m.pid}, Node ${m.node}`); return resolve(); }
         if (m.type === 'token') { tokenCbs.get(m.reqId)?.(m.t); return; }
         const p = pending.get(m.id); if (!p) return; pending.delete(m.id);
-        m.error ? p.reject(new Error(m.error)) : p.resolve(m.result);
+        if (m.error) { const e = new Error(m.error); if (m.code) e.code = m.code; p.reject(e); } else p.resolve(m.result);
       });
       child.on('error', (e) => { log('[engine] lỗi khởi động: ' + e.message); reject(e); });
       child.on('exit', (code, signal) => {
@@ -71,6 +71,12 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
       if (n > 0) ratio = n / chars;
     },
     ocr: (buf) => call('ocr', Buffer.from(buf).toString('base64')),
+    embedLoad: (id, p, opts) => call('embedLoad', id, p, opts),
+    embedUnload: () => call('embedUnload'),
+    embedStatus: () => call('embedStatus'),
+    embedCount: (texts) => call('embedCount', texts),
+    // trả Float32Array[] (chuẩn hoá L2)
+    async embed(texts, kind) { const r = await call('embed', texts, kind); return r.map(b => { const u = Uint8Array.from(Buffer.from(b, 'base64')); return new Float32Array(u.buffer); }); },
     async stop() { if (child) { try { child.kill(); } catch {} } },
   };
 }

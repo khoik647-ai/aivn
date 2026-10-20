@@ -55,9 +55,13 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
   step "Tải Node.js thuần (bộ máy suy luận chạy ngoài Electron) cho Windows/macOS, kiểm SHA-256"
   node build/fetch-node.cjs
 
+  step "Tải llama.cpp chính thức (llama-server, MIT) cho chế độ nhìn ảnh, kiểm SHA-256"
+  node build/fetch-llama.cjs win-x64 darwin-arm64 darwin-x64
+
   step "Build Windows (NSIS) → dist/AIVN-Setup-$VERSION.exe + latest.yml + blockmap"
   rm -rf dist
   npx electron-builder --win nsis --x64 --publish never
+  [[ -f dist/win-unpacked/resources/llama/llama-server.exe ]] || die "bản Windows thiếu llama-server.exe"
 
   step "Build macOS arm64 + x64 (.app)"
   MAC_TARGET=dir node build/mac-build.cjs
@@ -67,6 +71,7 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
     dir="${pair%%:*}"; arch="${pair##*:}"
     app="dist/$dir/AIVN.app"
     [[ -d "$app" ]] || die "không thấy $app"
+    [[ -x "$app/Contents/Resources/llama/llama-server" ]] || die "$app thiếu llama-server"
     "$RCODESIGN" sign "$app"
     (cd "dist/$dir" && rm -f "../AIVN-$VERSION-$arch-mac.zip" && zip -qry "../AIVN-$VERSION-$arch-mac.zip" AIVN.app)
   done
@@ -128,13 +133,15 @@ fi
 step "Tạo GitHub Release $TAG"
 NOTES="AIVN $VERSION · Phát triển bởi NGUYỄN NGỌC KHÔI SINH VIÊN VLU
 
-- Mới ở 0.11.1: logo rồng AIVN, giao diện sáng đỏ–trắng (có chế độ Tối / Tự động), biểu tượng ứng dụng mới
-- Khám phá: tìm mọi mô hình GGUF trên Hugging Face (sắp xếp theo lượt tải / mới nhất / lượt thích), gộp tệp chia nhỏ, nhãn vừa RAM, gợi ý Q4_K_M; 26 mô hình gợi ý đã kiểm tra (Qwen3, Gemma 3, Llama 3.x, Phi-4, Mistral, DeepSeek R1, gpt-oss, VyLinh tiếng Việt…)
-- Tải mô hình có hàng đợi, tạm dừng/tải tiếp, tốc độ và thời gian còn lại; mã truy cập Hugging Face tuỳ chọn (chỉ lưu trên máy)
-- Ảnh: dán Ctrl+V / Cmd+V hoặc kéo thả PNG/JPG/WEBP/GIF; AIVN đọc chữ trong ảnh (OCR tiếng Việt + tiếng Anh, offline). Mô hình hiện tại chưa nhìn được hình.
-- Menu Sửa và menu chuột phải (Cắt/Sao chép/Dán/Chọn tất cả), nút sao chép câu trả lời
-- Bộ máy suy luận mới (llama.cpp mới hơn: Qwen3, Gemma 3, gpt-oss) chạy trong tiến trình riêng, sửa lỗi sập khi nạp mô hình 7B trên CPU
-- Hỏi đáp với tài liệu, máy chủ API tương thích OpenAI, tự động cập nhật (Windows cài tại chỗ; macOS báo có bản mới)
+Mới ở 0.12.0:
+- Nhìn ảnh thật: mô hình thị giác (Qwen3-VL 2B, Qwen2.5-VL 3B, Gemma 3 4B, SmolVLM 500M) xem trực tiếp ảnh bạn dán/kéo thả, chạy bằng llama-server chính thức của llama.cpp (MIT) đi kèm ứng dụng. Kho mô hình tự tải kèm tệp thị giác (mmproj) và gắn nhãn “Nhìn được ảnh”. Mô hình chỉ có chữ vẫn dùng OCR như trước.
+- Hỏi đáp tài liệu dài bằng tìm kiếm ngữ nghĩa (RAG): chia đoạn ~500 token, nhúng trên máy bằng BGE-M3 (tải khi dùng lần đầu, ~605 MB), chỉ mục riêng cho từng cuộc trò chuyện, ghi nguồn “Trích từ: tệp, đoạn n” dưới câu trả lời. Chưa tải BGE-M3 thì dùng cách tìm theo từ khoá.
+- Máy chủ API: thêm POST /v1/embeddings (tương thích OpenAI).
+- Đổi giao diện Sáng/Tối mượt (hiệu ứng lan tròn từ nút bấm, tôn trọng “giảm chuyển động”), không còn nháy màu khi mở ứng dụng.
+- Mục “Khám phá” đổi tên thành “Kho mô hình”.
+- Windows: chế độ nhìn ảnh cần Microsoft Visual C++ Redistributable 2015–2022 (x64); AIVN báo và mở trang tải chính thức của Microsoft nếu máy chưa có.
+
+Vẫn có: logo rồng và giao diện đỏ–trắng; Kho mô hình tìm mọi GGUF trên Hugging Face, 29 gợi ý đã kiểm tra; tải có hàng đợi và tải tiếp; dán ảnh và OCR tiếng Việt; máy chủ API tương thích OpenAI; tự động cập nhật.
 
 Tải về:
 - Windows 10/11: AIVN-Setup.exe

@@ -9,7 +9,7 @@ const HF_HOST = 'huggingface.co';
 const RETRIES = 4;
 
 function friendlyHttp(status) {
-  if (status === 401 || status === 403) return 'Mô hình này yêu cầu đăng nhập hoặc chấp nhận giấy phép trên Hugging Face. Hãy chấp nhận giấy phép trên trang của mô hình, rồi nhập HF token trong Khám phá → Token Hugging Face.';
+  if (status === 401 || status === 403) return 'Mô hình này yêu cầu đăng nhập hoặc chấp nhận giấy phép trên Hugging Face. Hãy chấp nhận giấy phép trên trang của mô hình, rồi nhập HF token trong Kho mô hình → Token Hugging Face.';
   if (status === 404) return 'Không tìm thấy tệp trên Hugging Face (có thể đã bị đổi tên hoặc xoá).';
   if (status === 429) return 'Hugging Face đang giới hạn lượt tải, vui lòng thử lại sau.';
   return `Máy chủ trả về lỗi ${status}.`;

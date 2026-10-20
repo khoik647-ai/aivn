@@ -1,7 +1,9 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const inv = (ch) => (...a) => ipcRenderer.invoke(ch, ...a);
 const on = (ch) => (cb) => { const h = (_e, d) => cb(d); ipcRenderer.on(ch, h); return () => ipcRenderer.removeListener(ch, h); };
+const themeArg = (process.argv || []).find(a => a.startsWith('--aivn-theme='));
 contextBridge.exposeInMainWorld('aivn', {
+  initialTheme: themeArg && themeArg.endsWith('=dark') ? 'dark' : 'light',
   info: inv('app:info'), getSettings: inv('settings:get'), setSettings: inv('settings:set'),
   catalog: inv('catalog:list'), hfSearch: inv('hf:search'), hfRepo: inv('hf:repo'), hwInfo: inv('hw:info'),
   dlStart: inv('dl:start'), dlPause: inv('dl:pause'), dlResume: inv('dl:resume'), dlRemove: inv('dl:remove'), dlList: inv('dl:list'),
@@ -12,7 +14,9 @@ contextBridge.exposeInMainWorld('aivn', {
   startServer: inv('server:start'), stopServer: inv('server:stop'), serverStatus: inv('server:status'), openExternal: inv('open:external'),
   pickFiles: inv('files:pick'), readImage: inv('image:read'), copyText: inv('clipboard:write'), ocrImage: inv('image:ocr'), onEngineCrash: on('engine:crash'), extractFiles: inv('files:extract'), pathForFile: (f) => { try { return webUtils.getPathForFile(f); } catch { return ''; } },
   checkUpdate: inv('update:check'), downloadUpdate: inv('update:download'), installUpdate: inv('update:install'), openReleases: inv('update:open'), updateState: inv('update:state'),
-  onUpdate: on('update:status'), onDocInfo: on('chat:docinfo'),
+  onUpdate: on('update:status'), onDocInfo: on('chat:docinfo'), onRagProgress: on('chat:ragprogress'),
+  ragInfo: inv('rag:info'), ragDownload: inv('rag:download'), ragDelete: inv('rag:delete'), ragConvo: inv('rag:convo'),
+  openVcredist: inv('vision:vcredist'), onVcredist: on('vision:vcredist'),
   onToken: on('chat:token'), onModelStatus: on('model:status'), onServerLog: on('server:log'),
   onDl: on('dl:update'), onDlDone: on('dl:done'), onDlRemoved: on('dl:removed'),
 });

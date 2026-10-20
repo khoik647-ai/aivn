@@ -5,6 +5,8 @@ const catalog = require('./catalog');
 const { JsonStore } = require('./store');
 const { createApiServer } = require('./server');
 const docs = require('./docs');
+const { createRagStore, buildRagContent } = require('./rag');
+const EMBED = catalog.EMBEDDING;
 const { createUpdater } = require('./updater');
 const hf = require('./hf');
 const { createDownloader } = require('./downloader');
@@ -34,6 +36,7 @@ if (nodePath) {
     onCrash: (e) => { send('model:status', { loaded: false }); send('engine:crash', { message: e.message }); } });
 } else {
   console.warn('[engine] không tìm thấy Node.js đi kèm, chạy llama.cpp ngay trong Electron (mô hình > 2 GB chạy CPU có thể lỗi)');
+  if (process.resourcesPath && !process.env.AIVN_RESOURCES) process.env.AIVN_RESOURCES = process.resourcesPath;
   const inproc = require('./engine');
   engine = { ...inproc, external: false, calibrate: async () => {}, ocr: (b) => require('./ocr').recognize(b), start: async () => {}, stop: async () => {} };
 }
@@ -52,9 +55,10 @@ function initStores() {
   fs.mkdirSync(paths.models, { recursive: true });
   settings = new JsonStore(path.join(ud, 'settings.json'), {
     systemPrompt: 'Bạn là AIVN, một trợ lý AI thân thiện. Hãy trả lời bằng tiếng Việt, rõ ràng và chính xác.',
-    temperature: 0.7, maxTokens: 1024, contextSize: 4096, apiPort: 1234, apiAutoStart: false, imported: [], lastModel: null, hfToken: '', theme: 'light',
+    temperature: 0.7, maxTokens: 1024, contextSize: 4096, apiPort: 1234, apiAutoStart: false, imported: [], lastModel: null, hfToken: '', theme: 'light', rag: true, vision: true,
   });
   convos = new JsonStore(path.join(ud, 'conversations.json'), { list: [] });
+  rag = createRagStore(path.join(ud, 'rag'));
   downloader = createDownloader({ dir: paths.models, send, getToken: () => settings.data.hfToken || null, maxConcurrent: 2, log: (m) => isTest && console.log(m) });
 }
 // Cài đặt gửi sang giao diện: không bao giờ kèm token
@@ -64,13 +68,17 @@ const send = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send
 const log = (msg) => { const e = { t: Date.now(), msg }; serverLog.push(e); if (serverLog.length > 200) serverLog.shift(); send('server:log', e); };
 
 const SPLIT_RE = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i;
+// Mô hình nhúng (dùng cho tìm kiếm tài liệu), không phải mô hình trò chuyện
+const EMBED_RE = /(^|[-_.])(embed|embedding|bge-m3|bge-small|bge-base|bge-large|multilingual-e5|e5-(small|base|large)|nomic-embed|gte-)/i;
 function modelIdFromFile(f) { const b = path.basename(f); const m = b.match(SPLIT_RE); return (m ? m[1] : b.replace(/\.gguf$/i, '')).toLowerCase(); }
 
 // Quét thư mục mô hình (models/<tác giả>/<repo>/<tệp>.gguf và tệp ở gốc). Mô hình chia phần chỉ hiện một dòng.
 function scanDir(dir, depth, out) {
   let ents = [];
   try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  const files = ents.filter(e => e.isFile() && /\.gguf$/i.test(e.name) && !/mmproj/i.test(e.name));
+  const files = ents.filter(e => e.isFile() && /\.gguf$/i.test(e.name) && !/mmproj/i.test(e.name) && !EMBED_RE.test(e.name));
+  const mmName = hf.pickMmprojFile(ents.filter(e => e.isFile()).map(e => e.name));
+  const mmproj = mmName ? path.join(dir, mmName) : null;
   for (const e of files) {
     const full = path.join(dir, e.name);
     const m = e.name.match(SPLIT_RE);
@@ -85,7 +93,7 @@ function scanDir(dir, depth, out) {
         }
       }
       const rel = path.relative(paths.models, dir);
-      out.push({ id: modelIdFromFile(e.name), file: e.name, path: full, size, mtime: fs.statSync(full).mtimeMs, source: 'downloaded', parts, incomplete: missing > 0, repo: rel && rel.split(path.sep).length === 2 ? rel.split(path.sep).join('/') : null });
+      out.push({ id: modelIdFromFile(e.name), file: e.name, path: full, size, mtime: fs.statSync(full).mtimeMs, source: 'downloaded', parts, incomplete: missing > 0, mmproj, vision: !!mmproj, repo: rel && rel.split(path.sep).length === 2 ? rel.split(path.sep).join('/') : null });
     } catch {}
   }
   if (depth > 0) for (const e of ents) if (e.isDirectory()) scanDir(path.join(dir, e.name), depth - 1, out);
@@ -95,7 +103,8 @@ function listModels() {
   const out = [];
   scanDir(paths.models, 3, out);
   for (const full of settings.data.imported) {
-    try { const s = fs.statSync(full); out.push({ id: modelIdFromFile(full), file: path.basename(full), path: full, size: s.size, mtime: s.mtimeMs, source: 'imported', parts: 1 }); } catch {}
+    try { const s = fs.statSync(full); let mm = null; try { const n = hf.pickMmprojFile(fs.readdirSync(path.dirname(full))); if (n) mm = path.join(path.dirname(full), n); } catch {}
+      out.push({ id: modelIdFromFile(full), file: path.basename(full), path: full, size: s.size, mtime: s.mtimeMs, source: 'imported', parts: 1, mmproj: mm, vision: !!mm }); } catch {}
   }
   const st = engine.status();
   const seen = new Set();
@@ -110,11 +119,13 @@ async function loadById(id) {
   send('model:status', { loading: true, id });
   try {
     let st;
-    try { st = await engine.loadModel(m.id, m.path, { contextSize: settings.data.contextSize }); }
+    try { st = await engine.loadModel(m.id, m.path, { contextSize: settings.data.contextSize, ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj } : {}) }); }
     catch (e) {
       const a = String(e.message).match(/unknown model architecture: '([^']+)'/i);
       if (a) throw new Error(`Kiến trúc mô hình "${a[1]}" chưa được hỗ trợ bởi llama.cpp ${hf.llamaCpp} trong AIVN. Hãy chờ bản AIVN mới hơn.`);
       if (/mmproj|clip/i.test(m.file)) throw new Error('Đây là tệp thị giác (mmproj), không phải mô hình trò chuyện.');
+      if (e.code === 'VCREDIST') { send('vision:vcredist', { url: VCREDIST_URL }); throw new Error('Chế độ nhìn ảnh cần bộ thư viện Microsoft Visual C++ (bản 2015–2022, x64). Hãy cài từ trang chính thức của Microsoft rồi nạp lại mô hình.'); }
+      if (e.code === 'NO_SERVER') throw new Error('Bản AIVN này thiếu thành phần nhìn ảnh (llama-server). Hãy cài lại AIVN.');
       throw e;
     }
     settings.data.lastModel = m.id; settings.save();
@@ -137,22 +148,91 @@ async function ensureModel(requested) {
 }
 
 
-// Đóng gói tài liệu đính kèm vào tin nhắn cuối, vừa với ngân sách ngữ cảnh của mô hình
-async function packForPrompt(messages, attached, maxTokens) {
-  await engine.calibrate([...messages.map(m => typeof m.content === 'string' ? m.content : ''), ...attached.map(a => a.text)]).catch(() => {});
+// ---------- Hỏi đáp tài liệu (RAG) ----------
+const VCREDIST_URL = 'https://aka.ms/vs/17/release/vc_redist.x64.exe';
+let rag = null; // khởi tạo khi có paths
+const embedPath = () => path.join(paths.models, ...EMBED.repo.split('/'), EMBED.file);
+function embedInfo() {
+  let st = null; try { st = fs.statSync(embedPath()); } catch {}
+  const installed = !!st && st.size === EMBED.size;
+  const job = downloader ? downloader.get(`${EMBED.repo}::${EMBED.file}`) : null;
+  return { id: EMBED.id, name: EMBED.name, size: EMBED.size, license: EMBED.license, repo: EMBED.repo, installed, mtime: st ? st.mtimeMs : null, enabled: settings.data.rag !== false, job };
+}
+let embedLoading = null;
+async function ensureEmbedder() {
+  if (!embedInfo().installed) return false;
+  const st = await engine.embedStatus();
+  if (st.loaded) return true;
+  embedLoading ||= engine.embedLoad(EMBED.id, embedPath(), { prefix: EMBED.prefix }).finally(() => { embedLoading = null; });
+  await embedLoading;
+  return true;
+}
+const ragActive = () => settings.data.rag !== false && embedInfo().installed;
+
+// Đóng gói tài liệu vào tin nhắn cuối, vừa với ngân sách ngữ cảnh của mô hình.
+// Có mô hình nhúng: tìm đoạn liên quan bằng vector (lưu chỉ mục theo cuộc trò chuyện). Không có: cách cũ theo từ khoá.
+async function packForPrompt(messages, attached, maxTokens, { convoId, reqId } = {}) {
+  const textOf = (c) => typeof c === 'string' ? c : Array.isArray(c) ? c.filter(x => x && x.type === 'text').map(x => x.text).join('\n') : '';
+  await engine.calibrate([...messages.map(m => textOf(m.content)), ...attached.map(a => a.text)]).catch(() => {});
   const st = engine.status();
   const ctx = st.contextSize || settings.data.contextSize || 4096;
   const last = messages[messages.length - 1];
-  const question = last.content;
-  const used = engine.countTokens(messages.map(m => m.content).join('\n')) + 64 * messages.length;
+  const question = textOf(last.content);
+  const used = engine.countTokens(messages.map(m => textOf(m.content)).join('\n')) + 64 * messages.length;
   const reserve = Math.min(maxTokens || 1024, Math.floor(ctx / 3));
   const budget = Math.max(256, ctx - used - reserve - 256);
-  const packed = docs.packDocuments(question, attached, budget, (t) => engine.countTokens(t));
+  const count = (t) => engine.countTokens(t);
+  const texts = attached.filter(a => a.kind !== 'image');
+  const images = attached.filter(a => a.kind === 'image');
+
+  let useRag = false;
+  if (convoId && ragActive() && (texts.length || rag.has(convoId))) {
+    try { useRag = await ensureEmbedder(); } catch (e) { console.warn('[rag] không nạp được mô hình nhúng:', e.message); useRag = false; }
+  }
+  if (useRag) {
+    try {
+      const embed = (arr, kind) => engine.embed(arr, kind);
+      if (texts.length) {
+        send('chat:ragprogress', { reqId, stage: 'index', done: 0, total: 0 });
+        await rag.addDocuments(convoId, texts, { embed, model: EMBED.id, onProgress: (p) => send('chat:ragprogress', { reqId, stage: 'index', ...p }) });
+      }
+      let imgBlock = null, imgTok = 0;
+      if (images.length) { const pi = docs.packDocuments(question, images, Math.floor(budget / 3), count); imgBlock = pi.block; imgTok = imgBlock ? count(imgBlock) : 0; }
+      const ragBudget = Math.max(300, budget - imgTok);
+      const k = Math.max(2, Math.min(6, Math.floor(ragBudget / 520)));
+      send('chat:ragprogress', { reqId, stage: 'search' });
+      const r = await rag.retrieve(convoId, question, { embed, model: EMBED.id, k, budget: ragBudget, countTokens: count });
+      if (r) {
+        const block = [imgBlock, r.block].filter(Boolean).join('\n\n');
+        const content = buildRagContent(question, block);
+        return { messages: [...messages.slice(0, -1), { ...last, content: withParts(last.content, content) }], docInfo: { mode: 'rag', truncated: false, files: [], budget, sources: r.sources, totalChunks: r.totalChunks, context: null } };
+      }
+    } catch (e) { console.warn('[rag] lỗi, dùng cách tìm theo từ khoá:', e.message); }
+  }
+  if (!attached.length) return { messages, docInfo: null };
+  const packed = docs.packDocuments(question, attached, budget, count);
   const content = docs.buildUserContent(question, packed.block);
-  return { messages: [...messages.slice(0, -1), { ...last, content }], docInfo: { truncated: packed.truncated, files: packed.files, budget, context: content } };
+  return { messages: [...messages.slice(0, -1), { ...last, content: withParts(last.content, content) }], docInfo: { mode: 'keyword', truncated: packed.truncated, files: packed.files, budget, context: content, ragAvailable: !embedInfo().installed && texts.length > 0 } };
+}
+// Giữ phần ảnh (image_url) khi thay nội dung chữ của tin nhắn
+function withParts(orig, text) {
+  if (!Array.isArray(orig)) return text;
+  return [{ type: 'text', text }, ...orig.filter(x => x && x.type === 'image_url')];
 }
 
-const api = createApiServer({ engine, models: listModels, ensureModel, log });
+const api = createApiServer({ engine, models: listModels, ensureModel, log, embeddings: {
+  info: () => embedInfo(),
+  async ensure(model) {
+    if (model && !String(model).toLowerCase().includes('bge') && String(model).toLowerCase() !== EMBED.id && !/embed/i.test(model)) {
+      const e = new Error(`Mô hình nhúng "${model}" không có. AIVN dùng "${EMBED.id}".`); e.status = 404; throw e;
+    }
+    if (!embedInfo().installed) { const e = new Error(`Chưa tải mô hình nhúng "${EMBED.id}". Hãy mở AIVN → Cài đặt → Tìm kiếm tài liệu để tải.`); e.status = 400; throw e; }
+    await ensureEmbedder();
+    return { id: EMBED.id };
+  },
+  embed: (texts) => engine.embed(texts, 'passage'),
+  count: (texts) => engine.embedCount(texts).then(a => a.reduce((s, x) => s + x, 0)),
+} });
 const updater = createUpdater({ send, log: (m) => console.log(m) });
 
 // ---------- Tải mô hình ----------
@@ -166,7 +246,7 @@ function annotateGroup(repo, g) {
 function catalogList() {
   return hw().then(h => catalog.map(c => {
     const job = downloader.get(`${c.repo}::${c.file}`);
-    const part = downloader.partialFor(c.repo, [{ path: c.file, size: c.size }]);
+    const part = downloader.partialFor(c.repo, [{ path: c.file, size: c.size }, ...(c.mmproj ? [{ path: c.mmproj.file, size: c.mmproj.size }] : [])]);
     return { ...c, installed: part.complete || isInstalled(c.file), partial: part.complete ? 0 : part.received, job, fit: hf.fitFor(c.size, h) };
   }));
 }
@@ -180,6 +260,7 @@ function registerIpc() {
     Object.assign(settings.data, rest);
     if (typeof hfToken === 'string') settings.data.hfToken = hfToken.trim().slice(0, 300);
     if (['light', 'dark', 'system'].includes(settings.data.theme)) require('electron').nativeTheme.themeSource = settings.data.theme;
+    if ('theme' in rest && win && !win.isDestroyed()) win.setBackgroundColor(windowBg());
     settings.save(); return publicSettings();
   });
 
@@ -188,12 +269,17 @@ function registerIpc() {
   ipcMain.handle('hf:repo', async (_e, repo) => {
     if (!safeRepo(repo)) throw new Error('Tên repo không hợp lệ');
     const r = await hf.repoFiles(repo, { token: settings.data.hfToken || null, hw: await hw() });
-    return { ...r, groups: r.groups.map(g => annotateGroup(repo, g)) };
+    const groups = r.groups.map(g => annotateGroup(repo, g));
+    // tệp thị giác đã có trên máy chưa (để tải bổ sung cho mô hình đã tải trước đó)
+    const mmprojInstalled = !!r.mmproj && fs.existsSync(path.join(paths.models, ...repo.split('/'), r.mmproj.path.split('/').pop()));
+    return { ...r, groups, mmprojInstalled };
   });
   ipcMain.handle('dl:start', (_e, spec) => {
     if (spec && spec.catalogId) {
       const c = catalog.find(x => x.id === spec.catalogId); if (!c) throw new Error('Mô hình không có trong danh mục');
-      return downloader.enqueue({ repo: c.repo, files: [{ path: c.file, size: c.size }], name: c.name, quant: c.quant, catalogId: c.id, urlFor: hf.resolveUrl });
+      const files = [{ path: c.file, size: c.size }];
+      if (c.mmproj) files.push({ path: c.mmproj.file, size: c.mmproj.size });
+      return downloader.enqueue({ repo: c.repo, files, name: c.name, quant: c.quant, catalogId: c.id, urlFor: hf.resolveUrl });
     }
     if (!spec || !safeRepo(spec.repo) || !Array.isArray(spec.files) || !spec.files.length || !spec.files.every(f => safeFile(f.path))) throw new Error('Yêu cầu tải không hợp lệ');
     return downloader.enqueue({ repo: spec.repo, files: spec.files.map(f => ({ path: f.path, size: Number(f.size) || 0 })), name: spec.name, quant: spec.quant, urlFor: hf.resolveUrl });
@@ -234,15 +320,22 @@ function registerIpc() {
   ipcMain.handle('models:reveal', (_e, p) => { shell.showItemInFolder(p || paths.models); return true; });
   ipcMain.handle('model:status', () => engine.status());
 
-  ipcMain.handle('chat:generate', async (_e, { reqId, messages, temperature, maxTokens, docs: attached }) => {
+  ipcMain.handle('chat:generate', async (_e, { reqId, messages, temperature, maxTokens, docs: attached, convoId, images }) => {
     const ac = new AbortController();
     generations.set(reqId, ac);
     try {
       let docInfo = null;
-      if (attached && attached.length) {
-        const packed = await packForPrompt(messages, attached, maxTokens);
+      // Mô hình nhìn ảnh: gửi ảnh trực tiếp (data URL) trong tin nhắn cuối
+      if (Array.isArray(images) && images.length && engine.status().vision) {
+        const ok = images.filter(u => typeof u === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(u) && u.length < 15e6).slice(0, 4);
+        const last = messages[messages.length - 1];
+        if (ok.length) messages = [...messages.slice(0, -1), { ...last, content: [{ type: 'text', text: String(last.content) }, ...ok.map(url => ({ type: 'image_url', image_url: { url } }))] }];
+      }
+      const hasIndex = convoId && rag && ragActive() && rag.has(convoId);
+      if ((attached && attached.length) || hasIndex) {
+        const packed = await packForPrompt(messages, attached || [], maxTokens, { convoId, reqId });
         messages = packed.messages; docInfo = packed.docInfo;
-        send('chat:docinfo', { reqId, ...docInfo });
+        if (docInfo) send('chat:docinfo', { reqId, ...docInfo });
       }
       const r = await engine.generate(messages, { temperature, maxTokens, signal: ac.signal, onToken: t => send('chat:token', { reqId, t }) });
       return { ...r, docInfo };
@@ -288,7 +381,18 @@ function registerIpc() {
     convos.data.list.sort((a, b) => b.updatedAt - a.updatedAt);
     convos.save(); return true;
   });
-  ipcMain.handle('convos:delete', (_e, id) => { convos.data.list = convos.data.list.filter(x => x.id !== id); convos.save(); return true; });
+  ipcMain.handle('convos:delete', (_e, id) => { convos.data.list = convos.data.list.filter(x => x.id !== id); convos.save(); if (rag) rag.remove(id); return true; });
+  ipcMain.handle('rag:info', () => embedInfo());
+  ipcMain.handle('rag:download', () => downloader.enqueue({ repo: EMBED.repo, files: [{ path: EMBED.file, size: EMBED.size }], name: EMBED.name, quant: 'Q8_0', catalogId: EMBED.id, urlFor: hf.resolveUrl }));
+  ipcMain.handle('rag:delete', async () => {
+    const ok = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Huỷ', 'Xoá'], defaultId: 0, cancelId: 0, title: 'Xoá mô hình nhúng', message: `Xoá "${EMBED.file}" khỏi máy? AIVN sẽ quay về cách tìm theo từ khoá.` });
+    if (ok.response !== 1) return embedInfo();
+    await engine.embedUnload().catch(() => {});
+    fs.rmSync(embedPath(), { force: true });
+    return embedInfo();
+  });
+  ipcMain.handle('rag:convo', (_e, id) => { try { return rag ? rag.summary(id) : null; } catch { return null; } });
+  ipcMain.handle('vision:vcredist', () => shell.openExternal(VCREDIST_URL));
 
   ipcMain.handle('server:start', async (_e, port) => {
     port = Number(port) || settings.data.apiPort;
@@ -349,7 +453,8 @@ function createWindow() {
   win = new BrowserWindow({
     width: 1280, height: 820, minWidth: 900, minHeight: 600, backgroundColor: windowBg(), title: 'AIVN',
     icon: path.join(__dirname, '..', 'build', 'icon.png'), show: false,
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true,
+      additionalArguments: [`--aivn-theme=${windowBg() === '#ffffff' ? 'light' : 'dark'}`] }, // giao diện đã lưu, áp dụng trước lần vẽ đầu tiên
   });
   buildMenus();
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
@@ -449,6 +554,128 @@ async function selfTestUi() {
   save(); app.quit();
 }
 
+// Tự kiểm thử v0.12 (AIVN_SELFTEST_V12=1): nhìn ảnh, RAG trên PDF dài, /v1/embeddings, Kho mô hình, đổi giao diện
+async function selfTestV12() {
+  const { clipboard, ClipboardItem } = require('electron');
+  const wc = win.webContents; const out = { started: new Date().toISOString() };
+  const js = (code) => wc.executeJavaScript(code);
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const save = () => fs.writeFileSync(process.env.AIVN_SELFTEST_OUT, JSON.stringify(out, null, 2));
+  const until = async (code, ms = 120000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await js(code)) return true; await sleep(250); } return false; };
+  const shotDir = process.env.AIVN_SHOTS; if (shotDir) fs.mkdirSync(shotDir, { recursive: true });
+  const shot = async (name) => { if (shotDir) { await sleep(350); fs.writeFileSync(path.join(shotDir, name), (await wc.capturePage()).toPNG()); } };
+  const ask = async (q) => {
+    const n = await js('document.querySelectorAll("#messages .msg.assistant").length');
+    await js(`document.querySelector("#input").value = ${JSON.stringify(q)}; document.querySelector("#composer").requestSubmit();`);
+    await sleep(500);
+    await until(`!document.querySelector("#sendBtn").hidden && document.querySelectorAll("#messages .msg.assistant").length > ${n}`, 600000);
+    return js('(() => { const m = [...document.querySelectorAll("#messages .msg.assistant")].pop(); return { body: m.querySelector(".body").innerText, sources: [...m.querySelectorAll(".sources .src")].map(e => e.innerText), stats: document.querySelector("#genStats").innerText }; })()');
+  };
+  try {
+    await until('!!document.querySelector("#input") && !!state.settings');
+    out.initialTheme = await js('[window.aivn.initialTheme, document.documentElement.dataset.theme]');
+    out.viewTransitions = await js('typeof document.startViewTransition === "function"');
+    out.reducedMotion = await js('matchMedia("(prefers-reduced-motion: reduce)").matches');
+    // 1) Nhìn ảnh
+    const vm = process.env.AIVN_VISION_MODEL;
+    if (vm) {
+      const t0 = Date.now(); const st = await loadById(vm); out.visionLoad = { ms: Date.now() - t0, vision: !!st.vision, ctx: st.contextSize };
+      await until('state.status.vision === true', 20000);
+      await clipboard.write([new ClipboardItem({ 'image/png': new Blob([fs.readFileSync(process.env.AIVN_TEST_IMAGE)], { type: 'image/png' }) })]);
+      await js('document.querySelector("#input").focus()'); wc.paste();
+      await until('!!document.querySelector(".chip.img:not(.loading)")', 20000);
+      out.visionChip = await js('document.querySelector(".chip.img").innerText');
+      const a = await ask('Bức ảnh này vẽ gì? Hãy mô tả bằng tiếng Việt, nêu màu sắc của ngôi nhà và mái nhà.');
+      out.visionAnswer = a;
+      out.visionNote = await js('[...document.querySelectorAll("#messages .doc-warn.vis")].map(e => e.innerText).join(" | ")');
+      out.ocrNoteShown = await js('document.querySelectorAll("#messages .doc-warn.ocr").length');
+      await shot('app-vision-light.png');
+      await js('document.querySelector("#messages .msg.user").scrollIntoView({ block: "start" })'); await shot('app-vision-image-light.png');
+      const f = await ask('Mặt trời trong ảnh màu gì?'); // hỏi tiếp: ảnh được gửi lại trong phiên
+      out.visionFollowUp = f.body;
+      save();
+    }
+    // 2) RAG trên PDF dài
+    const tm = process.env.AIVN_TEXT_MODEL;
+    if (tm && process.env.AIVN_TEST_DOC) {
+      if (tm !== vm) await loadById(tm);
+      await js('document.querySelector("#newChat").click()');
+      out.ragInfo = embedInfo();
+      await js(`addFiles([${JSON.stringify(process.env.AIVN_TEST_DOC)}])`);
+      await until('!!document.querySelector(".chip:not(.loading)")', 60000);
+      out.docChip = await js('document.querySelector(".chip").innerText');
+      const t1 = Date.now();
+      const a = await ask('Nhà máy Cần Thơ khánh thành ngày nào và công suất thiết kế là bao nhiêu tấn mỗi tháng?');
+      out.rag1 = { ...a, ms: Date.now() - t1 };
+      await shot('app-rag-sources-light.png');
+      const b = await ask('Mã dự án chuyển đổi số là gì và ai phụ trách?'); // không đính kèm lại: tìm trong chỉ mục của cuộc trò chuyện
+      out.rag2 = b;
+      const cid = await js('state.current && state.current.id'); out.ragIndex = rag.summary(cid);
+      save();
+    }
+    // 2b) Chưa có mô hình nhúng: tìm theo từ khoá + lời mời tải BGE-M3 (tải lần đầu), rồi huỷ tải
+    if (process.env.AIVN_RAG_DL_TEST && process.env.AIVN_TEST_DOC) {
+      out.fallbackRagInfo = { installed: embedInfo().installed };
+      await js('document.querySelector("#newChat").click()');
+      await js(`addFiles([${JSON.stringify(process.env.AIVN_TEST_DOC)}])`);
+      await until('!!document.querySelector(".chip:not(.loading)")', 60000);
+      const a = await ask('Tỷ lệ tái chế bao bì năm 2025 đạt bao nhiêu phần trăm?');
+      out.fallback = { body: a.body, sources: a.sources, offer: await js('document.querySelector("#ragOffer").hidden ? null : document.querySelector("#ragOffer").innerText'), keywordContext: !!(await js('[...state.current.messages].reverse().find(m => m.role === "user").context')) };
+      await shot('app-rag-offer-light.png');
+      await js('document.querySelector("#ragOffer [data-rag=dl]").click()');
+      await sleep(6000);
+      out.firstUseDownload = { ragText: await js('document.querySelector("#ragText").innerText'), progressVisible: await js('!document.querySelector("#ragProg").hidden'), job: embedInfo().job && { status: embedInfo().job.status, received: embedInfo().job.received, total: embedInfo().job.total, url: hf.resolveUrl(EMBED.repo, EMBED.file) } };
+      await shot('app-rag-downloading-light.png');
+      const jid = `${EMBED.repo}::${EMBED.file}`; await downloader.remove(jid); await sleep(500);
+      out.downloadRemoved = !embedInfo().installed;
+      save();
+    }
+    // 3) /v1/embeddings bằng curl
+    if (process.env.AIVN_API_TEST === '1') {
+      const port = await api.start(settings.data.apiPort).catch(() => settings.data.apiPort);
+      const { execFile } = require('child_process'); // bất đồng bộ: máy chủ API chạy cùng tiến trình
+      const curl = (args) => new Promise((res, rej) => execFile('curl', ['-s', ...args], { encoding: 'utf8', timeout: 180000 }, (e, so) => e ? rej(e) : res(so)));
+      out.curlCommand = `curl http://localhost:${port}/v1/embeddings -H "Content-Type: application/json" -d '{"model":"bge-m3-q8_0","input":[…3 câu…]}'`;
+      const raw = await curl(['http://localhost:' + port + '/v1/embeddings', '-H', 'Content-Type: application/json', '-d', JSON.stringify({ model: 'bge-m3-q8_0', input: ['Nhà máy Cần Thơ có công suất 2.750 tấn mỗi tháng.', 'Công suất của nhà máy ở Cần Thơ là bao nhiêu?', 'Hôm nay trời mưa to ở Hà Nội.'] })]);
+      const j = JSON.parse(raw);
+      const dot = (a, b) => a.reduce((s, x, i) => s + x * b[i], 0);
+      out.embeddings = { object: j.object, model: j.model, n: j.data && j.data.length, dims: j.data && j.data[0].embedding.length, usage: j.usage,
+        simRelated: +dot(j.data[0].embedding, j.data[1].embedding).toFixed(3), simUnrelated: +dot(j.data[0].embedding, j.data[2].embedding).toFixed(3), error: j.error || null };
+      out.modelsList = JSON.parse(await curl(['http://localhost:' + port + '/v1/models'])).data.map(m => m.id + (m.type ? ':' + m.type : '') + (m.vision ? ':vision' : ''));
+      save();
+    }
+    // 4) Kho mô hình
+    await js('show("discover")'); await until('document.querySelectorAll("#catalog .card").length > 0', 20000);
+    out.kho = await js('({ nav: document.querySelector(".nav-item[data-view=discover]").innerText, title: document.querySelector("#view-discover h2").innerText, cards: document.querySelectorAll("#catalog .card").length, visionCards: [...document.querySelectorAll("#catalog .card")].filter(c => c.querySelector(".tag.vis")).map(c => c.querySelector("h4").innerText) })');
+    await shot('app-kho-mo-hinh-light.png');
+    await js('document.querySelector("#catalog .card .tag.vis").scrollIntoView({ block: "center" })'); await shot('app-kho-vision-cards-light.png');
+    if (process.env.AIVN_REPO_TEST) {
+      await js(`openRepo(${JSON.stringify(process.env.AIVN_REPO_TEST)})`);
+      await until('!!document.querySelector("#repoArea .qtable") || !!document.querySelector("#repoArea .err")', 30000);
+      out.repoNotes = await js('[...document.querySelectorAll("#repoArea .note")].map(n => n.innerText)');
+      out.repoVisionTag = await js('[...document.querySelectorAll("#repoArea .qr .tag.vis")].length');
+      await shot('app-kho-repo-vision-light.png');
+    }
+    // 5) Đổi giao diện mượt (vòng tròn từ nút bấm)
+    await js('show("chat")'); await sleep(300);
+    await js('(() => { const o = document.startViewTransition.bind(document); window.__vt = []; document.startViewTransition = (cb) => { const v = o(cb); const t0 = performance.now(); v.ready.then(() => __vt.push("ready " + Math.round(performance.now() - t0)), e => __vt.push("rej " + e.name + ": " + e.message)); v.finished.then(() => __vt.push("fin " + Math.round(performance.now() - t0))); return v; }; })()');
+    let grab = null; // quay màn hình Xvfb để thấy hiệu ứng vòng tròn (capturePage không chụp lớp view-transition)
+    if (process.env.AIVN_GRAB) { grab = require('child_process').spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'x11grab', '-framerate', '60', '-video_size', '1400x900', '-i', process.env.DISPLAY, '-t', '2.5', process.env.AIVN_GRAB]); await sleep(900); }
+    await js('window.__t0 = performance.now(); new MutationObserver((m, o) => { window.__applied = Math.round(performance.now() - window.__t0); o.disconnect(); }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] }); document.querySelector("#themeRow button[data-theme=dark]").click()');
+    await sleep(150); if (shotDir) fs.writeFileSync(path.join(shotDir, 'app-theme-switch-mid.png'), (await wc.capturePage()).toPNG()); // chụp giữa hiệu ứng (480 ms)
+    out.vtClassDuringSwitch = await js('document.documentElement.classList.contains("vt-theme") || document.documentElement.classList.contains("theme-anim")');
+    if (grab) await new Promise(r => grab.once('exit', r));
+    await sleep(700); out.themeAfter = await js('document.documentElement.dataset.theme'); out.themeAppliedMs = await js('window.__applied'); out.vtLog = await js('window.__vt'); await shot('app-chat-dark.png');
+    await js('show("discover")'); await shot('app-kho-mo-hinh-dark.png');
+    await js('show("chat")');
+    out.themeBeforeBack = await js('[document.documentElement.dataset.theme, applyTheme.pending, state.settings.theme]');
+    await js('document.querySelector("#themeRow button[data-theme=light]").click()'); await sleep(900);
+    out.themeBack = await js('[document.documentElement.dataset.theme, applyTheme.pending, state.settings.theme]');
+    out.saved = (convos.data.list || []).slice(0, 2).map(c => ({ id: c.id, msgs: c.messages.map(m => ({ role: m.role, sources: m.sources ? m.sources.length : 0, visionNote: m.visionNote || null, ctx: !!m.context })) }));
+  } catch (e) { out.error = e.stack || String(e); }
+  save(); app.quit();
+}
+
 const gotLock = isTest || app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
 else {
@@ -460,6 +687,7 @@ else {
     if (settings.data.apiAutoStart || process.env.AIVN_API === '1') api.start(settings.data.apiPort).catch(e => log('Lỗi: ' + e.message));
     if (process.env.AIVN_LOAD) loadById(process.env.AIVN_LOAD).catch(e => log('Lỗi nạp: ' + e.message));
     if (app.isPackaged || process.env.AIVN_UPDATE_CHECK === '1') setTimeout(() => updater.check({ silent: true }), Number(process.env.AIVN_UPDATE_DELAY || 5000));
+    if (process.env.AIVN_SELFTEST_V12) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestV12().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));
     if (process.env.AIVN_SELFTEST_UI) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestUi().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));
     if (process.env.AIVN_SELFTEST_HF) selfTestHf().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); });
     if (process.env.AIVN_SELFTEST_DOC) selfTestDoc().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); });
