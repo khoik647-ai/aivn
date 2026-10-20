@@ -383,3 +383,10 @@ details.adv[open]{display:flex;flex-direction:column;gap:10px}
 .tag.tools-good{background:var(--ok-soft);color:var(--ok);border-color:transparent}.tag.tools-limited{background:var(--warm-soft);color:var(--warm);border-color:transparent}.tag.tools-none{background:var(--danger-soft);color:var(--danger);border-color:transparent}
 
 .screen-area{margin:4px 0 8px}.screen-area h3.mt{margin-top:16px}.tag.comp{background:var(--accent-soft,#fde8ea);color:var(--accent,#b3121c);border-color:transparent;font-weight:600}
+
+/* 0.14.4: chẩn đoán + nút nhật ký trên thẻ lỗi */
+.err-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.row.wrap { flex-wrap: wrap; gap: 6px; }
+.scan-row { margin-top: 6px; align-items: center; }
+.scan-q { width: 110px; padding: 4px 8px; border: 1px solid var(--line, #ddd); border-radius: 6px; background: var(--bg, #fff); color: inherit; font: inherit; font-size: 12px; }
+.diag-block.mt { margin-top: 10px; }

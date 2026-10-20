@@ -8,7 +8,7 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
   let cached = { loaded: false };
   let loading = null;
   let ratio = 1 / 3;
-  let extraEnv = {}, restarting = false; // token / ký tự, được hiệu chỉnh theo văn bản thật
+  let extraEnv = {}, restarting = false, killReason = null; const inflight = new Map(); // id -> tên lệnh (ghi vào nhật ký khi bộ máy dừng) // token / ký tự, được hiệu chỉnh theo văn bản thật
 
   function start() {
     if (readyP) return readyP;
@@ -20,19 +20,23 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
       child.on('message', (m) => {
         if (m.type === 'ready') { log(`[engine] tiến trình ${m.pid}, Node ${m.node}`); return resolve(); }
         if (m.type === 'token') { tokenCbs.get(m.reqId)?.(m.t); return; }
-        const p = pending.get(m.id); if (!p) return; pending.delete(m.id);
+        const p = pending.get(m.id); if (!p) return; pending.delete(m.id); inflight.delete(m.id);
         if (m.error) { const e = new Error(m.error); if (m.code) e.code = m.code; if (m.stack) e.hostStack = m.stack; if (m.attempts) e.attempts = m.attempts; if (m.gpu != null) e.gpu = m.gpu; p.reject(e); } else p.resolve(m.result);
       });
       child.on('error', (e) => { log('[engine] lỗi khởi động: ' + e.message); reject(e); });
       child.on('exit', (code, signal) => {
         const wasLoaded = cached.loaded || !!loading;
         child = null; readyP = null; cached = { loaded: false };
-        const err = new Error(`Bộ máy AI đã dừng đột ngột${signal ? ` (${signal})` : code ? ` (mã ${code})` : ''}. Có thể máy không đủ bộ nhớ cho mô hình này, hãy thử bản lượng tử nhỏ hơn.`);
+        const busy = [...inflight.values()]; inflight.clear();
+        const why = killReason; killReason = null;
+        // signal (SIGTERM…) chỉ có khi chính AIVN dừng tiến trình; sập thật (thiếu bộ nhớ, lỗi driver) cho mã thoát
+        const err = new Error(why ? `Bộ máy AI đã được khởi động lại (${why}).` : `Bộ máy AI đã dừng đột ngột${signal ? ` (${signal})` : code ? ` (mã ${code}${code > 0xC0000000 ? ' = 0x' + (code >>> 0).toString(16).toUpperCase() : ''})` : ''}. Có thể máy không đủ bộ nhớ (RAM/VRAM) cho mô hình hoặc độ dài ngữ cảnh này.`);
+        err.code = 'ENGINE_EXIT'; err.exitCode = code; err.signal = signal; err.killReason = why;
         for (const p of pending.values()) p.reject(err);
         pending.clear(); tokenCbs.clear();
-        log(`[engine] tiến trình kết thúc code=${code} signal=${signal}`);
+        log(`[engine] tiến trình kết thúc code=${code} signal=${signal}${why ? ' · do AIVN: ' + why : ''}${busy.length ? ' · đang chạy: ' + busy.join(', ') : ''}${wasLoaded ? ' · đang có mô hình' : ''}`);
         reject(err);
-        if ((wasLoaded || code) && !restarting) onCrash(err);
+        if ((wasLoaded || code) && !restarting && !busy.length) onCrash(err); // đang có lượt chạy: lỗi hiện ngay trong câu trả lời (và tự phục hồi)
       });
     });
     return readyP;
@@ -40,7 +44,7 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
 
   async function call(method, ...args) {
     await start();
-    return new Promise((resolve, reject) => { const id = ++seq; pending.set(id, { resolve, reject }); child.send({ id, method, args }); });
+    return new Promise((resolve, reject) => { const id = ++seq; pending.set(id, { resolve, reject }); inflight.set(id, method); child.send({ id, method, args }); });
   }
 
   return {
@@ -86,11 +90,12 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
     embedCount: (texts) => call('embedCount', texts),
     // trả Float32Array[] (chuẩn hoá L2)
     async embed(texts, kind) { const r = await call('embed', texts, kind); return r.map(b => { const u = Uint8Array.from(Buffer.from(b, 'base64')); return new Float32Array(u.buffer); }); },
-    async stop() { if (child) { try { child.kill(); } catch {} } },
+    async stop(reason = 'thoát ứng dụng') { if (child) { killReason = reason; log('[engine] dừng tiến trình: ' + reason); try { child.kill(); } catch {} } },
+    busy: () => inflight.size > 0,
     // Khởi động lại tiến trình bộ máy với biến môi trường mới (vd. AIVN_GPU=off để chỉ dùng CPU)
-    async restart(envPatch = {}) {
+    async restart(envPatch = {}, reason = 'đổi cài đặt bộ máy') {
       extraEnv = { ...extraEnv, ...envPatch };
-      const c = child; restarting = true;
+      const c = child; restarting = true; if (c) { killReason = reason; log('[engine] khởi động lại: ' + reason + (inflight.size ? ' (đang có ' + inflight.size + ' lệnh chạy)' : '')); }
       if (c) await new Promise((r) => { const t = setTimeout(r, 8000); c.once('exit', () => { clearTimeout(t); r(); }); try { c.kill(); } catch { r(); } });
       restarting = false; cached = { loaded: false };
     },

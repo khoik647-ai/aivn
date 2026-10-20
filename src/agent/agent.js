@@ -115,6 +115,35 @@ const CLAIMS = [
   [/(đã|vừa)\s+chụp\s+màn hình|màn hình (đang )?hiển thị/iu, ['screen_look', 'screen_act']],
 ];
 const COMP = ['open_app', 'open_path', 'open_url', 'close_app', 'run_command', 'system_action', 'screen_look', 'screen_act', 'list_apps', 'running_apps'];
+// Câu khẳng định "ứng dụng chưa cài / không có" (hay gợi ý dùng bản web thay thế)
+const NOT_INSTALLED_RE = /(chưa\s+(được\s+)?cài(\s+đặt)?|không\s+được\s+cài(\s+đặt)?|chưa\s+có\s+(ứng dụng|trên máy)|không\s+(có|tìm thấy|tồn tại)[^.\n]{0,40}(ứng dụng|trên máy|trong máy)|không có trên máy|zalo\.me|chat\.zalo|(trang|bản|phiên bản)\s+web\s+(của\s+)?zalo)/iu;
+// "mở zalo", "mở ứng dụng zalo trên màn hình máy của tôi và gửi tin…" → { name: 'zalo', rest: 'và gửi tin…' }
+function openIntent(query) {
+  const s = String(query || '').trim().replace(/\s+/g, ' ');
+  const m = s.match(/^(?:(?:hãy|giúp (?:tôi|mình|em)|làm ơn|vui lòng|bạn|aivn bot,?)\s+)*(mở|khởi động|bật|chạy)\s+(?:(?:giúp|cho)\s+(?:tôi|mình|em)\s+)?(?:(ứng dụng|app|phần mềm|chương trình)\s+)?(.+)$/iu);
+  if (!m) return null;
+  if (/^(bật|chạy)$/i.test(m[1]) && !m[2]) return null; // "bật wifi", "chạy lệnh…" không phải mở ứng dụng
+  const tail = m[3];
+  if (/https?:|www\.|^[^\s]+\.(com|vn|net|org|io)(\b|$)/i.test(tail)) return null; // địa chỉ web → open_url
+  const cut = tail.search(/\s+(?:trên|ở|tại|trong)\s+(?:màn hình|máy|desktop|laptop)|\s+(?:và|rồi|sau đó|để|giúp|giùm|cho tôi|cho mình|cho em|nhé|nha|đi|với)(?=\s|$)|[,.;!?\n]/iu);
+  let name = (cut >= 0 ? tail.slice(0, cut) : tail).replace(/^["“'‘]|["”'’]$/g, '').trim();
+  let rest = (cut >= 0 ? tail.slice(cut) : '').replace(/^\s*(?:trên|ở|tại|trong)\s+(?:màn hình|máy|desktop|laptop)(?:\s+(?:máy|tính))?(?:\s+(?:của\s+)?(?:tôi|mình|em))?/iu, '').replace(/^[\s,.;]+/, '').trim();
+  if (/^(?:(?:giúp|giùm|cho)\s*(?:tôi|mình|em)?|nhé|nha|đi|với|ngay|lên|ra|luôn|nào|[\s,.;!?])*$/iu.test(rest)) rest = '';
+  if (!name || name.length > 40 || name.split(' ').length > 4) return null;
+  if (/^(thư mục|tệp|file|trang|web|website|đường dẫn|link|đèn|wifi|bluetooth|âm lượng|loa|nhạc|video|bài|lệnh|terminal lệnh)(?=\s|$)/iu.test(name)) return null;
+  if (/https?:|www\.|\.(com|vn|net|org|io)(\b|$)|[\\/:]/i.test(name)) return null;
+  return { name, rest };
+}
+// Bỏ các câu trả lời CŨ khẳng định "ứng dụng chưa cài" để mô hình không chép lại (phải kiểm tra lại bằng công cụ trong lượt này)
+const STALE_NOTE = '(Câu trả lời cũ này đã được ẩn: nó khẳng định một ứng dụng chưa cài/không có hoặc đề nghị dùng bản web mà không kiểm tra bằng công cụ. Không lặp lại nó; lượt này phải kiểm tra lại bằng công cụ.)';
+function sanitizeHistory(messages) {
+  let n = 0;
+  const out = messages.map((m, i) => {
+    if (i === messages.length - 1 || m.role !== 'assistant' || typeof m.content !== 'string' || !NOT_INSTALLED_RE.test(m.content)) return m;
+    n++; return { ...m, content: STALE_NOTE };
+  });
+  return { messages: out, hidden: n };
+}
 function fakeActionCheck(text, steps, names, query = '') {
   const t = String(text || '');
   if (!t.trim()) return null;
@@ -124,6 +153,7 @@ function fakeActionCheck(text, steps, names, query = '') {
   if (/\[\s*(screen|tool|open_app|open_url|screen_act|screen_look|run_command|close_app|action|bước \d+:?\s*(mở|bấm|gõ))[^\]\n]{0,40}\]/i.test(t)) return 'pseudo';
   if (/\b(screen_act|screen_look|open_app|run_command|open_url|close_app|list_apps)\s*[({]/.test(t) || /<\/?tool_(call|result)/i.test(t)) return 'pseudo';
   if (/(gõ|nhập|trả lời|nói|gửi)\s*["“'‘]?\s*tiếp tục/i.test(t) && !steps.length) return 'continue';
+  if (names.includes('open_app') && NOT_INSTALLED_RE.test(t) && !steps.some(x => x.name === 'open_app' || x.name === 'list_apps')) return 'claim'; // nói "chưa cài" mà lượt này chưa hề kiểm tra
   if (!names.some(n => COMP.includes(n)) && !steps.length) return null;
   for (const [re, tools] of CLAIMS) if (re.test(t) && !ok(tools)) return 'claim';
   return null;
@@ -368,21 +398,49 @@ function createAgent(deps) {
     const query = lastUser ? (typeof lastUser.content === 'string' ? lastUser.content : (lastUser.content || []).map(x => x.text || '').join(' ')) : '';
     onStatus({ stage: 'prepare' });
     const sys = await systemPrompt({ query, names, headless });
-    const msgs = [{ role: 'system', content: sys.text }, ...messages];
+    const san = sanitizeHistory(messages);
+    if (san.hidden) deps.log && deps.log(`[aivn bot] ẩn ${san.hidden} câu trả lời cũ khẳng định ứng dụng chưa cài`);
+    const msgs = [{ role: 'system', content: sys.text }, ...san.messages];
     const st = deps.engine.status();
     const ctx = { signal, convoId, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
     const steps = [], seen = new Map();
     let text = '', finishReason = 'stop', calls = 0, nudged = false, forcedTried = false, warning = null, fakeSeen = false;
     const usage = { completion_tokens: 0, seconds: 0 };
     const t0 = Date.now();
+    const logTool = (st) => { try { deps.logTool && deps.logTool({ name: st.name, args: st.args, status: st.status, summary: st.summary, ms: st.ms, auto: !!st.auto }); } catch {} };
+    // "mở X": gọi open_app THẬT ngay (không phụ thuộc mô hình hay lịch sử cũ)
+    const intent = names.includes('open_app') && !headless ? openIntent(query) : null;
+    let autoOpen = null;
+    if (intent) {
+      const call = { id: 'auto_open_' + Date.now().toString(36), name: 'open_app', arguments: { name: intent.name } };
+      const def = defOf('open_app');
+      const step = { id: call.id, name: 'open_app', label: def.label, icon: def.icon, args: call.arguments, status: 'running', startedAt: Date.now(), round: 0, pre: '', auto: true };
+      steps.push(step); onStep({ ...step }); onStatus({ stage: 'tools', round: 0, pre: '' });
+      let out;
+      try { out = await exec('open_app', call.arguments, ctx); }
+      catch (e) { const msg = (e && e.message) || String(e); out = { error: msg, forModel: `Lỗi: ${msg}`, summary: msg }; }
+      Object.assign(step, { status: out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, ms: Date.now() - step.startedAt });
+      onStep({ ...step }); logTool(step); calls++;
+      seen.set('open_app:' + JSON.stringify(call.arguments), out);
+      msgs.push({ role: 'assistant', content: '', tool_calls: [{ id: call.id, type: 'function', function: { name: 'open_app', arguments: JSON.stringify(call.arguments) } }] });
+      msgs.push({ role: 'tool', tool_call_id: call.id, content: String(out.forModel || out.summary || '') });
+      autoOpen = { ok: !out.error, out };
+      if (autoOpen.ok && !intent.rest) { // chỉ cần mở ứng dụng: xong, không cần mô hình
+        return { text: `Đã mở ${out.summary ? out.summary.replace(/^Đã mở\s*/, '') : intent.name}.`, steps, usage, finishReason: 'stop', urls: [], memories: sys.memories.map(m => m.text), tools: names, warning: null };
+      }
+    }
+    // yêu cầu thao tác trên máy mà chưa có bước thật nào thành công → lượt đầu BẮT BUỘC gọi công cụ (hoặc cannot_do)
+    const forceFirst = !headless && names.some(n => COMP.includes(n)) && !(autoOpen && autoOpen.ok) && (!!intent || /^\s*(?:(?:hãy|giúp (?:tôi|mình|em)|làm ơn|vui lòng|bạn)\s+)*(mở|khởi động|gửi tin|nhắn tin|nhắn cho|gửi cho|đóng|tắt ứng dụng)(?=\s|$)/iu.test(query));
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const last = round === MAX_ROUNDS - 1 || calls >= MAX_CALLS;
       onStatus({ stage: 'think', round });
       let streamed = '';
-      let r = await deps.engine.chatStep(msgs, { tools, toolChoice: last ? 'none' : 'auto', temperature: s.agentTemperature ?? 0.2, maxTokens: s.maxTokens || 1024, signal,
+      const forcing = round === 0 && forceFirst && !last;
+      let r = await deps.engine.chatStep(msgs, { tools: forcing ? [...tools, CANNOT] : tools, toolChoice: last ? 'none' : forcing ? 'required' : 'auto', temperature: s.agentTemperature ?? 0.2, maxTokens: s.maxTokens || 1024, signal,
         onToken: (t) => { streamed += t; onToken(t, round); } });
       usage.completion_tokens += r.usage?.completion_tokens || 0;
       if (signal?.aborted || r.finishReason === 'abort') { text = r.text || streamed; finishReason = 'abort'; break; }
+      if (forcing && r.toolCalls && r.toolCalls[0] && r.toolCalls[0].name === 'cannot_do') { const why = r.toolCalls[0].arguments && r.toolCalls[0].arguments.reason; text = 'Mình chưa làm được việc này' + (why ? ': ' + String(why) : '.'); finishReason = 'stop'; break; }
       if ((!r.toolCalls || !r.toolCalls.length) && r.finishReason !== 'abort' && /<tool_call>|"name"\s*:/.test(r.text || '')) {
         // mô hình viết lời gọi công cụ dạng văn bản (vd. SmolVLM qua llama-server, Qwen nhỏ): tự tách thành lời gọi thật
         const p = TP.parseToolCalls(r.text, names);
@@ -438,11 +496,18 @@ function createAgent(deps) {
           if (!userErr) deps.log && deps.log(`[aivn bot] ${call.name} lỗi: ${msg}`);
         }
         Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, ms: Date.now() - step.startedAt });
+        logTool(step);
         onStep({ ...step });
         msgs.push({ role: 'tool', tool_call_id: call.id, content: typeof out.forModel === 'string' && out.forModel ? out.forModel : String(out.forModel ?? out.message ?? out.summary ?? JSON.stringify(out)) || '(không có kết quả)' });
         if (signal?.aborted) break;
       }
       if (signal?.aborted) { finishReason = 'abort'; break; }
+    }
+    // mô hình nhỏ hay chép nguyên kết quả lỗi của công cụ (kèm chỉ dẫn dành cho mô hình) làm câu trả lời → nói lại cho người dùng
+    if (/^\s*Lỗi:/.test(text || '') && steps.some(x => x.status === 'error')) {
+      const e = steps.filter(x => x.status === 'error').at(-1);
+      const why = String(e.summary || '').replace(/^\(lặp lại\)\s*/, '').split(/\s*(?:Bước tiếp|Gợi ý cho mô hình|Không mở trang web)/)[0].trim().replace(/[.\s]+$/, '');
+      text = `Mình chưa làm được việc này: ${why}.` + (e.name === 'open_app' ? ' Bạn kiểm tra lại tên ứng dụng giúp mình (hoặc bấm "Kiểm tra quét ứng dụng" trong Cài đặt → Nâng cao để xem AIVN thấy những ứng dụng nào).' : '');
     }
     if (fakeSeen && !warning && finishReason !== 'abort' && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) warning = NO_ACTION_WARN;
     usage.seconds = (Date.now() - t0) / 1000;
@@ -454,4 +519,4 @@ function createAgent(deps) {
   return { run, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck };
 }
 
-module.exports = { createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN };
+module.exports = { openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN };
