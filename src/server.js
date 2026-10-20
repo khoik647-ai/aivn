@@ -24,7 +24,7 @@ function parseResponseFormat(rf) {
   throw new Error('"response_format.type" phải là "text", "json_object" hoặc "json_schema"');
 }
 
-function createApiServer({ engine, models, ensureModel, log, embeddings = null }) {
+function createApiServer({ engine, models, ensureModel, log, embeddings = null, isBlocked = null }) {
   let server = null;
   let port = null;
 
@@ -46,6 +46,8 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null }
     const url = new URL(req.url, 'http://localhost');
     const p = url.pathname.replace(/\/+$/, '');
     if (req.method === 'OPTIONS') { res.writeHead(204, cors()); return res.end(); }
+    const blocked = isBlocked && isBlocked();
+    if (blocked) return err(res, 423, blocked, 'locked');
     log(`${req.method} ${p}`);
 
     if (req.method === 'GET' && (p === '/v1/models' || p === '/models')) {

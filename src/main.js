@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, Notification, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, Notification, Tray, nativeImage, globalShortcut, powerMonitor, net, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const catalog = require('./catalog');
@@ -15,6 +15,9 @@ const { createMemoryStore } = require('./agent/memory');
 const { createScheduler } = require('./agent/scheduler');
 const sandbox = require('./agent/sandbox');
 const { normalizeTools } = require('./schema');
+const { createLicenseState } = require('./gate');
+const { createAppLock, resetData } = require('./applock');
+const LIC = require('./license');
 
 const isTest = process.env.AIVN_TEST === '1';
 if (process.env.AIVN_USER_DATA) app.setPath('userData', process.env.AIVN_USER_DATA);
@@ -69,8 +72,77 @@ function initStores() {
   scheduler = createScheduler({ file: path.join(ud, 'schedules.json'), onFire: onScheduleFire, log: (m) => { console.log(m); log(m); } });
   agent = createAgent({ engine, getSettings: () => settings.data, memory, scheduler, extractFile: docs.extractFile, embedForMemory, log,
     trash: async (p) => { try { await shell.trashItem(p); } catch (e) { throw new Error('Không chuyển được tệp vào Thùng rác (' + e.message + '). Tệp vẫn còn nguyên.'); } } });
+  lic = createLicenseState({ file: path.join(ud, 'license.json'), isPackaged: app.isPackaged, log: (m) => { log(m); if (isTest) console.log(m); }, fetchJson });
+  appLock = createAppLock(path.join(ud, 'applock.json'));
   downloader = createDownloader({ dir: paths.models, send, getToken: () => settings.data.hfToken || null, maxConcurrent: 2, log: (m) => isTest && console.log(m) });
 }
+// ---------- Cổng vào: kích hoạt (bắt buộc) + Khóa ứng dụng (tuỳ chọn) ----------
+let lic, appLock, unlocked = false, servicesOn = false, licTimer = null, idleTimer = null;
+const devSkip = !app.isPackaged && process.env.AIVN_SKIP_ACTIVATION === '1'; // chỉ khi chạy từ mã nguồn để kiểm thử
+async function fetchJson(url) {
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 15000);
+  try { const r = await net.fetch(url, { signal: ac.signal, cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); return await r.json(); }
+  finally { clearTimeout(t); }
+}
+const activated = () => devSkip || lic.evaluate().ok;
+const isLocked = () => appLock.isEnabled() && !unlocked;
+const gateMode = () => !activated() ? 'activate' : isLocked() ? 'lock' : null;
+const gated = () => !!gateMode();
+function loadUi() {
+  if (!win || win.isDestroyed()) return;
+  const file = gateMode() ? 'gate.html' : 'index.html';
+  if (!win.webContents.getURL().endsWith('/' + file)) win.loadFile(path.join(__dirname, 'renderer', file));
+  else win.webContents.send('gate:changed', {});
+}
+function abortAll() { for (const ac of generations.values()) { try { ac.abort(); } catch {} } if (typeof stopComputer === 'function') stopComputer('khoá'); }
+function lockNow(reason) {
+  if (!appLock.isEnabled() || !unlocked) return false;
+  unlocked = false; abortAll(); log('[khoá] AIVN đã khoá (' + reason + ')'); if (isTest) console.log('[khoá] ' + reason);
+  loadUi(); return true;
+}
+function startServices() {
+  if (servicesOn) return; servicesOn = true;
+  applyBackgroundPrefs();
+  scheduler.start();
+  if (settings.data.apiAutoStart || process.env.AIVN_API === '1') api.start(settings.data.apiPort).catch(e => log('Lỗi: ' + e.message));
+  if (process.env.AIVN_LOAD) loadById(process.env.AIVN_LOAD).catch(e => log('Lỗi nạp: ' + e.message));
+}
+function stopServices() { if (!servicesOn) return; servicesOn = false; abortAll(); scheduler.stop(); api.stop().catch(() => {}); }
+async function licenseCheck() {
+  if (devSkip) return;
+  const r = await lic.checkOnline();
+  if (!lic.evaluate().ok) { if (servicesOn) { log('[kích hoạt] ' + (LIC.REASON_VI[lic.evaluate().reason] || 'mất kích hoạt')); stopServices(); } }
+  else if (!servicesOn) startServices();
+  loadUi();
+  return r;
+}
+function startGateTimers() {
+  clearInterval(licTimer); licTimer = setInterval(() => licenseCheck().catch(() => {}), LIC.CHECK_EVERY_MS);
+  clearInterval(idleTimer); idleTimer = setInterval(() => {
+    const o = appLock.info(); if (!o.enabled || !unlocked || !o.idleMinutes) return;
+    const idle = process.env.AIVN_FAKE_IDLE && !app.isPackaged ? Number(process.env.AIVN_FAKE_IDLE) : powerMonitor.getSystemIdleTime();
+    if (idle >= o.idleMinutes * 60) lockNow('không hoạt động ' + o.idleMinutes + ' phút');
+  }, isTest ? 2000 : 30000);
+  for (const ev of ['lock-screen', 'suspend']) powerMonitor.on(ev, () => { if (appLock.info().lockOnSleep) lockNow(ev === 'suspend' ? 'máy ngủ' : 'khoá màn hình'); });
+  powerMonitor.on('resume', () => licenseCheck().catch(() => {}));
+}
+function registerGateIpc(handle) {
+  handle('gate:state', () => ({ mode: gateMode(), license: lic.publicInfo(), lock: appLock.info() }));
+  handle('gate:activate', async (_e, code) => { lic.activate(code); licenseCheck().catch(() => {}); if (activated()) startServices(); loadUi(); return lic.publicInfo(); });
+  handle('gate:retry', async () => { const r = await licenseCheck(); return { ok: !!(r && r.ok), error: r && r.error }; });
+  handle('gate:unlock', async (_e, pw) => { if (!isLocked()) return { ok: true }; const r = await appLock.unlock(String(pw || '')); if (r.ok) { unlocked = true; loadUi(); } return r; });
+  handle('gate:reset', async (_e, word) => {
+    if (!isLocked()) throw new Error('Chỉ dùng khi quên mật khẩu ở màn hình khoá');
+    stopServices(); const removed = resetData(paths.userData, word);
+    log('[khoá] đã xoá dữ liệu: ' + removed.join(', '));
+    await Promise.race([engine.stop().catch(() => {}), new Promise(r => setTimeout(r, 3000))]);
+    if (!isTest) app.relaunch(); app.exit(0);
+  });
+  handle('gate:copy', (_e, t) => { clipboard.writeText(String(t || '').slice(0, 64)); return true; });
+  handle('gate:quit', () => { quitting = true; app.quit(); });
+  handle('gate:enter', () => { loadUi(); return gateMode(); });
+}
+
 // Cài đặt gửi sang giao diện: không bao giờ kèm token
 const publicSettings = () => { const { hfToken, ...rest } = settings.data; return { ...rest, hfTokenSet: !!hfToken }; };
 
@@ -230,6 +302,7 @@ async function runAgentTurn({ reqId, convoId, messages, headless = false, signal
 // ---------- Lịch tự động ----------
 let lastNotice = null;
 function notify(title, body, convoId) {
+  if (gated()) { title = 'AIVN'; body = 'Có thông báo mới. Mở khoá AIVN để xem.'; convoId = null; } // không lộ nội dung khi đang khoá
   lastNotice = { title, body, at: Date.now(), supported: Notification.isSupported(), shown: false };
   if (!Notification.isSupported()) return;
   const n = new Notification({ title, body: String(body || '').slice(0, 240), icon: path.join(__dirname, '..', 'build', 'icons', '128x128.png') });
@@ -343,7 +416,7 @@ function withParts(orig, text) {
   return [{ type: 'text', text }, ...orig.filter(x => x && x.type === 'image_url')];
 }
 
-const api = createApiServer({ engine, models: listModels, ensureModel, log, embeddings: {
+const api = createApiServer({ engine, models: listModels, ensureModel, log, isBlocked: () => !activated() ? 'AIVN chưa được kích hoạt trên máy này.' : isLocked() ? 'AIVN đang khoá. Hãy mở khoá ứng dụng để dùng máy chủ API.' : null, embeddings: {
   info: () => embedInfo(),
   async ensure(model) {
     if (model && !String(model).toLowerCase().includes('bge') && String(model).toLowerCase() !== EMBED.id && !/embed/i.test(model)) {
@@ -376,6 +449,17 @@ function catalogList() {
 
 // ---------- IPC ----------
 function registerIpc() {
+  // Mọi kênh IPC (trừ cổng) bị chặn khi chưa kích hoạt hoặc đang khoá: không dữ liệu nào tới giao diện
+  const rawHandle = ipcMain.handle.bind(ipcMain);
+  registerGateIpc(rawHandle);
+  ipcMain.handle = (ch, fn) => rawHandle(ch, (e, ...a) => { if (gated()) throw new Error(gateMode() === 'activate' ? 'AIVN chưa được kích hoạt' : 'AIVN đang khoá'); return fn(e, ...a); });
+  ipcMain.handle('lock:info', () => appLock.info());
+  ipcMain.handle('lock:set', async (_e, { password, confirm, current }) => { await appLock.setPassword(password, confirm, current); unlocked = true; return appLock.info(); });
+  ipcMain.handle('lock:disable', async (_e, { current }) => { await appLock.disable(current); return appLock.info(); });
+  ipcMain.handle('lock:options', (_e, o) => { appLock.setOptions(o || {}); return appLock.info(); });
+  ipcMain.handle('lock:now', () => lockNow('bấm Khóa ngay'));
+  ipcMain.handle('license:info', () => lic.publicInfo());
+  ipcMain.handle('license:check', async () => { const r = await licenseCheck(); return { ok: !!(r && r.ok), error: r && r.error, info: lic.publicInfo() }; });
   ipcMain.handle('app:info', async () => ({ version: app.getVersion(), paths, hardware: await hw(), llamaCpp: hf.llamaCpp }));
   ipcMain.handle('settings:get', () => publicSettings());
   ipcMain.handle('settings:set', (_e, patch = {}) => {
@@ -572,7 +656,7 @@ function buildMenus() {
     { role: 'delete', label: 'Xoá' }, { role: 'selectAll', label: 'Chọn tất cả' }] };
   const view = { label: 'Xem', submenu: [{ role: 'resetZoom', label: 'Cỡ chữ mặc định' }, { role: 'zoomIn', label: 'Phóng to' }, { role: 'zoomOut', label: 'Thu nhỏ' }, { type: 'separator' }, { role: 'togglefullscreen', label: 'Toàn màn hình' }] };
   const template = [
-    ...(isMac ? [{ label: 'AIVN', submenu: [{ role: 'about', label: 'Giới thiệu AIVN' }, { type: 'separator' }, { role: 'hide', label: 'Ẩn AIVN' }, { role: 'hideOthers', label: 'Ẩn ứng dụng khác' }, { role: 'unhide', label: 'Hiện tất cả' }, { type: 'separator' }, { role: 'quit', label: 'Thoát AIVN' }] }] : [{ label: 'Tệp', submenu: [{ role: 'quit', label: 'Thoát' }] }]),
+    ...(isMac ? [{ label: 'AIVN', submenu: [{ role: 'about', label: 'Giới thiệu AIVN' }, { type: 'separator' }, { label: 'Khóa ngay', accelerator: 'CmdOrCtrl+Shift+L', click: () => lockNow('phím tắt') }, { type: 'separator' }, { role: 'hide', label: 'Ẩn AIVN' }, { role: 'hideOthers', label: 'Ẩn ứng dụng khác' }, { role: 'unhide', label: 'Hiện tất cả' }, { type: 'separator' }, { role: 'quit', label: 'Thoát AIVN' }] }] : [{ label: 'Tệp', submenu: [{ label: 'Khóa ngay', accelerator: 'CmdOrCtrl+Shift+L', click: () => lockNow('phím tắt') }, { type: 'separator' }, { role: 'quit', label: 'Thoát' }] }]),
     edit, view,
     { label: 'Cửa sổ', submenu: [{ role: 'minimize', label: 'Thu nhỏ' }, ...(isMac ? [{ role: 'zoom', label: 'Phóng to' }, { role: 'front', label: 'Đưa tất cả lên trước' }] : [{ role: 'close', label: 'Đóng' }])] },
   ];
@@ -614,7 +698,7 @@ function createWindow({ hidden = false } = {}) {
       additionalArguments: [`--aivn-theme=${windowBg() === '#ffffff' ? 'light' : 'dark'}`] }, // giao diện đã lưu, áp dụng trước lần vẽ đầu tiên
   });
   buildMenus();
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  loadUi();
   win.once('ready-to-show', () => { if (!hidden) win.show(); });
   // Chạy nền: đóng cửa sổ thì thu xuống khay để Lịch tự động tiếp tục chạy
   win.on('close', (e) => {
@@ -1005,10 +1089,9 @@ else {
     initStores();
     registerIpc();
     createWindow({ hidden: process.argv.includes('--hidden') && settings.data.keepInTray });
-    applyBackgroundPrefs();
-    scheduler.start();
-    if (settings.data.apiAutoStart || process.env.AIVN_API === '1') api.start(settings.data.apiPort).catch(e => log('Lỗi: ' + e.message));
-    if (process.env.AIVN_LOAD) loadById(process.env.AIVN_LOAD).catch(e => log('Lỗi nạp: ' + e.message));
+    if (activated()) startServices(); // chưa kích hoạt: không chạy lịch, API, mô hình
+    licenseCheck().catch(() => {});
+    startGateTimers();
     if (app.isPackaged || process.env.AIVN_UPDATE_CHECK === '1') setTimeout(() => updater.check({ silent: true }), Number(process.env.AIVN_UPDATE_DELAY || 5000));
     if (process.env.AIVN_SELFTEST_V13) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestV13().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));
     if (process.env.AIVN_SELFTEST_V12) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestV12().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));
