@@ -30,6 +30,7 @@ function show(view) {
   if (view === 'memory') refreshMem();
   if (view === 'discover' && !$('#sugArea').hidden) renderCatalog();
   if (view === 'models') refreshModels();
+  if (view === 'crm') renderCrm();
   if (view === 'server') refreshServer();
   if (view === 'security') refreshSecurity().catch(err => toast(cleanErr(err.message), true));
 }
@@ -865,6 +866,68 @@ document.addEventListener('keydown', (e) => {
 A.onAgentApprove((c) => { apQueue.push(c); apShow(); });
 A.onAgentApproveCancel(({ id }) => { if (apOpen && apOpen.id === id) { apOpen = null; $('#approveCard').hidden = true; apShow(); } const i = apQueue.findIndex(x => x.id === id); if (i >= 0) apQueue.splice(i, 1); });
 
+// --- Kinh doanh → Khách hàng (CRM) ---
+const crm = { tab: 'dash', contacts: [] };
+const vnd = (n) => (Number(n) || 0).toLocaleString('vi-VN') + ' đ';
+async function C(fn, ...a) { const r = await A.crm(fn, ...a); if (!r.ok) throw new Error(r.error); return r.data; }
+async function renderCrm() {
+  $$('.crm-tabs button').forEach(b => b.classList.toggle('on', b.dataset.crm === crm.tab));
+  const q = $('#crmQ').value.trim(); const body = $('#crmBody');
+  $('#crmAdd').textContent = crm.tab === 'leads' ? '＋ Cơ hội' : crm.tab === 'acts' ? '＋ Việc' : '＋ Liên hệ';
+  try {
+    if (crm.tab === 'dash') {
+      const d = await C('dashboard');
+      body.innerHTML = `<div class="kpis"><div class="kpi">Cơ hội đang mở<b>${d.open.n}</b><span class="small muted">${vnd(d.open.sum)} · dự kiến ${vnd(d.open.weighted)}</span></div><div class="kpi">Thắng trong tháng<b>${d.wonMonth.n}</b><span class="small muted">${vnd(d.wonMonth.sum)}</span></div><div class="kpi">Tỉ lệ thắng<b>${d.winRate == null ? '—' : Math.round(d.winRate) + '%'}</b><span class="small muted">90 ngày: ${d.winRate90 == null ? '—' : Math.round(d.winRate90) + '%'}</span></div><div class="kpi">Việc cần làm<b>${d.activities.open}</b><span class="small muted">${d.activities.overdue} quá hạn · ${d.activities.today} hôm nay</span></div></div>
+        <h3>Theo giai đoạn</h3><table class="crm-table"><tr><th>Giai đoạn</th><th>Số cơ hội</th><th>Giá trị</th></tr>${d.byStage.map(x => `<tr><td>${esc(x.name)}</td><td>${x.n}</td><td>${vnd(x.sum)}</td></tr>`).join('')}</table>
+        <h3>Sắp tới</h3>${(d.upcoming || []).length ? `<table class="crm-table">${d.upcoming.map(a => `<tr><td>${esc(a.type_vi || '')}</td><td>${esc(a.title)}</td><td>${esc(a.contact_name || '')}</td><td>${a.due_at ? new Date(a.due_at).toLocaleString('vi-VN') : 'chưa hẹn giờ'}</td></tr>`).join('')}</table>` : '<div class="empty-state"><div class="big">📅</div>Chưa có việc nào sắp tới.</div>'}`;
+    } else if (crm.tab === 'contacts') {
+      const r = await C('listContacts', { q }); crm.contacts = r.rows;
+      body.innerHTML = r.rows.length ? `<table class="crm-table"><tr><th>Tên</th><th>Loại</th><th>Điện thoại</th><th>Email</th><th>Thẻ</th><th>Phụ trách</th><th></th></tr>${r.rows.map(c => `<tr><td><b>${esc(c.name)}</b>${c.job_title ? `<div class="small muted">${esc(c.job_title)}</div>` : ''}</td><td>${esc(c.kind_vi)}</td><td>${esc(c.phone_fmt || c.phone || '')}</td><td>${esc(c.email || '')}</td><td>${(c.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join(' ')}</td><td>${esc(c.owner || '')}</td><td><button class="btn sm" data-crm-edit="${esc(c.id)}">Sửa</button> <button class="btn sm ghost" data-crm-del="${esc(c.id)}" title="Xoá liên hệ">🗑</button></td></tr>`).join('')}</table><p class="small muted">${r.total} liên hệ</p>`
+        : `<div class="empty-state"><div class="big">👥</div>${q ? 'Không tìm thấy liên hệ phù hợp.' : 'Chưa có khách hàng nào. Bấm “＋ Liên hệ” hoặc “⬆ Nhập” từ tệp Excel/CSV.'}</div>`;
+    } else if (crm.tab === 'leads') {
+      const r = await C('listLeads', { q }); const rows = Array.isArray(r) ? r : r.rows || [];
+      const ST = [['new', 'Mới'], ['contacted', 'Đã liên hệ'], ['quoted', 'Báo giá'], ['negotiation', 'Đàm phán'], ['won', 'Thắng'], ['lost', 'Thua']];
+      body.innerHTML = `<div class="kanban">${ST.map(([id, n]) => { const col = rows.filter(l => l.stage === id); return `<div class="kcol" data-stage="${id}"><h4>${n}<span class="muted">${col.length}</span></h4>${col.map(l => `<div class="kcard" draggable="true" data-lead="${esc(l.id)}"><b>${esc(l.title)}</b><div class="small muted">${esc(l.contact_name || '')}</div><div class="small">${vnd(l.expected_revenue)} · ${l.probability}%</div></div>`).join('') || '<div class="small muted">Kéo thẻ vào đây</div>'}</div>`; }).join('')}</div>`;
+    } else {
+      const r = await C('listActivities', { status: 'open' });
+      body.innerHTML = r.length ? `<table class="crm-table"><tr><th></th><th>Việc</th><th>Loại</th><th>Khách hàng</th><th>Hạn</th></tr>${r.map(a => `<tr><td><input type="checkbox" data-crm-done="${esc(a.id)}" aria-label="Đánh dấu xong"></td><td>${esc(a.title)}${a.overdue ? ' <span class="tag" style="color:#82071e">quá hạn</span>' : ''}</td><td>${esc(a.type_vi)}</td><td>${esc(a.contact_name || '')}</td><td>${a.due_at ? new Date(a.due_at).toLocaleString('vi-VN') : '—'}</td></tr>`).join('')}</table>` : '<div class="empty-state"><div class="big">✅</div>Không còn việc nào cần làm.</div>';
+    }
+  } catch (e) { body.innerHTML = `<div class="empty-state">⚠ ${esc(e.message)}</div>`; }
+}
+function crmForm(kind, data = {}) {
+  const F = {
+    contact: [['name', 'Họ tên / tên công ty *'], ['kind', 'Loại', [['person', 'Cá nhân'], ['company', 'Công ty']]], ['phone', 'Điện thoại'], ['email', 'Email'], ['job_title', 'Chức vụ'], ['address', 'Địa chỉ'], ['tax_id', 'Mã số thuế'], ['tags', 'Thẻ (cách nhau bởi dấu phẩy)'], ['notes', 'Ghi chú', 'area']],
+    lead: [['title', 'Tên cơ hội *'], ['contact_id', 'Khách hàng', [['', '—'], ...crm.contacts.map(c => [c.id, c.name])]], ['expected_revenue', 'Giá trị dự kiến (đ)'], ['stage', 'Giai đoạn', [['new', 'Mới'], ['contacted', 'Đã liên hệ'], ['quoted', 'Báo giá'], ['negotiation', 'Đàm phán'], ['won', 'Thắng'], ['lost', 'Thua']]], ['close_date', 'Ngày dự kiến chốt (YYYY-MM-DD)'], ['notes', 'Ghi chú', 'area']],
+    act: [['title', 'Việc cần làm *'], ['type', 'Loại', [['call', 'Gọi điện'], ['meeting', 'Cuộc hẹn'], ['email', 'Email'], ['todo', 'Việc cần làm']]], ['contact_id', 'Khách hàng', [['', '—'], ...crm.contacts.map(c => [c.id, c.name])]], ['due_at', 'Hạn', 'datetime'], ['notes', 'Ghi chú', 'area']]
+  }[kind];
+  $('#crmFormTitle').textContent = (data.id ? 'Sửa ' : 'Thêm ') + ({ contact: 'liên hệ', lead: 'cơ hội', act: 'việc cần làm' })[kind];
+  $('#crmFields').innerHTML = F.map(([k, l, t]) => `<label>${esc(l)}${Array.isArray(t) ? `<select name="${k}">${t.map(([v, n]) => `<option value="${esc(v)}" ${String(data[k] ?? '') === v ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : t === 'area' ? `<textarea name="${k}" rows="3">${esc(data[k] || '')}</textarea>` : `<input name="${k}" type="${t === 'datetime' ? 'datetime-local' : 'text'}" value="${esc(Array.isArray(data[k]) ? data[k].join(', ') : data[k] ?? '')}">`}</label>`).join('');
+  $('#crmErr').textContent = ''; $('#crmModal').hidden = false; $('#crmForm').dataset.kind = kind; $('#crmForm').dataset.id = data.id || '';
+  $('#crmFields').querySelector('input,select').focus();
+}
+$('#crmForm').addEventListener('submit', async (e) => {
+  e.preventDefault(); const f = e.target; const o = Object.fromEntries(new FormData(f).entries()); if (f.dataset.id) o.id = f.dataset.id;
+  try { await C({ contact: 'saveContact', lead: 'saveLead', act: 'saveActivity' }[f.dataset.kind], o); $('#crmModal').hidden = true; toast('Đã lưu ✓'); renderCrm(); }
+  catch (err) { $('#crmErr').textContent = err.message; }
+});
+$('#crmCancel').addEventListener('click', () => { $('#crmModal').hidden = true; });
+$('#crmModal').addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#crmModal').hidden = true; });
+$$('.crm-tabs button').forEach(b => b.addEventListener('click', () => { crm.tab = b.dataset.crm; renderCrm(); }));
+let crmT = null; $('#crmQ').addEventListener('input', () => { clearTimeout(crmT); crmT = setTimeout(() => { if (crm.tab === 'dash') crm.tab = 'contacts'; renderCrm(); }, 220); });
+$('#crmAdd').addEventListener('click', async () => { if (!crm.contacts.length) crm.contacts = (await C('listContacts', {}).catch(() => ({ rows: [] }))).rows; crmForm(crm.tab === 'leads' ? 'lead' : crm.tab === 'acts' ? 'act' : 'contact'); });
+$('#crmExport').addEventListener('click', async () => { const r = await A.crmExport(); if (r.ok) toast('Đã xuất ' + r.file); else if (!r.canceled) toast('⚠ ' + r.error, true); });
+$('#crmImport').addEventListener('click', async () => { const r = await A.crmImport(); if (r.ok) { toast(`Đã nhập: ${r.result.created} mới, ${r.result.merged} gộp, ${r.result.skipped} bỏ qua${r.result.errors.length ? `, ${r.result.errors.length} lỗi` : ''}`); crm.tab = 'contacts'; renderCrm(); } else if (!r.canceled) toast('⚠ ' + r.error, true); });
+$('#crmBody').addEventListener('click', async (e) => {
+  const ed = e.target.closest('[data-crm-edit]'); const del = e.target.closest('[data-crm-del]'); const lead = e.target.closest('[data-lead]');
+  if (ed) crmForm('contact', crm.contacts.find(c => c.id === ed.dataset.crmEdit) || {});
+  if (del && await modalAsk({ icon: '🗑', title: 'Xoá liên hệ?', message: 'Liên hệ và lịch sử liên quan sẽ bị xoá khỏi máy này.', okLabel: 'Xoá', noLabel: 'Giữ lại' })) { await C('deleteContact', del.dataset.crmDel).catch(err => toast(err.message, true)); renderCrm(); }
+  if (lead && !e.defaultPrevented) { const rows = await C('listLeads', {}); const all = Array.isArray(rows) ? rows : rows.rows; if (!crm.contacts.length) crm.contacts = (await C('listContacts', {})).rows; crmForm('lead', all.find(l => l.id === lead.dataset.lead) || {}); }
+});
+$('#crmBody').addEventListener('change', async (e) => { const d = e.target.closest('[data-crm-done]'); if (d) { await C('completeActivity', d.dataset.crmDone).catch(err => toast(err.message, true)); toast('Đã xong ✓'); renderCrm(); } });
+$('#crmBody').addEventListener('dragstart', (e) => { const c = e.target.closest('[data-lead]'); if (c) { e.dataTransfer.setData('text/plain', c.dataset.lead); c.classList.add('drag'); } });
+$('#crmBody').addEventListener('dragover', (e) => { const col = e.target.closest('.kcol'); if (col) { e.preventDefault(); $$('.kcol').forEach(k => k.classList.toggle('over', k === col)); } });
+$('#crmBody').addEventListener('drop', async (e) => { const col = e.target.closest('.kcol'); if (!col) return; e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); await C('moveLead', id, col.dataset.stage).catch(err => toast(err.message, true)); renderCrm(); });
+
 // --- UX 0.15.0: bảng lệnh Ctrl+K, ẩn/hiện bảng phải, phím tắt, giới thiệu nhanh ---
 function togglePanel(force) {
   const v = $('#view-chat'); const off = typeof force === 'boolean' ? force : !v.classList.contains('no-panel');
@@ -883,6 +946,7 @@ function paletteCommands() {
     { i: '🤖', t: 'AIVN AGENT', run: () => show('agent') },
     { i: '＋', t: 'Cuộc trò chuyện mới', k: 'Ctrl+N', run: () => $('#newChat').click() },
     { i: '🗃', t: 'Kho mô hình (tải mô hình)', run: () => show('discover') },
+    { i: '👥', t: 'Kinh doanh → Khách hàng', run: () => show('crm') },
     { i: '📦', t: 'Mô hình của tôi', run: () => show('models') },
     { i: '⏰', t: 'Lịch tự động', run: () => show('schedule') },
     { i: '🧠', t: 'Ghi nhớ', run: () => show('memory') },

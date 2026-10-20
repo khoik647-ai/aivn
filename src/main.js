@@ -885,6 +885,24 @@ function registerIpc() {
   ipcMain.handle('bench:run', async (_e, { ids }) => { try { return { ok: true, results: await runAgentBench(Array.isArray(ids) ? ids.slice(0, 4) : []) }; } catch (e) { return { ok: false, error: e.message }; } });
   ipcMain.handle('bench:stop', () => { if (benchRun) benchRun.abort(); stopComputer('dừng bài đo'); return true; });
   ipcMain.handle('bench:scores', () => benchScores());
+  // ---- Kinh doanh → Khách hàng (CRM, lưu cục bộ SQLite) ----
+  let crmP = null;
+  const getCrm = () => crmP || (crmP = (async () => { const { openDb } = require('./crm/db'); const { createCrm } = require('./crm/crm'); const db = await openDb(path.join(app.getPath('userData'), 'crm.db')); return createCrm({ db, defaultOwner: () => settings.data.crmOwner || require('os').userInfo().username, log: (m) => LOG.log('crm', m) }); })());
+  const CRM_OK = new Set(['saveContact', 'listContacts', 'getContact', 'deleteContact', 'facets', 'saveLead', 'moveLead', 'listLeads', 'deleteLead', 'saveActivity', 'completeActivity', 'deleteActivity', 'listActivities', 'addNote', 'listQuotes', 'dashboard', 'findDuplicates', 'find']);
+  ipcMain.handle('crm:call', async (_e, { fn, args }) => {
+    if (!CRM_OK.has(fn)) return { ok: false, error: 'Không hỗ trợ.' };
+    try { const c = await getCrm(); return { ok: true, data: await c[fn](...(Array.isArray(args) ? args : [])) }; }
+    catch (e) { if (!e.userMessage) LOG.log('crm', `Lỗi ${fn}: ${e.message}`); return { ok: false, error: e.userMessage || e.message }; }
+  });
+  ipcMain.handle('crm:export', async () => {
+    try { const c = await getCrm(); const r = await dialog.showSaveDialog(win, { title: 'Xuất danh sách khách hàng', defaultPath: 'khach-hang.csv', filters: [{ name: 'CSV', extensions: ['csv'] }] }); if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+      const rows = c.exportContacts(); const S = require('./crm/sheet'); fs.writeFileSync(r.filePath, S.toCsv(Array.isArray(rows) ? rows : rows.rows)); return { ok: true, file: r.filePath }; } catch (e) { return { ok: false, error: e.message }; }
+  });
+  ipcMain.handle('crm:import', async () => {
+    try { const c = await getCrm(); const r = await dialog.showOpenDialog(win, { title: 'Nhập khách hàng từ CSV/Excel', properties: ['openFile'], filters: [{ name: 'CSV / Excel', extensions: ['csv', 'xlsx'] }] }); if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true };
+      const S = require('./crm/sheet'); const buf = fs.readFileSync(r.filePaths[0]); const rows = /\.xlsx$/i.test(r.filePaths[0]) ? S.parseXlsx(buf) : S.parseCsv(S.decodeBytes(buf));
+      return { ok: true, result: c.importContacts(rows, { onDuplicate: 'merge' }) }; } catch (e) { return { ok: false, error: e.userMessage || e.message }; }
+  });
   // ---- Kết nối (MCP) ----
   ipcMain.handle('mcp:status', () => ({ servers: mcp.status(), text: mcp.readText(), file: mcp.file, enabled: settings.data.agentMcp !== false }));
   ipcMain.handle('mcp:save', async (_e, text) => { try { await mcp.saveText(String(text)); LOG.log('mcp', 'Đã lưu mcp.json'); return { ok: true, servers: mcp.status() }; } catch (e) { return { ok: false, error: e.message }; } });

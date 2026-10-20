@@ -20,6 +20,8 @@
       <button class="nav-item sub" data-view="schedule"><i>⏰</i><span>Lịch tự động</span><b class="pill-count" id="schedCount" hidden></b></button>
       <button class="nav-item sub" data-view="memory"><i>🧠</i><span>Ghi nhớ</span><b class="pill-count" id="memCount" hidden></b></button>
     </div>
+    <div class="nav-group small muted">Kinh doanh</div>
+    <button class="nav-item" data-view="crm"><i>👥</i><span>Khách hàng</span></button>
     <button class="nav-item" data-view="discover"><i>🗃</i><span>Kho mô hình</span></button>
     <button class="nav-item" data-view="models"><i>📦</i><span>Mô hình của tôi</span></button>
     <button class="nav-item" data-view="server"><i>⚡</i><span>Máy chủ API</span><b class="pill-dot" id="srvDot"></b></button>
@@ -37,6 +39,17 @@
       <div class="model-state" id="modelState"><span class="dot off"></span>Chưa nạp mô hình</div>
       <div class="top-tools"><button class="btn sm ghost" id="paletteBtn" title="Tìm lệnh nhanh (Ctrl+K)" aria-label="Tìm lệnh nhanh">⌘ Lệnh <kbd>Ctrl+K</kbd></button><button class="btn sm ghost" id="panelToggle" title="Ẩn/hiện bảng cài đặt bên phải (Ctrl+.)" aria-label="Ẩn hoặc hiện bảng cài đặt">⇥ Bảng cài đặt</button><button class="btn sm ghost" id="helpKeys" title="Phím tắt (Ctrl+/)" aria-label="Phím tắt">⌨</button></div>
     </header>
+
+    <!-- KINH DOANH → KHÁCH HÀNG -->
+    <section class="view" id="view-crm">
+      <div class="crm-head"><h2>👥 Khách hàng</h2>
+        <nav class="crm-tabs" role="tablist"><button data-crm="dash" class="on" role="tab">Tổng quan</button><button data-crm="contacts" role="tab">Liên hệ</button><button data-crm="leads" role="tab">Cơ hội</button><button data-crm="acts" role="tab">Việc cần làm</button></nav>
+        <div class="crm-actions"><input type="search" id="crmQ" placeholder="Tìm tên, số điện thoại, email…" aria-label="Tìm khách hàng"><button class="btn sm primary" id="crmAdd">＋ Thêm</button><button class="btn sm" id="crmImport" title="Nhập từ CSV/Excel">⬆ Nhập</button><button class="btn sm" id="crmExport" title="Xuất CSV (mở được bằng Excel)">⬇ Xuất</button></div>
+      </div>
+      <div class="crm-body" id="crmBody"></div>
+      <p class="small muted crm-foot">Dữ liệu khách hàng lưu trên máy này (SQLite), không gửi đi đâu.</p>
+    </section>
+    <div class="modal-back" id="crmModal" hidden><form class="modal crm-form" id="crmForm"><h3 id="crmFormTitle"></h3><div id="crmFields"></div><p class="small" id="crmErr" style="color:#82071e"></p><div class="row"><button type="button" class="btn" id="crmCancel">Huỷ</button><button type="submit" class="btn primary">Lưu</button></div></form></div>
 
     <!-- CHAT -->
     <section class="view active" id="view-chat">
