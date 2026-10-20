@@ -45,7 +45,7 @@ function setMode(mode) {
   }
   $('#view-chat').classList.toggle('agent-mode', mode === 'agent');
   $('#input').placeholder = mode === 'agent' ? 'Giao việc cho AIVN BOT… (vd. đọc tệp bao-cao.csv, tính tổng rồi ghi tóm tắt vào tom-tat.md)' : 'Nhập tin nhắn… (Enter để gửi, Shift+Enter xuống dòng, kéo thả tệp hoặc dán ảnh bằng Ctrl+V)';
-  $('#attachBtn').hidden = mode === 'agent';
+  $('#attachBtn').hidden = false;
   $('#newChat').textContent = mode === 'agent' ? '＋ Việc mới cho AIVN BOT' : '＋ Cuộc trò chuyện mới';
   renderConvos(); renderMessages();
   if (mode === 'agent') refreshAgent();
@@ -169,7 +169,7 @@ async function renderCatalog() {
   $('#catalog').innerHTML = list.map(c => `<div class="card" data-id="${esc(c.id)}">
     <div class="card-top"><div class="av">${esc(c.family.slice(0, 2))}</div><div><h4>${esc(c.name)}</h4><div class="sub">${esc(c.params)} tham số · ${esc(c.quant)} · ${fmtBytes(c.size + (c.mmproj ? c.mmproj.size : 0))}</div></div></div>
     <p>${esc(c.desc)}</p>
-    <div class="tags">${c.recommended ? '<span class="tag rec" title="Mô hình lớn nhất vẫn chạy tốt trên máy này">⭐ Gợi ý cho máy này</span>' : ''}${fitBadge(c.fit)}${c.vision ? `<span class="tag vis" title="Tải kèm tệp thị giác ${esc(c.mmproj.file)} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán">👁 Nhìn được ảnh</span>` : ''}${c.agent ? '<span class="tag agent" title="Gọi công cụ tốt, hợp cho chế độ AIVN BOT">🤖 Hợp cho AIVN BOT</span>' : ''}${c.tags.filter(t => t !== 'Nhìn được ảnh').map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
+    <div class="tags">${c.recommended ? '<span class="tag rec" title="Mô hình lớn nhất vẫn chạy tốt trên máy này">⭐ Gợi ý cho máy này</span>' : ''}${fitBadge(c.fit)}${c.vision ? `<span class="tag vis" title="Tải kèm tệp thị giác ${esc(c.mmproj.file)} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán">👁 Nhìn được ảnh</span>` : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}${c.tags.filter(t => t !== 'Nhìn được ảnh').map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
     <div class="card-foot" data-job="${esc(jobIdFor(c.repo, c.file))}">${footHtml({ ...c, size: c.size + (c.mmproj ? c.mmproj.size : 0) }, `data-act="dl-cat" data-id="${esc(c.id)}"`, c.file)}</div>
     <button class="linkish" data-act="open-repo" data-repo="${esc(c.repo)}">Các bản lượng tử khác · ${esc(c.repo)}</button></div>`).join('');
 }
@@ -307,7 +307,7 @@ function renderMessages() {
     const ag = m.role === 'assistant' && (m.steps || m.agent);
     const extra = m.role === 'assistant' ? webSrcHtml(m) + (m.memories && m.memories.length ? `<div class="mem-used" title="${esc(m.memories.join('\n'))}">🧠 Đã dùng ${m.memories.length} ghi nhớ liên quan</div>` : '') : '';
     const sched = m.scheduled ? `<div class="sched-tag">⏰ Lịch tự động · ${new Date(m.scheduled.at).toLocaleString('vi-VN')}${m.scheduled.late ? ' · chạy bù (trễ)' : ''}${m.scheduled.manual ? ' · chạy thủ công' : ''}</div>` : '';
-    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN BOT' : 'AIVN'}${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${srcs}${extra}${sched}${copyBtn}</div>${warn}`;
+    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN BOT' : 'AIVN'}${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.warning ? `<div class="no-action" role="alert"><b>⚠ Chưa có việc nào được làm</b><span>${esc(m.warning)}</span><button type="button" class="btn sm" data-rec-go="1">Mở Kho mô hình</button></div>` : ''}${srcs}${extra}${sched}${copyBtn}</div>${warn}`;
   }).join('');
   box.scrollTop = box.scrollHeight;
 }
@@ -338,7 +338,6 @@ async function imageToPng(blob) {
   return { png: new Uint8Array(await png.arrayBuffer()), thumb: t.toDataURL('image/jpeg', 0.75), vis: v.toDataURL('image/jpeg', 0.92), width: bmp.width, height: bmp.height };
 }
 async function addImageBlobs(list) { // list: [{blob, name, size}]
-  if (isAgent()) { toast('AIVN BOT làm việc với tệp trong thư mục bạn cho phép (Cài đặt AIVN BOT → Thêm thư mục), không nhận tệp đính kèm.', true); return; }
   const room = MAX_FILES - pending.length;
   if (room <= 0) { toast(`Chỉ gửi kèm tối đa ${MAX_FILES} tệp mỗi lần`, true); return; }
   if (list.length > room) toast(`Chỉ gửi kèm tối đa ${MAX_FILES} tệp mỗi lần, đã bỏ bớt ${list.length - room} tệp`, true);
@@ -370,7 +369,6 @@ function renderChips() {
 $('#chips').addEventListener('click', (e) => { const c = e.target.closest('.chip'); if (c && e.target.closest('button')) { pending = pending.filter(a => a.id !== c.dataset.id); renderChips(); } });
 async function addFiles(paths) {
   paths = paths.filter(Boolean);
-  if (isAgent() && paths.length) { toast('AIVN BOT làm việc với tệp trong thư mục bạn cho phép (Cài đặt AIVN BOT → Thêm thư mục), không nhận tệp đính kèm.', true); return; }
   const imgs = paths.filter(p => IMG_EXT.test(p)); paths = paths.filter(p => !IMG_EXT.test(p));
   if (imgs.length) {
     const list = [];
@@ -432,7 +430,7 @@ $('#composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   let text = input.value.trim();
   if (state.generating) return;
-  if (isAgent()) { if (text) sendAgent(text); return; }
+  if (isAgent()) { if (pending.some(a => a.loading)) { toast('Đang đọc tệp, vui lòng đợi một chút…'); return; } if (text || pending.some(a => a.ok)) sendAgent(text); return; }
   if (pending.some(a => a.loading)) { toast('Đang đọc tệp, vui lòng đợi một chút…'); return; }
   const vision = !!state.status.vision;
   // ảnh thêm lúc đang dùng mô hình nhìn ảnh nhưng giờ mô hình không nhìn được: đọc chữ (OCR) ngay lúc gửi
@@ -694,15 +692,40 @@ function webSrcHtml(m) {
 }
 function agentHistory(conv) {
   return conv.messages.slice(0, -2).filter(m => !m.error && m.content).slice(-12).map(m => ({ role: m.role,
-    content: m.role === 'assistant' && m.steps && m.steps.length ? `[Đã dùng công cụ: ${m.steps.map(x => `${x.label}${x.summary ? ' (' + String(x.summary).slice(0, 80) + ')' : ''} ${x.status === 'ok' ? '✓' : x.status === 'refused' ? '✗ bị từ chối' : '✗ lỗi'}`).join('; ')}]\n${m.content}` : m.content }));
+    content: (m.attachments ? `[Đã gửi kèm: ${m.attachments.map(a => a.name).join(', ')}]\n` : '') + (m.role === 'assistant' && m.steps && m.steps.length ? `[Đã dùng công cụ: ${m.steps.map(x => `${x.label}${x.summary ? ' (' + String(x.summary).slice(0, 80) + ')' : ''} ${x.status === 'ok' ? '✓' : x.status === 'refused' ? '✗ bị từ chối' : '✗ lỗi'}`).join('; ')}]\n${m.content}` : m.content) }));
 }
 $('#messages').addEventListener('click', (e) => { const b = e.target.closest('[data-example]'); if (b) { input.value = b.dataset.example; input.focus(); input.dispatchEvent(new Event('input')); } });
 
+// Tệp/ảnh đính kèm cho AIVN BOT: ảnh → mô hình nhìn ảnh (nếu có) hoặc chữ đọc bằng OCR; tài liệu → nội dung chữ đưa vào lượt hỏi;
+// đường dẫn tệp đính kèm được phép đọc (read_file) trong việc này
+async function agentAttachments(atts, text) {
+  const vision = !!state.status.vision;
+  for (const a of atts.filter(x => x.kind === 'image' && x.direct && !vision)) {
+    try { const r = await A.ocrImage(a.png); if (r && r.chars >= 3) Object.assign(a, { direct: false, text: r.text, ocrChars: r.chars }); else a.ok = false; } catch { a.ok = false; }
+    if (!a.ok) toast(`Không đọc được chữ trong ảnh "${a.name}", ảnh này sẽ không được gửi.`, true);
+  }
+  atts = atts.filter(a => a.ok);
+  const budget = Math.max(3000, Math.floor((state.status.contextSize || 4096) * 1.4)); const per = Math.floor(budget / Math.max(1, atts.length));
+  const imgs = [];
+  const parts = atts.map(a => {
+    if (a.kind === 'image' && vision && a.vis) { imgs.push(a.vis); return `[Ảnh đính kèm: ${a.name}]`; }
+    const t = String(a.text || ''); const cut = t.length > per;
+    return `[Tệp đính kèm: ${a.name}${a.path ? ` — đường dẫn: ${a.path}` : ''}${a.kind === 'image' ? ' (ảnh, chữ đọc bằng OCR)' : ''}]\n${t.slice(0, per)}${cut ? `\n…(đã cắt bớt${a.path ? '; dùng read_file với đường dẫn trên để đọc phần còn lại' : ''})` : ''}`;
+  });
+  const full = atts.length ? parts.join('\n\n') + '\n\n' + text : text;
+  return { atts, content: imgs.length ? [{ type: 'text', text: full }, ...imgs.map(url => ({ type: 'image_url', image_url: { url } }))] : full, files: atts.filter(a => a.path).map(a => ({ path: a.path, name: a.name })) };
+}
 async function sendAgent(text) {
   if (!state.status.loaded && !(await ensureLoaded())) return;
+  let atts = pending.filter(a => a.ok); pending = []; renderChips();
+  if (!text && atts.length) text = atts.every(a => a.kind === 'image') ? 'Hãy xem ảnh đính kèm và cho biết nội dung.' : 'Hãy đọc tệp đính kèm và tóm tắt ý chính.';
+  if (!text) return;
+  const pack = await agentAttachments(atts, text); atts = pack.atts;
   if (!state.current) state.current = { id: uid(), title: text.slice(0, 48), messages: [], createdAt: Date.now(), updatedAt: Date.now(), mode: 'agent' };
   const conv = state.current;
-  conv.messages.push({ role: 'user', content: text });
+  const userMsg = { role: 'user', content: text };
+  if (atts.length) userMsg.attachments = atts.map(a => ({ name: a.name, size: a.size, kind: a.kind, pages: a.pages || null, ...(a.kind === 'image' ? { thumb: a.thumb, ocrChars: a.ocrChars, direct: !!(state.status.vision && a.vis) } : {}) }));
+  conv.messages.push(userMsg);
   const reply = { role: 'assistant', content: '', model: state.status.id, steps: [], agent: true };
   conv.messages.push(reply);
   const idx = conv.messages.length - 1;
@@ -731,8 +754,8 @@ async function sendAgent(text) {
     if (st.stage === 'verify') { reply.content = ''; paintBody(); $('#genStats').textContent = 'Đang kiểm tra lại: câu trả lời chưa khớp với các bước đã làm…'; }
   });
   try {
-    const r = await A.agentRun({ reqId, convoId: conv.id, messages: [...agentHistory(conv), { role: 'user', content: text }] });
-    Object.assign(reply, { content: r.text || (r.finishReason === 'abort' ? '' : '(AIVN BOT không trả lời)'), steps: r.steps, urls: r.urls, memories: r.memories, model: r.model || reply.model });
+    const r = await A.agentRun({ reqId, convoId: conv.id, messages: [...agentHistory(conv), { role: 'user', content: pack.content }], attachments: pack.files });
+    Object.assign(reply, { content: r.text || (r.finishReason === 'abort' ? '' : r.warning ? '' : '(AIVN BOT không trả lời)'), warning: r.warning || null, steps: r.steps, urls: r.urls, memories: r.memories, model: r.model || reply.model });
     const tools = r.steps.length;
     $('#genStats').textContent = `${tools ? tools + ' bước dùng công cụ · ' : ''}${r.usage.completion_tokens} token · ${r.usage.seconds.toFixed(1)} giây${r.finishReason === 'abort' ? ' · đã dừng' : r.finishReason === 'length' ? ' · chạm giới hạn token' : ''}`;
     if (r.finishReason === 'abort') reply.content = (reply.content ? reply.content + '\n\n' : '') + '_Đã dừng theo yêu cầu._';
@@ -779,7 +802,7 @@ async function refreshAgent() {
   $('#agPyNote').textContent = info.python.available ? `Python ${info.python.version} có trên máy. Chạy trong thư mục tạm, chặn mạng và tệp ngoài thư mục tạm, tối đa 10 giây (hạn chế, không cách ly tuyệt đối như JavaScript).` : 'Máy chưa có Python 3, nên chỉ chạy được JavaScript.';
   $('#agMem').checked = info.memory.enabled;
   $('#agMemNote').textContent = `Đang có ${info.memory.count} ghi nhớ · tìm ${info.memory.semantic ? 'theo ý nghĩa (BGE-M3)' : 'theo từ khoá (tải BGE-M3 để tìm theo ý nghĩa)'}.`;
-  renderChips(info);
+  renderToolChips(info);
   paintAgentWarn(info.advice);
   paintComputer(info.computer);
   if (isAgent() && (!state.current || !state.current.messages.length) && !state.generating) renderMessages();
@@ -789,6 +812,7 @@ function paintAgentWarn(adv) {
   const rec = (adv && adv.recommended) || [];
   const recBtns = rec.map(r => `<button class="btn sm" data-rec="${esc(r.id)}" data-installed="${r.installed ? 1 : 0}">${r.installed ? 'Nạp' : 'Tải'} ${esc(r.name)}</button>`).join(' ');
   if (!state.status.loaded) { w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN BOT chạy tốt nhất với <b>Qwen3 4B/8B</b> hoặc <b>Gemma 3 4B</b> trở lên.</span>`; w.hidden = false; return; }
+  if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN BOT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để mở ứng dụng, đọc tệp, điều khiển máy đáng tin cậy, hãy dùng <b>Qwen3 4B/8B</b>.</span> ${recBtns}`; w.hidden = false; return; }
   if (adv && adv.small) { w.innerHTML = `<span>⚠ <b>${esc(adv.model)}</b>${adv.params ? ` (khoảng ${String(adv.params).replace('.', ',')} tỉ tham số)` : ''} khá nhỏ cho AIVN BOT: có thể gọi sai công cụ, bỏ bước hoặc nói đã làm khi chưa làm. Nên dùng <b>Qwen3 4B/8B</b> hoặc <b>Gemma 3 4B</b> trở lên.</span> ${recBtns}`; w.hidden = false; return; }
   w.hidden = true;
 }
@@ -1120,7 +1144,7 @@ function chipState(c, info) {
     default: return { st: off.has(c.id) ? 'off' : 'on' };
   }
 }
-function renderChips(info) {
+function renderToolChips(info) {
   if (!info) return;
   $('#toolChips').innerHTML = CHIPS.map(c => {
     const s = chipState(c, info);
@@ -1180,3 +1204,5 @@ for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) $('#toolChips')
 $('#toolChips').addEventListener('keydown', (e) => { const chip = e.target.closest('[data-chip]'); if (chip && e.key === 'ArrowDown' && e.target.classList.contains('tc-main')) { e.preventDefault(); openChipPop(chip.dataset.chip); } });
 document.addEventListener('pointerdown', (e) => { if (chipPop && !e.target.closest('.chip-pop') && !e.target.closest('[data-chip]')) closeChipPop(); });
 window.addEventListener('resize', closeChipPop);
+
+$('#messages').addEventListener('click', (e) => { if (e.target.closest('[data-rec-go]')) show('discover'); });

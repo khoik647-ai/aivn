@@ -24,11 +24,27 @@ const DEFS = {
 const LEVEL1 = ['list_apps', 'open_app', 'open_path', 'open_url', 'running_apps', 'close_app', 'run_command', 'system_action'];
 const LEVEL2 = ['screen_look', 'screen_act'];
 
+function isSendAction(a = {}) {
+  const t = String(a.target || '');
+  if (['click', 'double_click'].includes(a.action) && /(^|\s)(gửi|send)(\s|$)|nút gửi|máy bay giấy|paper ?plane/i.test(t)) return true;
+  if (a.action === 'key' && /^\s*(enter|return)\s*$/i.test(String(a.keys || ''))) return true;
+  if (a.action === 'type' && /\n\s*$/.test(String(a.text || ''))) return true;
+  return false;
+}
+
 function createComputerTools(deps) {
   // deps: { getSettings, openPath, openExternal, keyTap, visionReady(), screen: { look(question, ctx), act(args, ctx) }, log }
   const st = () => deps.getSettings();
   let appCache = null, appCacheAt = 0;
-  const apps = () => { if (!appCache || Date.now() - appCacheAt > 60e3) { appCache = C.listApps(); appCacheAt = Date.now(); } return appCache; };
+  // Danh sách ứng dụng: lối tắt Start Menu/Desktop, %LOCALAPPDATA%\Programs, sổ đăng ký (Uninstall, App Paths), Get-StartApps (Store/UWP); macOS: /Applications…
+  let deepCache = null, deepAt = 0;
+  const quick = () => { if (!appCache || Date.now() - appCacheAt > 60e3) { appCache = C.listApps(); appCacheAt = Date.now(); } return appCache; };
+  const apps = async () => {
+    if (!deepCache || Date.now() - deepAt > 5 * 60e3) { deepCache = await (deps.deepApps || C.deepApps)().catch(() => []); deepAt = Date.now(); }
+    return C.mergeApps(quick(), deepCache);
+  };
+  const SOURCES = process.platform === 'win32' ? 'lối tắt Start Menu (của bạn và mọi người dùng), Desktop, %LOCALAPPDATA%\\Programs, sổ đăng ký (Uninstall, App Paths) và ứng dụng Store (Get-StartApps)'
+    : process.platform === 'darwin' ? '/Applications, ~/Applications, /System/Applications, Spotlight và "open -a"' : 'các tệp .desktop';
 
   function names({ headless = false } = {}) {
     if (headless) return []; // chạy theo lịch: không có ai để duyệt
@@ -42,28 +58,40 @@ function createComputerTools(deps) {
     if (!ok) return { refused: true, forModel: refusedMsg, summary: 'Người dùng từ chối: ' + (req.short || req.title) };
     return null;
   }
+  async function openApp(hit) {
+    if (hit.appId) { const { spawn } = require('child_process'); spawn('explorer.exe', ['shell:AppsFolder\\' + hit.appId], { detached: true, stdio: 'ignore' }).unref(); return; }
+    if (process.platform === 'win32' && hit.path && /\.exe$/i.test(hit.path)) { const { spawn } = require('child_process'); const c = spawn(hit.path, [], { detached: true, stdio: 'ignore', cwd: path.dirname(hit.path) }); c.on('error', () => {}); c.unref(); return; }
+    if (!hit.path) throw new CompError(`"${hit.name}" có trong danh sách đã cài nhưng không tìm thấy tệp chạy.`);
+    return openWith(hit.path, 'app');
+  }
   async function openWith(target, kind) {
     if (process.platform === 'linux' && kind === 'app' && target.endsWith('.desktop')) { const { spawn } = require('child_process'); spawn('gtk-launch', [path.basename(target, '.desktop')], { detached: true, stdio: 'ignore' }).unref(); return; }
+    if (process.platform === 'darwin' && kind === 'app') { const ok = await macOpenApp(target); if (ok) return; } // open -a hoạt động cho cả đường dẫn .app lẫn tên ứng dụng
     const err = await deps.openPath(target); if (err) throw new CompError('Không mở được: ' + err);
   }
+  const macOpenApp = (nameOrPath) => new Promise(res => require('child_process').execFile('open', ['-a', nameOrPath], { timeout: 15000 }, (e) => res(!e)));
 
   async function exec(name, a, ctx) {
     const s = st();
     switch (name) {
       case 'list_apps': {
         const q = String(a.query || '').trim();
-        let list = apps(); if (q) list = list.map(x => ({ ...x, s: C.score(q, x.name) })).filter(x => x.s >= 40).sort((x, y) => y.s - x.s);
+        let list = await apps(); if (q && process.platform === 'darwin' && !list.some(x => C.score(q, x.name) >= 40)) list = C.mergeApps(list, await C.macSpotlight(q)); if (q) list = list.map(x => ({ ...x, s: C.score(q, x.name) })).filter(x => x.s >= 40).sort((x, y) => y.s - x.s);
         const shown = list.slice(0, 80).map(x => x.name);
-        return { forModel: `${q ? `Ứng dụng khớp "${q}"` : 'Ứng dụng đã cài'} (${list.length}${list.length > 80 ? ', hiện 80' : ''}):\n${shown.join('\n') || '(không có)'}`, summary: `${list.length} ứng dụng${q ? ` khớp “${q}”` : ''}`, detail: shown.join('\n') };
+        return { forModel: `${q ? `Ứng dụng khớp "${q}"` : 'Ứng dụng đã cài'} (${list.length}${list.length > 80 ? ', hiện 80' : ''}):\n${shown.join('\n') || `(không có mục khớp; đã kiểm tra ${SOURCES}. Đừng kết luận là chưa cài: hãy thử open_app với tên này)`}`, summary: `${list.length} ứng dụng${q ? ` khớp “${q}”` : ''}`, detail: shown.join('\n') };
       }
       case 'open_app': {
         const q = String(a.name || '').trim(); if (!q) throw new CompError('Thiếu tên ứng dụng');
-        const hit = C.findApp(q, apps());
-        if (hit) { await openWith(hit.path, 'app'); return { forModel: `Đã mở ứng dụng "${hit.name}".`, summary: `Đã mở ${hit.name}` }; }
+        const all = await apps();
+        let hit = C.findApp(q, all);
+        if (!hit && process.platform === 'darwin') hit = C.findApp(q, await C.macSpotlight(q));
+        // macOS: tên gần đúng (điểm thấp) → thử "open -a <tên>" trước, vì LaunchServices biết cả ứng dụng ngoài /Applications (vd. Zalo cài từ App Store)
+        if (process.platform === 'darwin' && (!hit || hit.s < 60) && await macOpenApp(q)) return { forModel: `Đã mở ứng dụng "${q}".`, summary: `Đã mở ${q}` };
+        if (hit) { await openApp(hit); return { forModel: `Đã mở ứng dụng "${hit.name}".`, summary: `Đã mở ${hit.name}` }; }
         if (process.platform === 'win32') { const b = C.WIN_BUILTIN[q.toLowerCase()]; if (b) { if (b.endsWith(':')) await deps.openExternal(b); else { const { spawn } = require('child_process'); spawn(b, [], { detached: true, stdio: 'ignore' }).unref(); } return { forModel: `Đã mở "${q}".`, summary: `Đã mở ${q}` }; } }
         if (process.platform === 'darwin') { const r = await new Promise(res => require('child_process').execFile('open', ['-a', q], (e) => res(!e))); if (r) return { forModel: `Đã mở ứng dụng "${q}".`, summary: `Đã mở ${q}` }; }
-        const near = apps().map(x => ({ n: x.name, s: C.score(q.split(/\s+/)[0], x.name) })).filter(x => x.s > 0).sort((x, y) => y.s - x.s).slice(0, 8).map(x => x.n);
-        throw new CompError(`Không tìm thấy ứng dụng "${q}" trên máy.${near.length ? ' Gần giống: ' + near.join(', ') + '.' : ' Dùng list_apps để xem danh sách.'}`);
+        const near = all.map(x => ({ n: x.name, s: C.score(q.split(/\s+/)[0], x.name) })).filter(x => x.s > 0).sort((x, y) => y.s - x.s).slice(0, 8).map(x => x.n);
+        throw new CompError(`Không tìm thấy ứng dụng "${q}" sau khi đã kiểm tra ${SOURCES}.${near.length ? ' Gần giống: ' + near.join(', ') + '.' : ''} Có thể tên khác (hỏi người dùng tên chính xác) hoặc ứng dụng chưa được cài.`);
       }
       case 'open_path': {
         const p = C.expandPath(a.path);
@@ -119,11 +147,20 @@ function createComputerTools(deps) {
         return { forModel: `Đã thực hiện: ${lbl}.`, summary: lbl };
       }
       case 'screen_look': return deps.screen.look(a, ctx);
-      case 'screen_act': return deps.screen.act(a, ctx);
+      case 'screen_act': {
+        // Gửi tin nhắn cho người khác: luôn hỏi duyệt riêng lần cuối trước khi bấm Gửi / Enter
+        if (isSendAction(a)) {
+          const r = await confirmOrRefuse(ctx, { kind: 'send-message', icon: '✉️', title: 'Gửi tin nhắn cho người khác?', short: 'gửi tin nhắn', okLabel: 'Đồng ý gửi', noLabel: 'Không gửi',
+            message: `AIVN BOT sắp ${a.action === 'key' ? `bấm phím ${a.keys}` : `bấm “${a.target || 'nút Gửi'}”`}: thao tác này sẽ GỬI tin nhắn tới người khác và không thu hồi được dễ dàng. Hãy kiểm tra đúng người nhận và nội dung trên màn hình trước khi đồng ý.` },
+            'Người dùng KHÔNG đồng ý gửi tin nhắn. Dừng lại, không gửi, và báo cho người dùng.');
+          if (r) return r;
+        }
+        return deps.screen.act(a, ctx);
+      }
       default: throw new CompError(`Không có công cụ "${name}".`);
     }
   }
   return { defs: DEFS, names, exec, has: (n) => n in DEFS, CompError };
 }
 
-module.exports = { createComputerTools, DEFS: DEFS, LEVEL1, LEVEL2, CompError };
+module.exports = { createComputerTools, DEFS: DEFS, LEVEL1, LEVEL2, CompError, isSendAction };

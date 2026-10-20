@@ -73,10 +73,22 @@ function listApps({ platform = process.platform, home = os.homedir(), env = proc
   if (platform === 'win32') {
     const roots = [path.join(env.ProgramData || 'C:\\ProgramData', 'Microsoft', 'Windows', 'Start Menu', 'Programs'), path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Microsoft', 'Windows', 'Start Menu', 'Programs')];
     const files = []; for (const r of roots) walk(r, 4, files, (e) => e.isFile() && /\.(lnk|url|appref-ms)$/i.test(e.name));
-    for (const f of files) { const name = path.basename(f).replace(/\.(lnk|url|appref-ms)$/i, ''); if (/^(uninstall|gỡ|readme|help|website|license|release notes)\b|\buninstall\b/i.test(name)) continue; out.push({ name, path: f }); }
+    const desk = [path.join(env.USERPROFILE || home, 'Desktop'), path.join(env.PUBLIC || 'C:\\Users\\Public', 'Desktop'), path.join(env.OneDrive || path.join(home, 'OneDrive'), 'Desktop')];
+    for (const d of desk) walk(d, 0, files, (e) => e.isFile() && /\.(lnk|url|appref-ms)$/i.test(e.name));
+    for (const f of files) { const name = path.basename(f).replace(/\.(lnk|url|appref-ms)$/i, ''); if (/^(uninstall|gỡ|readme|help|website|license|release notes)\b|\buninstall\b/i.test(name)) continue; out.push({ name, path: f, source: 'shortcut' }); }
+    // ứng dụng cài theo người dùng (Zalo, VS Code, Discord…): %LOCALAPPDATA%\Programs\<Tên>\<Tên>.exe
+    const progs = path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Programs');
+    let dirs = []; try { dirs = fs.readdirSync(progs, { withFileTypes: true }).filter(e => e.isDirectory()); } catch {}
+    for (const d of dirs) {
+      let exes = []; try { exes = fs.readdirSync(path.join(progs, d.name)).filter(f => /\.exe$/i.test(f) && !/unins|update|setup|crash|helper/i.test(f)); } catch {}
+      const exe = exes.find(f => fold(f.replace(/\.exe$/i, '')) === fold(d.name)) || exes.find(f => fold(f).startsWith(fold(d.name).slice(0, 3))) || (exes.length === 1 ? exes[0] : null);
+      if (exe) out.push({ name: d.name, path: path.join(progs, d.name, exe), source: 'localappdata' });
+    }
   } else if (platform === 'darwin') {
     const files = []; for (const r of ['/Applications', '/System/Applications', '/System/Applications/Utilities', '/Applications/Utilities', path.join(home, 'Applications')]) walk(r, 1, files, (e) => e.name.endsWith('.app'));
     for (const f of files) out.push({ name: path.basename(f, '.app'), path: f });
+    const more = []; for (const r of ['/Applications']) walk(r, 2, more, (e) => e.name.endsWith('.app')); // thư mục con: "Microsoft Office", "Setapp"…
+    for (const f of more) out.push({ name: path.basename(f, '.app'), path: f });
   } else {
     const files = []; for (const r of ['/usr/share/applications', '/usr/local/share/applications', path.join(home, '.local/share/applications'), '/var/lib/flatpak/exports/share/applications']) walk(r, 1, files, (e) => e.name.endsWith('.desktop'));
     for (const f of files) { let name = path.basename(f, '.desktop'); try { const t = fs.readFileSync(f, 'utf8'); if (/^NoDisplay=true/m.test(t)) continue; const m = t.match(/^Name=(.+)$/m); if (m) name = m[1].trim(); } catch {} out.push({ name, path: f }); }
@@ -84,12 +96,60 @@ function listApps({ platform = process.platform, home = os.homedir(), env = proc
   const seen = new Set();
   return out.filter(a => { const k = fold(a.name); if (seen.has(k)) return false; seen.add(k); return true; }).sort((a, b) => a.name.localeCompare(b.name, 'vi'));
 }
+// ---------- Tìm sâu (Windows: sổ đăng ký Uninstall/App Paths + Get-StartApps/Store; macOS: Spotlight) ----------
+const PS_APPS = `$ErrorActionPreference='SilentlyContinue'
+$o=@()
+foreach($k in 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'){ Get-ItemProperty $k | Where-Object { $_.DisplayName -and -not $_.SystemComponent } | ForEach-Object { $o += [pscustomobject]@{ s='uninstall'; n=$_.DisplayName; i=$_.DisplayIcon; l=$_.InstallLocation } } }
+foreach($k in 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\*','HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\*'){ Get-ItemProperty $k | ForEach-Object { $o += [pscustomobject]@{ s='apppath'; n=$_.PSChildName; i=$_.'(default)' } } }
+if(Get-Command Get-StartApps){ Get-StartApps | ForEach-Object { $o += [pscustomobject]@{ s='start'; n=$_.Name; a=$_.AppID } } }
+[Console]::OutputEncoding=[Text.Encoding]::UTF8
+$o | ConvertTo-Json -Compress -Depth 2`;
+function exeFromIcon(icon, loc, name) {
+  let p = String(icon || '').trim().replace(/^"|"?,\s*-?\d+$|"$/g, '').replace(/^"|"$/g, '');
+  if (/\.exe$/i.test(p) && !/unins|setup|update/i.test(path.basename(p))) return p;
+  if (loc) { try { const ex = fs.readdirSync(loc).filter(f => /\.exe$/i.test(f) && !/unins|setup|update|crash/i.test(f)); const hit = ex.find(f => fold(name).includes(fold(f.replace(/\.exe$/i, '')))) || ex[0]; if (hit) return path.join(loc, hit); } catch {} }
+  return null;
+}
+function parseWinApps(json) {
+  let arr; try { arr = JSON.parse(json || '[]'); } catch { return []; }
+  if (!Array.isArray(arr)) arr = [arr];
+  const out = [];
+  for (const x of arr) {
+    if (!x || !x.n) continue;
+    if (x.s === 'start') out.push({ name: x.n, appId: x.a, source: 'start' });
+    else if (x.s === 'apppath') { const exe = String(x.i || '').replace(/^"|"$/g, ''); if (exe) out.push({ name: x.n.replace(/\.exe$/i, ''), path: exe, source: 'apppath' }); }
+    else { const exe = exeFromIcon(x.i, x.l, x.n); if (exe) out.push({ name: x.n, path: exe, source: 'uninstall' }); else out.push({ name: x.n, path: null, source: 'uninstall' }); }
+  }
+  return out;
+}
+async function deepApps({ platform = process.platform, run = null } = {}) {
+  const exec_ = run || ((cmd, args) => new Promise(res => execFile(cmd, args, { timeout: 20000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (e, out) => res(e ? '' : String(out)))));
+  if (platform === 'win32') return parseWinApps(await exec_('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', PS_APPS]));
+  return [];
+}
+async function macSpotlight(query, { run = null } = {}) {
+  const q = String(query || '').replace(/["'*\\]/g, '').trim(); if (!q) return [];
+  const exec_ = run || ((cmd, args) => new Promise(res => execFile(cmd, args, { timeout: 8000 }, (e, out) => res(e ? '' : String(out)))));
+  const out = await exec_('mdfind', [`kMDItemContentTypeTree == "com.apple.application-bundle" && kMDItemDisplayName == "*${q}*"cd`]);
+  return out.split('\n').filter(l => l.endsWith('.app')).map(p => ({ name: path.basename(p, '.app'), path: p, source: 'spotlight' }));
+}
+// Gộp danh sách: ưu tiên mục mở được trực tiếp (có path/appId)
+function mergeApps(...lists) {
+  const m = new Map();
+  for (const l of lists) for (const a of l || []) { const k = fold(a.name); const cur = m.get(k); if (!cur || (!cur.path && !cur.appId && (a.path || a.appId))) m.set(k, a); }
+  return [...m.values()].sort((a, b) => a.name.localeCompare(b.name, 'vi'));
+}
+
 // Tên gọi thông dụng (tiếng Việt / viết tắt) → tên ứng dụng
 const ALIASES = { 'trinh duyet': ['Google Chrome', 'Microsoft Edge', 'Safari', 'Firefox', 'Cốc Cốc', 'Coc Coc'], chrome: ['Google Chrome'], edge: ['Microsoft Edge'], 'coc coc': ['Cốc Cốc', 'CocCoc'], word: ['Microsoft Word', 'Word'], excel: ['Microsoft Excel', 'Excel'], powerpoint: ['Microsoft PowerPoint', 'PowerPoint'], 'may tinh': ['Calculator', 'Máy tính'], calculator: ['Calculator'], notepad: ['Notepad', 'TextEdit'], 'ghi chu': ['Notepad', 'Notes', 'Sticky Notes'], terminal: ['Terminal', 'Windows Terminal', 'Command Prompt', 'PowerShell'], cmd: ['Command Prompt'], 'cai dat': ['Settings', 'System Settings', 'System Preferences'], settings: ['Settings', 'System Settings'], 'file explorer': ['File Explorer'], explorer: ['File Explorer'], finder: ['Finder'], zalo: ['Zalo'], 'vs code': ['Visual Studio Code'], vscode: ['Visual Studio Code'], paint: ['Paint'], 'nhac': ['Music', 'Spotify', 'Media Player'], spotify: ['Spotify'], telegram: ['Telegram', 'Telegram Desktop'], zoom: ['Zoom', 'zoom.us'], teams: ['Microsoft Teams'], outlook: ['Microsoft Outlook', 'Outlook'] };
 // Ứng dụng có sẵn của hệ điều hành không có lối tắt trong Start Menu: mở bằng lệnh hệ thống
 const WIN_BUILTIN = { calculator: 'calc.exe', 'máy tính': 'calc.exe', notepad: 'notepad.exe', paint: 'mspaint.exe', 'file explorer': 'explorer.exe', explorer: 'explorer.exe', 'command prompt': 'cmd.exe', cmd: 'cmd.exe', powershell: 'powershell.exe', settings: 'ms-settings:', 'cài đặt': 'ms-settings:', 'task manager': 'taskmgr.exe', 'snipping tool': 'snippingtool.exe', 'control panel': 'control.exe' };
+const NOISE = /\b(pc|app|apps|desktop|for (windows|mac|macos)|ung dung|phan mem|chuong trinh|cho (windows|mac))\b/g;
 function score(q, name) {
-  const a = fold(q), b = fold(name);
+  const a0 = fold(q), b0 = fold(name);
+  const a = a0.replace(NOISE, ' ').replace(/\s+/g, ' ').trim() || a0, b = b0.replace(/\s+/g, ' ');
+  if (a && b && a !== a0 && (a === b || a === b.replace(NOISE, ' ').replace(/\s+/g, ' ').trim())) return 95;
+  if (a && b.length >= 3 && a.startsWith(b + ' ')) return 70; // "zalo pc" ↔ "Zalo"
   if (!a) return 0; if (a === b) return 100; if (b.startsWith(a)) return 80; if (b.includes(a)) return 60;
   const words = a.split(/\s+/).filter(w => w.length > 1); const hit = words.filter(w => b.includes(w)).length;
   return words.length ? Math.round(40 * hit / words.length) : 0;
@@ -197,4 +257,4 @@ async function systemAction(action, { platform = process.platform, keyTap = null
   return SYS[action].label;
 }
 
-module.exports = { checkCommand, listApps, findApp, score, fold, expandPath, knownFolder, EXEC_EXT, runCommand, runningApps, matchRunning, closeApp, systemAction, SYS, WIN_BUILTIN, PROTECTED, BLOCK };
+module.exports = { deepApps, parseWinApps, macSpotlight, mergeApps, exeFromIcon, checkCommand, listApps, findApp, score, fold, expandPath, knownFolder, EXEC_EXT, runCommand, runningApps, matchRunning, closeApp, systemAction, SYS, WIN_BUILTIN, PROTECTED, BLOCK };

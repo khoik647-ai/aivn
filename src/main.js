@@ -20,6 +20,7 @@ const { createComputerTools } = require('./agent/computer-tools');
 const { createAdmin } = require('./admin');
 const SC = require('./screen-control');
 const { WELCOME, TOOL_GROUPS } = require('./agent/agent');
+const { toolSupport } = require('./toolsupport');
 const { createAppLock, resetData } = require('./applock');
 const LIC = require('./license');
 
@@ -334,8 +335,9 @@ function agentAdvice() {
   const m = listModels().find(x => x.path === st.path) || null;
   const p = m && m.catalog && m.catalog.params ? parseFloat(String(m.catalog.params).replace(',', '.')) : null;
   const small = p != null ? p < 3.5 : m ? m.size < 2.2e9 : false;
-  const recommended = catalog.filter(c => c.agent && ['qwen3-4b-instruct-2507-q4_k_m', 'qwen_qwen3-8b-q4_k_m', 'gemma-3-4b-it-q4_k_m'].includes(c.id)).map(c => ({ id: c.id, name: c.name, size: c.size + (c.mmproj ? c.mmproj.size : 0), installed: isInstalled(c.file) }));
-  return { model: m ? (m.catalog ? m.catalog.name : m.file) : st.id, params: p, small, good: !!(m && m.catalog && m.catalog.agent), recommended };
+  const recommended = catalog.filter(c => c.agent && ['qwen3-4b-instruct-2507-q4_k_m', 'qwen_qwen3-8b-q4_k_m'].includes(c.id)).map(c => ({ id: c.id, name: c.name, size: c.size + (c.mmproj ? c.mmproj.size : 0), installed: isInstalled(c.file) }));
+  const tools = toolSupport({ id: m && m.catalog ? m.catalog.id : '', name: m && m.catalog ? m.catalog.name : '', file: m ? m.file : st.id, params: m && m.catalog ? m.catalog.params : null });
+  return { model: m ? (m.catalog ? m.catalog.name : m.file) : st.id, params: p, small, good: !!(m && m.catalog && m.catalog.agent), recommended, tools, toolMode: st.toolMode || null };
 }
 function agentInfo() {
   const py = sandbox.findPython();
@@ -358,14 +360,15 @@ function askConfirm(req) {
   });
 }
 const slimStep = (x) => ({ id: x.id, name: x.name, label: x.label, icon: x.icon, args: x.args, status: x.status, summary: x.summary, detail: typeof x.detail === 'string' ? x.detail.slice(0, 4000) : x.detail, urls: x.urls, ms: x.ms, pre: x.pre });
-async function runAgentTurn({ reqId, convoId, messages, headless = false, signal }) {
+async function runAgentTurn({ reqId, convoId, messages, headless = false, signal, attachments = [] }) {
   if (!engine.status().loaded) {
     if (headless && settings.data.lastModel) await loadById(settings.data.lastModel);
-    else throw new Error('Chưa nạp mô hình nào. Hãy chọn mô hình ở thanh phía trên (gợi ý: Qwen3 4B hoặc Gemma 3 4B trở lên).');
+    else throw new Error('Chưa nạp mô hình nào. Hãy chọn mô hình ở thanh phía trên (gợi ý: Qwen3 4B hoặc Qwen3 8B, hỗ trợ công cụ tốt).');
   }
   const comp = !headless && agent.activeTools({ headless }).some(n => computerTools.has(n));
   if (comp) computerSessionStart();
-  try { return await agent.run({ messages, convoId, signal, headless, confirm: askConfirm, confirmScreen: askScreen,
+  const files = (Array.isArray(attachments) ? attachments : []).filter(f => f && typeof f.path === 'string' && path.isAbsolute(f.path) && fs.existsSync(f.path) && fs.statSync(f.path).isFile()).slice(0, 10);
+  try { return await agent.run({ messages, convoId, signal, headless, attachments: files, confirm: askConfirm, confirmScreen: askScreen,
     onToken: (t) => reqId && send('chat:token', { reqId, t }),
     onStep: (st) => reqId && send('agent:step', { reqId, step: slimStep(st) }),
     onStatus: (st) => reqId && send('agent:status', { reqId, ...st }) }); }
@@ -610,11 +613,11 @@ function catalogList() {
   return hw().then(h => catalog.map(c => {
     const job = downloader.get(`${c.repo}::${c.file}`);
     const part = downloader.partialFor(c.repo, [{ path: c.file, size: c.size }, ...(c.mmproj ? [{ path: c.mmproj.file, size: c.mmproj.size }] : [])]);
-    return { ...c, installed: part.complete || isInstalled(c.file), partial: part.complete ? 0 : part.received, job, fit: hf.fitFor(c.size, h) };
+    return { ...c, installed: part.complete || isInstalled(c.file), partial: part.complete ? 0 : part.received, job, fit: hf.fitFor(c.size, h), tools: toolSupport(c) };
   })).then(list => {
     // Gợi ý một mô hình cho máy này: mô hình lớn nhất (thường giỏi nhất) vẫn "Chạy tốt", ưu tiên loại gọi công cụ tốt
     const good = list.filter(c => c.fit && c.fit.level === 'fit' && !c.embedding);
-    const best = good.sort((a, b) => (b.size * (b.agent ? 1.15 : 1)) - (a.size * (a.agent ? 1.15 : 1)))[0];
+    const w = (c) => c.size * (c.tools && c.tools.level === 'good' ? 1.4 : 1); const best = good.sort((a, b) => w(b) - w(a))[0];
     return list.map(c => c === best ? { ...c, recommended: true } : c);
   });
 }
@@ -813,9 +816,9 @@ function registerIpc() {
 
   // --- AIVN BOT ---
   ipcMain.handle('agent:info', () => agentInfo());
-  ipcMain.handle('agent:run', async (_e, { reqId, convoId, messages }) => {
+  ipcMain.handle('agent:run', async (_e, { reqId, convoId, messages, attachments }) => {
     const ac = new AbortController(); generations.set(reqId, ac);
-    try { const r = await runAgentTurn({ reqId, convoId, messages, signal: ac.signal }); return { ...r, steps: r.steps.map(slimStep), model: engine.status().id }; }
+    try { const r = await runAgentTurn({ reqId, convoId, messages, attachments, signal: ac.signal }); return { ...r, steps: r.steps.map(slimStep), model: engine.status().id }; }
     finally { generations.delete(reqId); }
   });
   ipcMain.handle('agent:screen-reply', (_e, { id, ok, nx, ny }) => { const f = screenConfirms.get(id); if (f) f({ ok: ok === true, nx: Number.isFinite(nx) ? Math.min(1, Math.max(0, nx)) : null, ny: Number.isFinite(ny) ? Math.min(1, Math.max(0, ny)) : null }); return !!f; });
