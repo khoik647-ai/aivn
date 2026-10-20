@@ -124,6 +124,7 @@ function setStatus(st) {
   if (st.loading) el.innerHTML = `<span class="dot busy"></span>Đang nạp ${esc(st.id || '')}…`;
   else if (st.loaded) el.innerHTML = `<span class="dot"></span>${esc(st.id)}${st.vision ? ' · <b class="vis-pill" title="Mô hình nhìn được ảnh: ảnh bạn dán được gửi thẳng cho mô hình">👁 nhìn ảnh</b>' : ''} · ngữ cảnh ${st.contextSize} · ${st.gpu ? 'GPU ' + esc(String(st.gpu)) : 'CPU'}`;
   else el.innerHTML = `<span class="dot off"></span>Chưa nạp mô hình`;
+  el.title = el.textContent;
   $('#ejectBtn').disabled = !st.loaded;
   $('#modelSelect').disabled = !!st.loading;
 }

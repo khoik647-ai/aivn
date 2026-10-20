@@ -446,7 +446,7 @@ function askApproval(card) {
     confirms.set(id, (r) => { clearTimeout(t); confirms.delete(id); resolve(r && typeof r === 'object' ? { ok: r.ok === true, reason: String(r.reason || '').slice(0, 500), always: r.always === true } : { ok: r === true }); });
     send('agent:approve', { id, ...card });
     LOG.log('agent', `Xin phép: ${card.title} (${card.tool})`);
-    if (!app.isPackaged && process.env.AIVN_APPROVE_AUTO) setTimeout(() => { const f = confirms.get(id); if (f) f(process.env.AIVN_APPROVE_AUTO === 'allow' ? { ok: true } : { ok: false, reason: process.env.AIVN_APPROVE_AUTO.replace(/^deny:?/, '') }); }, 200);
+    if (!app.isPackaged && process.env.AIVN_APPROVE_AUTO) setTimeout(async () => { if (process.env.AIVN_QACU && confirmSeq <= 3) { await sleep(500); try { fs.writeFileSync(path.join(process.env.AIVN_QACU, `approve-card-${confirmSeq}.png`), (await win.webContents.capturePage()).toPNG()); } catch {} } const f = confirms.get(id); if (f) f(process.env.AIVN_APPROVE_AUTO === 'allow' ? { ok: true } : { ok: false, reason: process.env.AIVN_APPROVE_AUTO.replace(/^deny:?/, '') }); }, 200);
   });
 }
 const slimStep = (x) => ({ id: x.id, name: x.name, label: x.label, icon: x.icon, args: x.args, status: x.status, summary: x.summary, detail: typeof x.detail === 'string' ? x.detail.slice(0, 4000) : x.detail, urls: x.urls, ms: x.ms, pre: x.pre, thumb: x.thumb && typeof x.thumb.src === 'string' && x.thumb.src.length < 120000 ? x.thumb : undefined });
@@ -1263,6 +1263,7 @@ async function qaCU() {
   const until = async (c, ms = 60000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await js(c)) return true; } catch {} await sleep(250); } return false; };
   const out = { task: process.env.AIVN_QACU_TASK, started: new Date().toISOString() }; const save = () => fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify(out, null, 2));
   let n = 0; const snap = () => { try { cp.execSync(`import -window root -resize 50% ${JSON.stringify(path.join(dir, 'live-' + String(++n).padStart(3, '0') + '.jpg'))}`, { timeout: 8000 }); } catch {} };
+  win.setBounds({ x: 0, y: 0, width: 1280, height: 720 });
   await until('typeof show === "function" && !!state.settings', 60000);
   Object.assign(settings.data, process.env.AIVN_QACU_FOLDER ? { agentFolders: [process.env.AIVN_QACU_FOLDER], agentComputer: false, agentScreen: false, agentToolsOff: [] } : { agentComputer: true, agentScreen: true, agentScreenMode: process.env.AIVN_QACU_MODE || 'each', agentToolsOff: [] }); settings.save();
   const id = process.env.AIVN_QACU_MODEL; const t0 = Date.now();
@@ -1280,6 +1281,59 @@ async function qaCU() {
   await js('document.querySelectorAll("#messages .msg:last-child details.step").forEach((d, i, a) => { if (i >= a.length - 3) d.open = true; }); document.querySelector("#messages").scrollTop = 1e9');
   await sleep(500); fs.writeFileSync(path.join(dir, 'chat-timeline-open.png'), (await wc.capturePage()).toPNG());
   save(); app.quit();
+}
+
+// QA 0.15.0 giao diện (AIVN_QAUI=thư mục, chỉ khi phát triển): chụp 1280x720 các màn hình mới
+async function qaUI() {
+  const dir = process.env.AIVN_QAUI; fs.mkdirSync(dir, { recursive: true });
+  const wc = win.webContents; const js = (c) => wc.executeJavaScript(c);
+  const until = async (c, ms = 60000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await js(c)) return true; } catch {} await sleep(150); } return false; };
+  const out = {}; const shot = async (n) => { await sleep(700); fs.writeFileSync(path.join(dir, n + '.png'), (await wc.capturePage()).toPNG()); out[n] = true; };
+  win.setBounds({ x: 0, y: 0, width: 1280, height: 720 });
+  await until('typeof show === "function" && !!state.settings', 60000);
+  const step = async (n, code) => { try { if (code) await js(code); await shot(n); } catch (e) { out[n] = 'lỗi: ' + e.message; } };
+  if (process.env.AIVN_QAUI_ONBOARD) await step('00-onboarding', 'startOnboard(true)');
+  await js('document.querySelectorAll(".modal-back").forEach(m => m.hidden = true)');
+  const c = await (async () => { const { openDb } = require('./crm/db'); const { createCrm } = require('./crm/crm'); return createCrm({ db: await openDb(path.join(app.getPath('userData'), 'crm.db')), defaultOwner: () => 'Khôi' }); })();
+  if (!c.listContacts({}).total) {
+    const a = c.saveContact({ name: 'Trần Quỳnh Anh', phone: '0912345678', email: 'quynhanh@example.vn', tags: 'VIP, Hà Nội', job_title: 'Giám đốc mua hàng' });
+    const b = c.saveContact({ name: 'Công ty TNHH Sen Vàng', kind: 'company', phone: '02838123456', email: 'lienhe@senvang.vn', tags: 'Đại lý' });
+    const d = c.saveContact({ name: 'Lê Minh Tuấn', phone: '0987654321', email: 'tuan.le@example.vn', tags: 'Khách lẻ' });
+    c.saveLead({ title: 'Gói phần mềm 20 máy', contact_id: b.id, expected_revenue: 45000000, stage: 'quoted' });
+    c.saveLead({ title: 'Đơn hàng quý IV', contact_id: a.id, expected_revenue: 120000000, stage: 'negotiation' });
+    c.saveLead({ title: 'Tư vấn lắp đặt', contact_id: d.id, expected_revenue: 8000000, stage: 'new' });
+    c.saveLead({ title: 'Hợp đồng bảo trì', contact_id: b.id, expected_revenue: 15000000, stage: 'won' });
+    c.saveActivity({ title: 'Gọi lại chị Quỳnh Anh về báo giá', type: 'call', contact_id: a.id, due_at: Date.now() + 3600e3 });
+    c.saveActivity({ title: 'Gửi hợp đồng cho Sen Vàng', type: 'email', contact_id: b.id, due_at: Date.now() - 86400e3 });
+  }
+  crmP = null;
+  await step('01-crm-tong-quan', 'show("crm"); crm.tab = "dash"; renderCrm()');
+  await step('02-crm-lien-he', 'crm.tab = "contacts"; renderCrm()');
+  await step('03-crm-co-hoi', 'crm.tab = "leads"; renderCrm()');
+  await step('04-crm-viec', 'crm.tab = "acts"; renderCrm()');
+  await step('05-crm-form', 'crmForm("contact", {})');
+  await js('document.querySelector("#crmModal").hidden = true');
+  await step('06-crm-trong', 'crm.tab = "contacts"; document.querySelector("#crmQ").value = "không-có-ai"; renderCrm()');
+  await js('document.querySelector("#crmQ").value = ""');
+  await step('07-agent-mcp', 'show("agent"); const m = document.querySelector("#mcpBlock"); m.open = true; m.scrollIntoView()');
+  await step('08-agent-perf', 'document.querySelector("#perfBox") && document.querySelector("#perfBox").scrollIntoView()');
+  await step('09-agent-bench', 'document.querySelector("#benchBox") && (document.querySelector("#benchBox").closest("details") ? document.querySelector("#benchBox").closest("details").open = true : 0, document.querySelector("#benchBox").scrollIntoView())');
+  const AP = require('./agent/approval');
+  const kf = path.join(require('os').tmpdir(), 'ke-hoach-tuan.md'); fs.writeFileSync(kf, '# Kế hoạch tuần\n- Thứ Hai: họp nhóm 8h\n- Thứ Ba: nộp báo cáo\n');
+  const card = AP.buildCard('write_file', { path: kf, content: '# Kế hoạch tuần\n- Thứ Hai: họp nhóm 9h\n- Thứ Ba: nộp báo cáo\n- Thứ Tư: ôn thi Toán rời rạc\n' }, { label: 'Ghi tệp', icon: '📝', resolvePath: (p) => ({ full: p }) });
+  send('agent:approve', { id: 'qa-card', ...card });
+  await step('10-the-xin-phep');
+  await step('11-the-xin-phep-ly-do', 'const b = [...document.querySelectorAll("#approveCard button")].find(x => /lý do/i.test(x.textContent)); b && b.click()');
+  await js('document.querySelector("#approveCard").hidden = true');
+  await step('12-bang-lenh', 'openPalette()');
+  await js('document.querySelector("#palette").hidden = true');
+  await step('13-phim-tat', 'openKeys()');
+  await js('document.querySelector("#keysModal").hidden = true');
+  await step('14-thu-gon-panel', 'togglePanel(true)');
+  await js('togglePanel(false)');
+  await step('15-kho-mo-hinh', 'show("discover")');
+  await step('16-mo-hinh-cua-toi', 'show("models")');
+  fs.writeFileSync(path.join(dir, 'qaui.json'), JSON.stringify(out, null, 2)); app.quit();
 }
 
 // QA 0.14.4 (AIVN_QA144=thư mục, chỉ khi phát triển): bộ máy sập giữa lượt → tự phục hồi; thẻ lỗi có nút nhật ký; chống bấm đúp Gửi→Dừng; quét ứng dụng; tệp nhật ký
@@ -1844,6 +1898,7 @@ else {
     if (app.isPackaged || process.env.AIVN_UPDATE_CHECK === '1') setTimeout(() => updater.check({ silent: true }), Number(process.env.AIVN_UPDATE_DELAY || 5000));
     if (process.env.AIVN_SHOTS141) win.webContents.once('did-finish-load', () => setTimeout(() => shots141().catch(e => { console.error('SHOTS lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_AGENTBENCH && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaBench().catch(e => { console.error('BENCH lỗi', e); app.exit(2); }), 2500));
+    if (process.env.AIVN_QAUI && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaUI().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QACU && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaCU().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QA144 && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qa144().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QA143 && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qa143().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));

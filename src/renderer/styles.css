@@ -490,3 +490,7 @@ details.adv[open]{display:flex;flex-direction:column;gap:10px}
 .crm-form { max-width: 520px; width: 92vw; } .crm-form label { display: block; margin: 6px 0; font-size: 13px; }
 .crm-form input, .crm-form select, .crm-form textarea { width: 100%; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line, #ccc); font: inherit; background: transparent; color: inherit; }
 .crm-foot { margin-top: 16px; }
+/* thanh trên cùng: trạng thái mô hình không xuống dòng ở cửa sổ hẹp */
+.topbar .model-state { min-width: 0; flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .top-tools { flex: 0 0 auto; white-space: nowrap; }
+@media (max-width: 1180px) { #paletteBtn kbd { display: none; } }
