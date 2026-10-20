@@ -67,6 +67,7 @@
       "src/engine.js",
       "src/engine-host.js",
       "src/vision-server.js",
+      "src/schema.js",
       "src/ocr.js",
       "src/llama-archs.json",
       "package.json"
