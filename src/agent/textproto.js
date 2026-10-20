@@ -122,6 +122,18 @@ function compactTools(tools) {
   const strip = (p) => { if (!p || typeof p !== 'object') return p; const o = { ...p }; delete o.description; if (o.properties) o.properties = Object.fromEntries(Object.entries(o.properties).map(([k, v]) => [k, strip(v)])); if (o.items) o.items = strip(o.items); return o; };
   return tools.map(t => ({ ...t, description: String(t.description || '').split(/(?<=[.!?])\s/)[0].slice(0, 120), parameters: strip(t.parameters) }));
 }
+// 0.15.2: bản mô tả công cụ gọn cho ngữ cảnh ≤ 16k: tối đa 2 câu / 300 ký tự cho công cụ, 70 ký tự cho tham số.
+// Câu kết thúc bằng . ! ? rồi khoảng trắng + chữ HOA (không cắt nhầm ở "vd.").
+const LEAN_DESC = {
+  screen_act: 'Làm MỘT thao tác: click / double_click / right_click (element = id [eN] của lần quan sát mới nhất hoặc tên phần tử; hoặc x,y thang 0-1000), type_text (text; element = ô cần gõ), hotkey (keys, vd. "enter", "ctrl+s"), scroll (amount âm = xuống), wait (seconds), focus_window (window). Kết quả kèm kiểm tra và danh sách phần tử mới. Không bao giờ gõ mật khẩu.',
+  screen_look: 'Quan sát cửa sổ đang dùng: danh sách phần tử [eN] (loại, tên, giá trị, vị trí x,y 0-1000) và chữ đọc được. Gọi trước screen_act. window: chuyển tới cửa sổ đó trước; query: lọc phần tử theo chữ.',
+  run_javascript: 'Chạy đoạn JavaScript ngắn trong hộp cát (không mạng, không đọc tệp, tối đa 3 giây); in kết quả bằng console.log. input_file: nội dung tệp trong thư mục được phép có sẵn trong biến INPUT.',
+};
+function leanTools(tools) {
+  const cap = (d, n) => { d = String(d || '').trim(); return d.length > n ? d.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : d; };
+  const strip = (p) => { if (!p || typeof p !== 'object') return p; const o = { ...p }; if (o.description) o.description = cap(o.description, 70); if (o.properties) o.properties = Object.fromEntries(Object.entries(o.properties).map(([k, v]) => [k, strip(v)])); if (o.items) o.items = strip(o.items); return o; };
+  return tools.map(t => ({ ...t, description: LEAN_DESC[t.name] || t.description, parameters: strip(t.parameters) }));
+}
 // Giữ lời nhắc hệ thống (cắt bớt) + vài lượt cuối, không cắt rời lời gọi công cụ khỏi kết quả
 function trimHistory(messages) {
   const sys = messages.filter(m => m.role === 'system').map(m => ({ ...m, content: typeof m.content === 'string' && m.content.length > 2500 ? m.content.slice(0, 2500) + '\n…' : m.content }));
@@ -130,7 +142,8 @@ function trimHistory(messages) {
   while (start > 0 && rest[start].role === 'tool') start--;
   return [...sys, ...rest.slice(start)];
 }
-const CTX_RE = /context shift strategy|fits the context size|context size is too small|too long for the context|exceeds the available context size/i;
+// 0.15.2: thêm "Failed to compress chat history … too long prompt or system message" (node-llama-cpp 3.22) — trước đây lọt ra người dùng bằng tiếng Anh
+const CTX_RE = /context shift strategy|fits the context size|context size is too small|too long for the context|exceeds the available context size|compress chat history|too long prompt or system message|increasing the context size/i;
 function ctxSmallError(n) {
   const x = new Error(`Độ dài ngữ cảnh${n ? ' ' + n + ' token' : ''} quá nhỏ cho yêu cầu này (lời nhắc hệ thống + mô tả công cụ + lịch sử). Hãy tăng "Độ dài ngữ cảnh" lên 8192 trong Cài đặt trò chuyện rồi nạp lại mô hình, hoặc tắt bớt công cụ trên đầu AIVN AGENT.`);
   x.code = 'CTX_SMALL'; return x;
@@ -141,4 +154,4 @@ function templateHasTools(tpl) {
   const t = String(tpl || ''); if (!t) return null;
   return /<tool_call>|\[TOOL_CALLS\]|\[AVAILABLE_TOOLS\]|<\|python_tag\|>|ipython|tool_calls|<\|tool_call|functions\.|<function=/.test(t) && /\btools\b/.test(t);
 }
-module.exports = { templateHasTools, compactTools, trimHistory, CTX_RE, ctxSmallError, analyzeTemplate, normalizeMessages, parseToolCalls, toolPrompt, streamFilter, isTemplateError, contentText };
+module.exports = { templateHasTools, compactTools, leanTools, trimHistory, CTX_RE, ctxSmallError, analyzeTemplate, normalizeMessages, parseToolCalls, toolPrompt, streamFilter, isTemplateError, contentText };

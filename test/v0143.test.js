@@ -52,10 +52,10 @@ test('lời gọi <tool_call> trong văn bản (chế độ gốc) được th�
   assert.strictEqual(typeof toolMsg.content, 'string'); assert.ok(toolMsg.content.length > 0);
 });
 
-test('chuỗi dự phòng: đủ lớp → ½ → ½ ngữ cảnh nhỏ → ¼ lớp → CPU', () => {
+test('chuỗi dự phòng (0.15.2): đủ lớp → ¾ → ½ → ¼ lớp → CPU, ngữ cảnh không giảm; cuối cùng CPU 4096', () => {
   const { loadPlans } = require('../src/engine');
   const p = loadPlans({ gpu: 'vulkan', vram: { total: 8e9, free: 8e9 }, fileSize: 400e6, geo: { layers: 28, kvPerToken: 1000 }, ctx: 8192 });
-  assert.deepStrictEqual(p.map(x => x.gpuLayers + '@' + x.ctx), ['29@8192', '14@8192', '14@2048', '7@8192', '0@8192', '0@2048']);
+  assert.deepStrictEqual(p.map(x => x.gpuLayers + '@' + x.ctx), ['29@8192', '21@8192', '14@8192', '7@8192', '0@8192', '0@4096']);
 });
 
 // ---- Zalo trên máy thật: Desktop nằm trong OneDrive, tên người dùng tiếng Việt ----

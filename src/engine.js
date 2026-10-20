@@ -59,16 +59,21 @@ async function modelGeometry(modelPath) {
     const kvHeads = Number(m.attention && m.attention.head_count_kv) || heads;
     const headDim = Number(m.attention && m.attention.key_length) || (m.embedding_length && heads ? m.embedding_length / heads : null);
     const kvPerToken = layers && kvHeads && headDim ? 2 * layers * kvHeads * headDim * 2 : null; // K+V, f16
+    const trainCtx = Number(m.context_length) || null;
     const g = (info.metadata && info.metadata.general) || {};
     const tpl = String((info.metadata && info.metadata.tokenizer && info.metadata.tokenizer.chat_template) || '');
-    return { arch, layers, kvPerToken, name: g.name || g.basename || null, sizeLabel: g.size_label || null, toolTemplate: TP.templateHasTools(tpl) };
+    return { arch, layers, kvPerToken, trainCtx, name: g.name || g.basename || null, sizeLabel: g.size_label || null, toolTemplate: TP.templateHasTools(tpl) };
   } catch { return { arch: null, layers: null, kvPerToken: null }; }
 }
 const MB = 1024 * 1024;
 // Kế hoạch nạp: thử lần lượt từ nhanh nhất tới an toàn nhất
-function loadPlans({ gpu, vram, fileSize, geo, ctx, userLayers, kvScale = 1 }) {
-  const plans = []; const add = (p) => { if (!plans.some(x => x.gpuLayers === p.gpuLayers && x.ctx === p.ctx)) plans.push(p); };
-  const small = Math.min(ctx, 2048);
+// 0.15.2: KHÔNG BAO GIỜ thu nhỏ ngữ cảnh dưới minCtx (mặc định 8192 — lời nhắc hệ thống + công cụ của AIVN AGENT cần chỗ).
+// Thiếu VRAM thì đưa ít lớp lên GPU hơn; ngữ cảnh chỉ giảm (tới minCtx) ở các phương án cuối cùng.
+function loadPlans({ gpu, vram, fileSize, geo, ctx, userLayers, kvScale = 1, minCtx = 8192 }) {
+  const plans = []; const add = (p) => { p = { ...p, minCtx: Math.min(minCtx, p.ctx) }; if (!plans.some(x => x.gpuLayers === p.gpuLayers && x.ctx === p.ctx)) plans.push(p); };
+  if (geo && geo.trainCtx) ctx = Math.min(ctx, geo.trainCtx);
+  minCtx = Math.min(minCtx, ctx);
+  const small = Math.max(minCtx, Math.min(ctx, 2048));
   if (gpu) {
     const L = geo.layers ? geo.layers + 1 : null; // + lớp đầu ra
     if (Number.isInteger(userLayers) && userLayers >= 0) add({ mode: userLayers ? 'gpu-manual' : 'cpu', gpuLayers: userLayers, ctx });
@@ -83,18 +88,23 @@ function loadPlans({ gpu, vram, fileSize, geo, ctx, userLayers, kvScale = 1 }) {
     else if (fitN >= L) add({ mode: 'gpu', gpuLayers: L, ctx });
     else if (fitN > 0) add({ mode: 'gpu-partial', gpuLayers: fitN, ctx });
     const base = fitN ?? (L || 32);
+    if (base > 4) add({ mode: 'gpu-partial', gpuLayers: Math.floor(base * 3 / 4), ctx });
     if (base > 4) add({ mode: 'gpu-partial', gpuLayers: Math.floor(base / 2), ctx });
     if (base > 4) add({ mode: 'gpu-partial', gpuLayers: Math.floor(base / 2), ctx: small });
     if (base > 8) add({ mode: 'gpu-partial', gpuLayers: Math.floor(base / 4), ctx }); // ít lớp → KV trên GPU cũng ít; vẫn nhanh hơn chỉ CPU
     add({ mode: 'cpu', gpuLayers: 0, ctx });
     add({ mode: 'cpu', gpuLayers: 0, ctx: small });
   } else { add({ mode: 'cpu-only', gpuLayers: 0, ctx }); add({ mode: 'cpu-only', gpuLayers: 0, ctx: small }); }
+  // phương án cuối: CPU, ngữ cảnh 4096 (vẫn trò chuyện được; AIVN AGENT sẽ tự xin nạp lại với ngữ cảnh lớn hơn khi cần)
+  if (ctx > 4096) { const last = { mode: gpu ? 'cpu' : 'cpu-only', gpuLayers: 0, ctx: 4096 }; if (!plans.some(x => x.gpuLayers === 0 && x.ctx === 4096)) plans.push({ ...last, minCtx: 4096 }); }
   return plans;
 }
 
 async function loadModel(id, modelPath, opts = {}) {
-  if (!opts.mmproj && current && current.path === modelPath) return status();
-  if (opts.mmproj && visionOn && getVision().status()?.path === modelPath) return status();
+  // cùng tệp đã nạp: giữ nguyên, TRỪ khi cần ngữ cảnh lớn hơn ngữ cảnh đang có (0.15.2: tự tăng ngữ cảnh)
+  const wantCtx = opts.minContextSize || Math.min(Number(opts.contextSize) || 0, 8192);
+  if (!opts.mmproj && current && current.path === modelPath && !(wantCtx && current.context.contextSize < wantCtx)) return status();
+  if (opts.mmproj && visionOn && getVision().status()?.path === modelPath && !(wantCtx && (getVision().status().contextSize || 0) < wantCtx)) return status();
   if (loading) await loading.catch(() => {});
   if (opts.mmproj) {
     loading = (async () => {
@@ -124,8 +134,8 @@ async function loadModel(id, modelPath, opts = {}) {
     let fileSize = opts.fileSize || 0; if (!fileSize) { try { fileSize = require('fs').statSync(modelPath).size; } catch {} }
     const pf = opts.perf || {};
     const kvQuant = !!pf.kvQuant;
-    const plans = loadPlans({ gpu: l.gpu, vram, fileSize, geo, ctx: ctxMax, userLayers: opts.gpuLayers, kvScale: kvQuant ? 0.55 : 1 });
-    const ctxOpts = (plan, kv) => ({ contextSize: { min: Math.min(512, plan.ctx), max: plan.ctx },
+    const plans = loadPlans({ gpu: l.gpu, vram, fileSize, geo, ctx: ctxMax, userLayers: opts.gpuLayers, kvScale: kvQuant ? 0.55 : 1, minCtx: opts.minContextSize || 8192 });
+    const ctxOpts = (plan, kv) => ({ contextSize: { min: plan.minCtx, max: plan.ctx },
       ...(pf.threads ? { threads: pf.threads } : {}), ...(pf.batchSize ? { batchSize: Math.min(pf.batchSize, plan.ctx) } : {}), ...(pf.flashAttention != null ? { flashAttention: kv ? true : pf.flashAttention } : {}),
       ...(kv ? { experimentalKvCacheKeyType: 'Q8_0', experimentalKvCacheValueType: 'Q8_0' } : {}) });
     for (const plan of plans) {
@@ -136,7 +146,7 @@ async function loadModel(id, modelPath, opts = {}) {
         try { context = await model.createContext(ctxOpts(plan, kvUsed)); }
         catch (e) { if (!kvUsed) throw e; kvUsed = false; attempts.push({ mode: `${plan.mode} KV q8_0`, message: String(e && e.message || e) }); context = await model.createContext(ctxOpts(plan, false)); } // KV nén lỗi (mô hình/GPU không hỗ trợ) → f16
         let tokenPredictor; if (pf.lookup) { try { const { InputLookupTokenPredictor } = await getLib(); tokenPredictor = new InputLookupTokenPredictor(); } catch {} }
-        current = { id, path: modelPath, model, context, tokenPredictor, loadedAt: Date.now(), mode: plan.mode, meta: { name: geo.name, arch: geo.arch, sizeLabel: geo.sizeLabel, toolTemplate: geo.toolTemplate }, gpuLayers: model.gpuLayers, totalLayers: geo.layers ? geo.layers + 1 : null, attempts: attempts.map(a => a.mode + ': ' + a.message),
+        current = { id, path: modelPath, model, context, tokenPredictor, loadedAt: Date.now(), mode: plan.mode, meta: { name: geo.name, arch: geo.arch, sizeLabel: geo.sizeLabel, toolTemplate: geo.toolTemplate, trainCtx: geo.trainCtx || null }, gpuLayers: model.gpuLayers, totalLayers: geo.layers ? geo.layers + 1 : null, attempts: attempts.map(a => a.mode + ': ' + a.message),
           perf: { threads: pf.threads || l.cpuMathCores || null, batchSize: pf.batchSize || 512, kv: kvUsed ? 'q8_0' : 'f16', flashAttention: context.flashAttention ?? null, lookup: !!tokenPredictor, profile: pf.effective || null } };
         return;
       } catch (e) {
