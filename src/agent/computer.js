@@ -68,25 +68,63 @@ function walk(dir, depth, out, pred, max = 4000) {
     if (e.isDirectory() && depth > 0 && !e.name.endsWith('.app')) walk(full, depth - 1, out, pred, max);
   }
 }
-function listApps({ platform = process.platform, home = os.homedir(), env = process.env } = {}) {
+// Đọc đích của lối tắt .lnk (MS-SHLLINK) không cần PowerShell: LinkInfo → LocalBasePath (ưu tiên bản Unicode)
+function lnkTarget(file) {
+  let b; try { b = fs.readFileSync(file); } catch { return null; }
+  try {
+    if (b.length < 0x4c || b.readUInt32LE(0) !== 0x4c) return null;
+    const flags = b.readUInt32LE(0x14); let off = 0x4c;
+    if (flags & 1) off += 2 + b.readUInt16LE(off);
+    if (!(flags & 2)) return null;
+    const li = off, hs = b.readUInt32LE(li + 4), lf = b.readUInt32LE(li + 8);
+    if (!(lf & 1)) return null;
+    const cstr = (o) => { let e = o; while (e < b.length && b[e]) e++; return b.toString('latin1', o, e); };
+    const wstr = (o) => { let e = o; while (e + 1 < b.length && (b[e] || b[e + 1])) e += 2; return b.toString('utf16le', o, e); };
+    let base = hs >= 0x24 && b.readUInt32LE(li + 28) ? wstr(li + b.readUInt32LE(li + 28)) : cstr(li + b.readUInt32LE(li + 16));
+    const suf = hs >= 0x24 && b.readUInt32LE(li + 32) ? wstr(li + b.readUInt32LE(li + 32)) : cstr(li + b.readUInt32LE(li + 24));
+    if (suf) base = base.replace(/\\?$/, '\\') + suf;
+    return base || null;
+  } catch { return null; }
+}
+// Thư mục Desktop / Start Menu có thể có trên Windows: hồ sơ thường, Public, OneDrive (cá nhân + tổ chức, vd. "OneDrive - Văn Lang"),
+// cộng thêm các thư mục thật lấy từ sổ đăng ký / [Environment]::GetFolderPath (extraDirs)
+function winDirs({ home, env, extraDirs = {} }) {
+  const prof = env.USERPROFILE || home;
+  const one = [env.OneDrive, env.OneDriveConsumer, env.OneDriveCommercial].filter(Boolean);
+  try { for (const e of fs.readdirSync(prof, { withFileTypes: true })) if (e.isDirectory() && /^OneDrive/i.test(e.name)) one.push(path.join(prof, e.name)); } catch {}
+  const desk = [path.join(prof, 'Desktop'), path.join(env.PUBLIC || 'C:\\Users\\Public', 'Desktop'), ...one.flatMap(o => [path.join(o, 'Desktop'), path.join(o, 'Màn hình nền')]), ...(extraDirs.desktop || [])];
+  const start = [path.join(env.ProgramData || 'C:\\ProgramData', 'Microsoft', 'Windows', 'Start Menu', 'Programs'), path.join(env.APPDATA || path.join(prof, 'AppData', 'Roaming'), 'Microsoft', 'Windows', 'Start Menu', 'Programs'), ...(extraDirs.start || [])];
+  const uniq = (a) => { const seen = new Set(); return a.filter(d => { const k = d.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }); };
+  return { desk: uniq(desk), start: uniq(start) };
+}
+const SKIP_LNK = /^(uninstall|gỡ|readme|help|website|license|release notes)\b|\buninstall\b/i;
+function listApps({ platform = process.platform, home = os.homedir(), env = process.env, extraDirs = {}, diag = null } = {}) {
   const out = [];
+  const count = (k, n) => { if (diag) diag.sources[k] = (diag.sources[k] || 0) + n; };
   if (platform === 'win32') {
-    const roots = [path.join(env.ProgramData || 'C:\\ProgramData', 'Microsoft', 'Windows', 'Start Menu', 'Programs'), path.join(env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'Microsoft', 'Windows', 'Start Menu', 'Programs')];
-    const files = []; for (const r of roots) walk(r, 4, files, (e) => e.isFile() && /\.(lnk|url|appref-ms)$/i.test(e.name));
-    const desk = [path.join(env.USERPROFILE || home, 'Desktop'), path.join(env.PUBLIC || 'C:\\Users\\Public', 'Desktop'), path.join(env.OneDrive || path.join(home, 'OneDrive'), 'Desktop')];
-    for (const d of desk) walk(d, 0, files, (e) => e.isFile() && /\.(lnk|url|appref-ms)$/i.test(e.name));
-    for (const f of files) { const name = path.basename(f).replace(/\.(lnk|url|appref-ms)$/i, ''); if (/^(uninstall|gỡ|readme|help|website|license|release notes)\b|\buninstall\b/i.test(name)) continue; out.push({ name, path: f, source: 'shortcut' }); }
+    const { desk, start } = winDirs({ home, env, extraDirs });
+    if (diag) diag.dirs = { desktop: desk.filter(d => fs.existsSync(d)), start: start.filter(d => fs.existsSync(d)) };
+    const add = (f, source) => {
+      const name = path.basename(f).replace(/\.(lnk|url|appref-ms|exe)$/i, ''); if (SKIP_LNK.test(name)) return false;
+      const target = /\.lnk$/i.test(f) ? lnkTarget(f) : /\.exe$/i.test(f) ? f : null;
+      out.push({ name, path: f, target: target || undefined, source }); return true;
+    };
+    for (const r of start) { const files = []; walk(r, 4, files, (e) => e.isFile() && /\.(lnk|url|appref-ms)$/i.test(e.name)); count('startmenu', files.filter(f => add(f, 'startmenu')).length); }
+    for (const d of desk) { const files = []; walk(d, 0, files, (e) => e.isFile() && /\.(lnk|url|appref-ms|exe)$/i.test(e.name)); count('desktop', files.filter(f => add(f, 'desktop')).length); }
     // ứng dụng cài theo người dùng (Zalo, VS Code, Discord…): %LOCALAPPDATA%\Programs\<Tên>\<Tên>.exe
-    const progs = path.join(env.LOCALAPPDATA || path.join(home, 'AppData', 'Local'), 'Programs');
+    const progs = path.join(env.LOCALAPPDATA || path.join(env.USERPROFILE || home, 'AppData', 'Local'), 'Programs');
     let dirs = []; try { dirs = fs.readdirSync(progs, { withFileTypes: true }).filter(e => e.isDirectory()); } catch {}
+    let nLocal = 0;
     for (const d of dirs) {
       let exes = []; try { exes = fs.readdirSync(path.join(progs, d.name)).filter(f => /\.exe$/i.test(f) && !/unins|update|setup|crash|helper/i.test(f)); } catch {}
       const exe = exes.find(f => fold(f.replace(/\.exe$/i, '')) === fold(d.name)) || exes.find(f => fold(f).startsWith(fold(d.name).slice(0, 3))) || (exes.length === 1 ? exes[0] : null);
-      if (exe) out.push({ name: d.name, path: path.join(progs, d.name, exe), source: 'localappdata' });
+      if (exe) { out.push({ name: d.name, path: path.join(progs, d.name, exe), source: 'localappdata' }); nLocal++; }
     }
+    count('localappdata', nLocal);
   } else if (platform === 'darwin') {
     const files = []; for (const r of ['/Applications', '/System/Applications', '/System/Applications/Utilities', '/Applications/Utilities', path.join(home, 'Applications')]) walk(r, 1, files, (e) => e.name.endsWith('.app'));
     for (const f of files) out.push({ name: path.basename(f, '.app'), path: f });
+    count('applications', files.length);
     const more = []; for (const r of ['/Applications']) walk(r, 2, more, (e) => e.name.endsWith('.app')); // thư mục con: "Microsoft Office", "Setapp"…
     for (const f of more) out.push({ name: path.basename(f, '.app'), path: f });
   } else {
@@ -97,35 +135,53 @@ function listApps({ platform = process.platform, home = os.homedir(), env = proc
   return out.filter(a => { const k = fold(a.name); if (seen.has(k)) return false; seen.add(k); return true; }).sort((a, b) => a.name.localeCompare(b.name, 'vi'));
 }
 // ---------- Tìm sâu (Windows: sổ đăng ký Uninstall/App Paths + Get-StartApps/Store; macOS: Spotlight) ----------
-const PS_APPS = `$ErrorActionPreference='SilentlyContinue'
+const PS_APPS = `[Console]::OutputEncoding=[Text.Encoding]::UTF8
+$ErrorActionPreference='SilentlyContinue'
 $o=@()
 foreach($k in 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*','HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'){ Get-ItemProperty $k | Where-Object { $_.DisplayName -and -not $_.SystemComponent } | ForEach-Object { $o += [pscustomobject]@{ s='uninstall'; n=$_.DisplayName; i=$_.DisplayIcon; l=$_.InstallLocation } } }
 foreach($k in 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\*','HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\*'){ Get-ItemProperty $k | ForEach-Object { $o += [pscustomobject]@{ s='apppath'; n=$_.PSChildName; i=$_.'(default)' } } }
 if(Get-Command Get-StartApps){ Get-StartApps | ForEach-Object { $o += [pscustomobject]@{ s='start'; n=$_.Name; a=$_.AppID } } }
-[Console]::OutputEncoding=[Text.Encoding]::UTF8
-$o | ConvertTo-Json -Compress -Depth 2`;
+foreach($f in 'Desktop','CommonDesktopDirectory','StartMenu','CommonStartMenu','Programs','CommonPrograms'){ $d=[Environment]::GetFolderPath($f); if($d){ $o += [pscustomobject]@{ s='dir'; n=$f; i=$d } } }
+ConvertTo-Json -InputObject @($o) -Compress -Depth 2`;
+// -EncodedCommand (UTF-16LE base64): không vướng dấu nháy / xuống dòng / chính sách thực thi
+const psEncoded = (script) => Buffer.from(script, 'utf16le').toString('base64');
 function exeFromIcon(icon, loc, name) {
   let p = String(icon || '').trim().replace(/^"|"?,\s*-?\d+$|"$/g, '').replace(/^"|"$/g, '');
   if (/\.exe$/i.test(p) && !/unins|setup|update/i.test(path.basename(p))) return p;
   if (loc) { try { const ex = fs.readdirSync(loc).filter(f => /\.exe$/i.test(f) && !/unins|setup|update|crash/i.test(f)); const hit = ex.find(f => fold(name).includes(fold(f.replace(/\.exe$/i, '')))) || ex[0]; if (hit) return path.join(loc, hit); } catch {} }
   return null;
 }
-function parseWinApps(json) {
-  let arr; try { arr = JSON.parse(json || '[]'); } catch { return []; }
+function parseWinApps(json, diag = null) {
+  let arr; try { arr = JSON.parse(String(json || '[]').replace(/^\uFEFF/, '').trim() || '[]'); } catch (e) { if (diag) diag.errors.push('PowerShell trả dữ liệu không đọc được'); return []; }
   if (!Array.isArray(arr)) arr = [arr];
-  const out = [];
+  const out = []; const dirs = { desktop: [], start: [] };
   for (const x of arr) {
     if (!x || !x.n) continue;
+    if (x.s === 'dir') { if (x.i) (/desktop/i.test(x.n) ? dirs.desktop : dirs.start).push(x.i); continue; }
     if (x.s === 'start') out.push({ name: x.n, appId: x.a, source: 'start' });
     else if (x.s === 'apppath') { const exe = String(x.i || '').replace(/^"|"$/g, ''); if (exe) out.push({ name: x.n.replace(/\.exe$/i, ''), path: exe, source: 'apppath' }); }
-    else { const exe = exeFromIcon(x.i, x.l, x.n); if (exe) out.push({ name: x.n, path: exe, source: 'uninstall' }); else out.push({ name: x.n, path: null, source: 'uninstall' }); }
+    else { const exe = exeFromIcon(x.i, x.l, x.n); out.push({ name: x.n, path: exe || null, source: 'uninstall' }); }
   }
+  if (diag) { for (const a of out) diag.sources[a.source] = (diag.sources[a.source] || 0) + 1; diag.shellDirs = dirs; }
+  Object.defineProperty(out, 'dirs', { value: dirs, enumerable: false });
   return out;
 }
-async function deepApps({ platform = process.platform, run = null } = {}) {
-  const exec_ = run || ((cmd, args) => new Promise(res => execFile(cmd, args, { timeout: 20000, windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (e, out) => res(e ? '' : String(out)))));
-  if (platform === 'win32') return parseWinApps(await exec_('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', PS_APPS]));
-  return [];
+// Tìm sâu; trả mảng ứng dụng, kèm .diag (nguồn → số mục, lỗi) không liệt kê
+async function deepApps({ platform = process.platform, run = null, timeout = 25000 } = {}) {
+  const diag = { sources: {}, errors: [] };
+  const exec_ = run || ((cmd, args) => new Promise(res => execFile(cmd, args, { timeout, windowsHide: true, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8' }, (e, out, err) => {
+    if (e) diag.errors.push(`PowerShell ${e.killed || e.signal ? 'quá thời gian ' + Math.round(timeout / 1000) + ' giây' : 'lỗi: ' + String(err || e.message).split('\n')[0].slice(0, 160)}`);
+    res(String(out || ''));
+  })));
+  let list = [];
+  if (platform === 'win32') {
+    const t0 = Date.now();
+    let out = ''; try { out = await exec_('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', psEncoded(PS_APPS)]); } catch (e) { diag.errors.push('PowerShell không chạy được: ' + e.message); }
+    if (!String(out).trim() && !diag.errors.length) diag.errors.push('PowerShell không trả kết quả');
+    list = parseWinApps(out, diag); diag.ms = Date.now() - t0;
+  }
+  Object.defineProperty(list, 'diag', { value: diag, enumerable: false });
+  return list;
 }
 async function macSpotlight(query, { run = null } = {}) {
   const q = String(query || '').replace(/["'*\\]/g, '').trim(); if (!q) return [];
@@ -257,4 +313,4 @@ async function systemAction(action, { platform = process.platform, keyTap = null
   return SYS[action].label;
 }
 
-module.exports = { deepApps, parseWinApps, macSpotlight, mergeApps, exeFromIcon, checkCommand, listApps, findApp, score, fold, expandPath, knownFolder, EXEC_EXT, runCommand, runningApps, matchRunning, closeApp, systemAction, SYS, WIN_BUILTIN, PROTECTED, BLOCK };
+module.exports = { lnkTarget, winDirs, psEncoded, PS_APPS, deepApps, parseWinApps, macSpotlight, mergeApps, exeFromIcon, checkCommand, listApps, findApp, score, fold, expandPath, knownFolder, EXEC_EXT, runCommand, runningApps, matchRunning, closeApp, systemAction, SYS, WIN_BUILTIN, PROTECTED, BLOCK };

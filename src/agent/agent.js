@@ -10,6 +10,7 @@ const { evaluate, fmtVi } = require('./calc');
 const sandbox = require('./sandbox');
 const web = require('./web');
 const { DAY_VI } = require('./scheduler');
+const TP = require('./textproto');
 
 const MAX_ROUNDS = 8, MAX_CALLS = 16;
 const WRITE_EXT = new Set(['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'jsonl', 'xml', 'yaml', 'yml', 'toml', 'ini', 'log', 'html', 'htm', 'css', 'js', 'mjs', 'cjs', 'ts', 'py', 'sql', 'sh', 'bat', 'ps1', 'java', 'c', 'h', 'cpp', 'cs', 'go', 'rs', 'php', 'rb', 'kt', 'swift', 'tex', 'srt', 'vtt']);
@@ -118,7 +119,7 @@ function fakeActionCheck(text, steps, names, query = '') {
   const t = String(text || '');
   if (!t.trim()) return null;
   // yêu cầu thao tác rõ ràng mà mô hình lờ đi (không gọi công cụ, cũng không nói không làm được)
-  if (!steps.length && names.some(n => COMP.includes(n)) && /^\s*(hãy |giúp (tôi|mình|em) |làm ơn |bạn |aivn bot,? )?(mở|gửi|nhắn|bấm|nhấn|gõ|chạy|đóng|tắt|khởi động|bật)\s/iu.test(String(query)) && !/(không thể|không làm được|chưa làm được|chưa thể|không có công cụ|cần bật|không được phép|chưa bật|từ chối)/iu.test(t)) return 'ignored';
+  if (!steps.length && names.some(n => COMP.includes(n)) && /^\s*(hãy |giúp (tôi|mình|em) |làm ơn |bạn |aivn bot,? )?(mở|gửi|nhắn|bấm|nhấn|gõ|chạy|đóng|tắt|khởi động|bật)\s/iu.test(String(query)) && !/(cần bật|chưa bật|không được phép)/iu.test(t)) return 'ignored';
   const ok = (list) => steps.some(x => list.includes(x.name) && x.status === 'ok');
   if (/\[\s*(screen|tool|open_app|open_url|screen_act|screen_look|run_command|close_app|action|bước \d+:?\s*(mở|bấm|gõ))[^\]\n]{0,40}\]/i.test(t)) return 'pseudo';
   if (/\b(screen_act|screen_look|open_app|run_command|open_url|close_app|list_apps)\s*[({]/.test(t) || /<\/?tool_(call|result)/i.test(t)) return 'pseudo';
@@ -342,7 +343,7 @@ function createAgent(deps) {
       s.agentWeb ? 'Truy cập mạng: ĐANG BẬT. Dùng web_search rồi fetch_url khi cần thông tin mới; ghi rõ địa chỉ nguồn trong câu trả lời.'
         : 'Truy cập mạng: ĐANG TẮT. Bạn không tìm kiếm hay mở trang web được; nếu cần thông tin mới, hãy nói người dùng bật "Cho phép truy cập mạng" trong Cài đặt AIVN BOT.',
     ];
-    if (names.includes('open_app')) lines.push('Máy tính: bạn mở được ứng dụng (open_app, list_apps), tệp/thư mục (open_path), trang web (open_url), xem/đóng ứng dụng đang mở, chạy lệnh terminal (run_command, người dùng duyệt từng lệnh) và thao tác hệ thống (system_action). Hệ điều hành: ' + ({ win32: 'Windows (lệnh chạy bằng PowerShell)', darwin: 'macOS (lệnh chạy bằng zsh)' }[process.platform] || 'Linux') + '. Ưu tiên công cụ chuyên dụng (open_app, open_url…) thay vì run_command. Không bao giờ chạy lệnh xoá hàng loạt, tải mã từ mạng về chạy, hay đổi cài đặt bảo mật.');
+    if (names.includes('open_app')) lines.push('Máy tính: bạn mở được ứng dụng (open_app, list_apps), tệp/thư mục (open_path), trang web (open_url), xem/đóng ứng dụng đang mở, chạy lệnh terminal (run_command, người dùng duyệt từng lệnh) và thao tác hệ thống (system_action). Hệ điều hành: ' + ({ win32: 'Windows (lệnh chạy bằng PowerShell)', darwin: 'macOS (lệnh chạy bằng zsh)' }[process.platform] || 'Linux') + '. Ưu tiên công cụ chuyên dụng (open_app, open_url…) thay vì run_command. "Mở máy tính" nghĩa là mở ứng dụng Máy tính (Calculator) bằng open_app; Không bao giờ khẳng định một ứng dụng "không có" hay "chưa cài" trên máy; nếu open_app báo không tìm thấy: thử list_apps với từ khoá ngắn (vd. "zalo"), rồi trên Windows thử run_command `cmd /c start "" "<tên>"` (người dùng duyệt lệnh) trước khi bỏ cuộc; cuối cùng mới nói là chưa tìm/mở được và hỏi tên chính xác. KHÔNG tự mở trang web hay tìm trên mạng để thay cho ứng dụng (vd. mở zalo.me thay cho Zalo) khi người dùng chưa đồng ý — hãy hỏi trước. khi người dùng nhờ mở/chạy ứng dụng, hãy GỌI open_app ngay thay vì nói không làm được. Không bao giờ chạy lệnh xoá hàng loạt, tải mã từ mạng về chạy, hay đổi cài đặt bảo mật.');
     else lines.push('Máy tính: các công cụ mở ứng dụng/chạy lệnh đang TẮT (Cài đặt AIVN BOT → Truy cập máy tính).');
     if (names.includes('open_app') && !names.includes('screen_act')) lines.push('Gửi tin nhắn, bấm hay gõ trong ứng dụng khác (Zalo, Messenger…) cần bật "Điều khiển màn hình" và nạp mô hình nhìn ảnh; hiện CHƯA có, nên bạn chỉ mở được ứng dụng (open_app) rồi phải nói rõ người dùng tự gõ và gửi.');
     if (names.includes('screen_act')) lines.push('Nhắn tin cho người khác: mở ứng dụng bằng open_app → screen_look xem màn hình → screen_act tìm người nhận, bấm vào ô chat, gõ nội dung → cuối cùng screen_act bấm nút Gửi (hoặc phím Enter); AIVN sẽ hỏi người dùng duyệt lần cuối trước khi gửi.');
@@ -382,6 +383,16 @@ function createAgent(deps) {
         onToken: (t) => { streamed += t; onToken(t, round); } });
       usage.completion_tokens += r.usage?.completion_tokens || 0;
       if (signal?.aborted || r.finishReason === 'abort') { text = r.text || streamed; finishReason = 'abort'; break; }
+      if ((!r.toolCalls || !r.toolCalls.length) && r.finishReason !== 'abort' && /<tool_call>|"name"\s*:/.test(r.text || '')) {
+        // mô hình viết lời gọi công cụ dạng văn bản (vd. SmolVLM qua llama-server, Qwen nhỏ): tự tách thành lời gọi thật
+        const p = TP.parseToolCalls(r.text, names);
+        if (p.toolCalls.length) {
+          const sigOf = (c) => c.name + ':' + JSON.stringify(Object.fromEntries(Object.entries(c.arguments && typeof c.arguments === 'object' ? c.arguments : {}).filter(([, v]) => v !== null)));
+          const fresh = p.toolCalls.filter(c => !seen.has(sigOf(c)));
+          if (fresh.length) r = { ...r, text: p.text, toolCalls: fresh, finishReason: 'tool_calls' };
+          else { const lastOk = [...steps].reverse().find(x => x.status === 'ok'); r = { ...r, text: p.text || (lastOk ? 'Xong: ' + lastOk.summary + '.' : '') }; }
+        }
+      }
       if (!r.toolCalls || !r.toolCalls.length) {
         const fake = r.finishReason === 'abort' ? null : fakeActionCheck(r.text, steps, names, query);
         if (fake) fakeSeen = true;
@@ -397,7 +408,12 @@ function createAgent(deps) {
           else { text = c && c.arguments && c.arguments.reason ? 'Mình chưa làm được việc này: ' + String(c.arguments.reason) : ''; warning = NO_ACTION_WARN; finishReason = 'stop'; break; }
         } else {
           text = r.text; finishReason = r.finishReason;
-          if (fake) { warning = NO_ACTION_WARN; text = stripFake(text); }
+          if (fake) {
+            const did = steps.some(x => COMP.includes(x.name) && x.status === 'ok');
+            if (!did) warning = NO_ACTION_WARN;
+            text = stripFake(String(text || '').replace(/<tool_call>[\s\S]*?(<\/tool_call>|$)/g, '').replace(/<\/?tool_result[^>]*>/g, '')).trim();
+            if (!text && did) { const lastOk = [...steps].reverse().find(x => x.status === 'ok'); text = 'Xong: ' + lastOk.summary + '.'; }
+          }
           break;
         }
       }
@@ -423,7 +439,7 @@ function createAgent(deps) {
         }
         Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, ms: Date.now() - step.startedAt });
         onStep({ ...step });
-        msgs.push({ role: 'tool', tool_call_id: call.id, content: out.forModel });
+        msgs.push({ role: 'tool', tool_call_id: call.id, content: typeof out.forModel === 'string' && out.forModel ? out.forModel : String(out.forModel ?? out.message ?? out.summary ?? JSON.stringify(out)) || '(không có kết quả)' });
         if (signal?.aborted) break;
       }
       if (signal?.aborted) { finishReason = 'abort'; break; }

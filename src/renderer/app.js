@@ -166,13 +166,18 @@ async function renderCatalog() {
   const fams = ['all', ...new Set(state.catalog.map(c => c.family))];
   $('#famFilter').innerHTML = fams.map(f => `<button class="chip-btn ${disc.fam === f ? 'on' : ''}" data-fam="${esc(f)}">${f === 'all' ? 'Tất cả' : esc(f)}</button>`).join('');
   const list = state.catalog.filter(c => disc.fam === 'all' || c.family === disc.fam);
-  $('#catalog').innerHTML = list.map(c => `<div class="card" data-id="${esc(c.id)}">
+  const comp = state.catalog.filter(c => c.computer && (disc.fam === 'all' || c.family === disc.fam)).sort((x, y) => (!!y.recScreen - !!x.recScreen) || ((y.screenPriority || 0) - (x.screenPriority || 0)));
+  $('#screenArea').hidden = !comp.length;
+  $('#screenCards').innerHTML = comp.map(catCard).join('');
+  $('#catalog').innerHTML = list.filter(c => !c.computer).map(catCard).join('');
+}
+const catCard = (c) => `<div class="card" data-id="${esc(c.id)}">
     <div class="card-top"><div class="av">${esc(c.family.slice(0, 2))}</div><div><h4>${esc(c.name)}</h4><div class="sub">${esc(c.params)} tham số · ${esc(c.quant)} · ${fmtBytes(c.size + (c.mmproj ? c.mmproj.size : 0))}</div></div></div>
     <p>${esc(c.desc)}</p>
-    <div class="tags">${c.recommended ? '<span class="tag rec" title="Mô hình lớn nhất vẫn chạy tốt trên máy này">⭐ Gợi ý cho máy này</span>' : ''}${fitBadge(c.fit)}${c.vision ? `<span class="tag vis" title="Tải kèm tệp thị giác ${esc(c.mmproj.file)} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán">👁 Nhìn được ảnh</span>` : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}${c.tags.filter(t => t !== 'Nhìn được ảnh').map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
+    <div class="tags">${c.recScreen ? '<span class="tag rec" title="Nhìn được màn hình và gọi công cụ tốt, vừa với máy này">⭐ Gợi ý cho điều khiển màn hình</span>' : ''}${c.recommended ? '<span class="tag rec" title="Mô hình lớn nhất vẫn chạy tốt trên máy này">⭐ Gợi ý cho máy này</span>' : ''}${c.computer ? `<span class="tag comp" title="${esc(c.computerNote || 'Đã kiểm tra: nhìn ảnh, chỉ đúng vị trí nút trên ảnh chụp màn hình, gọi công cụ thật')}">🖥 Điều khiển máy tính</span>` : ''}${fitBadge(c.fit)}${c.vision ? `<span class="tag vis" title="Tải kèm tệp thị giác ${esc(c.mmproj.file)} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán">👁 Nhìn được ảnh</span>` : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}${c.tags.filter(t => t !== 'Nhìn được ảnh' && t !== 'Điều khiển máy tính').map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
     <div class="card-foot" data-job="${esc(jobIdFor(c.repo, c.file))}">${footHtml({ ...c, size: c.size + (c.mmproj ? c.mmproj.size : 0) }, `data-act="dl-cat" data-id="${esc(c.id)}"`, c.file)}</div>
-    <button class="linkish" data-act="open-repo" data-repo="${esc(c.repo)}">Các bản lượng tử khác · ${esc(c.repo)}</button></div>`).join('');
-}
+    <button class="linkish" data-act="open-repo" data-repo="${esc(c.repo)}">Các bản lượng tử khác · ${esc(c.repo)}</button></div>`;
+
 
 function renderDlPanel() {
   const list = [...jobs.values()].filter(j => j.status !== 'done');
@@ -1140,7 +1145,7 @@ function chipState(c, info) {
       return { st: info.python.enabled ? 'on' : 'off' };
     case 'memory': return { st: info.memory.enabled ? 'on' : 'off' };
     case 'computer': return { st: comp.enabled ? 'on' : 'off' };
-    case 'screen': if (!comp.screen) return { st: 'off' }; return comp.vision ? { st: 'on' } : { st: 'blocked', why: 'Cần nạp một mô hình nhìn được ảnh (có biểu tượng 👁, vd. Gemma 3 4B hoặc Qwen2.5-VL).', fix: 'Mở Kho mô hình', act: () => show('discover'), canOff: true };
+    case 'screen': if (!comp.screen) return { st: 'off' }; return comp.vision ? { st: 'on' } : { st: 'blocked', why: 'Cần nạp một mô hình nhìn được ảnh (có biểu tượng 👁, vd. Qwen3-VL 4B, xem mục “Mô hình điều khiển máy tính” trong Kho).', fix: 'Mở Kho mô hình', act: () => show('discover'), canOff: true };
     default: return { st: off.has(c.id) ? 'off' : 'on' };
   }
 }

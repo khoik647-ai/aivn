@@ -86,6 +86,15 @@ function fileKind(file, repoInfo) {
 // Ước lượng cho máy này: Chạy tốt / Chạy chậm / Không đủ bộ nhớ.
 // hw.vram.total là VRAM RIÊNG của GPU rời (không tính bộ nhớ dùng chung của GPU tích hợp).
 const GBy = 1024 ** 3;
+// Điều khiển màn hình cần phản hồi nhanh (mỗi bước một ảnh chụp): chỉ gợi ý khi vừa HẲN GPU rời, vừa nửa RAM Mac, hoặc nhỏ nếu chạy CPU
+function screenFit(size, hw) {
+  if (!size || !hw || !hw.ram) return false;
+  const need = size * 1.1 + 0.9 * GBy; // + ảnh chụp màn hình (token ảnh) và ngữ cảnh
+  if (hw.gpu === 'metal') return need <= hw.ram * 0.5;
+  const vram = hw.gpu && hw.vram && hw.vram.total ? hw.vram.total : 0;
+  if (vram) return need <= vram * 0.98;
+  return size <= 3.0e9 && need <= hw.ram * 0.5;
+}
 function fitFor(size, hw) {
   if (!size || !hw || !hw.ram) return null;
   const need = size * 1.1 + 0.4 * GBy; // trọng số + ngữ cảnh/bộ đệm
@@ -171,4 +180,4 @@ function pickMmprojFile(names) {
 
 function resolveUrl(repo, file) { return `${HF}/${repo}/resolve/main/${file.split('/').map(encodeURIComponent).join('/')}`; }
 
-module.exports = { search, repoFiles, groupFiles, pickMmproj, pickMmprojFile, parseQuant, fitFor, archSupported, resolveUrl, summarize, HfError, QUANT_PREF, SPLIT_RE, llamaCpp: ARCHS.llamaCpp };
+module.exports = { screenFit, search, repoFiles, groupFiles, pickMmproj, pickMmprojFile, parseQuant, fitFor, archSupported, resolveUrl, summarize, HfError, QUANT_PREF, SPLIT_RE, llamaCpp: ARCHS.llamaCpp };

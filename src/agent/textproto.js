@@ -117,4 +117,28 @@ function streamFilter(onToken) {
 
 const isTemplateError = (msg) => /parser|template|raise_exception|alternate|jinja|chat format|CallExpression/i.test(String(msg || ''));
 
-module.exports = { analyzeTemplate, normalizeMessages, parseToolCalls, toolPrompt, streamFilter, isTemplateError, contentText };
+// Rút gọn: mô tả công cụ một câu, bỏ mô tả tham số
+function compactTools(tools) {
+  const strip = (p) => { if (!p || typeof p !== 'object') return p; const o = { ...p }; delete o.description; if (o.properties) o.properties = Object.fromEntries(Object.entries(o.properties).map(([k, v]) => [k, strip(v)])); if (o.items) o.items = strip(o.items); return o; };
+  return tools.map(t => ({ ...t, description: String(t.description || '').split(/(?<=[.!?])\s/)[0].slice(0, 120), parameters: strip(t.parameters) }));
+}
+// Giữ lời nhắc hệ thống (cắt bớt) + vài lượt cuối, không cắt rời lời gọi công cụ khỏi kết quả
+function trimHistory(messages) {
+  const sys = messages.filter(m => m.role === 'system').map(m => ({ ...m, content: typeof m.content === 'string' && m.content.length > 2500 ? m.content.slice(0, 2500) + '\n…' : m.content }));
+  const rest = messages.filter(m => m.role !== 'system');
+  let start = Math.max(0, rest.length - 6);
+  while (start > 0 && rest[start].role === 'tool') start--;
+  return [...sys, ...rest.slice(start)];
+}
+const CTX_RE = /context shift strategy|fits the context size|context size is too small|too long for the context|exceeds the available context size/i;
+function ctxSmallError(n) {
+  const x = new Error(`Độ dài ngữ cảnh${n ? ' ' + n + ' token' : ''} quá nhỏ cho yêu cầu này (lời nhắc hệ thống + mô tả công cụ + lịch sử). Hãy tăng "Độ dài ngữ cảnh" lên 8192 trong Cài đặt trò chuyện rồi nạp lại mô hình, hoặc tắt bớt công cụ trên đầu AIVN BOT.`);
+  x.code = 'CTX_SMALL'; return x;
+}
+
+// Mẫu chat có gọi công cụ gốc? (Qwen2.5/3 <tool_call>, Llama 3.1+ <|python_tag|>/ipython, Mistral [TOOL_CALLS], Hermes, gpt-oss…)
+function templateHasTools(tpl) {
+  const t = String(tpl || ''); if (!t) return null;
+  return /<tool_call>|\[TOOL_CALLS\]|\[AVAILABLE_TOOLS\]|<\|python_tag\|>|ipython|tool_calls|<\|tool_call|functions\.|<function=/.test(t) && /\btools\b/.test(t);
+}
+module.exports = { templateHasTools, compactTools, trimHistory, CTX_RE, ctxSmallError, analyzeTemplate, normalizeMessages, parseToolCalls, toolPrompt, streamFilter, isTemplateError, contentText };

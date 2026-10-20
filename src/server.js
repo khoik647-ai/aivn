@@ -42,6 +42,17 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
     req.on('error', reject);
   });
 
+  // số token lời nhắc (OpenAI usage.prompt_tokens): lấy từ máy chạy nếu có, không thì đếm bằng bộ tách từ của mô hình
+  const promptTokens = async (r, messages) => {
+    if (r && r.usage && Number.isFinite(r.usage.prompt_tokens) && r.usage.prompt_tokens > 0) return r.usage.prompt_tokens;
+    try {
+      const txt = messages.map(m => { const c = m && m.content; return typeof c === 'string' ? c : Array.isArray(c) ? c.map(x => x && x.text || '').join(' ') : ''; });
+      const n = engine.countTokens ? txt.reduce((a, t) => a + (Number(engine.countTokens(t)) || 0), 0) : 0;
+      return n + messages.length * 4;
+    } catch { return 0; }
+  };
+  const usageOf = async (r, messages) => { const pt = await promptTokens(r, messages); const ct = r.usage.completion_tokens || 0; return { prompt_tokens: pt, completion_tokens: ct, total_tokens: pt + ct }; };
+
   async function handle(req, res) {
     const url = new URL(req.url, 'http://localhost');
     const p = url.pathname.replace(/\/+$/, '');
@@ -101,7 +112,7 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
           return send(res, 200, {
             id, object: 'chat.completion', created, model: st.id,
             choices: [{ index: 0, message, finish_reason: r.toolCalls.length ? 'tool_calls' : r.finishReason === 'length' ? 'length' : 'stop' }],
-            usage: { prompt_tokens: 0, completion_tokens: r.usage.completion_tokens, total_tokens: r.usage.completion_tokens },
+            usage: await usageOf(r, body.messages),
           });
         } catch (e) { return err(res, 500, e.message, 'server_error'); }
       }
@@ -124,7 +135,7 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
         return send(res, 200, {
           id, object: 'chat.completion', created, model: st.id,
           choices: [{ index: 0, message: { role: 'assistant', content: r.text }, finish_reason: r.finishReason === 'length' ? 'length' : 'stop' }],
-          usage: { prompt_tokens: 0, completion_tokens: r.usage.completion_tokens, total_tokens: r.usage.completion_tokens },
+          usage: await usageOf(r, body.messages),
         });
       } catch (e) { return err(res, 500, e.message, 'server_error'); }
     }

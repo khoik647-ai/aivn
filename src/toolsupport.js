@@ -12,9 +12,12 @@ function paramsOf(name, params) {
   const m = String(name || '').toLowerCase().match(/(?:^|[^a-z0-9.])(\d+(?:\.\d+)?)\s*([bm])(?![a-z])/);
   if (!m) return null; const v = parseFloat(m[1]); return m[2] === 'm' ? v / 1000 : v;
 }
-function toolSupport({ id = '', name = '', file = '', params = null } = {}) {
-  const s = `${id} ${name} ${file}`.toLowerCase().replace(/_/g, '-');
-  const p = paramsOf(`${id} ${file} ${name}`, params);
+// meta (khi mô hình đã nạp): { name, arch, sizeLabel, toolTemplate } đọc từ GGUF; toolMode/wrapper từ bộ máy
+function toolSupport({ id = '', name = '', file = '', params = null, meta = null, toolMode = null, wrapper = null, size = 0, toolLevel = null } = {}) {
+  if (LABEL[toolLevel]) return { level: toolLevel, label: LABEL[toolLevel], hint: HINT[toolLevel] }; // đã kiểm tra thật trong Kho (mục Điều khiển máy tính)
+  const s = `${id} ${name} ${file} ${meta && meta.name || ''} ${meta && meta.arch || ''}`.toLowerCase().replace(/_/g, '-');
+  let p = paramsOf(`${id} ${file} ${name} ${meta && meta.sizeLabel || ''} ${meta && meta.name || ''}`, params);
+  if (p == null && size > 0) p = Math.round(size / 0.62e9 * 10) / 10; // ~Q4_K_M: 0,62 GB / tỉ tham số
   let level;
   if (/smol|tinyllama|-1b-|deepseek-r1-distill-qwen-1\.5b|phi-3/.test(s) || (p != null && p < 1.2)) level = 'none';
   else if (/gpt-oss|mistral-nemo|mistral-small|ministral|functionary|hermes-3|command-r/.test(s)) level = 'good';
@@ -22,7 +25,11 @@ function toolSupport({ id = '', name = '', file = '', params = null } = {}) {
   else if (/qwen2\.5(?!-vl)/.test(s) && p != null && p >= 7) level = 'good';
   else if (/llama-?3\.[13]/.test(s) && p != null && p >= 8) level = 'good';
   else if (/\bphi-4(?![- ]?mini)/.test(s)) level = 'good';
+  else if (/qwen-?3-?vl|qwen2\.5-?vl/.test(s) && (p == null || p >= 3.5)) level = 'good'; // Qwen-VL: gọi công cụ gốc <tool_call>
+  else if (/qwen-?3|qwen3/.test(s) && /\b(qwen3|qwen3moe)\b/.test(s) && p == null) level = 'good';
   else level = 'limited'; // Gemma 2/3, Mistral 7B, Llama 3.2 3B, Qwen 1.5–3B, mô hình nhìn ảnh nhỏ, mô hình lạ
+  // mẫu chat của chính tệp GGUF có gọi công cụ gốc (hoặc bộ máy đã nhận ra định dạng gốc) → không hạ xuống "Hạn chế" chỉ vì tên lạ
+  if (level === 'limited' && (meta && meta.toolTemplate || toolMode === 'native') && (p == null || p >= 3.5)) level = 'good';
   return { level, label: LABEL[level], hint: HINT[level] };
 }
 module.exports = { toolSupport, paramsOf, LABEL };
