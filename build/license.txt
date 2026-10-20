@@ -1,0 +1,8 @@
+AIVN 0.10.0 - Giấy phép sử dụng (MIT)
+Phát triển bởi NGUYỄN NGỌC KHÔI SINH VIÊN VLU · © 2026 AIVN
+
+Phần mềm này được cung cấp miễn phí "NGUYÊN TRẠNG", không kèm bất kỳ bảo đảm nào.
+AIVN sử dụng thư viện mã nguồn mở node-llama-cpp và llama.cpp (giấy phép MIT) cùng Electron (giấy phép MIT).
+
+Các mô hình AI tải về qua AIVN thuộc quyền của nhà phát hành tương ứng (Qwen, Llama, Gemma...) và tuân theo giấy phép riêng của từng mô hình.
+Nội dung do mô hình tạo ra có thể không chính xác; hãy kiểm chứng trước khi sử dụng.

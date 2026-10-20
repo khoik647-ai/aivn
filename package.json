@@ -1,0 +1,162 @@
+{
+  "name": "aivn",
+  "productName": "AIVN",
+  "version": "0.10.0",
+  "description": "AIVN - Chạy mô hình AI ngay trên máy tính của bạn",
+  "author": {
+    "name": "NGUYỄN NGỌC KHÔI SINH VIÊN VLU"
+  },
+  "license": "MIT",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win nsis --x64",
+    "dist:linux": "electron-builder --linux AppImage --x64",
+    "dist:mac": "node build/mac-build.cjs"
+  },
+  "dependencies": {
+    "@node-llama-cpp/mac-arm64-metal": "3.22.2",
+    "@node-llama-cpp/mac-x64": "3.22.2",
+    "@node-llama-cpp/win-x64": "3.22.2",
+    "@node-llama-cpp/win-x64-vulkan": "3.22.2",
+    "electron-updater": "6.8.9",
+    "mammoth": "1.13.0",
+    "node-llama-cpp": "3.22.2",
+    "pdfjs-dist": "5.6.205"
+  },
+  "devDependencies": {
+    "electron": "44.9.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "vn.aivn.desktop",
+    "productName": "AIVN",
+    "copyright": "© 2026 AIVN · NGUYỄN NGỌC KHÔI SINH VIÊN VLU",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "build/icon.png",
+      "package.json",
+      "!node_modules/@node-llama-cpp/*-cuda*/**",
+      "!node_modules/@node-llama-cpp/linux-arm*/**",
+      "!node_modules/@node-llama-cpp/linux-armv7l/**",
+      "!node_modules/@node-llama-cpp/*riscv*/**",
+      "!node_modules/@node-llama-cpp/win-arm64/**",
+      "!node_modules/node-llama-cpp/llama/**/*.{c,cpp,h,hpp,cu,metal,comp,glsl}",
+      "!**/*.map",
+      "!node_modules/pdfjs-dist/{web,image_decoders,types,build}/**",
+      "!node_modules/pdfjs-dist/legacy/{web,image_decoders}/**",
+      "!node_modules/pdfjs-dist/**/*.map",
+      "!node_modules/pdfjs-dist/legacy/build/*.min.mjs",
+      "!node_modules/pdfjs-dist/legacy/build/pdf.sandbox*",
+      "!test/**",
+      "!node_modules/@napi-rs/**"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/node-llama-cpp/**",
+      "node_modules/@node-llama-cpp/**",
+      "node_modules/pdfjs-dist/**"
+    ],
+    "npmRebuild": false,
+    "nodeGypRebuild": false,
+    "buildDependenciesFromSource": false,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "files": [
+        "!node_modules/@node-llama-cpp/linux-*/**",
+        "!node_modules/@node-llama-cpp/mac-*/**",
+        "!node_modules/@reflink/reflink-linux-*/**",
+        "!node_modules/@reflink/reflink-darwin-*/**"
+      ],
+      "artifactName": "${productName}-${version}-${arch}-${target}.${ext}",
+      "signAndEditExecutable": true,
+      "signtoolOptions": {
+        "publisherName": "NGUYỄN NGỌC KHÔI SINH VIÊN VLU"
+      },
+      "verifyUpdateCodeSignature": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "AIVN",
+      "artifactName": "AIVN-Setup-${version}.${ext}",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "license": "build/license.txt"
+    },
+    "portable": {
+      "artifactName": "AIVN-Portable-${version}.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "Utility",
+      "files": [
+        "!node_modules/@node-llama-cpp/win-*/**",
+        "!node_modules/@node-llama-cpp/mac-*/**"
+      ],
+      "artifactName": "AIVN-${version}-${arch}.${ext}",
+      "maintainer": "NGUYỄN NGỌC KHÔI SINH VIÊN VLU",
+      "desktop": {
+        "entry": {
+          "Name": "AIVN",
+          "Comment": "Chạy mô hình AI ngay trên máy tính"
+        }
+      }
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "identity": null,
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSHumanReadableCopyright": "© 2026 AIVN · NGUYỄN NGỌC KHÔI SINH VIÊN VLU"
+      },
+      "files": [
+        "!node_modules/@node-llama-cpp/win-*/**",
+        "!node_modules/@node-llama-cpp/linux-*/**",
+        "!node_modules/@reflink/reflink-linux-*/**",
+        "!node_modules/@reflink/reflink-win32-*/**"
+      ],
+      "artifactName": "AIVN-${version}-${arch}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "khoik647-ai",
+        "repo": "aivn",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "desktopName": "aivn.desktop"
+}

@@ -1,0 +1,13 @@
+QUY CHẾ THƯ VIỆN (bản thử nghiệm)
+
+Giờ mở cửa
+Thư viện Trường Đại học Hoa Sen Xanh (tên giả định) mở cửa từ 7 giờ 30 đến 21 giờ, từ thứ Hai đến thứ Bảy. Chủ nhật thư viện đóng cửa.
+
+Mượn sách
+Mỗi sinh viên được mượn tối đa 5 cuốn sách cùng lúc, thời hạn mượn là 14 ngày và được gia hạn thêm 1 lần.
+
+Phí trả trễ
+Trả sách trễ hạn bị phạt 2.000 đồng cho mỗi cuốn mỗi ngày. Làm mất sách phải bồi thường gấp đôi giá bìa.
+
+Phòng học nhóm
+Phòng học nhóm phải đặt trước qua cổng sinh viên, mỗi lần tối đa 2 giờ.

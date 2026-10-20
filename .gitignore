@@ -1,0 +1,19 @@
+# AIVN – không đưa lên git
+node_modules/
+dist/
+out/
+*.gguf
+*.gguf.part
+*.bin
+*.safetensors
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+.npmrc
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*

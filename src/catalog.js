@@ -1,0 +1,28 @@
+// Danh mục mô hình được tuyển chọn (đã kiểm tra URL bằng HEAD request)
+const HF = 'https://huggingface.co/';
+module.exports = [
+  { id: 'qwen2.5-0.5b-instruct-q4_k_m', name: 'Qwen2.5 0.5B Instruct', family: 'Qwen', params: '0.5B', quant: 'Q4_K_M',
+    file: 'qwen2.5-0.5b-instruct-q4_k_m.gguf', size: 491400032, ram: '≥ 2 GB RAM',
+    url: HF + 'Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf',
+    desc: 'Siêu nhỏ, chạy được trên hầu hết mọi máy. Phù hợp để thử nghiệm nhanh.', tags: ['Siêu nhẹ', 'Đa ngôn ngữ'] },
+  { id: 'qwen2.5-1.5b-instruct-q4_k_m', name: 'Qwen2.5 1.5B Instruct', family: 'Qwen', params: '1.5B', quant: 'Q4_K_M',
+    file: 'qwen2.5-1.5b-instruct-q4_k_m.gguf', size: 1117320736, ram: '≥ 4 GB RAM',
+    url: HF + 'Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf',
+    desc: 'Cân bằng tốt giữa tốc độ và chất lượng, trả lời tiếng Việt khá ổn.', tags: ['Khuyên dùng', 'Đa ngôn ngữ'] },
+  { id: 'qwen2.5-3b-instruct-q4_k_m', name: 'Qwen2.5 3B Instruct', family: 'Qwen', params: '3B', quant: 'Q4_K_M',
+    file: 'qwen2.5-3b-instruct-q4_k_m.gguf', size: 2104932768, ram: '≥ 6 GB RAM',
+    url: HF + 'Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf',
+    desc: 'Thông minh hơn rõ rệt, tốt cho tóm tắt, viết lách và lập trình cơ bản.', tags: ['Đa ngôn ngữ', 'Lập trình'] },
+  { id: 'llama-3.2-1b-instruct-q4_k_m', name: 'Llama 3.2 1B Instruct', family: 'Llama', params: '1B', quant: 'Q4_K_M',
+    file: 'Llama-3.2-1B-Instruct-Q4_K_M.gguf', size: 807694464, ram: '≥ 3 GB RAM',
+    url: HF + 'bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf',
+    desc: 'Nhỏ gọn, phản hồi nhanh. Mạnh nhất với tiếng Anh.', tags: ['Nhanh'] },
+  { id: 'llama-3.2-3b-instruct-q4_k_m', name: 'Llama 3.2 3B Instruct', family: 'Llama', params: '3B', quant: 'Q4_K_M',
+    file: 'Llama-3.2-3B-Instruct-Q4_K_M.gguf', size: 2019377696, ram: '≥ 6 GB RAM',
+    url: HF + 'bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf',
+    desc: 'Đa năng, ngữ cảnh dài, phù hợp làm trợ lý hằng ngày.', tags: ['Đa năng'] },
+  { id: 'gemma-2-2b-it-q4_k_m', name: 'Gemma 2 2B it', family: 'Gemma', params: '2B', quant: 'Q4_K_M',
+    file: 'gemma-2-2b-it-Q4_K_M.gguf', size: 1708582752, ram: '≥ 4 GB RAM',
+    url: HF + 'bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf',
+    desc: 'Văn phong tự nhiên, gọn nhẹ, chạy tốt trên laptop không có card rời.', tags: ['Gọn nhẹ'] },
+];

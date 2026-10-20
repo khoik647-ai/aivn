@@ -1,0 +1,24 @@
+// Build macOS riêng cho từng kiến trúc, mỗi bản chỉ chứa binary llama.cpp của kiến trúc đó
+const builder = require('electron-builder');
+// "publish" được electron-builder đọc từ package.json; truyền lại qua config sẽ bị gộp sai (lỗi mergePublish)
+const { publish: _publish, ...base } = require('../package.json').build;
+const fs = require('fs');
+const path = require('path');
+const target = process.env.MAC_TARGET || 'zip';
+// Với target "dir" electron-builder không ghi app-update.yml → tự ghi để electron-updater biết repo GitHub (phải làm trước khi ký)
+function writeUpdateYml(arch) {
+  const pub = [].concat(_publish || [])[0];
+  if (!pub) return;
+  const dir = path.join(__dirname, '..', 'dist', arch === 'arm64' ? 'mac-arm64' : 'mac', 'AIVN.app', 'Contents', 'Resources');
+  if (!fs.existsSync(dir)) return;
+  const yml = `owner: ${pub.owner}\nrepo: ${pub.repo}\nprovider: ${pub.provider}\nreleaseType: ${pub.releaseType || 'release'}\nupdaterCacheDirName: aivn-updater\n`;
+  fs.writeFileSync(path.join(dir, 'app-update.yml'), yml);
+  console.log('đã ghi', path.join(dir, 'app-update.yml'));
+}
+(async () => {
+  for (const [arch, other] of [['arm64', 'mac-x64'], ['x64', 'mac-arm64-metal']]) {
+    const config = { ...base, mac: { ...base.mac, files: [...base.mac.files, `!node_modules/@node-llama-cpp/${other}/**`] } };
+    await builder.build({ targets: builder.Platform.MAC.createTarget([target], builder.Arch[arch]), config, publish: 'never' });
+    if (target === 'dir') writeUpdateYml(arch);
+  }
+})().catch(e => { console.error(e); process.exit(1); });
