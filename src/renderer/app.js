@@ -779,8 +779,7 @@ async function refreshAgent() {
   $('#agPyNote').textContent = info.python.available ? `Python ${info.python.version} có trên máy. Chạy trong thư mục tạm, chặn mạng và tệp ngoài thư mục tạm, tối đa 10 giây (hạn chế, không cách ly tuyệt đối như JavaScript).` : 'Máy chưa có Python 3, nên chỉ chạy được JavaScript.';
   $('#agMem').checked = info.memory.enabled;
   $('#agMemNote').textContent = `Đang có ${info.memory.count} ghi nhớ · tìm ${info.memory.semantic ? 'theo ý nghĩa (BGE-M3)' : 'theo từ khoá (tải BGE-M3 để tìm theo ý nghĩa)'}.`;
-  const all = [['🧮', 'Máy tính', true], ['🕒', 'Ngày giờ', true], ['⚙️', 'JavaScript', true], ['📂', 'Tệp', info.folders.some(f => f.exists)], ['🌐', 'Web', info.web], ['🐍', 'Python', info.python.enabled && info.python.available], ['🧠', 'Ghi nhớ', info.memory.enabled], ['💻', 'Mở ứng dụng & lệnh', info.computer && info.computer.enabled], ['🖱', 'Màn hình (thử nghiệm)', info.computer && info.computer.screen && info.computer.vision], ['⏰', 'Lịch nhắc', true]];
-  $('#toolChips').innerHTML = all.map(([i, n, on]) => `<span class="tool-chip${on ? '' : ' off'}" title="${on ? 'Đang bật' : 'Đang tắt'}">${i} ${n}${on ? '' : ' · tắt'}</span>`).join('');
+  renderChips(info);
   paintAgentWarn(info.advice);
   paintComputer(info.computer);
   if (isAgent() && (!state.current || !state.current.messages.length) && !state.generating) renderMessages();
@@ -1093,3 +1092,91 @@ $('#gpuDevice').addEventListener('change', async e => { const v = e.target.value
 $('#vramLimit').addEventListener('change', async e => { const v = Number(e.target.value); state.settings = await A.setSettings({ vramLimitGB: v > 0 ? v : null }); toast('Đã đổi giới hạn VRAM. Hãy nạp lại mô hình.'); setTimeout(paintAdvanced, 1500); });
 $('#advReset').addEventListener('click', async () => { state.settings = await A.setSettings({ gpu: true, gpuDevice: null, gpuLayers: null, vramLimitGB: null }); $('#gpuOn').checked = true; toast('Đã về chế độ tự động. Hãy nạp lại mô hình.'); setTimeout(paintAdvanced, 1500); });
 $('#advBox').addEventListener('toggle', e => { if (e.target.open) paintAdvanced(); });
+
+// ---------- Nút công cụ trên đầu AIVN BOT: bấm để bật/tắt, di chuột/nhấn giữ để xem, ▾ để xem ví dụ ----------
+const CHIPS = [
+  { id: 'calc', i: '🧮', n: 'Máy tính', desc: 'Tính biểu thức chính xác: cộng trừ nhân chia, phần trăm, luỹ thừa, căn.', ex: ['Tính 15% của 2.350.000 đồng', '(3,5 + 4,2) × 12 bằng bao nhiêu?'] },
+  { id: 'datetime', i: '🕒', n: 'Ngày giờ', desc: 'Biết ngày giờ hiện tại trên máy, đếm số ngày giữa hai mốc.', ex: ['Hôm nay là thứ mấy, ngày bao nhiêu?', 'Còn bao nhiêu ngày nữa đến Tết Dương lịch?'] },
+  { id: 'js', i: '⚙️', n: 'JavaScript', desc: 'Chạy đoạn mã JavaScript trong hộp cát cách ly (không mạng, không tệp) để tính toán, xử lý văn bản.', ex: ['Viết và chạy mã liệt kê 20 số nguyên tố đầu tiên', 'Đảo ngược từng từ trong câu "Xin chào Văn Lang"'] },
+  { id: 'files', i: '📂', n: 'Tệp', desc: 'Đọc, ghi, liệt kê tệp, chỉ trong các thư mục bạn đã cho phép. Xoá/ghi đè luôn hỏi bạn trước.', ex: ['Liệt kê các tệp trong thư mục đã cho phép', 'Đọc tệp ghi-chu.txt và tóm tắt 3 ý chính'] },
+  { id: 'web', i: '🌐', n: 'Web', set: '#agWeb', desc: 'Tìm kiếm trên mạng và đọc trang web (chỉ khi bật). Câu trả lời ghi nguồn.', ex: ['Tìm trên mạng: Trường Đại học Văn Lang thành lập năm nào?', 'Đọc trang vnexpress.net và tóm tắt tin chính'] },
+  { id: 'python', i: '🐍', n: 'Python', set: '#agPy', desc: 'Chạy mã Python 3 có trên máy trong thư mục tạm, chặn mạng, tối đa 10 giây.', ex: ['Dùng Python tính độ lệch chuẩn của 4, 8, 15, 16, 23, 42', 'Dùng Python tạo bảng cửu chương 7'] },
+  { id: 'memory', i: '🧠', n: 'Ghi nhớ', set: '#agMem', desc: 'Ghi nhớ điều bạn dặn để dùng ở các cuộc trò chuyện sau (lưu trên máy, xoá được).', ex: ['Hãy nhớ: tôi học ngành Công nghệ thông tin ở Văn Lang', 'Bạn đang nhớ gì về tôi?'] },
+  { id: 'computer', i: '💻', n: 'Máy tính/ứng dụng', set: '#agComp', desc: 'Mở ứng dụng, tệp, thư mục, trang web; xem/đóng ứng dụng; chạy lệnh (luôn hỏi bạn trước).', ex: ['Mở Máy tính (Calculator) giúp tôi', 'Những ứng dụng nào đang chạy?'] },
+  { id: 'screen', i: '🖱', n: 'Điều khiển màn hình', set: '#agScreen', beta: true, desc: 'Thử nghiệm: chụp màn hình, mô hình nhìn ảnh đề xuất bấm/gõ; mỗi thao tác bạn duyệt trước. Ctrl+Alt+Q để dừng.', ex: ['Nhìn màn hình và cho biết tôi đang mở gì', 'Bấm vào nút Bắt đầu (Start) trên thanh tác vụ'] },
+  { id: 'reminder', i: '⏰', n: 'Lịch nhắc', desc: 'Tạo lời nhắc hoặc việc AIVN BOT tự làm theo giờ (xem ở mục Lịch).', ex: ['Nhắc tôi uống nước sau 30 phút', 'Mỗi sáng 8 giờ nhắc tôi xem lịch học'] },
+];
+let chipPop = null; // { id, el }
+function chipState(c, info) {
+  const off = new Set(info.toolsOff || []); const comp = info.computer || {};
+  switch (c.id) {
+    case 'files': if (off.has('files')) return { st: 'off' }; return info.folders.some(f => f.exists) ? { st: 'on' } : { st: 'blocked', why: 'Chưa cho phép thư mục nào, nên AIVN BOT không đọc/ghi được tệp.', fix: 'Thêm thư mục', act: () => $('#addFolder').click() };
+    case 'web': return { st: info.web ? 'on' : 'off' };
+    case 'python': if (!info.python.available) return { st: 'blocked', why: 'Máy chưa có Python 3.', fix: 'Hướng dẫn cài Python', act: () => modalAsk({ icon: '🐍', title: 'Cài Python 3', message: 'Tải Python 3 từ trang chính thức python.org (Windows: nhớ tích "Add python.exe to PATH" khi cài; macOS: cài gói .pkg). Cài xong, khởi động lại AIVN rồi bật nút Python.', okLabel: 'Mở python.org', noLabel: 'Đóng' }).then(ok => ok && A.openExternal('https://www.python.org/downloads/')) };
+      return { st: info.python.enabled ? 'on' : 'off' };
+    case 'memory': return { st: info.memory.enabled ? 'on' : 'off' };
+    case 'computer': return { st: comp.enabled ? 'on' : 'off' };
+    case 'screen': if (!comp.screen) return { st: 'off' }; return comp.vision ? { st: 'on' } : { st: 'blocked', why: 'Cần nạp một mô hình nhìn được ảnh (có biểu tượng 👁, vd. Gemma 3 4B hoặc Qwen2.5-VL).', fix: 'Mở Kho mô hình', act: () => show('discover'), canOff: true };
+    default: return { st: off.has(c.id) ? 'off' : 'on' };
+  }
+}
+function renderChips(info) {
+  if (!info) return;
+  $('#toolChips').innerHTML = CHIPS.map(c => {
+    const s = chipState(c, info);
+    const label = s.st === 'on' ? 'đang bật' : s.st === 'off' ? 'đang tắt' : 'chưa dùng được';
+    const tip = `${c.desc}\n${s.st === 'blocked' ? '⚠ ' + s.why : s.st === 'on' ? 'Bấm để tắt.' : 'Bấm để bật.'}`;
+    return `<span class="tool-chip ${s.st}" data-chip="${c.id}"><button type="button" class="tc-main" aria-pressed="${s.st === 'on'}" aria-label="${esc(c.n)}: ${label}${s.st === 'blocked' ? '. ' + esc(s.why) : ''}" title="${esc(tip)}">${c.i} ${esc(c.n)}${s.st === 'on' ? '' : ' · tắt'}</button><button type="button" class="tc-more" aria-haspopup="dialog" aria-expanded="false" aria-label="Xem mô tả và ví dụ cho ${esc(c.n)}" title="Mô tả và ví dụ">▾</button></span>`;
+  }).join('');
+  if (chipPop) { const id = chipPop.id; closeChipPop(); openChipPop(id, false); }
+}
+async function toggleChip(id) {
+  const c = CHIPS.find(x => x.id === id); const info = state.agent; if (!c || !info) return;
+  const s = chipState(c, info);
+  if (s.st === 'blocked' && !s.canOff) { openChipPop(id, true); return; }
+  const turnOn = s.st === 'off';
+  if (c.set) { const el = $(c.set); el.checked = turnOn; el.dispatchEvent(new Event('change')); }
+  else { const off = new Set(info.toolsOff || []); turnOn ? off.delete(id) : off.add(id); await saveAgentSetting({ agentToolsOff: [...off] }); }
+  toast(`${c.n}: ${turnOn ? 'đã bật' : 'đã tắt'}${turnOn ? '' : ' (AIVN BOT sẽ không dùng công cụ này)'}`);
+}
+function closeChipPop() {
+  if (!chipPop) return; chipPop.el.remove();
+  const b = document.querySelector(`[data-chip="${chipPop.id}"] .tc-more`); if (b) b.setAttribute('aria-expanded', 'false');
+  chipPop = null;
+}
+function openChipPop(id, focus = true) {
+  closeChipPop();
+  const c = CHIPS.find(x => x.id === id); const chip = document.querySelector(`[data-chip="${id}"]`); if (!c || !chip || !state.agent) return;
+  const s = chipState(c, state.agent);
+  const el = document.createElement('div'); el.className = 'chip-pop'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', c.n);
+  el.innerHTML = `<div class="cp-head"><b>${c.i} ${esc(c.n)}</b>${c.beta ? '<em class="beta">Thử nghiệm</em>' : ''}<span class="cp-st ${s.st}">${s.st === 'on' ? 'Đang bật' : s.st === 'off' ? 'Đang tắt' : 'Chưa dùng được'}</span></div>
+    <p class="small">${esc(c.desc)}</p>
+    ${s.st === 'blocked' ? `<p class="small warn-ink">⚠ ${esc(s.why)}</p><button type="button" class="btn sm primary" data-cp="fix">${esc(s.fix)}</button>` : `<button type="button" class="btn sm ${s.st === 'on' ? '' : 'primary'}" data-cp="toggle">${s.st === 'on' ? 'Tắt công cụ này' : 'Bật công cụ này'}</button>`}
+    <div class="cp-ex"><span class="muted small">Thử hỏi (bấm để chèn vào ô nhập):</span>${c.ex.map((x, k) => `<button type="button" class="cp-q" data-cp="ex" data-k="${k}">“${esc(x)}”</button>`).join('')}</div>`;
+  document.body.appendChild(el);
+  const r = chip.getBoundingClientRect(); const w = Math.min(320, window.innerWidth - 16);
+  el.style.width = w + 'px'; el.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px'; el.style.top = (r.bottom + 6) + 'px';
+  chip.querySelector('.tc-more').setAttribute('aria-expanded', 'true');
+  chipPop = { id, el };
+  el.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-cp]'); if (!b) return;
+    if (b.dataset.cp === 'toggle') toggleChip(id);
+    else if (b.dataset.cp === 'fix') { closeChipPop(); s.act(); }
+    else if (b.dataset.cp === 'ex') { const inp = $('#input'); inp.value = c.ex[Number(b.dataset.k)]; inp.dispatchEvent(new Event('input')); closeChipPop(); inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+  });
+  el.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); const back = chip.querySelector('.tc-more'); closeChipPop(); back && back.focus(); } });
+  if (focus) (el.querySelector('[data-cp]') || el).focus();
+}
+$('#toolChips').addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-chip]'); if (!chip) return;
+  if (chip.dataset.lp === '1') { chip.dataset.lp = ''; return; } // vừa nhấn giữ để mở bảng
+  if (e.target.closest('.tc-more')) { chipPop && chipPop.id === chip.dataset.chip ? closeChipPop() : openChipPop(chip.dataset.chip); return; }
+  toggleChip(chip.dataset.chip);
+});
+// Nhấn giữ (cảm ứng/chuột) ~0,5 giây để xem mô tả và ví dụ
+let lpTimer = null;
+$('#toolChips').addEventListener('pointerdown', (e) => { const chip = e.target.closest('[data-chip]'); if (!chip) return; clearTimeout(lpTimer); lpTimer = setTimeout(() => { chip.dataset.lp = '1'; openChipPop(chip.dataset.chip, false); }, 520); });
+for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) $('#toolChips').addEventListener(ev, () => clearTimeout(lpTimer));
+$('#toolChips').addEventListener('keydown', (e) => { const chip = e.target.closest('[data-chip]'); if (chip && e.key === 'ArrowDown' && e.target.classList.contains('tc-main')) { e.preventDefault(); openChipPop(chip.dataset.chip); } });
+document.addEventListener('pointerdown', (e) => { if (chipPop && !e.target.closest('.chip-pop') && !e.target.closest('[data-chip]')) closeChipPop(); });
+window.addEventListener('resize', closeChipPop);

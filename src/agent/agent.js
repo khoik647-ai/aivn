@@ -1,6 +1,8 @@
 // AIVN BOT: vòng lặp gọi công cụ chạy hoàn toàn trên mô hình cục bộ.
 // Mỗi bước: mô hình trả lời hoặc yêu cầu gọi công cụ → AIVN chạy công cụ (có kiểm soát quyền) → đưa kết quả lại cho mô hình.
 const fs = require('fs');
+// Nhóm công cụ mà người dùng bật/tắt bằng các nút trên đầu AIVN BOT (tắt = không gửi cho mô hình)
+const TOOL_GROUPS = { calc: ['calculator'], datetime: ['get_datetime'], js: ['run_javascript'], files: ['list_files', 'read_file', 'write_file', 'delete_file'], reminder: ['create_reminder'] };
 const path = require('path');
 const { evaluate, fmtVi } = require('./calc');
 const sandbox = require('./sandbox');
@@ -146,6 +148,10 @@ function createAgent(deps) {
 
   function activeTools({ headless = false } = {}) {
     const s = S_();
+    const off = new Set(Array.isArray(s.agentToolsOff) ? s.agentToolsOff : []);
+    return activeToolsRaw({ headless, s }).filter(n => !Object.entries(TOOL_GROUPS).some(([g, list]) => off.has(g) && list.includes(n)));
+  }
+  function activeToolsRaw({ headless, s }) {
     const names = ['calculator', 'get_datetime', 'run_javascript'];
     if (folders().length) names.push('list_files', 'read_file', 'write_file', 'delete_file');
     if (s.agentWeb) names.push('web_search', 'fetch_url');
@@ -371,4 +377,4 @@ function createAgent(deps) {
   return { run, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck };
 }
 
-module.exports = { createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR };
+module.exports = { createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR, TOOL_GROUPS };

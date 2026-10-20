@@ -236,8 +236,27 @@ input:focus-visible,textarea:focus-visible,select:focus-visible{outline:none}
 .agent-bar{flex-direction:column;gap:8px;padding:12px 28px 10px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--accent-soft),transparent)}
 .agent-title{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}.agent-title b{color:var(--accent-ink);font-size:15px}
 .tool-chips{display:flex;flex-wrap:wrap;gap:6px}
-.tool-chip{font-size:11.5px;border:1px solid var(--line);background:var(--card);border-radius:999px;padding:2px 9px;color:var(--muted)}
-.tool-chip.off{opacity:.55;border-style:dashed}
+.tool-chip{display:inline-flex;align-items:stretch;font-size:11.5px;border:1.5px solid var(--accent);border-radius:999px;overflow:hidden;transition:background .15s,color .15s,border-color .15s,box-shadow .15s}
+.tool-chip button{font:inherit;border:0;background:transparent;color:inherit;cursor:pointer;padding:3px 9px;line-height:1.3}
+.tool-chip .tc-more{padding:3px 7px 3px 5px;border-left:1px solid currentColor;opacity:.8}
+.tool-chip button:focus-visible{outline:2px solid var(--accent);outline-offset:-3px;border-radius:999px}
+.tool-chip.on{background:var(--accent);color:#fff;font-weight:600}
+.tool-chip.on .tc-more{border-left-color:rgba(255,255,255,.45)}
+.tool-chip.on:hover{box-shadow:0 0 0 3px var(--accent-soft)}
+.tool-chip.off{background:transparent;color:var(--accent-ink,var(--accent))}
+.tool-chip.off:hover{background:var(--accent-soft)}
+.tool-chip.blocked{background:transparent;color:var(--muted);border-style:dashed;border-color:var(--muted)}
+.tool-chip.blocked:hover{background:var(--warm-soft);color:var(--warm);border-color:var(--warm)}
+.chip-pop{position:fixed;z-index:60;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.18);padding:12px 14px;display:flex;flex-direction:column;gap:8px;animation:cpIn .14s ease-out}
+@keyframes cpIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.chip-pop p{margin:0}
+.cp-head{display:flex;align-items:center;gap:8px}
+.cp-st{margin-left:auto;font-size:11px;border-radius:999px;padding:1px 8px;border:1px solid var(--line)}
+.cp-st.on{background:var(--accent);color:#fff;border-color:var(--accent)}.cp-st.blocked{color:var(--warm);border-color:var(--warm)}
+.chip-pop .btn{align-self:flex-start}
+.cp-ex{display:flex;flex-direction:column;gap:5px;border-top:1px solid var(--line);padding-top:8px}
+.cp-q{text-align:left;font:inherit;font-size:12.5px;background:var(--accent-soft);color:var(--text);border:1px solid transparent;border-radius:8px;padding:6px 9px;cursor:pointer}
+.cp-q:hover,.cp-q:focus-visible{border-color:var(--accent);outline:none}
 .agent-warn{margin:10px 28px 0;max-width:none;align-items:center;gap:8px;flex-wrap:wrap}
 .agent-warn b{color:var(--text)}
 .set-block{display:flex;flex-direction:column;gap:8px}
