@@ -1,4 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu, Notification, Tray, nativeImage, globalShortcut, powerMonitor, net, clipboard } = require('electron');
+// Giao diện tiếng Việt: ô ngày/giờ và hộp thoại mặc định của Chromium theo vi-VN
+app.commandLine.appendSwitch('lang', 'vi');
 const path = require('path');
 const fs = require('fs');
 const catalog = require('./catalog');
@@ -161,6 +163,11 @@ function lockNow(reason) {
 function startServices() {
   if (!servicesOn) LOG.log('app', 'Đã kích hoạt: khởi động bộ máy AI, lịch tự động, máy chủ API');
   if (servicesOn) return; servicesOn = true; startIdleUnload();
+  // 0.15.1: tự kiểm tra bộ máy AI khi mở ứng dụng — nếu tiến trình không khởi động được thì báo ngay dòng lỗi thật (không đợi lúc nạp mô hình)
+  if (engine.external && engine.start) { const t0 = Date.now(); engine.start().then(() => LOG.log('app', `Tự kiểm tra bộ máy AI: OK (${Date.now() - t0} ms)`)).catch((e) => {
+    LOG.log('app', 'Tự kiểm tra bộ máy AI: LỖI ' + e.message, { stderr: e.detail || '' });
+    setTimeout(() => send('app:notice', { text: `${e.message}. AIVN chưa nạp được mô hình nào. Bấm “Mở nhật ký” trong Cài đặt → Nâng cao và gửi cho nhà phát triển.`, kind: 'warn' }), 2500);
+  }); }
   hw().then(h => LOG.log('app', 'Phần cứng', { gpu: h.gpu || 'không', thietBi: h.devices, vramGB: h.vram ? +(h.vram.total / 1024 ** 3).toFixed(2) : 0, vramTrongGB: h.vram ? +(h.vram.free / 1024 ** 3).toFixed(2) : 0, ramGB: +(h.ram / 1024 ** 3).toFixed(1), chiCPU: !!h.cpuOnly })).catch(e => LOG.log('app', 'Không đọc được phần cứng: ' + e.message));
   applyBackgroundPrefs();
   scheduler.start();
@@ -335,12 +342,21 @@ async function loadById(id, { force = false, ctx = null, reason = null } = {}) {
       try { st = await engine.loadModel(m.id, m.path, opts); }
       catch (e) {
         // GPU (Vulkan/CUDA/Metal) không nạp được: ghi nhật ký, khởi động lại bộ máy ở chế độ chỉ CPU rồi thử lại một lần
+        if (e.code === 'ENGINE_EXIT' && !e.startup && !e.killReason && engine.restart) {
+          // 0.15.1: bộ máy sập khi đang nạp → thử lại MỘT lần với cấu hình an toàn (chỉ CPU, ngữ cảnh 4096)
+          engineLog('Bộ máy AI sập khi nạp ' + m.file + ', thử lại với cấu hình an toàn (CPU, ngữ cảnh 4096)', e, { path: m.path, size: m.size, stderr: e.detail });
+          await engine.restart({ ...engineEnv(), AIVN_GPU: 'off' }, 'bộ máy sập khi nạp, thử lại chỉ CPU'); hwCache = null;
+          st = await engine.loadModel(m.id, m.path, { ...opts, contextSize: Math.min(4096, opts.contextSize || 4096), gpuLayers: 0 });
+          st = { ...st, mode: 'cpu-only', fallbackFrom: ['bộ máy sập: ' + e.message] };
+          ctxNote = 'Đã nạp ở chế độ an toàn (chỉ CPU, ngữ cảnh 4096) vì bộ máy AI bị sập khi nạp bình thường. Xem nhật ký để biết chi tiết.';
+        } else {
         if (!(e.code === 'LOAD_FAILED' && e.gpu && engine.restart)) throw e;
         engineLog('GPU không nạp được ' + m.file + ', thử lại bằng bộ máy chỉ CPU', e, { path: m.path, size: m.size });
         await engine.restart({ ...engineEnv(), AIVN_GPU: 'off' }, 'GPU không nạp được mô hình, chuyển sang chỉ CPU'); hwCache = null;
         st = await engine.loadModel(m.id, m.path, opts);
         st = { ...st, mode: 'cpu-only', fallbackFrom: [...(e.attempts || []).map(a => a.mode + ': ' + a.message), ...(st.fallbackFrom || [])] };
         settings.data.gpu = false; settings.save(); // lần sau mở AIVN dùng CPU luôn (bật lại trong Cài đặt trò chuyện)
+      }
       }
     } catch (e) {
       const a = String(e.message).match(/unknown model architecture: '([^']+)'/i);
@@ -758,7 +774,7 @@ function registerIpc() {
   const ah = (ch, fn) => rawHandle(ch, async (e, ...a) => { if (gateMode() === 'lock') throw new Error('AIVN đang khoá'); return fn(e, ...a); });
   ah('admin:state', () => ({ ...admin.state(), machineCode: lic.publicInfo().machineCode }));
   ah('admin:import', async (_e, { pass }) => {
-    const r = await dialog.showOpenDialog(win, { title: 'Chọn tệp khoá quản trị (aivn-admin-key.json)', properties: ['openFile'], filters: [{ name: 'Khoá quản trị AIVN', extensions: ['json'] }] });
+    const r = await dialog.showOpenDialog(win, { buttonLabel: 'Mở', title: 'Chọn tệp khoá quản trị (aivn-admin-key.json)', properties: ['openFile'], filters: [{ name: 'Khoá quản trị AIVN', extensions: ['json'] }] });
     if (r.canceled || !r.filePaths[0]) return { canceled: true, ...admin.state() };
     const st = fs.statSync(r.filePaths[0]); if (st.size > 20000) throw new Error('Tệp quá lớn, không phải khoá quản trị');
     return admin.importKey(fs.readFileSync(r.filePaths[0], 'utf8'), String(pass || ''));
@@ -770,7 +786,7 @@ function registerIpc() {
   ah('admin:issue', (_e, o) => admin.issue(o || {}));
   const saveDoc = async (r) => {
     if (r.published) return { published: true, state: r.state };
-    const d = await dialog.showSaveDialog(win, { title: 'Lưu revoked.json (chưa có token GitHub để tự đăng)', defaultPath: 'revoked.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
+    const d = await dialog.showSaveDialog(win, { buttonLabel: 'Lưu', title: 'Lưu revoked.json (chưa có token GitHub để tự đăng)', defaultPath: 'revoked.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
     if (!d.canceled && d.filePath) fs.writeFileSync(d.filePath, JSON.stringify(r.doc, null, 2) + '\n');
     return { published: false, savedTo: d.canceled ? null : d.filePath, state: r.state };
   };
@@ -861,7 +877,7 @@ function registerIpc() {
 
   ipcMain.handle('models:list', () => listModels());
   ipcMain.handle('models:import', async () => {
-    const r = await dialog.showOpenDialog(win, { title: 'Chọn tệp mô hình GGUF', filters: [{ name: 'Mô hình GGUF', extensions: ['gguf'] }], properties: ['openFile', 'multiSelections'] });
+    const r = await dialog.showOpenDialog(win, { buttonLabel: 'Mở', title: 'Chọn tệp mô hình GGUF', filters: [{ name: 'Mô hình GGUF', extensions: ['gguf'] }], properties: ['openFile', 'multiSelections'] });
     if (r.canceled) return listModels();
     for (const f of r.filePaths) if (!settings.data.imported.includes(f)) settings.data.imported.push(f);
     settings.save();
@@ -901,11 +917,11 @@ function registerIpc() {
     catch (e) { if (!e.userMessage) LOG.log('crm', `Lỗi ${fn}: ${e.message}`); return { ok: false, error: e.userMessage || e.message }; }
   });
   ipcMain.handle('crm:export', async () => {
-    try { const c = await getCrm(); const r = await dialog.showSaveDialog(win, { title: 'Xuất danh sách khách hàng', defaultPath: 'khach-hang.csv', filters: [{ name: 'CSV', extensions: ['csv'] }] }); if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+    try { const c = await getCrm(); const r = await dialog.showSaveDialog(win, { buttonLabel: 'Lưu', title: 'Xuất danh sách khách hàng', defaultPath: 'khach-hang.csv', filters: [{ name: 'CSV', extensions: ['csv'] }] }); if (r.canceled || !r.filePath) return { ok: false, canceled: true };
       const rows = c.exportContacts(); const S = require('./crm/sheet'); fs.writeFileSync(r.filePath, S.toCsv(Array.isArray(rows) ? rows : rows.rows)); return { ok: true, file: r.filePath }; } catch (e) { return { ok: false, error: e.message }; }
   });
   ipcMain.handle('crm:import', async () => {
-    try { const c = await getCrm(); const r = await dialog.showOpenDialog(win, { title: 'Nhập khách hàng từ CSV/Excel', properties: ['openFile'], filters: [{ name: 'CSV / Excel', extensions: ['csv', 'xlsx'] }] }); if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true };
+    try { const c = await getCrm(); const r = await dialog.showOpenDialog(win, { buttonLabel: 'Mở', title: 'Nhập khách hàng từ CSV/Excel', properties: ['openFile'], filters: [{ name: 'CSV / Excel', extensions: ['csv', 'xlsx'] }] }); if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true };
       const S = require('./crm/sheet'); const buf = fs.readFileSync(r.filePaths[0]); const rows = /\.xlsx$/i.test(r.filePaths[0]) ? S.parseXlsx(buf) : S.parseCsv(S.decodeBytes(buf));
       return { ok: true, result: c.importContacts(rows, { onDuplicate: 'merge' }) }; } catch (e) { return { ok: false, error: e.userMessage || e.message }; }
   });
@@ -916,7 +932,7 @@ function registerIpc() {
   ipcMain.handle('mcp:restart', async (_e, name) => { try { return { ok: true, server: await mcp.start(name) }; } catch (e) { return { ok: false, error: e.message }; } });
   ipcMain.handle('mcp:preset', async (_e, kind) => {
     let folder = null;
-    if (kind === 'filesystem') { const r = await dialog.showOpenDialog(win, { title: 'Chọn thư mục cho máy chủ MCP filesystem', properties: ['openDirectory'] }); if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }; folder = r.filePaths[0]; }
+    if (kind === 'filesystem') { const r = await dialog.showOpenDialog(win, { buttonLabel: 'Chọn thư mục', title: 'Chọn thư mục cho máy chủ MCP filesystem', properties: ['openDirectory'] }); if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }; folder = r.filePaths[0]; }
     const P = require('./mcp').presets({ folder }); if (!P[kind]) return { ok: false, error: 'Không có mẫu này.' };
     const cfg = mcp.config(); let name = kind; let i = 2; while (cfg.mcpServers[name]) name = `${kind}-${i++}`;
     cfg.mcpServers[name] = P[kind];
@@ -958,7 +974,7 @@ function registerIpc() {
     } finally { generations.delete(reqId); stopReasons.delete(reqId); }
   });
   ipcMain.handle('files:pick', async () => {
-    const r = await dialog.showOpenDialog(win, { title: 'Chọn tệp để gửi kèm', properties: ['openFile', 'multiSelections'],
+    const r = await dialog.showOpenDialog(win, { buttonLabel: 'Mở', title: 'Chọn tệp để gửi kèm', properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'Tài liệu và ảnh', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'pdf', 'docx', 'txt', 'md', 'csv', 'json', 'html', 'xml', 'yaml', 'yml', 'log', 'js', 'ts', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rs', 'php', 'sql', 'sh'] }, { name: 'Tất cả tệp', extensions: ['*'] }] });
     return r.canceled ? [] : r.filePaths;
   });
@@ -1024,7 +1040,7 @@ function registerIpc() {
   ipcMain.handle('agent:approve-reply', (_e, r) => { const f = r && confirms.get(r.id); if (f) f({ ok: r.ok === true, reason: r.reason || '', always: r.always === true }); return !!f; });
   ipcMain.handle('agent:always-revoke', (_e, name) => { settings.data.agentAlwaysAllow = (settings.data.agentAlwaysAllow || []).filter(n => n !== name); settings.save(); LOG.log('agent', `Bỏ "Luôn cho phép": ${name}`); return settings.data.agentAlwaysAllow; });
   ipcMain.handle('agent:add-folder', async () => {
-    const r = await dialog.showOpenDialog(win, { title: 'Chọn thư mục AIVN AGENT được phép làm việc', properties: ['openDirectory', 'createDirectory', 'multiSelections'] });
+    const r = await dialog.showOpenDialog(win, { buttonLabel: 'Chọn thư mục', title: 'Chọn thư mục AIVN AGENT được phép làm việc', properties: ['openDirectory', 'createDirectory', 'multiSelections'] });
     if (!r.canceled) { for (const f of r.filePaths) if (!settings.data.agentFolders.includes(f)) settings.data.agentFolders.push(f); settings.save(); }
     return agentInfo();
   });
@@ -1305,6 +1321,27 @@ async function qaUI() {
   await until('typeof show === "function" && !!state.settings', 60000);
   const step = async (n, code) => { try { if (code) await js(code); await shot(n); } catch (e) { out[n] = 'lỗi: ' + e.message; } };
   if (process.env.AIVN_QAUI_ONBOARD) await step('00-onboarding', 'startOnboard(true)');
+  if (process.env.AIVN_QAUI_151) { // QA 0.15.1: điều hướng, thông báo, biểu mẫu
+    await js('document.querySelectorAll(".modal-back").forEach(m => m.hidden = true)');
+    const st = async (n) => { await shot(n); out[n] = await js(`({ toasts: [...document.querySelectorAll(".toast-stack .toast-item")].map(t => (t.classList.contains("err") ? "ERR " : "") + t.textContent.replace("×", "").trim()), crmNav: [...document.querySelectorAll("[data-crm-nav]")].map(e => getComputedStyle(e).display), active: document.querySelector(".view.active")?.id })`); };
+    for (const th of ['light', 'dark']) {
+      await js(`document.documentElement.dataset.theme = "${th}"`);
+      await js('show("chat")'); await st(`151-nav-${th}`);
+      await js(`toast("Đã lưu cài đặt"); toast("Đã sao chép nhật ký"); toast("Đã thêm thư mục tài liệu"); toast("Đã tải xong mô hình Qwen3 4B"); toast("Bộ máy AI không khởi động được (mã 1): Error: Cannot find module './agent/sampling'", true)`);
+      await st(`151-toast-stack-${th}`);
+      await js('show("discover")'); await st(`151-toast-after-nav-${th}`);
+      await js('document.querySelectorAll(".toast-stack .toast-item button").forEach(b => b.click())');
+      await js('show("schedule")'); await st(`151-form-schedule-${th}`);
+      await js('show("memory")'); await st(`151-form-memory-${th}`);
+      await js('show("security")'); await st(`151-form-security-${th}`);
+      await js('{ show("agent"); const m = document.querySelector("#mcpBlock"); if (m) { m.open = true; m.scrollIntoView(); } }'); await st(`151-form-mcp-${th}`);
+      await js('toast("Thông báo ngắn")'); await sleep(4200); out[`autodismiss-info-${th}`] = await js('document.querySelectorAll(".toast-stack .toast-item").length');
+      await js('toast("Lỗi thử", true)'); await sleep(5000); out[`err-at-5s-${th}`] = await js('document.querySelectorAll(".toast-stack .toast-item").length'); await sleep(5600); out[`err-at-10.6s-${th}`] = await js('document.querySelectorAll(".toast-stack .toast-item").length');
+    }
+    out.inputs = await js(`[...document.querySelectorAll("input[type=text],input:not([type]),input[type=number],input[type=password],textarea")].filter(e => e.offsetParent).map(e => { const c = getComputedStyle(e); return { id: e.id, border: c.borderTopWidth + " " + c.borderTopStyle, bg: c.backgroundColor }; })`);
+    out.english = await js(`(() => { const W = /\\b(Save|Cancel|Open|Close|Delete|Settings|Loading|Error|Submit|Search|Add|Edit)\\b/; const hits = []; const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) { const t = n.textContent.trim(); if (t && W.test(t) && !/^(MCP|API|GPU|CPU|RAM|VRAM)/.test(t)) hits.push(t.slice(0, 80)); } document.querySelectorAll("[placeholder],[title],[aria-label]").forEach(e => { for (const a of ["placeholder", "title", "aria-label"]) { const v = e.getAttribute(a); if (v && W.test(v)) hits.push(a + ": " + v.slice(0, 80)); } }); return hits; })()`);
+    fs.writeFileSync(path.join(dir, 'qa151.json'), JSON.stringify(out, null, 2)); app.exit(0); return;
+  }
   await js('document.querySelectorAll(".modal-back").forEach(m => m.hidden = true)');
   await js(`(async () => { const C = async (fn, ...a) => { const r = await A.crm(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
     if ((await C('listContacts', {})).total) return;
@@ -1377,7 +1414,7 @@ async function qa144() {
     await until('state.generating && state.current.messages.at(-1).content.length > 10'); killEngine();
     await until('/tự nạp lại mô hình/.test(document.querySelector("#genStats").textContent)', 15000);
     await until('state.current.messages.at(-1).content.length > 10', 120000); killEngine();
-    await until('!state.generating', 120000);
+    await until('!state.generating', 120000); await until('!!document.querySelector("#messages .msg:last-child [data-logs]")', 5000);
     const r = await last(); await shot('error-card.png');
     return { ...r, ok: r.error && r.btns.length === 2 };
   });

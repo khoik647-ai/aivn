@@ -9,7 +9,21 @@ const fmtBytes = (b) => { if (!b) return '0 B'; const u = ['B', 'KB', 'MB', 'GB'
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 let toastTimer;
-function toast(msg, err = false) { const t = $('#toast'); t.textContent = msg; t.className = 'toast show' + (err ? ' err' : ''); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = 'toast', Math.max(3500, Math.min(15000, String(msg).length * 55))); }
+const toastStack = (() => { const d = document.createElement('div'); d.className = 'toast-stack'; d.setAttribute('role', 'status'); d.setAttribute('aria-live', 'polite'); document.body.appendChild(d); return d; })();
+function toast(msg, err = false, { sticky = false } = {}) {
+  msg = String(msg ?? ''); if (!msg) return;
+  // trùng nội dung: làm mới thay vì chồng thêm
+  for (const el of toastStack.children) if (el.dataset.msg === msg) { el.remove(); }
+  const el = document.createElement('div'); el.className = 'toast-item' + (err ? ' err' : ''); el.dataset.msg = msg; el.dataset.route = String(err ? '' : 'nav');
+  el.innerHTML = `<span class="tx"></span><button type="button" aria-label="Đóng thông báo" title="Đóng">×</button>`; el.querySelector('.tx').textContent = msg;
+  const close = () => { clearTimeout(el._t); el.remove(); };
+  el.querySelector('button').addEventListener('click', close);
+  toastStack.appendChild(el);
+  while (toastStack.children.length > 3) toastStack.firstElementChild.remove();
+  if (!sticky) el._t = setTimeout(close, err ? 10000 : Math.max(3500, Math.min(8000, msg.length * 45)));
+  el.addEventListener('mouseenter', () => clearTimeout(el._t)); el.addEventListener('mouseleave', () => { if (!sticky) el._t = setTimeout(close, 3000); });
+}
+function clearInfoToasts() { for (const el of [...toastStack.children]) if (el.dataset.route === 'nav') el.remove(); }
 
 // Markdown tối giản: khối code, code inline, in đậm, nghiêng, xuống dòng
 function md(src) {
@@ -22,6 +36,7 @@ function md(src) {
 
 // ---------- Điều hướng ----------
 function show(view) {
+  clearInfoToasts();
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   const target = view === 'agent' ? 'chat' : view;
   $$('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + target));
@@ -823,7 +838,7 @@ A.onAgentConfirmCancel(({ id }) => { if (modalOpen && modalOpen.id === id) close
 const apQueue = []; let apOpen = null;
 function setPhase(ph) {
   const el = $('#phaseStrip'); if (!el) return;
-  if (!ph) { el.hidden = true; return; }
+  if (!ph || !isAgent()) { el.hidden = true; return; }
   el.hidden = false; const order = ['think', 'ask', 'act', 'done']; const k = order.indexOf(ph);
   el.querySelectorAll('span').forEach(sp => { const i = order.indexOf(sp.dataset.ph); sp.classList.toggle('on', i === k); sp.classList.toggle('done', ph === 'done' ? i < k : false); });
 }
@@ -869,7 +884,9 @@ A.onAgentApproveCancel(({ id }) => { if (apOpen && apOpen.id === id) { apOpen = 
 
 if (A.onNotice) A.onNotice((n) => toast((n.kind === 'warn' ? '⚠ ' : '') + n.text, n.kind === 'warn'));
 
-// --- Kinh doanh → Khách hàng (CRM) ---
+// --- Kinh doanh → Khách hàng (CRM) --- 0.15.1: ẩn cho tới khi bộ Kinh doanh hoàn chỉnh ra mắt ở 0.16.0 (bật xem trước: localStorage aivn.crmPreview=1)
+const CRM_ON = localStorage.getItem('aivn.crmPreview') === '1' || !!(A.qaMode && A.qaCrm);
+$$('[data-crm-nav]').forEach(el => { el.hidden = !CRM_ON; });
 const crm = { tab: 'dash', contacts: [] };
 const vnd = (n) => (Number(n) || 0).toLocaleString('vi-VN') + ' đ';
 async function C(fn, ...a) { const r = await A.crm(fn, ...a); if (!r.ok) throw new Error(r.error); return r.data; }
@@ -949,7 +966,7 @@ function paletteCommands() {
     { i: '🤖', t: 'AIVN AGENT', run: () => show('agent') },
     { i: '＋', t: 'Cuộc trò chuyện mới', k: 'Ctrl+N', run: () => $('#newChat').click() },
     { i: '🗃', t: 'Kho mô hình (tải mô hình)', run: () => show('discover') },
-    { i: '👥', t: 'Kinh doanh → Khách hàng', run: () => show('crm') },
+    ...(CRM_ON ? [{ i: '👥', t: 'Kinh doanh → Khách hàng', run: () => show('crm') }] : []),
     { i: '📦', t: 'Mô hình của tôi', run: () => show('models') },
     { i: '⏰', t: 'Lịch tự động', run: () => show('schedule') },
     { i: '🧠', t: 'Ghi nhớ', run: () => show('memory') },

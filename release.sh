@@ -78,6 +78,17 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
   node build/gen-latest-mac.cjs "$VERSION" "dist/AIVN-$VERSION-arm64-mac.zip" "dist/AIVN-$VERSION-x64-mac.zip"
 fi
 
+step "Tự kiểm tra bản đóng gói: bộ máy AI (engine-host) khởi động được từ app.asar.unpacked"
+for H in dist/win-unpacked/resources/app.asar.unpacked/src/engine-host.js $(ls -d dist/mac*/AIVN.app/Contents/Resources/app.asar.unpacked/src/engine-host.js 2>/dev/null); do
+  node -e '
+    const { fork } = require("child_process"); const h = process.argv[1];
+    const c = fork(h, [], { stdio: ["ignore", "pipe", "pipe", "ipc"], env: { ...process.env, AIVN_GPU: "off" } }); let err = "";
+    c.stderr.on("data", d => err += d);
+    const t = setTimeout(() => { console.error("quá thời gian: " + h); c.kill(); process.exit(1); }, 30000);
+    c.on("message", m => { if (m.type === "ready") { clearTimeout(t); console.log("OK " + h); c.kill(); process.exit(0); } });
+    c.on("exit", code => { clearTimeout(t); console.error("engine-host thoát mã " + code + "\n" + err.slice(-1500)); process.exit(1); });
+  ' "$H" || die "bản đóng gói hỏng: bộ máy AI không khởi động ($H)"
+done
 step "Chuẩn bị tệp phát hành trong dist/release/"
 rm -rf "$OUT"; mkdir -p "$OUT"
 need=( "dist/AIVN-Setup-$VERSION.exe" "dist/AIVN-Setup-$VERSION.exe.blockmap" "dist/latest.yml"

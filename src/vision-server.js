@@ -46,6 +46,8 @@ function createVisionServer({ log = () => {} } = {}) {
     const t0 = Date.now();
     proc = spawn(exe, args, { cwd: path.dirname(exe), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
       env: { ...process.env, LLAMA_ARG_HOST: '127.0.0.1' } });
+    // 0.15.1: báo pid cho tiến trình chính — nếu engine-host bị giết (SIGKILL/sập), llama-server không bị bỏ lại chiếm 5–6 GB RAM/VRAM
+    try { if (process.send && proc.pid) { process.send({ type: 'child', pid: proc.pid }); const p0 = proc; p0.once('exit', () => { try { process.send({ type: 'child-exit', pid: p0.pid }); } catch {} }); } } catch {}
     const onData = (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { tail.push(l); if (tail.length > 40) tail.shift(); } };
     proc.stdout.on('data', onData); proc.stderr.on('data', onData);
     const exited = new Promise((resolve) => proc.once('exit', (code, signal) => resolve({ code, signal })));
