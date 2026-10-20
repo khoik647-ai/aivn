@@ -29,6 +29,14 @@
       <div class="gate-err" id="gaErr" role="alert" hidden></div>
       <div class="gate-row"><button class="btn primary big" type="submit" id="gaGo">Kích hoạt</button><button class="btn" type="button" id="gaRetry" hidden>Kiểm tra lại qua Internet</button></div>
     </form>
+    <details class="gate-owner" id="gaOwnerBox">
+      <summary>Tôi là chủ sở hữu (có tệp khoá quản trị)</summary>
+      <p class="gate-small">Tự kích hoạt máy này bằng khoá quản trị <code>aivn-admin-key.json</code>. Khoá được mã hoá bằng cụm mật khẩu quản trị và chỉ lưu trên máy này; sau đó bạn cấp/thu hồi mã cho người khác trong mục <b>Bảo mật &amp; Quản trị</b>.</p>
+      <input type="password" id="goPass" placeholder="Cụm mật khẩu quản trị (ít nhất 8 ký tự)" autocomplete="off" maxlength="256">
+      <input id="goName" placeholder="Tên của bạn" maxlength="60" value="Nguyễn Ngọc Khôi">
+      <div class="gate-err" id="goErr" role="alert" hidden></div>
+      <div class="gate-row"><button class="btn" type="button" id="goGo">Chọn tệp khoá và kích hoạt máy này</button></div>
+    </details>
     <p class="gate-small">Mã kích hoạt gắn với máy này, không dùng được trên máy khác. AIVN kiểm tra danh sách mã bị thu hồi khi có mạng; nếu không có mạng vẫn dùng được tới 14 ngày kể từ lần kiểm tra gần nhất.</p>
   </section>
 

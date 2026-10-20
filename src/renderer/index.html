@@ -15,14 +15,15 @@
       <span>AIVN</span>
     </div>
     <button class="nav-item active" data-view="chat"><i>💬</i><span>Trò chuyện</span></button>
-    <div class="nav-group" aria-label="Trợ lý">
-      <button class="nav-item" data-view="agent"><i>🤖</i><span>Trợ lý</span><b class="nav-new">Mới</b></button>
+    <div class="nav-group" aria-label="AIVN BOT">
+      <button class="nav-item" data-view="agent"><i>🤖</i><span>AIVN BOT</span><b class="nav-new">Mới</b></button>
       <button class="nav-item sub" data-view="schedule"><i>⏰</i><span>Lịch tự động</span><b class="pill-count" id="schedCount" hidden></b></button>
       <button class="nav-item sub" data-view="memory"><i>🧠</i><span>Ghi nhớ</span><b class="pill-count" id="memCount" hidden></b></button>
     </div>
     <button class="nav-item" data-view="discover"><i>🗃</i><span>Kho mô hình</span></button>
     <button class="nav-item" data-view="models"><i>📦</i><span>Mô hình của tôi</span></button>
     <button class="nav-item" data-view="server"><i>⚡</i><span>Máy chủ API</span><b class="pill-dot" id="srvDot"></b></button>
+    <button class="nav-item" data-view="security"><i>🔐</i><span>Bảo mật &amp; Quản trị</span></button>
     <div class="rail-foot"><div id="hwInfo">Đang kiểm tra phần cứng…</div>
       <div class="theme-row" id="themeRow" role="group" aria-label="Giao diện"><button type="button" data-theme="light" title="Giao diện sáng">☀ Sáng</button><button type="button" data-theme="dark" title="Giao diện tối">☾ Tối</button><button type="button" data-theme="system" title="Theo hệ điều hành">Tự động</button></div></div>
   </nav>
@@ -44,7 +45,7 @@
       </aside>
       <div class="chat" id="chatPane">
         <div class="agent-bar only-agent" id="agentBar">
-          <div class="agent-title"><b>🤖 Trợ lý</b><span class="muted small">Tự dùng công cụ ngay trên máy bạn · mỗi bước đều hiện bên dưới</span></div>
+          <div class="agent-title"><b>🤖 AIVN BOT</b><span class="muted small">Tự dùng công cụ ngay trên máy bạn · mỗi bước đều hiện bên dưới</span></div>
           <div class="tool-chips" id="toolChips"></div>
         </div>
         <div class="doc-warn agent-warn only-agent" id="agentWarn" hidden></div>
@@ -65,15 +66,21 @@
       </div>
       <aside class="settings">
         <div class="only-agent agent-settings" id="agentSettings">
-          <h3>Cài đặt Trợ lý</h3>
+          <h3>Cài đặt AIVN BOT</h3>
           <div class="set-block">
             <div class="set-head"><b>📂 Thư mục được phép</b><button class="btn sm" id="addFolder">＋ Thêm thư mục</button></div>
             <div class="folder-list" id="folderList"></div>
-            <small>Trợ lý chỉ xem, đọc, ghi tệp trong các thư mục này. <b>Xoá</b> hay <b>ghi đè</b> tệp luôn hỏi bạn trước.</small>
+            <small>AIVN BOT chỉ xem, đọc, ghi tệp trong các thư mục này. <b>Xoá</b> hay <b>ghi đè</b> tệp luôn hỏi bạn trước.</small>
           </div>
           <label class="check toggle"><input type="checkbox" id="agWeb"> <span><b>🌐 Cho phép truy cập mạng</b><small>Tìm kiếm qua DuckDuckGo (dự phòng Wikipedia) và đọc trang web. Mọi địa chỉ đã mở đều ghi dưới câu trả lời.</small></span></label>
           <label class="check toggle"><input type="checkbox" id="agPy"> <span><b>🐍 Cho phép chạy Python</b><small id="agPyNote">Đang kiểm tra Python trên máy…</small></span></label>
-          <label class="check toggle"><input type="checkbox" id="agMem"> <span><b>🧠 Cho phép ghi nhớ</b><small id="agMemNote">Trợ lý lưu điều cần nhớ lâu dài và tự nhắc lại khi liên quan.</small></span></label>
+          <label class="check toggle"><input type="checkbox" id="agMem"> <span><b>🧠 Cho phép ghi nhớ</b><small id="agMemNote">AIVN BOT lưu điều cần nhớ lâu dài và tự nhắc lại khi liên quan.</small></span></label>
+          <div class="set-block comp-block">
+            <label class="check toggle"><input type="checkbox" id="agComp"> <span><b>💻 Truy cập máy tính</b><small>Mở ứng dụng, tệp, thư mục, trang web; xem/đóng ứng dụng; chạy lệnh terminal; khoá màn hình, âm lượng… Chạy lệnh, đóng ứng dụng, tắt máy luôn hỏi bạn trước. Lệnh nguy hiểm (xoá hàng loạt, định dạng ổ đĩa, tải mã về chạy, quyền quản trị) bị chặn.</small></span></label>
+            <label class="check toggle sub"><input type="checkbox" id="agAutoRO"> <span><b>Không hỏi lại với lệnh chỉ đọc</b><small>Ví dụ dir, ls, ipconfig, git status. Mặc định tắt: mọi lệnh đều hiện thẻ duyệt.</small></span></label>
+            <label class="check toggle"><input type="checkbox" id="agScreen"> <span><b>🖱 Điều khiển màn hình <em class="beta">Thử nghiệm</em></b><small id="agScreenNote">AIVN BOT chụp màn hình, mô hình nhìn ảnh đề xuất chỗ bấm; mỗi cú bấm/gõ hiện thẻ có khung đỏ để bạn duyệt. Cần mô hình nhìn ảnh. Dừng khẩn cấp: Ctrl+Alt+Q.</small></span></label>
+            <div class="perm-guide" id="permGuide" hidden></div>
+          </div>
           <p class="small"><button class="linkish" data-goto="memory">Quản lý ghi nhớ →</button> · <button class="linkish" data-goto="schedule">Lịch tự động →</button></p>
           <p class="small muted">JavaScript luôn chạy trong hộp cát riêng: không đọc tệp, không vào mạng, tối đa 3 giây.</p>
         </div>
@@ -89,6 +96,24 @@
         <label>Số token tối đa
           <input type="number" id="maxTok" min="16" max="8192" step="16">
         </label>
+        <label class="check"><input type="checkbox" id="gpuOn"> Tăng tốc bằng GPU (Vulkan/CUDA/Metal)<small>Tắt nếu nạp mô hình bị lỗi. AIVN tự chuyển sang CPU khi GPU nạp lỗi. Đổi cài đặt này sẽ gỡ mô hình đang nạp.</small></label>
+        <button type="button" class="btn sm" id="openLogs2">🧾 Mở thư mục nhật ký</button>
+        <details class="adv" id="advBox">
+          <summary>Nâng cao: phần cứng &amp; ghi đè</summary>
+          <div class="hw-info small" id="hwInfo">Đang đọc phần cứng…</div>
+          <p class="small muted">Mặc định AIVN tự chọn: GPU rời (CUDA/Vulkan), Metal trên Mac, hoặc CPU; tự tính số lớp đưa lên GPU theo VRAM riêng còn trống và tự giảm dần nếu nạp lỗi. Chỉ đổi khi bạn biết mình cần gì.</p>
+          <label>Thiết bị GPU (Vulkan)
+            <select id="gpuDevice"><option value="">Tự động (ưu tiên GPU rời)</option><option value="0">Thiết bị Vulkan #0</option><option value="1">Thiết bị Vulkan #1</option><option value="2">Thiết bị Vulkan #2</option><option value="3">Thiết bị Vulkan #3</option></select>
+          </label>
+          <label>Số lớp đưa lên GPU <b id="gpuLayersVal">Tự động</b>
+            <input type="range" id="gpuLayers" min="-1" max="100" step="1" value="-1">
+            <small>Kéo về trái hết = Tự động. 0 = chỉ CPU. Áp dụng khi nạp lại mô hình.</small>
+          </label>
+          <label>Giới hạn VRAM (GB, để trống = tự đo)
+            <input type="number" id="vramLimit" min="0" max="256" step="0.5" placeholder="Tự đo">
+          </label>
+          <button type="button" class="btn sm" id="advReset">Về mặc định (tự động)</button>
+        </details>
         <label>Độ dài ngữ cảnh (áp dụng khi nạp lại)
           <select id="ctxSize"><option>2048</option><option>4096</option><option>8192</option><option>16384</option></select>
         </label>
@@ -149,7 +174,7 @@
       <div class="page">
         <div class="page-head">
           <div><h2>Mô hình của tôi</h2><p class="muted" id="modelsDir"></p></div>
-          <div class="row"><button class="btn" id="openDir">📁 Mở thư mục</button><button class="btn primary" id="importBtn">📂 Nhập tệp GGUF</button></div>
+          <div class="row"><button class="btn" id="openLogs" title="Nhật ký lỗi khi nạp mô hình (logs/engine.log), gửi cho người hỗ trợ khi cần">🧾 Mở thư mục nhật ký</button><button class="btn" id="openDir">📁 Mở thư mục</button><button class="btn primary" id="importBtn">📂 Nhập tệp GGUF</button></div>
         </div>
         <div class="table" id="modelTable"></div>
       </div>
@@ -192,15 +217,15 @@
     <section class="view" id="view-schedule">
       <div class="page">
         <div class="page-head">
-          <div><h2>⏰ Lịch tự động</h2><p class="muted">Nhắc việc và việc định kỳ cho Trợ lý. Chạy khi AIVN đang mở (hoặc đang chạy nền trong khay), hiện thông báo của hệ điều hành và lưu kết quả vào một cuộc trò chuyện.</p></div>
+          <div><h2>⏰ Lịch tự động</h2><p class="muted">Nhắc việc và việc định kỳ cho AIVN BOT. Chạy khi AIVN đang mở (hoặc đang chạy nền trong khay), hiện thông báo của hệ điều hành và lưu kết quả vào một cuộc trò chuyện.</p></div>
         </div>
         <div class="grid-sched">
           <form class="sched-form" id="schedForm">
             <h3 id="schedFormTitle">Tạo lịch mới</h3>
             <label>Tên<input id="sfTitle" maxlength="120" placeholder="vd. Uống nước, Báo cáo chi tiêu tuần" required></label>
-            <div class="seg" id="sfKind" role="radiogroup"><button type="button" data-kind="reminder" class="on">🔔 Nhắc việc</button><button type="button" data-kind="agent">🤖 Việc cho Trợ lý</button></div>
+            <div class="seg" id="sfKind" role="radiogroup"><button type="button" data-kind="reminder" class="on">🔔 Nhắc việc</button><button type="button" data-kind="agent">🤖 Việc cho AIVN BOT</button></div>
             <label id="sfMsgWrap">Nội dung nhắc<textarea id="sfMsg" rows="2" placeholder="vd. Đứng dậy vươn vai và uống một cốc nước"></textarea></label>
-            <label id="sfPromptWrap" hidden>Yêu cầu cho Trợ lý<textarea id="sfPrompt" rows="3" placeholder="vd. Đọc tệp chi-tieu.csv, tính tổng tuần này và ghi vào bao-cao-tuan.md"></textarea><small>Chạy với mô hình đang nạp (hoặc mô hình dùng gần nhất). Không thể xoá/ghi đè tệp vì không có ai xác nhận.</small></label>
+            <label id="sfPromptWrap" hidden>Yêu cầu cho AIVN BOT<textarea id="sfPrompt" rows="3" placeholder="vd. Đọc tệp chi-tieu.csv, tính tổng tuần này và ghi vào bao-cao-tuan.md"></textarea><small>Chạy với mô hình đang nạp (hoặc mô hình dùng gần nhất). Không thể xoá/ghi đè tệp vì không có ai xác nhận.</small></label>
             <div class="seg" id="sfRepeat" role="radiogroup"><button type="button" data-rep="once" class="on">Một lần</button><button type="button" data-rep="daily">Hằng ngày</button><button type="button" data-rep="weekly">Hằng tuần</button></div>
             <div class="row"><label class="grow" id="sfDateWrap">Ngày<input type="date" id="sfDate"></label><label class="grow">Giờ<input type="time" id="sfTime" required></label></div>
             <div class="days" id="sfDays" hidden><button type="button" data-d="1">T2</button><button type="button" data-d="2">T3</button><button type="button" data-d="3">T4</button><button type="button" data-d="4">T5</button><button type="button" data-d="5">T6</button><button type="button" data-d="6">T7</button><button type="button" data-d="0">CN</button></div>
@@ -224,14 +249,46 @@
     <section class="view" id="view-memory">
       <div class="page narrow">
         <div class="page-head">
-          <div><h2>🧠 Ghi nhớ của Trợ lý</h2><p class="muted" id="memMode">Những điều Trợ lý đã ghi nhớ về bạn. Chỉ lưu trên máy này; điều liên quan được đưa vào lời nhắc của Trợ lý.</p></div>
+          <div><h2>🧠 Ghi nhớ của AIVN BOT</h2><p class="muted" id="memMode">Những điều AIVN BOT đã ghi nhớ về bạn. Chỉ lưu trên máy này; điều liên quan được đưa vào lời nhắc của AIVN BOT.</p></div>
           <div class="row mem-tools"><label class="check"><input type="checkbox" id="memOn"> Cho phép ghi nhớ</label><button class="btn danger sm" id="memClear">Xoá tất cả</button></div>
         </div>
         <form class="row mem-add" id="memForm"><input id="memNew" maxlength="500" placeholder="Thêm một điều cần nhớ, vd. Tôi học ngành Công nghệ thông tin ở VLU"><button class="btn primary" type="submit">Thêm</button></form>
         <div class="mem-list" id="memList"></div>
       </div>
     </section>
+    <section class="view" id="view-security">
+      <div class="page narrow">
+        <div class="page-head"><div><h2>🔐 Bảo mật &amp; Quản trị</h2><p class="muted">Kích hoạt của máy này, Khóa ứng dụng bằng mật khẩu, và trang Quản trị dành cho chủ sở hữu.</p></div></div>
+        <div class="sec-card" id="secLicense"></div>
+        <div class="sec-card">
+          <h3>🔒 Khóa ứng dụng</h3>
+          <p class="small muted">Đặt mật khẩu để mở AIVN trên máy này. AIVN chỉ lưu giá trị băm (scrypt) của mật khẩu; quên mật khẩu thì chỉ có thể xoá dữ liệu AIVN để dùng lại. Đây là khoá mở ứng dụng, không mã hoá tệp trên ổ đĩa.</p>
+          <div id="lockState" class="small"></div>
+          <form id="lockForm" class="sec-form">
+            <input type="password" id="lkCur" placeholder="Mật khẩu hiện tại" autocomplete="current-password" hidden>
+            <input type="password" id="lkNew" placeholder="Mật khẩu mới (ít nhất 4 ký tự)" autocomplete="new-password">
+            <input type="password" id="lkNew2" placeholder="Nhập lại mật khẩu mới" autocomplete="new-password">
+            <div class="row"><button class="btn primary" type="submit" id="lkSave">Bật Khóa ứng dụng</button><button class="btn" type="button" id="lkOff" hidden>Tắt khoá</button><button class="btn" type="button" id="lkNow" hidden>Khóa ngay</button></div>
+          </form>
+          <div class="row lk-opts"><label>Tự khoá khi không dùng <select id="lkIdle"><option value="0">Không</option><option value="5">5 phút</option><option value="15">15 phút</option><option value="30">30 phút</option><option value="60">60 phút</option></select></label><label class="check"><input type="checkbox" id="lkSleep"> Khoá khi máy ngủ / khoá màn hình</label></div>
+        </div>
+        <div class="sec-card" id="secAdmin">
+          <h3>🛡 Quản trị (chủ sở hữu)</h3>
+          <div id="admBody"></div>
+        </div>
+        <p class="small muted honest">Lưu ý trung thực: mã nguồn AIVN công khai trên GitHub, nên người rành kỹ thuật có thể tự sửa và build lại để bỏ bước kích hoạt. Cơ chế này giúp chủ sở hữu kiểm soát ai dùng bản AIVN chính thức, không phải biện pháp chống bẻ khoá tuyệt đối.</p>
+      </div>
+    </section>
   </main>
+</div>
+<div class="modal-back" id="screenModal" hidden>
+  <div class="modal wide" role="alertdialog" aria-modal="true" aria-labelledby="scTitle">
+    <h3 id="scTitle">🖱 AIVN BOT muốn thao tác trên màn hình <em class="beta">Thử nghiệm</em></h3>
+    <p id="scMsg"></p>
+    <div class="sc-shot" id="scShot"><img id="scImg" alt="Ảnh chụp màn hình"><div class="sc-box" id="scBox" hidden></div><div class="sc-dot" id="scDot" hidden></div></div>
+    <p class="small muted" id="scHint">Khung đỏ là chỗ AIVN BOT sẽ bấm. Nếu sai, hãy bấm vào ảnh để chọn đúng vị trí. Dừng khẩn cấp bất cứ lúc nào: Ctrl+Alt+Q.</p>
+    <div class="row end"><button class="btn" id="scNo">Từ chối</button><button class="btn danger" id="scStop">■ Dừng AIVN BOT</button><button class="btn primary" id="scYes">Đồng ý thực hiện</button></div>
+  </div>
 </div>
 <div class="modal-back" id="confirmModal" hidden>
   <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="cfTitle" aria-describedby="cfMsg">
@@ -240,11 +297,12 @@
     <p id="cfMsg"></p>
     <code class="cf-path" id="cfPath"></code>
     <pre class="cf-preview" id="cfPreview" hidden></pre>
-    <p class="small muted">Yêu cầu này do Trợ lý tạo ra. Nếu bạn không chắc, hãy chọn “Không”.</p>
+    <p class="small muted from-agent">Yêu cầu này do AIVN BOT tạo ra. Nếu bạn không chắc, hãy chọn “Không”.</p>
     <div class="row end"><button class="btn" id="cfNo">Không, giữ nguyên tệp</button><button class="btn danger" id="cfYes">Xoá</button></div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
+<div class="theme-veil" id="themeVeil" aria-hidden="true"><img src="dragon-red.svg" alt=""></div>
 <script src="app.js"></script>
 </body>
 </html>

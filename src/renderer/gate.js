@@ -47,6 +47,20 @@ $('#glForgot').addEventListener('click', () => { show($('#glForgotBox')); $('#gl
 $('#glForgotNo').addEventListener('click', () => { show($('#glForgotBox'), false); $('#glWord').value = ''; });
 $('#glReset').addEventListener('click', async () => { err($('#glErr')); try { await G.gateReset($('#glWord').value); } catch (x) { err($('#glErr'), clean(x.message)); } });
 $('#gQuit').addEventListener('click', () => G.gateQuit());
+$('#goGo').addEventListener('click', async () => {
+  err($('#goErr')); const b = $('#goGo'); b.disabled = true;
+  try {
+    const st = await G.adminState();
+    if (!st.unlocked) {
+      if (st.imported) await G.adminUnlock($('#goPass').value);
+      else { const r = await G.adminImport({ pass: $('#goPass').value }); if (r.canceled) return; }
+    }
+    await G.adminSelf({ name: $('#goName').value });
+    await render();
+  } catch (x) { err($('#goErr'), clean(x.message)); }
+  finally { b.disabled = false; }
+});
+(async () => { try { const st = await G.adminState(); if (st.imported) $('#goGo').textContent = 'Mở khoá quản trị và kích hoạt máy này'; } catch {} })();
 G.onGateChanged(() => render());
 const clean = (m) => String(m || '').replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 render();

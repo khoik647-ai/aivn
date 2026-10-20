@@ -1,4 +1,4 @@
-// Chạy mã ngắn cho Trợ lý.
+// Chạy mã ngắn cho AIVN BOT.
 // JavaScript: luồng Worker riêng + ngữ cảnh vm mới tinh. Không truyền bất kỳ đối tượng nào của tiến trình chính vào
 // ngữ cảnh (nên không có require, process, fetch, tệp hay mạng); tắt sinh mã từ chuỗi và WebAssembly; giới hạn thời gian và bộ nhớ.
 // Python (tuỳ chọn): chỉ khi máy có sẵn Python và người dùng bật; chạy trong thư mục tạm với móc kiểm tra (audit hook)

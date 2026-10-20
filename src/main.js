@@ -16,6 +16,10 @@ const { createScheduler } = require('./agent/scheduler');
 const sandbox = require('./agent/sandbox');
 const { normalizeTools } = require('./schema');
 const { createLicenseState } = require('./gate');
+const { createComputerTools } = require('./agent/computer-tools');
+const { createAdmin } = require('./admin');
+const SC = require('./screen-control');
+const { WELCOME } = require('./agent/agent');
 const { createAppLock, resetData } = require('./applock');
 const LIC = require('./license');
 
@@ -53,6 +57,13 @@ let win = null, tray = null, quitting = false;
 let paths, settings, convos, memory, scheduler, agent;
 let downloader = null;
 let hwCache = null;
+// Biến môi trường cho bộ máy: tắt GPU, chọn GPU Vulkan (vd. chỉ dùng GPU rời trên laptop 2 GPU), giới hạn VRAM (ghi đè trong Nâng cao)
+function engineEnv() {
+  const d = settings.data;
+  const dev = Number.isInteger(d.gpuDevice) && d.gpuDevice >= 0 ? String(d.gpuDevice) : '';
+  const lim = Number(d.vramLimitGB) > 0 ? String(Math.round(Number(d.vramLimitGB) * 1024 ** 3)) : '';
+  return { AIVN_GPU: d.gpu === false ? 'off' : '', GGML_VK_VISIBLE_DEVICES: dev, AIVN_VRAM_LIMIT: lim };
+}
 const hw = async () => (hwCache ||= await engine.hardwareInfo().catch(() => ({ ram: require('os').totalmem() })));
 const generations = new Map(); // reqId -> AbortController
 const serverLog = [];
@@ -64,19 +75,25 @@ function initStores() {
   settings = new JsonStore(path.join(ud, 'settings.json'), {
     systemPrompt: 'Bạn là AIVN, một trợ lý AI thân thiện. Hãy trả lời bằng tiếng Việt, rõ ràng và chính xác.',
     temperature: 0.7, maxTokens: 1024, contextSize: 4096, apiPort: 1234, apiAutoStart: false, imported: [], lastModel: null, hfToken: '', theme: 'light', rag: true, vision: true,
-    agentFolders: [], agentWeb: false, agentPython: false, agentMemory: true, agentTemperature: 0.2, keepInTray: false, openAtLogin: false,
+    agentFolders: [], agentWeb: false, agentPython: false, agentMemory: true, agentTemperature: 0.2, agentComputer: true, agentScreen: false, agentAutoReadOnly: false, keepInTray: false, openAtLogin: false,
   });
+  Object.assign(process.env, Object.fromEntries(Object.entries(engineEnv()).filter(([k, v]) => v && !process.env[k]))); // bộ máy (tiến trình riêng) kế thừa các biến này khi khởi động
   convos = new JsonStore(path.join(ud, 'conversations.json'), { list: [] });
   rag = createRagStore(path.join(ud, 'rag'));
   memory = createMemoryStore(path.join(ud, 'memory.json'));
   scheduler = createScheduler({ file: path.join(ud, 'schedules.json'), onFire: onScheduleFire, log: (m) => { console.log(m); log(m); } });
-  agent = createAgent({ engine, getSettings: () => settings.data, memory, scheduler, extractFile: docs.extractFile, embedForMemory, log,
+  computerTools = createComputerTools({ getSettings: () => settings.data, openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log,
+    keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: screenLook, act: screenAct } });
+  agent = createAgent({ engine, getSettings: () => settings.data, memory, scheduler, extractFile: docs.extractFile, embedForMemory, log, computer: computerTools,
     trash: async (p) => { try { await shell.trashItem(p); } catch (e) { throw new Error('Không chuyển được tệp vào Thùng rác (' + e.message + '). Tệp vẫn còn nguyên.'); } } });
   lic = createLicenseState({ file: path.join(ud, 'license.json'), isPackaged: app.isPackaged, log: (m) => { log(m); if (isTest) console.log(m); }, fetchJson });
   appLock = createAppLock(path.join(ud, 'applock.json'));
+  admin = createAdmin({ dir: ud, fetchJson, fetchRaw: (u, o) => net.fetch(u, { cache: 'no-store', ...o }), log,
+    publicX: !app.isPackaged && process.env.AIVN_TEST_PUBKEY ? process.env.AIVN_TEST_PUBKEY : LIC.PUBLIC_KEY_X });
   downloader = createDownloader({ dir: paths.models, send, getToken: () => settings.data.hfToken || null, maxConcurrent: 2, log: (m) => isTest && console.log(m) });
 }
 // ---------- Cổng vào: kích hoạt (bắt buộc) + Khóa ứng dụng (tuỳ chọn) ----------
+let computerTools = null, admin = null;
 let lic, appLock, unlocked = false, servicesOn = false, licTimer = null, idleTimer = null;
 const devSkip = !app.isPackaged && process.env.AIVN_SKIP_ACTIVATION === '1'; // chỉ khi chạy từ mã nguồn để kiểm thử
 async function fetchJson(url) {
@@ -195,21 +212,74 @@ function listModels() {
 }
 const isInstalled = (file) => listModels().some(m => m.file.toLowerCase() === path.basename(file).toLowerCase());
 
-async function loadById(id) {
+// Nhật ký lỗi bộ máy (để chẩn đoán): userData/logs/engine.log, tối đa ~1 MB
+function engineLog(title, e, extra = {}) {
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(dir, { recursive: true });
+    const f = path.join(dir, 'engine.log');
+    try { if (fs.statSync(f).size > 1e6) fs.renameSync(f, f + '.1'); } catch {}
+    const lines = [`[${new Date().toISOString()}] ${title}`, `AIVN ${app.getVersion()} · ${process.platform} ${process.arch} · ${require('os').release()}`, ...Object.entries(extra).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)];
+    if (e) { lines.push('Lỗi: ' + (e.message || e)); if (e.code) lines.push('Mã: ' + e.code); if (Array.isArray(e.attempts)) for (const a of e.attempts) lines.push(`- Thử ${a.mode}: ${a.message}\n${a.stack || ''}`); if (e.hostStack) lines.push('Stack (engine): ' + e.hostStack); if (e.stack) lines.push('Stack: ' + e.stack); }
+    fs.appendFileSync(f, lines.join('\n') + '\n\n');
+  } catch {}
+}
+// Kiểm tra tệp GGUF trước khi nạp: tồn tại, đúng "GGUF" ở đầu tệp, kích thước khớp kho mô hình (khi biết)
+function verifyGguf(m) {
+  const bad = (why) => { const e = new Error('Tệp mô hình bị lỗi hoặc tải chưa xong — hãy xoá và tải lại. (' + why + ')'); e.code = 'BAD_FILE'; e.modelId = m.id; e.catalogId = m.catalog ? m.catalog.id : null; e.repo = m.repo || null; return e; };
+  let st; try { st = fs.statSync(m.path); } catch { throw bad('không thấy tệp ' + m.path); }
+  if (st.size < 1024 * 1024) throw bad('tệp quá nhỏ: ' + st.size + ' byte');
+  const fd = fs.openSync(m.path, 'r'); const b = Buffer.alloc(8);
+  try { fs.readSync(fd, b, 0, 8, 0); } finally { fs.closeSync(fd); }
+  if (b.toString('latin1', 0, 4) !== 'GGUF') throw bad('đầu tệp không phải GGUF');
+  const ver = b.readUInt32LE(4); if (ver < 1 || ver > 3) throw bad('phiên bản GGUF lạ: ' + ver);
+  if (m.catalog && m.parts === 1 && m.catalog.size && Math.abs(m.size - m.catalog.size) > 4096) throw bad(`kích thước ${m.size} byte, cần ${m.catalog.size} byte`);
+  if (fs.existsSync(m.path + '.part')) throw bad('còn tệp .part đang tải dở');
+}
+const MODE_VI = { gpu: 'GPU', 'gpu-partial': 'GPU một phần + CPU', cpu: 'CPU', 'cpu-only': 'CPU (không dùng GPU)' };
+
+async function loadById(id, { force = false } = {}) {
   const m = listModels().find(x => x.id === id);
   if (!m) throw new Error(`Không tìm thấy mô hình "${id}"`);
   send('model:status', { loading: true, id });
   try {
     let st;
-    try { st = await engine.loadModel(m.id, m.path, { contextSize: settings.data.contextSize, ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj } : {}) }); }
-    catch (e) {
+    try { verifyGguf(m); } catch (e) { engineLog('Tệp mô hình không hợp lệ: ' + m.file, e, { path: m.path, size: m.size }); throw e; }
+    // Kiểm tra bộ nhớ trước khi nạp: mô hình lớn hơn RAM trống + VRAM thì cảnh báo và gợi ý bản nhỏ hơn
+    if (!force) {
+      const h = await hw(); const os_ = require('os');
+      const freeRam = process.platform === 'darwin' ? os_.totalmem() * 0.7 : os_.freemem();
+      const vr = h.gpu && h.gpu !== 'metal' && h.vram ? (h.vram.free || h.vram.total || 0) * 0.9 : 0;
+      const need = m.size * 1.05 + 0.5 * 1024 ** 3;
+      if (need > freeRam + vr) {
+        const e = new Error(`Mô hình cần khoảng ${(need / 1024 ** 3).toFixed(1)} GB nhưng máy chỉ còn khoảng ${((freeRam + vr) / 1024 ** 3).toFixed(1)} GB trống (RAM${vr ? ' + VRAM' : ''}). Nạp vẫn có thể được nhưng máy sẽ rất chậm hoặc treo. Nên đóng bớt ứng dụng hoặc chọn bản nhỏ hơn (Q4_K_M, Q3_K_M hoặc mô hình ít tham số hơn) trong Kho mô hình.`);
+        e.code = 'LOW_MEM'; e.modelId = m.id; e.catalogId = m.catalog ? m.catalog.id : null; throw e;
+      }
+    }
+    const gl = settings.data.gpuLayers;
+    const opts = { contextSize: settings.data.contextSize, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj } : {}) };
+    try {
+      try { st = await engine.loadModel(m.id, m.path, opts); }
+      catch (e) {
+        // GPU (Vulkan/CUDA/Metal) không nạp được: ghi nhật ký, khởi động lại bộ máy ở chế độ chỉ CPU rồi thử lại một lần
+        if (!(e.code === 'LOAD_FAILED' && e.gpu && engine.restart)) throw e;
+        engineLog('GPU không nạp được ' + m.file + ', thử lại bằng bộ máy chỉ CPU', e, { path: m.path, size: m.size });
+        await engine.restart({ ...engineEnv(), AIVN_GPU: 'off' }); hwCache = null;
+        st = await engine.loadModel(m.id, m.path, opts);
+        st = { ...st, mode: 'cpu-only', fallbackFrom: [...(e.attempts || []).map(a => a.mode + ': ' + a.message), ...(st.fallbackFrom || [])] };
+        settings.data.gpu = false; settings.save(); // lần sau mở AIVN dùng CPU luôn (bật lại trong Cài đặt trò chuyện)
+      }
+    } catch (e) {
       const a = String(e.message).match(/unknown model architecture: '([^']+)'/i);
       if (a) throw new Error(`Kiến trúc mô hình "${a[1]}" chưa được hỗ trợ bởi llama.cpp ${hf.llamaCpp} trong AIVN. Hãy chờ bản AIVN mới hơn.`);
       if (/mmproj|clip/i.test(m.file)) throw new Error('Đây là tệp thị giác (mmproj), không phải mô hình trò chuyện.');
       if (e.code === 'VCREDIST') { send('vision:vcredist', { url: VCREDIST_URL }); throw new Error('Chế độ nhìn ảnh cần bộ thư viện Microsoft Visual C++ (bản 2015–2022, x64). Hãy cài từ trang chính thức của Microsoft rồi nạp lại mô hình.'); }
       if (e.code === 'NO_SERVER') throw new Error('Bản AIVN này thiếu thành phần nhìn ảnh (llama-server). Hãy cài lại AIVN.');
-      throw e;
+      engineLog('Không nạp được mô hình ' + m.file, e, { path: m.path, size: m.size, vision: !!m.mmproj, contextSize: settings.data.contextSize });
+      const n = Array.isArray(e.attempts) ? e.attempts.length : 0;
+      const x = new Error(`Không nạp được ${m.catalog ? m.catalog.name : m.file}${n ? ` (đã thử ${n} cách: GPU, GPU một phần, CPU)` : ''}. Lỗi: ${e.message}. Chi tiết đã ghi vào nhật ký (Mô hình của tôi → Mở thư mục nhật ký).`);
+      x.code = 'LOAD_FAILED'; throw x;
     }
+    if (st.fallbackFrom && st.fallbackFrom.length) { engineLog('Nạp ' + m.file + ' bằng chế độ dự phòng: ' + st.mode, null, { attempts: st.fallbackFrom }); st.notice = `GPU không nạp được mô hình này, AIVN đã chuyển sang chế độ ${MODE_VI[st.mode] || st.mode} (chậm hơn nhưng vẫn dùng được).`; }
     settings.data.lastModel = m.id; settings.save();
     send('model:status', st);
     return st;
@@ -251,14 +321,14 @@ async function ensureEmbedder() {
 }
 const ragActive = () => settings.data.rag !== false && embedInfo().installed;
 
-// ---------- Trợ lý ----------
+// ---------- AIVN BOT ----------
 // Ghi nhớ: dùng BGE-M3 nếu đã tải (tìm theo ý nghĩa), không thì theo từ khoá
 async function embedForMemory() {
   if (!ragActive()) return {};
   try { if (!(await ensureEmbedder())) return {}; } catch { return {}; }
   return { embed: (arr, kind) => engine.embed(arr, kind), model: EMBED.id };
 }
-// Mô hình nhỏ (< ~3,5 tỉ tham số) thường gọi công cụ sai: hiện cảnh báo trong Trợ lý
+// Mô hình nhỏ (< ~3,5 tỉ tham số) thường gọi công cụ sai: hiện cảnh báo trong AIVN BOT
 function agentAdvice() {
   const st = engine.status(); if (!st.loaded) return null;
   const m = listModels().find(x => x.path === st.path) || null;
@@ -271,7 +341,7 @@ function agentInfo() {
   const py = sandbox.findPython();
   return { folders: (settings.data.agentFolders || []).map(f => ({ path: f, name: path.basename(f), exists: (() => { try { return fs.statSync(f).isDirectory(); } catch { return false; } })() })),
     web: !!settings.data.agentWeb, python: { enabled: !!settings.data.agentPython, available: !!py, version: py ? py.version : null }, memory: { enabled: settings.data.agentMemory !== false, count: memory.count(), semantic: ragActive() },
-    tools: agent.activeTools().map(n => ({ name: n, label: agent.defs[n].label, icon: agent.defs[n].icon })), advice: agentAdvice(), keepInTray: !!settings.data.keepInTray, openAtLogin: !!settings.data.openAtLogin };
+    tools: agent.activeTools().map(n => ({ name: n, label: agent.defs[n].label, icon: agent.defs[n].icon })), computer: computerInfo(), welcome: WELCOME, advice: agentAdvice(), keepInTray: !!settings.data.keepInTray, openAtLogin: !!settings.data.openAtLogin };
 }
 // Xác nhận xoá/ghi đè: hộp thoại tiếng Việt trong cửa sổ AIVN; không trả lời trong 5 phút = từ chối
 const confirms = new Map();
@@ -293,11 +363,108 @@ async function runAgentTurn({ reqId, convoId, messages, headless = false, signal
     if (headless && settings.data.lastModel) await loadById(settings.data.lastModel);
     else throw new Error('Chưa nạp mô hình nào. Hãy chọn mô hình ở thanh phía trên (gợi ý: Qwen3 4B hoặc Gemma 3 4B trở lên).');
   }
-  return agent.run({ messages, convoId, signal, headless, confirm: askConfirm,
+  const comp = !headless && agent.activeTools({ headless }).some(n => computerTools.has(n));
+  if (comp) computerSessionStart();
+  try { return await agent.run({ messages, convoId, signal, headless, confirm: askConfirm, confirmScreen: askScreen,
     onToken: (t) => reqId && send('chat:token', { reqId, t }),
     onStep: (st) => reqId && send('agent:step', { reqId, step: slimStep(st) }),
-    onStatus: (st) => reqId && send('agent:status', { reqId, ...st }) });
+    onStatus: (st) => reqId && send('agent:status', { reqId, ...st }) }); }
+  finally { if (comp) computerSessionEnd(); }
 }
+// ---------- Truy cập máy tính: dừng khẩn cấp, thẻ duyệt thao tác màn hình ----------
+const STOP_KEY = 'CommandOrControl+Alt+Q';
+let compSessions = 0, stopWin = null;
+function computerSessionStart() { if (++compSessions === 1) { try { globalShortcut.register(STOP_KEY, () => stopComputer('phím tắt ' + STOP_KEY)); } catch {} } }
+function computerSessionEnd() { compSessions = Math.max(0, compSessions - 1); if (!compSessions) { try { globalShortcut.unregister(STOP_KEY); } catch {} hideStopBar(); } }
+// Dừng khẩn cấp: huỷ mọi lượt AIVN BOT đang chạy, từ chối mọi thẻ đang chờ, hiện lại cửa sổ
+function stopComputer(reason) {
+  let n = 0;
+  for (const ac of generations.values()) { try { ac.abort(); n++; } catch {} }
+  for (const f of [...confirms.values()]) f(false);
+  for (const f of [...screenConfirms.values()]) f({ ok: false });
+  hideStopBar();
+  if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); if (!win.isVisible()) win.show(); send('computer:stopped', { reason }); }
+  log('[AIVN BOT] dừng khẩn cấp (' + reason + '), đã huỷ ' + n + ' lượt');
+  return n;
+}
+function showStopBar() {
+  if (stopWin && !stopWin.isDestroyed()) { stopWin.showInactive(); return; }
+  const d = require('electron').screen.getPrimaryDisplay().workArea;
+  stopWin = new BrowserWindow({ width: 360, height: 52, x: Math.round(d.x + d.width / 2 - 180), y: d.y + 8, frame: false, transparent: true, resizable: false, alwaysOnTop: true, skipTaskbar: true, focusable: false, show: false, hasShadow: false,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  stopWin.setAlwaysOnTop(true, 'screen-saver'); stopWin.setContentProtection(true); // không lọt vào ảnh chụp màn hình
+  stopWin.loadFile(path.join(__dirname, 'renderer', 'stop.html'));
+  stopWin.once('ready-to-show', () => stopWin && !stopWin.isDestroyed() && stopWin.showInactive());
+  stopWin.on('closed', () => { stopWin = null; });
+}
+function hideStopBar() { if (stopWin && !stopWin.isDestroyed()) stopWin.hide(); }
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+// Ẩn cửa sổ AIVN để nhìn/thao tác trên màn hình thật, rồi hiện lại
+async function withWindowAway(fn) {
+  const w = win && !win.isDestroyed() ? win : null;
+  showStopBar();
+  if (w) { if (process.platform === 'darwin') w.hide(); else w.minimize(); await sleep(isTest ? 150 : 450); }
+  try { return await fn(); }
+  finally { if (w && !w.isDestroyed()) { if (w.isMinimized()) w.restore(); w.show(); w.focus(); } }
+}
+function screenGuard(signal) {
+  if (!settings.data.agentScreen) throw new computerTools.CompError('Điều khiển màn hình đang tắt (Cài đặt AIVN BOT → Điều khiển màn hình).');
+  if (!engine.status().vision) throw new computerTools.CompError('Cần nạp một mô hình nhìn được ảnh (có nhãn "Nhìn ảnh", vd. Gemma 3 4B hoặc Qwen2.5-VL) để điều khiển màn hình.');
+  const p = SC.permissions();
+  if (p.needed && (p.screen !== 'granted' || !p.accessibility)) throw new computerTools.CompError('macOS chưa cấp quyền cho AIVN: ' + [p.screen !== 'granted' && 'Ghi màn hình', !p.accessibility && 'Trợ năng'].filter(Boolean).join(' và ') + '. Hướng dẫn người dùng mở Cài đặt AIVN BOT → Điều khiển màn hình → "Hướng dẫn cấp quyền macOS".');
+  if (signal && signal.aborted) throw new computerTools.CompError('Đã dừng.');
+}
+async function captureAway() { return withWindowAway(() => process.env.AIVN_FAKE_SCREEN && !app.isPackaged ? fakeShot() : SC.capture()); }
+function fakeShot() { // chỉ để kiểm thử: ảnh màn hình giả từ tệp
+  const img = nativeImage.createFromPath(process.env.AIVN_FAKE_SCREEN); const sz = img.getSize();
+  return { dataUrl: 'data:image/jpeg;base64,' + img.toJPEG(80).toString('base64'), width: sz.width, height: sz.height, display: require('electron').screen.getPrimaryDisplay() };
+}
+async function screenLook(a, ctx) {
+  screenGuard(ctx.signal);
+  const shot = await captureAway();
+  const text = await SC.describe(engine, shot, a.question, { signal: ctx.signal });
+  return { forModel: `Màn hình hiện tại (do mô hình nhìn ảnh mô tả, có thể chưa chính xác):\n${text}`, summary: text.split('\n')[0].slice(0, 120), detail: text };
+}
+const ACT_VI = { click: 'bấm chuột trái vào', double_click: 'bấm đúp vào', right_click: 'bấm chuột phải vào', type: 'gõ chữ', key: 'bấm phím', scroll: 'cuộn màn hình' };
+async function screenAct(a, ctx) {
+  screenGuard(ctx.signal);
+  const action = String(a.action || ''); if (!ACT_VI[action]) throw new computerTools.CompError('action không hợp lệ: ' + action);
+  if (action === 'key') SC.parseKeys(a.keys); // kiểm tra trước (chặn tổ hợp hệ thống)
+  if (action === 'type' && !String(a.text || '')) throw new computerTools.CompError('Thiếu text cần gõ.');
+  const needPoint = ['click', 'double_click', 'right_click'].includes(action) || ((action === 'type' || action === 'scroll') && a.target);
+  if (needPoint && !String(a.target || '').trim()) throw new computerTools.CompError('Cần mô tả target (phần tử cần bấm).');
+  const shot = await captureAway();
+  let box = null, raw = '';
+  if (needPoint) { const r = await SC.locate(engine, shot, String(a.target), { signal: ctx.signal }); box = r.box; raw = r.raw; }
+  if (ctx.signal && ctx.signal.aborted) throw new computerTools.CompError('Đã dừng.');
+  const desc = action === 'type' ? `gõ “${String(a.text).slice(0, 200)}”${a.target ? ` vào ${a.target}` : ' vào ô đang chọn'}` : action === 'key' ? `bấm phím ${a.keys}` : action === 'scroll' ? `cuộn ${Number(a.amount) < 0 || a.amount == null ? 'xuống' : 'lên'} ${Math.abs(Number(a.amount) || 5)} nấc` : `${ACT_VI[action]} “${a.target}”`;
+  const req = { action, desc, target: a.target || null, image: shot.dataUrl, w: shot.width, h: shot.height, needPoint: !!needPoint,
+    box: box && box.found ? box : null, notFound: needPoint && !(box && box.found) ? (box && box.why) || 'Mô hình không tìm thấy phần tử này. Bạn có thể bấm vào ảnh để tự chọn vị trí.' : null };
+  const ans = settings.data.agentScreenAuto === true && req.box ? { ok: true } : await askScreen(req);
+  if (!ans || !ans.ok) return { refused: true, forModel: 'Người dùng KHÔNG đồng ý thao tác này (hoặc đã bấm Dừng). Dừng điều khiển màn hình và hỏi người dùng muốn làm gì.', summary: 'Người dùng từ chối: ' + desc };
+  let nx = null, ny = null;
+  if (needPoint) { if (ans.nx != null) { nx = ans.nx; ny = ans.ny; } else if (req.box) { nx = (req.box.x1 + req.box.x2) / 2; ny = (req.box.y1 + req.box.y2) / 2; } else return { refused: true, forModel: 'Không xác định được vị trí.', summary: 'Không có vị trí' }; }
+  if (ctx.signal && ctx.signal.aborted) throw new computerTools.CompError('Đã dừng.');
+  await withWindowAway(async () => { await SC.perform({ action, nx, ny, text: a.text, keys: a.keys, amount: a.amount, display: shot.display }); await sleep(500); });
+  return { forModel: `Đã ${desc}${nx != null ? ` tại vị trí (${Math.round(nx * 1000)}, ${Math.round(ny * 1000)}) trên thang 1000` : ''}. Hãy dùng screen_look để kiểm tra kết quả trước khi làm bước tiếp theo.`, summary: 'Đã ' + desc + (ans.nx != null ? ' (vị trí do bạn chọn)' : '') };
+}
+const screenConfirms = new Map(); let screenSeq = 0;
+function askScreen(req) {
+  if (!win || win.isDestroyed()) return Promise.resolve({ ok: false });
+  if (!win.isVisible()) win.show(); if (win.isMinimized()) win.restore(); win.focus();
+  const id = 's' + (++screenSeq);
+  return new Promise((resolve) => {
+    const t = setTimeout(() => { screenConfirms.delete(id); send('agent:screen-cancel', { id }); resolve({ ok: false }); }, 3 * 60e3);
+    screenConfirms.set(id, (r) => { clearTimeout(t); screenConfirms.delete(id); resolve(r || { ok: false }); });
+    send('agent:screen', { id, ...req });
+    if (isTest) console.log(`[duyệt màn hình] ${req.desc} box=${JSON.stringify(req.box)}`);
+  });
+}
+function computerInfo() {
+  const p = SC.permissions();
+  return { enabled: settings.data.agentComputer !== false, screen: !!settings.data.agentScreen, autoReadOnly: settings.data.agentAutoReadOnly === true, vision: !!engine.status().vision, platform: process.platform, perms: p, stopKey: process.platform === 'darwin' ? '⌘⌥Q' : 'Ctrl+Alt+Q' };
+}
+
 
 // ---------- Lịch tự động ----------
 let lastNotice = null;
@@ -326,7 +493,7 @@ async function onScheduleFire(t, { late, manual }) {
     try {
       const prior = c.messages.slice(-7, -1).filter(m => m.role === 'assistant' && m.content).map(m => ({ role: 'assistant', content: m.content }));
       const r = await runAgentTurn({ convoId, headless: true, signal: ac.signal, messages: [...prior.slice(-2), { role: 'user', content: t.prompt }] });
-      c.messages.push({ role: 'assistant', content: r.text || '(Trợ lý không trả lời)', steps: r.steps.map(slimStep), urls: r.urls, model: engine.status().id, scheduled: tag });
+      c.messages.push({ role: 'assistant', content: r.text || '(AIVN BOT không trả lời)', steps: r.steps.map(slimStep), urls: r.urls, model: engine.status().id, scheduled: tag });
       summary = r.text;
     } catch (e) {
       c.messages.push({ role: 'assistant', content: '⚠ Không chạy được việc tự động: ' + e.message, error: true, model: 'Lịch tự động', scheduled: tag });
@@ -444,7 +611,12 @@ function catalogList() {
     const job = downloader.get(`${c.repo}::${c.file}`);
     const part = downloader.partialFor(c.repo, [{ path: c.file, size: c.size }, ...(c.mmproj ? [{ path: c.mmproj.file, size: c.mmproj.size }] : [])]);
     return { ...c, installed: part.complete || isInstalled(c.file), partial: part.complete ? 0 : part.received, job, fit: hf.fitFor(c.size, h) };
-  }));
+  })).then(list => {
+    // Gợi ý một mô hình cho máy này: mô hình lớn nhất (thường giỏi nhất) vẫn "Chạy tốt", ưu tiên loại gọi công cụ tốt
+    const good = list.filter(c => c.fit && c.fit.level === 'fit' && !c.embedding);
+    const best = good.sort((a, b) => (b.size * (b.agent ? 1.15 : 1)) - (a.size * (a.agent ? 1.15 : 1)))[0];
+    return list.map(c => c === best ? { ...c, recommended: true } : c);
+  });
 }
 
 // ---------- IPC ----------
@@ -452,6 +624,34 @@ function registerIpc() {
   // Mọi kênh IPC (trừ cổng) bị chặn khi chưa kích hoạt hoặc đang khoá: không dữ liệu nào tới giao diện
   const rawHandle = ipcMain.handle.bind(ipcMain);
   registerGateIpc(rawHandle);
+  rawHandle('computer:stop', () => stopComputer('nút Dừng ngay'));
+  // Quản trị: dùng được cả ở màn hình kích hoạt (chủ sở hữu tự kích hoạt máy mình), không dùng khi app đang khoá
+  const ah = (ch, fn) => rawHandle(ch, async (e, ...a) => { if (gateMode() === 'lock') throw new Error('AIVN đang khoá'); return fn(e, ...a); });
+  ah('admin:state', () => ({ ...admin.state(), machineCode: lic.publicInfo().machineCode }));
+  ah('admin:import', async (_e, { pass }) => {
+    const r = await dialog.showOpenDialog(win, { title: 'Chọn tệp khoá quản trị (aivn-admin-key.json)', properties: ['openFile'], filters: [{ name: 'Khoá quản trị AIVN', extensions: ['json'] }] });
+    if (r.canceled || !r.filePaths[0]) return { canceled: true, ...admin.state() };
+    const st = fs.statSync(r.filePaths[0]); if (st.size > 20000) throw new Error('Tệp quá lớn, không phải khoá quản trị');
+    return admin.importKey(fs.readFileSync(r.filePaths[0], 'utf8'), String(pass || ''));
+  });
+  ah('admin:unlock', (_e, pass) => admin.unlock(String(pass || '')));
+  ah('admin:lock', () => admin.lock());
+  ah('admin:forget', () => admin.forget());
+  ah('admin:token', (_e, t) => admin.setToken(t));
+  ah('admin:issue', (_e, o) => admin.issue(o || {}));
+  const saveDoc = async (r) => {
+    if (r.published) return { published: true, state: r.state };
+    const d = await dialog.showSaveDialog(win, { title: 'Lưu revoked.json (chưa có token GitHub để tự đăng)', defaultPath: 'revoked.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
+    if (!d.canceled && d.filePath) fs.writeFileSync(d.filePath, JSON.stringify(r.doc, null, 2) + '\n');
+    return { published: false, savedTo: d.canceled ? null : d.filePath, state: r.state };
+  };
+  ah('admin:revoke', async (_e, id) => saveDoc(await admin.revoke(id)));
+  ah('admin:publish', async () => saveDoc(await admin.publish()));
+  ah('admin:self-activate', async (_e, { name }) => {
+    const r = admin.issue({ name: String(name || 'Chủ sở hữu').slice(0, 60), machineCode: lic.machineCode(), days: null });
+    lic.activate(r.code); licenseCheck().catch(() => {}); if (activated()) startServices(); loadUi();
+    return { ok: true, id: r.info.id };
+  });
   ipcMain.handle = (ch, fn) => rawHandle(ch, (e, ...a) => { if (gated()) throw new Error(gateMode() === 'activate' ? 'AIVN chưa được kích hoạt' : 'AIVN đang khoá'); return fn(e, ...a); });
   ipcMain.handle('lock:info', () => appLock.info());
   ipcMain.handle('lock:set', async (_e, { password, confirm, current }) => { await appLock.setPassword(password, confirm, current); unlocked = true; return appLock.info(); });
@@ -465,12 +665,17 @@ function registerIpc() {
   ipcMain.handle('settings:set', (_e, patch = {}) => {
     const { hfToken, hfTokenSet, ...rest } = patch;
     Object.assign(settings.data, rest);
+    const intOrNull = (v, max) => (Number.isInteger(v) && v >= 0 && v <= max ? v : null);
+    if ('gpuLayers' in rest) settings.data.gpuLayers = intOrNull(rest.gpuLayers, 1000);
+    if ('gpuDevice' in rest) settings.data.gpuDevice = intOrNull(rest.gpuDevice, 15);
+    if ('vramLimitGB' in rest) settings.data.vramLimitGB = Number(rest.vramLimitGB) > 0 ? Math.min(256, Number(rest.vramLimitGB)) : null;
     if (typeof hfToken === 'string') settings.data.hfToken = hfToken.trim().slice(0, 300);
     if (['light', 'dark', 'system'].includes(settings.data.theme)) require('electron').nativeTheme.themeSource = settings.data.theme;
     if ('theme' in rest && win && !win.isDestroyed()) win.setBackgroundColor(windowBg());
     if ('agentFolders' in rest) settings.data.agentFolders = (Array.isArray(rest.agentFolders) ? rest.agentFolders : []).filter(f => typeof f === 'string' && path.isAbsolute(f)); // chỉ thêm qua hộp thoại chọn thư mục
     settings.save();
     if ('keepInTray' in rest || 'openAtLogin' in rest) applyBackgroundPrefs();
+    if (['gpu', 'gpuDevice', 'vramLimitGB'].some(k => k in rest) && engine.restart) { const env = engineEnv(); for (const [k, v] of Object.entries(env)) { if (v) process.env[k] = v; else delete process.env[k]; } hwCache = null; engine.restart(env).then(() => send('model:status', engine.status())).catch(() => {}); }
     return publicSettings();
   });
 
@@ -508,7 +713,7 @@ function registerIpc() {
     settings.save();
     return listModels();
   });
-  ipcMain.handle('models:load', (_e, id) => loadById(id));
+  ipcMain.handle('models:load', async (_e, id, o = {}) => { try { return { ok: true, status: await loadById(id, { force: !!(o && o.force) }) }; } catch (e) { return { ok: false, error: e.message, code: e.code || null, modelId: e.modelId || id, catalogId: e.catalogId || null }; } });
   ipcMain.handle('models:unload', async () => { await engine.unloadModel(); const st = engine.status(); send('model:status', st); return st; });
   ipcMain.handle('models:delete', async (_e, id) => {
     const m = listModels().find(x => x.id === id);
@@ -529,6 +734,7 @@ function registerIpc() {
   });
   ipcMain.handle('models:reveal', (_e, p) => { shell.showItemInFolder(p || paths.models); return true; });
   ipcMain.handle('model:status', () => engine.status());
+  ipcMain.handle('logs:open', () => { const d = path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(d, { recursive: true }); shell.openPath(d); return d; });
 
   ipcMain.handle('chat:generate', async (_e, { reqId, messages, temperature, maxTokens, docs: attached, convoId, images }) => {
     const ac = new AbortController();
@@ -604,16 +810,19 @@ function registerIpc() {
   ipcMain.handle('rag:convo', (_e, id) => { try { return rag ? rag.summary(id) : null; } catch { return null; } });
   ipcMain.handle('vision:vcredist', () => shell.openExternal(VCREDIST_URL));
 
-  // --- Trợ lý ---
+  // --- AIVN BOT ---
   ipcMain.handle('agent:info', () => agentInfo());
   ipcMain.handle('agent:run', async (_e, { reqId, convoId, messages }) => {
     const ac = new AbortController(); generations.set(reqId, ac);
     try { const r = await runAgentTurn({ reqId, convoId, messages, signal: ac.signal }); return { ...r, steps: r.steps.map(slimStep), model: engine.status().id }; }
     finally { generations.delete(reqId); }
   });
+  ipcMain.handle('agent:screen-reply', (_e, { id, ok, nx, ny }) => { const f = screenConfirms.get(id); if (f) f({ ok: ok === true, nx: Number.isFinite(nx) ? Math.min(1, Math.max(0, nx)) : null, ny: Number.isFinite(ny) ? Math.min(1, Math.max(0, ny)) : null }); return !!f; });
+  ipcMain.handle('computer:perm-open', (_e, which) => { if (process.platform === 'darwin' && SC.PERM_URLS[which]) { if (which === 'accessibility') SC.permissions({ prompt: true }); shell.openExternal(SC.PERM_URLS[which]); } return computerInfo(); });
+  ipcMain.handle('computer:perm-test', async () => { try { const shot = await SC.capture({ maxW: 320 }); return { ok: true, info: computerInfo(), w: shot.width }; } catch (e) { return { ok: false, error: e.message, info: computerInfo() }; } });
   ipcMain.handle('agent:confirm-reply', (_e, { id, ok }) => { const f = confirms.get(id); if (f) f(ok === true); return !!f; });
   ipcMain.handle('agent:add-folder', async () => {
-    const r = await dialog.showOpenDialog(win, { title: 'Chọn thư mục Trợ lý được phép làm việc', properties: ['openDirectory', 'createDirectory', 'multiSelections'] });
+    const r = await dialog.showOpenDialog(win, { title: 'Chọn thư mục AIVN BOT được phép làm việc', properties: ['openDirectory', 'createDirectory', 'multiSelections'] });
     if (!r.canceled) { for (const f of r.filePaths) if (!settings.data.agentFolders.includes(f)) settings.data.agentFolders.push(f); settings.save(); }
     return agentInfo();
   });
@@ -624,7 +833,7 @@ function registerIpc() {
   ipcMain.handle('memory:update', (_e, { id, text }) => memory.update(id, text));
   ipcMain.handle('memory:delete', (_e, id) => memory.remove(id));
   ipcMain.handle('memory:clear', async () => {
-    const ok = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Huỷ', 'Xoá tất cả'], defaultId: 0, cancelId: 0, title: 'Xoá mọi ghi nhớ', message: `Xoá toàn bộ ${memory.count()} ghi nhớ của Trợ lý? Không hoàn tác được.` });
+    const ok = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Huỷ', 'Xoá tất cả'], defaultId: 0, cancelId: 0, title: 'Xoá mọi ghi nhớ', message: `Xoá toàn bộ ${memory.count()} ghi nhớ của AIVN BOT? Không hoàn tác được.` });
     if (ok.response === 1) memory.clear();
     return memory.list();
   });
@@ -924,7 +1133,55 @@ async function selfTestV12() {
   save(); app.quit();
 }
 
-// Tự kiểm thử v0.13 (AIVN_SELFTEST_V13=1): Trợ lý (nhiều bước, từ chối xoá, ghi nhớ, web), Lịch tự động, API công cụ, ảnh chụp
+// Tự kiểm thử v0.13 (AIVN_SELFTEST_V13=1): AIVN BOT (nhiều bước, từ chối xoá, ghi nhớ, web), Lịch tự động, API công cụ, ảnh chụp
+
+// Chỉ dùng khi kiểm thử 0.14: cổng kích hoạt, lời chào AIVN BOT, hiệu ứng đổi giao diện, Bảo mật & Quản trị, thẻ duyệt màn hình
+async function selfTestV14() {
+  const out = { stages: {} }; const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const wc = () => win.webContents; const js = (c) => wc().executeJavaScript(c);
+  const save = () => fs.writeFileSync(process.env.AIVN_SELFTEST_OUT, JSON.stringify(out, null, 2));
+  const until = async (c, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await js(c)) return true; } catch {} await sleep(150); } return false; };
+  const dir = process.env.AIVN_SHOTS; fs.mkdirSync(dir, { recursive: true });
+  const shot = async (n, wait = 300) => { if (wait) await sleep(wait); fs.writeFileSync(path.join(dir, n), (await wc().capturePage()).toPNG()); };
+  const stage = async (k, f) => { console.log('[v14] ' + k); try { out.stages[k] = (await f()) || { ok: true }; } catch (e) { out.stages[k] = { error: e.stack || String(e) }; } save(); };
+  await stage('gate', async () => {
+    const mode = await js('window.aivn.gateState().then(s => s.mode)');
+    await shot('activation-screen.png', 600);
+    if (process.env.AIVN_TEST_CODE) {
+      await js(`document.querySelector('#gaCode').value = ${JSON.stringify(process.env.AIVN_TEST_CODE)}; document.querySelector('#gaForm').requestSubmit();`);
+      await sleep(1500);
+    }
+    await until('!!document.querySelector("#messages")', 15000);
+    return { modeBefore: mode, url: wc().getURL().split('/').pop(), license: lic.publicInfo().status };
+  });
+  await stage('welcome', async () => {
+    await until('typeof show === "function" && !!state.settings', 15000);
+    await js('show("agent")'); await until('!!document.querySelector("#botWelcome")', 10000);
+    const text = await js('document.querySelector("#botWelcome").innerText');
+    await shot('aivn-bot-welcome.png', 600);
+    return { text, nav: await js('document.querySelector(".nav-item[data-view=agent]").innerText'), header: await js('document.querySelector(".agent-title b").innerText') };
+  });
+  await stage('theme', async () => {
+    await js('applyTheme("light"); state.settings.theme = "light";'); await sleep(500);
+    const frames = [];
+    await js('document.querySelector("#themeRow button[data-theme=dark]").click()');
+    const t0 = Date.now();
+    for (const [i, at] of [[1, 120], [2, 420], [3, 700]]) { const w = at - (Date.now() - t0); if (w > 0) await sleep(w); await shot(`theme-${i}.png`, 0); frames.push(Date.now() - t0); }
+    await sleep(800);
+    const after = await js('document.documentElement.dataset.theme');
+    await js('document.querySelector("#themeRow button[data-theme=light]").click()'); await sleep(420); await shot('theme-back-mid.png', 0); await sleep(900);
+    return { frames, after, back: await js('document.documentElement.dataset.theme'), vt: await js('!!document.startViewTransition') };
+  });
+  await stage('security', async () => { await js('show("security")'); await until('!!document.querySelector("#secMachine")'); await shot('security.png', 600); return { machine: await js('document.querySelector("#secMachine").innerText') }; });
+  await stage('settings', async () => { await js('show("agent")'); await sleep(500); await shot('agent-settings.png', 300); return {}; });
+  await stage('screencard', async () => {
+    const shotImg = process.env.AIVN_FAKE_SCREEN ? fakeShot() : null; if (!shotImg) return { skipped: true };
+    const p = askScreen({ action: 'click', desc: 'bấm chuột trái vào “nút Gửi”', target: 'nút Gửi', image: shotImg.dataUrl, w: shotImg.width, h: shotImg.height, needPoint: true, box: { x1: 0.62, y1: 0.7, x2: 0.74, y2: 0.78, found: true } });
+    await until('!document.querySelector("#screenModal").hidden'); await shot('screen-approval.png', 500);
+    await js('document.querySelector("#scNo").click()'); return { answer: await p };
+  });
+  out.done = true; save(); app.exit(0);
+}
 async function selfTestV13() {
   const wc = win.webContents; const out = { started: new Date().toISOString(), stages: {} };
   const js = (code) => wc.executeJavaScript(code);
@@ -1019,7 +1276,7 @@ async function selfTestV13() {
     });
 
     await stage('schedule', async () => {
-      // tạo lời nhắc qua biểu mẫu (phút tới), và một việc Trợ lý chạy sau ~25 giây
+      // tạo lời nhắc qua biểu mẫu (phút tới), và một việc AIVN BOT chạy sau ~25 giây
       await js('show("schedule")'); await sleep(400);
       const at = new Date(Date.now() + 60e3); const p2 = (n) => String(n).padStart(2, '0');
       await js(`(() => { document.querySelector("#sfTitle").value = "Uống nước"; document.querySelector('#sfKind [data-kind=reminder]').click(); document.querySelector("#sfMsg").value = "Đứng dậy uống một cốc nước nhé!"; document.querySelector('#sfRepeat [data-rep=once]').click(); document.querySelector("#sfDate").value = "${at.getFullYear()}-${p2(at.getMonth() + 1)}-${p2(at.getDate())}"; document.querySelector("#sfTime").value = "${p2(at.getHours())}:${p2(at.getMinutes())}"; document.querySelector("#schedForm").requestSubmit(); })()`);
@@ -1093,6 +1350,7 @@ else {
     licenseCheck().catch(() => {});
     startGateTimers();
     if (app.isPackaged || process.env.AIVN_UPDATE_CHECK === '1') setTimeout(() => updater.check({ silent: true }), Number(process.env.AIVN_UPDATE_DELAY || 5000));
+    if (process.env.AIVN_SELFTEST_V14) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestV14().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1200));
     if (process.env.AIVN_SELFTEST_V13) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestV13().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));
     if (process.env.AIVN_SELFTEST_V12) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestV12().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));
     if (process.env.AIVN_SELFTEST_UI) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestUi().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));

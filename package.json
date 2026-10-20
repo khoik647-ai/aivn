@@ -1,7 +1,7 @@
 {
   "name": "aivn",
   "productName": "AIVN",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "AIVN - Chạy mô hình AI ngay trên máy tính của bạn",
   "author": {
     "name": "NGUYỄN NGỌC KHÔI SINH VIÊN VLU"
@@ -196,7 +196,9 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "extendInfo": {
-        "NSHumanReadableCopyright": "© 2026 AIVN · NGUYỄN NGỌC KHÔI SINH VIÊN VLU"
+        "NSHumanReadableCopyright": "© 2026 AIVN · NGUYỄN NGỌC KHÔI SINH VIÊN VLU",
+        "NSAppleEventsUsageDescription": "AIVN BOT cần quyền này để mở, đóng ứng dụng và thực hiện thao tác bạn đã đồng ý.",
+        "NSScreenCaptureUsageDescription": "AIVN BOT chụp màn hình để đề xuất thao tác (chế độ Điều khiển màn hình thử nghiệm)."
       },
       "files": [
         "!node_modules/@node-llama-cpp/win-*/**",

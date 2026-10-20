@@ -83,15 +83,22 @@ function fileKind(file, repoInfo) {
   return 'chat';
 }
 
-// Ước lượng mức vừa máy: Vừa máy / Có thể chậm / Quá lớn
+// Ước lượng cho máy này: Chạy tốt / Chạy chậm / Không đủ bộ nhớ.
+// hw.vram.total là VRAM RIÊNG của GPU rời (không tính bộ nhớ dùng chung của GPU tích hợp).
+const GBy = 1024 ** 3;
 function fitFor(size, hw) {
   if (!size || !hw || !hw.ram) return null;
-  const need = size * 1.1 + 0.4 * 1024 ** 3; // trọng số + ngữ cảnh/bộ đệm
+  const need = size * 1.1 + 0.4 * GBy; // trọng số + ngữ cảnh/bộ đệm
   const vram = hw.gpu && hw.vram && hw.vram.total ? hw.vram.total : 0;
-  if (vram && need <= vram * 0.9) return { level: 'fit', label: 'Vừa máy', hint: 'Vừa với bộ nhớ GPU' };
-  if (need <= hw.ram * 0.6) return { level: 'fit', label: 'Vừa máy', hint: 'Vừa với RAM' };
-  if (need <= hw.ram * 0.9 + vram * 0.5) return { level: 'slow', label: 'Có thể chậm', hint: 'Gần hết bộ nhớ, máy có thể chậm' };
-  return { level: 'big', label: 'Quá lớn', hint: 'Lớn hơn bộ nhớ của máy' };
+  const unified = hw.gpu === 'metal'; // Mac Apple Silicon: RAM chung
+  if (vram && !unified && need <= vram * 0.9) return { level: 'fit', label: 'Chạy tốt', hint: 'Vừa hết trong bộ nhớ GPU' };
+  if (unified && need <= hw.ram * 0.65) return { level: 'fit', label: 'Chạy tốt', hint: 'Vừa bộ nhớ hợp nhất của Mac' };
+  if (need <= hw.ram * 0.6 + vram * 0.9) {
+    const fast = size < 2.6 * GBy || (vram && need <= vram * 1.6);
+    return fast ? { level: 'fit', label: 'Chạy tốt', hint: vram ? 'Một phần trên GPU, phần còn lại trên CPU' : 'Vừa RAM, chạy bằng CPU' } : { level: 'slow', label: 'Chạy chậm', hint: vram ? 'Phần lớn chạy bằng CPU vì GPU không đủ bộ nhớ' : 'Chạy bằng CPU, khá chậm' };
+  }
+  if (need <= hw.ram * 0.85 + vram * 0.9) return { level: 'slow', label: 'Chạy chậm', hint: 'Gần hết bộ nhớ, máy có thể chậm và giật' };
+  return { level: 'big', label: 'Không đủ bộ nhớ', hint: 'Lớn hơn bộ nhớ của máy, hãy chọn bản nhỏ hơn' };
 }
 
 // Gom tệp .gguf: các phần -00001-of-0000N thành một mô hình
