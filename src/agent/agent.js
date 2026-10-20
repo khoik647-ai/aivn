@@ -459,7 +459,7 @@ function createAgent(deps) {
     const st = deps.engine.status();
     const ctx = { signal, convoId, userQuery: query, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
     const steps = [], seen = new Map();
-    let text = '', finishReason = 'stop', calls = 0, nudged = false, forcedTried = false, warning = null, fakeSeen = false;
+    let text = '', finishReason = 'stop', calls = 0, nudged = false, deskNudged = false, forcedTried = false, warning = null, fakeSeen = false;
     const usage = { completion_tokens: 0, seconds: 0 };
     const t0 = Date.now();
     const logTool = (st) => { try { deps.logTool && deps.logTool({ name: st.name, args: st.args, status: st.status, summary: st.summary, ms: st.ms, auto: !!st.auto }); } catch {} };
@@ -510,6 +510,8 @@ function createAgent(deps) {
       if (!r.toolCalls || !r.toolCalls.length) {
         const fake = r.finishReason === 'abort' ? null : fakeActionCheck(r.text, steps, names, query);
         if (fake) fakeSeen = true;
+        let deskPending = null; try { deskPending = !deskNudged && names.includes('screen_act') && deps.computer && deps.computer.pending ? await deps.computer.pending() : null; } catch {}
+        if (deskPending && round < maxRounds - 2) { deskNudged = true; msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: `(Kiểm tra tự động của AIVN) ${deskPending} Hãy làm nốt bằng screen_act rồi mới trả lời; nếu không làm được thì nói rõ là CHƯA xong.` }); onStatus({ stage: 'verify', round, discarded: r.text || '' }); continue; }
         const nudge = !nudged && round < maxRounds - 2 ? (claimCheck(query, r.text || '', steps, names) || (fake ? FAKE_NUDGE : null)) : null;
         if (nudge) { nudged = true; msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: nudge }); onStatus({ stage: 'verify', round, discarded: r.text || '' }); continue; }
         if (fake && !forcedTried && names.length && !signal?.aborted) {

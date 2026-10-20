@@ -283,6 +283,8 @@ function createDesktopAgent(deps) {
     if (ctx.signal && ctx.signal.aborted) throw new Error('Đã dừng.');
     status(desc.charAt(0).toUpperCase() + desc.slice(1) + '…');
     const before = s.obs; const beforeDialog = s.dialog || null;
+    // trong hộp thoại Lưu/Mở, "ctrl+s"/"ctrl+o" không có nghĩa: hiểu là xác nhận hộp thoại (Enter)
+    if (action === 'hotkey' && s.dialog && /^(ctrl|cmd|command|meta)\+(shift\+)?[so]$/i.test(String(a.keys || '').replace(/\s/g, ''))) { deps.log && deps.log('desk', `Đang ở hộp thoại “${s.dialog}”: đổi ${a.keys} → enter (xác nhận)`); a = { ...a, keys: 'enter' }; }
     if (action === 'type_text') {
       // thay nội dung cũ (chọn hết rồi gõ) chỉ với ô một dòng (tên tệp, tìm kiếm…), không bao giờ với vùng soạn thảo tài liệu
       const el = t && t.el ? t.el : focusedEl;
@@ -343,7 +345,13 @@ function createDesktopAgent(deps) {
     } catch {}
     return null;
   }
-  return { look, act, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
+  // việc còn dang dở trên màn hình (để AIVN AGENT không báo "xong" khi hộp thoại vẫn mở)
+  async function pending() {
+    const s = session; if (!s || !s.target) return null;
+    try { const d = U.activeDialogOf(await U.windows(), s.target); if (d) return `Hộp thoại “${d.title || 'của ứng dụng'}” vẫn đang mở — việc chưa xong (vd. chưa bấm Save/Lưu/OK).`; } catch {}
+    return null;
+  }
+  return { pending, look, act, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
 }
 
 module.exports = { createDesktopAgent };

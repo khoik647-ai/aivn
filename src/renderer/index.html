@@ -160,6 +160,15 @@
             <div class="row wrap scan-row"><input type="text" class="scan-q" value="zalo" aria-label="Tên ứng dụng cần tìm" maxlength="60"><button type="button" class="btn sm" data-scan="1">Kiểm tra quét ứng dụng</button></div>
           </div>
         </details>
+        <div class="perf-box" id="perfBox">
+          <h3>⚡ Hiệu năng</h3>
+          <p class="small" id="perfTier">Đang nhận biết máy…</p>
+          <label>Chế độ <select id="perfMode"><option value="auto">Tự động (theo máy)</option><option value="saver">Tiết kiệm — máy yếu, ít RAM</option><option value="balanced">Cân bằng</option><option value="max">Tối đa — máy mạnh/GPU rời</option></select></label>
+          <div class="perf-cfg small" id="perfCfg"></div>
+          <ul class="small muted" id="perfTips"></ul>
+          <div class="row wrap"><button type="button" class="btn sm" id="perfSpeedBtn" title="Sinh 128 token với mô hình đang nạp">⏱ Đo tốc độ mô hình đang nạp</button><span class="small" id="perfSpeedMsg"></span></div>
+          <table class="perf-runs small" id="perfRuns"></table>
+        </div>
         <label>Độ dài ngữ cảnh (áp dụng khi nạp lại)
           <select id="ctxSize"><option>2048</option><option>4096</option><option>8192</option><option>16384</option></select>
         </label>

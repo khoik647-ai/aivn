@@ -122,7 +122,7 @@ function initStores() {
   memory = createMemoryStore(path.join(ud, 'memory.json'));
   scheduler = createScheduler({ file: path.join(ud, 'schedules.json'), onFire: onScheduleFire, log: (m) => { console.log(m); log(m); } });
   computerTools = createComputerTools({ getSettings: () => settings.data, openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => LOG.block('apps', 'Quét ứng dụng đã cài (AIVN AGENT)', [`nguồn: ${JSON.stringify(d.sources)}`, `lỗi: ${d.errors.length ? d.errors.join('; ') : 'không'}`, `thư mục Desktop: ${d.dirs ? d.dirs.desktop.join(' | ') : '—'}`, `thư mục Start Menu: ${d.dirs ? d.dirs.start.join(' | ') : '—'}`, `thời gian tìm sâu: ${d.ms ?? '?'} ms`]),
-    keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: (a, ctx) => deskWrap(getDesk().look, a, ctx), act: (a, ctx) => deskWrap(getDesk().act, a, ctx), readText: (a, ctx) => deskWrap(getDesk().readText, a, ctx) } });
+    keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: (a, ctx) => deskWrap(getDesk().look, a, ctx), act: (a, ctx) => deskWrap(getDesk().act, a, ctx), readText: (a, ctx) => deskWrap(getDesk().readText, a, ctx), pending: () => (desk && desk.active() ? desk.pending() : null) } });
   mcp = require('./mcp').createMcpManager({ dir: app.getPath('userData'), log: (sc, m) => LOG.log(sc, m), onChange: () => send('mcp:changed', mcp.status()) });
   agent = createAgent({ engine, mcp, getSettings: () => settings.data, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: docsPool.extractFile, embedForMemory, log, computer: computerTools,
     logTool: (x) => LOG.log('tool', `${x.auto ? '(tự động) ' : ''}${x.name} → ${x.status} sau ${x.ms ?? '?'} ms`, { args: Object.fromEntries(Object.entries(x.args || {}).map(([k, v]) => [k, typeof v === 'string' && v.length > 200 ? v.slice(0, 200) + '…' : v])), ketQua: String(x.summary || '').slice(0, 300) }),
@@ -836,6 +836,21 @@ function registerIpc() {
   ipcMain.handle('dl:remove', (_e, id) => downloader.remove(id));
   ipcMain.handle('dl:list', () => downloader.list());
   ipcMain.handle('hw:info', () => hw());
+  // Đo tốc độ mô hình đang nạp (thời gian ra chữ đầu, token/giây) — lưu lịch sử để so sánh trước/sau khi đổi chế độ hiệu năng
+  ipcMain.handle('perf:speed', async () => {
+    const st = engine.status(); if (!st.loaded) return { ok: false, error: 'Chưa nạp mô hình.' };
+    const pf = await perfProfile(); const t0 = Date.now(); let first = 0, n = 0;
+    const prompt = 'Viết một đoạn khoảng 120 từ giới thiệu ngắn gọn về Vịnh Hạ Long cho khách du lịch: vị trí, cảnh đẹp nổi bật, thời điểm nên đến và một lời khuyên.';
+    try {
+      const r = await engine.generate([{ role: 'user', content: prompt }], { maxTokens: 128, temperature: 0, onToken: () => { if (!first) first = Date.now(); n++; } });
+      const end = Date.now(); const toks = (r && r.usage && r.usage.completion_tokens) || n;
+      const out = { ok: true, model: st.id, mode: pf.effective, modeLabel: pf.effectiveLabel, tier: pf.tierLabel, ttftMs: (first || end) - t0, tokens: toks, tokPerSec: +(toks / Math.max(0.05, (end - (first || t0)) / 1000)).toFixed(1), totalMs: end - t0, at: new Date().toISOString(), gpu: st.mode || '' };
+      const hist = (settings.data.perfRuns || []).concat(out).slice(-12); settings.data.perfRuns = hist; settings.save();
+      LOG.log('perf', `Đo tốc độ ${st.id}: ${out.tokPerSec} token/giây, chữ đầu sau ${out.ttftMs} ms (chế độ ${out.modeLabel})`);
+      return out;
+    } catch (e) { return { ok: false, error: e.message }; }
+  });
+  ipcMain.handle('perf:runs', () => settings.data.perfRuns || []);
   ipcMain.handle('perf:info', async () => { const h = await hw(); return { profile: await perfProfile(), hw: { ram: h.ram, cpus: h.cpus, mathCores: h.mathCores, gpu: h.gpu, vram: h.vram, cpu: h.cpu } }; });
 
   ipcMain.handle('models:list', () => listModels());

@@ -532,7 +532,7 @@ $('#stopBtn').addEventListener('click', () => { if (!state.generating) return; i
 function bindSettings() {
   const s = state.settings;
   $('#sysPrompt').value = s.systemPrompt; $('#temp').value = s.temperature; $('#tempOut').textContent = s.temperature;
-  $('#maxTok').value = s.maxTokens; $('#ctxSize').value = String(s.contextSize);
+  $('#maxTok').value = s.maxTokens; $('#ctxSize').value = String(s.contextSize); paintPerf();
   $('#srvPort').value = s.apiPort; $('#srvAuto').checked = !!s.apiAutoStart;
   const save = async (patch) => { state.settings = await A.setSettings(patch); };
   $('#sysPrompt').addEventListener('change', e => save({ systemPrompt: e.target.value }));
@@ -864,6 +864,27 @@ document.addEventListener('keydown', (e) => {
 }, true);
 A.onAgentApprove((c) => { apQueue.push(c); apShow(); });
 A.onAgentApproveCancel(({ id }) => { if (apOpen && apOpen.id === id) { apOpen = null; $('#approveCard').hidden = true; apShow(); } const i = apQueue.findIndex(x => x.id === id); if (i >= 0) apQueue.splice(i, 1); });
+
+// --- Hiệu năng (0.15.0) ---
+async function paintPerf(pf) {
+  try {
+    const info = pf ? { profile: pf } : await A.perfInfo(); const p = info.profile;
+    $('#perfTier').innerHTML = `Máy này: <b>${esc(p.tierLabel)}</b> (${esc(p.why)}). Đang dùng chế độ <b>${esc(p.effectiveLabel)}</b>${p.mode === 'auto' ? ' (tự chọn)' : ''}.`;
+    $('#perfMode').value = p.mode || 'auto';
+    $('#perfCfg').innerHTML = `<span title="Số luồng CPU dùng để suy luận">🧵 ${p.threads} luồng</span> · <span title="Độ dài ngữ cảnh mặc định khi nạp">📏 ngữ cảnh ${p.ctx}</span> · <span title="Số token xử lý mỗi lượt khi đọc câu hỏi">📦 lô ${p.batchSize}</span>${p.kvQuant ? ' · <span title="Nén bộ nhớ đệm ngữ cảnh q8_0">🗜 KV q8_0</span>' : ''}${p.idleUnloadMin ? ` · <span title="Tự gỡ mô hình khi không dùng">💤 gỡ sau ${p.idleUnloadMin} phút</span>` : ''}${p.uiLite ? ' · <span title="Tắt hiệu ứng, gộp cập nhật chữ">🪶 giao diện nhẹ</span>' : ''}`;
+    $('#perfTips').innerHTML = (p.tips || []).map(t => `<li>${esc(t)}</li>`).join('');
+    const runs = await A.perfRuns();
+    $('#perfRuns').innerHTML = runs.length ? '<tr><th>Lúc</th><th>Mô hình</th><th>Chế độ</th><th>Chữ đầu</th><th>Tốc độ</th></tr>' + runs.slice(-6).reverse().map(r => `<tr><td>${new Date(r.at).toLocaleTimeString('vi-VN')}</td><td>${esc(String(r.model).slice(0, 28))}</td><td>${esc(r.modeLabel)}</td><td>${(r.ttftMs / 1000).toFixed(1)} giây</td><td><b>${r.tokPerSec}</b> token/giây</td></tr>`).join('') : '';
+  } catch {}
+}
+$('#perfMode').addEventListener('change', async (e) => { state.settings = await A.setSettings({ perfMode: e.target.value }); toast('Chế độ hiệu năng mới áp dụng đầy đủ khi nạp lại mô hình.'); setTimeout(() => paintPerf(), 300); });
+A.onPerfChanged((p) => paintPerf(p));
+$('#perfSpeedBtn').addEventListener('click', async () => {
+  const b = $('#perfSpeedBtn'); b.disabled = true; $('#perfSpeedMsg').textContent = 'Đang đo…';
+  const r = await A.perfSpeed(); b.disabled = false;
+  $('#perfSpeedMsg').textContent = r.ok ? `${r.tokPerSec} token/giây · chữ đầu sau ${(r.ttftMs / 1000).toFixed(1)} giây` : '⚠ ' + r.error;
+  paintPerf();
+});
 
 // --- Kết nối (MCP) ---
 let mcpState = { servers: [] };

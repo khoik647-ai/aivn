@@ -437,3 +437,8 @@ details.adv[open]{display:flex;flex-direction:column;gap:10px}
 .mcp-badges { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; margin: 2px auto 4px; font-size: 12px; }
 .mcp-badges span { border: 1px solid #8fd1a8; background: #e8f6ec; color: #17603a; border-radius: 999px; padding: 1px 9px; }
 .mcp-badges span.error { border-color: #f5b5c0; background: #ffebe9; color: #82071e; }
+.perf-box { border: 1px solid var(--line, #ddd); border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+.perf-box h3 { margin: 0 0 6px; }
+.perf-cfg { margin: 6px 0; line-height: 1.8; }
+.perf-runs { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.perf-runs td, .perf-runs th { padding: 3px 6px; border-bottom: 1px solid var(--line, #eee); text-align: left; }
