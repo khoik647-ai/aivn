@@ -19,7 +19,7 @@ const { createLicenseState } = require('./gate');
 const { createComputerTools } = require('./agent/computer-tools');
 const { createAdmin } = require('./admin');
 const SC = require('./screen-control');
-const { WELCOME } = require('./agent/agent');
+const { WELCOME, TOOL_GROUPS } = require('./agent/agent');
 const { createAppLock, resetData } = require('./applock');
 const LIC = require('./license');
 
@@ -341,7 +341,7 @@ function agentInfo() {
   const py = sandbox.findPython();
   return { folders: (settings.data.agentFolders || []).map(f => ({ path: f, name: path.basename(f), exists: (() => { try { return fs.statSync(f).isDirectory(); } catch { return false; } })() })),
     web: !!settings.data.agentWeb, python: { enabled: !!settings.data.agentPython, available: !!py, version: py ? py.version : null }, memory: { enabled: settings.data.agentMemory !== false, count: memory.count(), semantic: ragActive() },
-    tools: agent.activeTools().map(n => ({ name: n, label: agent.defs[n].label, icon: agent.defs[n].icon })), computer: computerInfo(), welcome: WELCOME, advice: agentAdvice(), keepInTray: !!settings.data.keepInTray, openAtLogin: !!settings.data.openAtLogin };
+    tools: agent.activeTools().map(n => ({ name: n, label: agent.defs[n].label, icon: agent.defs[n].icon })), computer: computerInfo(), toolsOff: settings.data.agentToolsOff || [], welcome: WELCOME, advice: agentAdvice(), keepInTray: !!settings.data.keepInTray, openAtLogin: !!settings.data.openAtLogin };
 }
 // Xác nhận xoá/ghi đè: hộp thoại tiếng Việt trong cửa sổ AIVN; không trả lời trong 5 phút = từ chối
 const confirms = new Map();
@@ -666,6 +666,7 @@ function registerIpc() {
     const { hfToken, hfTokenSet, ...rest } = patch;
     Object.assign(settings.data, rest);
     const intOrNull = (v, max) => (Number.isInteger(v) && v >= 0 && v <= max ? v : null);
+    if ('agentToolsOff' in rest) settings.data.agentToolsOff = [...new Set((Array.isArray(rest.agentToolsOff) ? rest.agentToolsOff : []).filter(g => Object.prototype.hasOwnProperty.call(TOOL_GROUPS, g)))];
     if ('gpuLayers' in rest) settings.data.gpuLayers = intOrNull(rest.gpuLayers, 1000);
     if ('gpuDevice' in rest) settings.data.gpuDevice = intOrNull(rest.gpuDevice, 15);
     if ('vramLimitGB' in rest) settings.data.vramLimitGB = Number(rest.vramLimitGB) > 0 ? Math.min(256, Number(rest.vramLimitGB)) : null;
@@ -1011,6 +1012,37 @@ async function selfTestUi() {
   save(); app.quit();
 }
 
+// Ảnh chụp 0.14.1 (AIVN_SHOTS141=thư mục): lời chào AIVN BOT, nút công cụ bật/tắt + bảng ví dụ, 3 khung hình đổi giao diện
+async function shots141() {
+  const dir = process.env.AIVN_SHOTS141; fs.mkdirSync(dir, { recursive: true });
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms)); const wc = win.webContents; const js = (c) => wc.executeJavaScript(c);
+  const shot = async (n, wait = 400) => { await sleep(wait); fs.writeFileSync(path.join(dir, n), (await wc.capturePage()).toPNG()); };
+  const out = {};
+  win.setBounds({ x: 0, y: 0, width: 1400, height: 900 }); await sleep(500);
+  await js('show("agent"); document.querySelector("#newChat").click()'); await sleep(1200);
+  out.header = await js('document.querySelector(".agent-title b").textContent');
+  out.welcome = await js('(document.querySelector("#messages .msg.welcome") || {}).innerText || null');
+  await shot('01-aivn-bot-welcome.png');
+  await js('toggleChip("calc")'); await sleep(900);
+  out.chips = await js('[...document.querySelectorAll("#toolChips .tool-chip")].map(c => c.dataset.chip + ":" + c.className.replace("tool-chip ", ""))');
+  out.toolsOffSaved = settings.data.agentToolsOff;
+  await shot('02-chips-on-off.png');
+  await js('openChipPop("web", true)'); await shot('03-chip-popover-web.png');
+  await js('document.querySelector(".chip-pop [data-cp=ex]").click()'); await sleep(300);
+  out.inserted = await js('document.querySelector("#input").value');
+  await js('openChipPop("files", true)'); await shot('04-chip-blocked-files.png');
+  await js('closeChipPop(); toggleChip("calc"); document.querySelector("#input").value = ""'); await sleep(800);
+  // 3 khung hình đổi giao diện: quay màn hình Xvfb rồi tách khung (capturePage không chụp lớp chuyển cảnh)
+  const vid = path.join(dir, 'theme.mp4');
+  const grab = require('child_process').spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'x11grab', '-framerate', '30', '-video_size', '1400x900', '-i', process.env.DISPLAY + '+0,0', '-t', '2.2', vid]);
+  await sleep(700);
+  await js('document.querySelector("#themeRow button[data-theme=dark]").click()');
+  await new Promise(r => grab.once('exit', r));
+  out.themeAfter = await js('document.documentElement.dataset.theme');
+  fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify(out, null, 2));
+  app.exit(0);
+}
+
 // Tự kiểm thử v0.12 (AIVN_SELFTEST_V12=1): nhìn ảnh, RAG trên PDF dài, /v1/embeddings, Kho mô hình, đổi giao diện
 async function selfTestV12() {
   const { clipboard, ClipboardItem } = require('electron');
@@ -1350,6 +1382,7 @@ else {
     licenseCheck().catch(() => {});
     startGateTimers();
     if (app.isPackaged || process.env.AIVN_UPDATE_CHECK === '1') setTimeout(() => updater.check({ silent: true }), Number(process.env.AIVN_UPDATE_DELAY || 5000));
+    if (process.env.AIVN_SHOTS141) win.webContents.once('did-finish-load', () => setTimeout(() => shots141().catch(e => { console.error('SHOTS lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_SELFTEST_V14) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestV14().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1200));
     if (process.env.AIVN_SELFTEST_V13) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestV13().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));
     if (process.env.AIVN_SELFTEST_V12) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestV12().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));
