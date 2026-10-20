@@ -52,7 +52,7 @@ function initStores() {
   fs.mkdirSync(paths.models, { recursive: true });
   settings = new JsonStore(path.join(ud, 'settings.json'), {
     systemPrompt: 'Bạn là AIVN, một trợ lý AI thân thiện. Hãy trả lời bằng tiếng Việt, rõ ràng và chính xác.',
-    temperature: 0.7, maxTokens: 1024, contextSize: 4096, apiPort: 1234, apiAutoStart: false, imported: [], lastModel: null, hfToken: '',
+    temperature: 0.7, maxTokens: 1024, contextSize: 4096, apiPort: 1234, apiAutoStart: false, imported: [], lastModel: null, hfToken: '', theme: 'light',
   });
   convos = new JsonStore(path.join(ud, 'conversations.json'), { list: [] });
   downloader = createDownloader({ dir: paths.models, send, getToken: () => settings.data.hfToken || null, maxConcurrent: 2, log: (m) => isTest && console.log(m) });
@@ -179,6 +179,7 @@ function registerIpc() {
     const { hfToken, hfTokenSet, ...rest } = patch;
     Object.assign(settings.data, rest);
     if (typeof hfToken === 'string') settings.data.hfToken = hfToken.trim().slice(0, 300);
+    if (['light', 'dark', 'system'].includes(settings.data.theme)) require('electron').nativeTheme.themeSource = settings.data.theme;
     settings.save(); return publicSettings();
   });
 
@@ -338,9 +339,15 @@ function attachContextMenu(wc) {
   });
 }
 
+function windowBg() { // màu nền trước khi giao diện vẽ xong, tránh nháy màu
+  const t = settings?.data?.theme;
+  const dark = t === 'dark' || (t === 'system' && require('electron').nativeTheme.shouldUseDarkColors);
+  return dark ? '#17181b' : '#ffffff';
+}
 function createWindow() {
+  if (['light', 'dark', 'system'].includes(settings.data.theme)) require('electron').nativeTheme.themeSource = settings.data.theme;
   win = new BrowserWindow({
-    width: 1280, height: 820, minWidth: 900, minHeight: 600, backgroundColor: '#0a0d12', title: 'AIVN',
+    width: 1280, height: 820, minWidth: 900, minHeight: 600, backgroundColor: windowBg(), title: 'AIVN',
     icon: path.join(__dirname, '..', 'build', 'icon.png'), show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });

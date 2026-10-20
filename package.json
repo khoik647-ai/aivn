@@ -1,7 +1,7 @@
 {
   "name": "aivn",
   "productName": "AIVN",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "AIVN - Chạy mô hình AI ngay trên máy tính của bạn",
   "author": {
     "name": "NGUYỄN NGỌC KHÔI SINH VIÊN VLU"
@@ -42,6 +42,7 @@
     "files": [
       "src/**/*",
       "build/icon.png",
+      "build/icons/**",
       "package.json",
       "!node_modules/@node-llama-cpp/*-cuda*/**",
       "!node_modules/@node-llama-cpp/linux-arm*/**",
@@ -136,7 +137,7 @@
           ]
         }
       ],
-      "icon": "build/icon.png",
+      "icon": "build/icons",
       "category": "Utility",
       "files": [
         "!node_modules/@node-llama-cpp/win-*/**",

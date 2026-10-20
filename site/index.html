@@ -5,14 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AIVN – Chạy AI ngay trên máy tính của bạn</title>
 <meta name="description" content="AIVN giúp bạn tải và chạy các mô hình ngôn ngữ AI hoàn toàn trên máy tính, không cần Internet, riêng tư tuyệt đối.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#D7263D">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap&subset=vietnamese" rel="stylesheet">
 <style>
 :root{
-  --bg:#0a0d12; --bg2:#0f141b; --card:#131a23; --line:#1f2a36; --text:#e8eef5; --muted:#8a99ab;
-  --accent:#2ee6a6; --accent2:#3ab8ff; --warm:#ffb547;
-  --grad:linear-gradient(120deg,#2ee6a6 0%,#3ab8ff 100%);
+  /* Trắng + đỏ thẫm (logo rồng AIVN). Chữ xám đậm; mọi cặp màu chữ/nền đạt WCAG AA. */
+  --bg:#ffffff; --bg2:#faf6f6; --card:#ffffff; --line:#ebe3e4; --line2:#d6c9cb; --text:#1f2328; --muted:#5c6370; --faint:#6b7280;
+  --accent:#D7263D; --accent-hover:#C21F35; --accent-ink:#B01C30; --accent-soft:rgba(215,38,61,.08); --accent2:#B01C30; --warm:#8a5a00;
+  --grad:linear-gradient(120deg,#D7263D 0%,#9E1528 100%);
+  --shadow:0 1px 2px rgba(31,35,40,.05),0 8px 24px -12px rgba(31,35,40,.12);
   --radius:16px; --max:1180px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
@@ -22,7 +28,7 @@ a{color:inherit;text-decoration:none}
 img,svg{display:block}
 .wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
 .grad-text{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
-.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:.8rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:14px}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:.8rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-ink);margin-bottom:14px}
 .eyebrow::before{content:"";width:18px;height:2px;background:var(--accent);border-radius:2px}
 section{padding:96px 0}
 h2{font-size:clamp(1.8rem,3.4vw,2.6rem);line-height:1.2;font-weight:800;letter-spacing:-.02em;margin-bottom:14px}
@@ -30,7 +36,7 @@ h2{font-size:clamp(1.8rem,3.4vw,2.6rem);line-height:1.2;font-weight:800;letter-s
 .center{text-align:center}.center .lead{margin:0 auto}
 
 /* header */
-header{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(10,13,18,.75);border-bottom:1px solid transparent;transition:border-color .3s}
+header{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);background:rgba(255,255,255,.85);border-bottom:1px solid transparent;transition:border-color .3s}
 header.scrolled{border-color:var(--line)}
 .nav{display:flex;align-items:center;justify-content:space-between;height:68px}
 .logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:1.2rem;letter-spacing:-.01em}
@@ -40,68 +46,68 @@ header.scrolled{border-color:var(--line)}
 .nav ul a:hover{color:var(--text)}
 .nav-cta{display:flex;gap:12px;align-items:center}
 .btn{display:inline-flex;align-items:center;gap:10px;padding:12px 20px;border-radius:12px;font-weight:600;font-size:.95rem;border:1px solid var(--line);background:var(--card);transition:transform .2s,border-color .2s,background .2s,box-shadow .2s;cursor:pointer;color:var(--text);font-family:inherit}
-.btn:hover{transform:translateY(-2px);border-color:#2d3d4e}
-.btn-primary{background:var(--grad);color:#04140e;border:none;box-shadow:0 8px 30px -8px rgba(46,230,166,.55)}
-.btn-primary:hover{box-shadow:0 12px 36px -8px rgba(46,230,166,.75)}
+.btn:hover{transform:translateY(-2px);border-color:var(--line2)}
+.btn-primary{background:var(--accent);color:#fff;border:none;box-shadow:0 8px 24px -10px rgba(215,38,61,.55)}
+.btn-primary:hover{background:var(--accent-hover);box-shadow:0 12px 30px -10px rgba(215,38,61,.65)}
 .btn-sm{padding:9px 16px;font-size:.88rem;border-radius:10px}
 .burger{display:none;background:none;border:1px solid var(--line);border-radius:10px;width:42px;height:42px;cursor:pointer;color:var(--text);align-items:center;justify-content:center}
 .mobile-menu{display:none}
 
 /* hero */
 .hero{padding:80px 0 60px;position:relative}
-.hero::before{content:"";position:absolute;inset:-200px 0 auto 0;height:700px;background:radial-gradient(600px 300px at 20% 30%,rgba(46,230,166,.16),transparent 70%),radial-gradient(500px 300px at 85% 20%,rgba(58,184,255,.14),transparent 70%);pointer-events:none;z-index:-1}
+.hero::before{content:"";position:absolute;inset:-200px 0 auto 0;height:700px;background:radial-gradient(600px 320px at 15% 30%,rgba(215,38,61,.09),transparent 70%),radial-gradient(520px 300px at 88% 18%,rgba(215,38,61,.06),transparent 70%);pointer-events:none;z-index:-1}
 .hero-grid{display:grid;grid-template-columns:1fr 1.1fr;gap:56px;align-items:center}
-.badge{display:inline-flex;align-items:center;gap:8px;background:rgba(46,230,166,.08);border:1px solid rgba(46,230,166,.25);color:#a9f5d9;padding:6px 14px;border-radius:999px;font-size:.84rem;font-weight:500;margin-bottom:22px}
-.badge .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
+.badge{display:inline-flex;align-items:center;gap:8px;background:var(--accent-soft);border:1px solid rgba(215,38,61,.28);color:var(--accent-ink);padding:6px 14px;border-radius:999px;font-size:.84rem;font-weight:500;margin-bottom:22px}
+.badge .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(215,38,61,.18)}
 .hero h1{font-size:clamp(2.3rem,5vw,3.7rem);line-height:1.12;font-weight:800;letter-spacing:-.03em;margin-bottom:20px}
 .hero p.lead{margin-bottom:32px}
 .dl-row{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px}
 .dl-btn{position:relative}
 .dl-btn .os-sub{display:block;font-size:.72rem;font-weight:500;opacity:.7;line-height:1.1}
 .dl-btn .os-main{display:block;line-height:1.2}
-.dl-btn.detected{background:var(--grad);color:#04140e;border-color:transparent;box-shadow:0 8px 30px -8px rgba(46,230,166,.6)}
-.dl-btn.detected::after{content:"Máy của bạn";white-space:nowrap;position:absolute;top:-10px;right:10px;font-size:.66rem;font-weight:700;background:var(--warm);color:#2a1a00;padding:1px 8px;border-radius:999px}
+.dl-btn.detected{background:var(--accent);color:#fff;border-color:transparent;box-shadow:0 8px 24px -10px rgba(215,38,61,.6)}
+.dl-btn.detected::after{content:"Máy của bạn";white-space:nowrap;position:absolute;top:-10px;right:10px;font-size:.66rem;font-weight:700;background:#1f2328;color:#fff;padding:1px 8px;border-radius:999px}
 .dl-btn.soon{opacity:.55;cursor:not-allowed}.dl-btn.soon:hover{transform:none}
 .mac-wrap{position:relative;display:inline-flex}
 .mac-wrap>.btn{width:100%}
-.mac-menu{position:absolute;top:calc(100% + 8px);left:0;z-index:20;min-width:270px;background:#111822;border:1px solid var(--line);border-radius:14px;padding:8px;box-shadow:0 20px 50px -10px rgba(0,0,0,.7);display:none;text-align:left}
+.mac-menu{position:absolute;top:calc(100% + 8px);left:0;z-index:20;min-width:270px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:8px;box-shadow:0 20px 50px -14px rgba(31,35,40,.3);display:none;text-align:left}
 .mac-wrap.open .mac-menu{display:block}
 .mac-menu a{display:flex;flex-direction:column;padding:10px 12px;border-radius:10px;color:var(--text)}
-.mac-menu a:hover{background:rgba(46,230,166,.1)}
+.mac-menu a:hover{background:var(--accent-soft)}
 .mac-menu a small{color:var(--muted);font-size:.78rem}
-.mac-menu p{font-size:.74rem;color:#66768a;padding:6px 12px 4px;line-height:1.45}
+.mac-menu p{font-size:.74rem;color:var(--faint);padding:6px 12px 4px;line-height:1.45}
 .cta .mac-wrap .mac-menu{left:50%;transform:translateX(-50%)}
 .hero-note{color:var(--muted);font-size:.86rem}
 .hero-note b{color:var(--text);font-weight:600}
 
 /* app window */
-.app{background:#0d1219;border:1px solid var(--line);border-radius:18px;box-shadow:0 40px 80px -30px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.02) inset;overflow:hidden;transform:perspective(1400px) rotateY(-4deg) rotateX(2deg);transition:transform .6s}
+.app{background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:0 40px 80px -34px rgba(120,20,35,.35),0 2px 6px rgba(31,35,40,.06);overflow:hidden;transform:perspective(1400px) rotateY(-4deg) rotateX(2deg);transition:transform .6s}
 .app:hover{transform:none}
-.app-bar{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);background:#0b1016}
-.app-bar i{width:11px;height:11px;border-radius:50%;background:#2a3542}
-.app-bar i:nth-child(1){background:#ff6b6b}.app-bar i:nth-child(2){background:#ffc145}.app-bar i:nth-child(3){background:#3ddc84}
+.app-bar{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--bg2)}
+.app-bar i{width:11px;height:11px;border-radius:50%;background:#d9d0d1}
+.app-bar i:nth-child(1){background:#ff5f57}.app-bar i:nth-child(2){background:#febc2e}.app-bar i:nth-child(3){background:#28c840}
 .app-bar .model-pill{margin-left:auto;font-size:.74rem;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:3px 10px;display:flex;gap:6px;align-items:center}
-.app-bar .model-pill b{color:var(--accent);font-weight:600}
+.app-bar .model-pill b{color:var(--accent-ink);font-weight:600}
 .app-body{display:grid;grid-template-columns:150px 1fr;min-height:380px}
 .app-side{border-right:1px solid var(--line);padding:14px 10px;display:flex;flex-direction:column;gap:4px;font-size:.78rem}
 .app-side .s-item{padding:8px 10px;border-radius:8px;color:var(--muted);display:flex;align-items:center;gap:8px}
-.app-side .s-item.on{background:rgba(46,230,166,.1);color:var(--text)}
-.app-side .s-title{font-size:.66rem;text-transform:uppercase;letter-spacing:.1em;color:#5d6b7c;margin:12px 10px 4px}
+.app-side .s-item.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+.app-side .s-title{font-size:.66rem;text-transform:uppercase;letter-spacing:.1em;color:var(--faint);margin:12px 10px 4px}
 .app-chat{padding:18px;display:flex;flex-direction:column;gap:14px;font-size:.84rem}
 .msg{max-width:85%;padding:10px 14px;border-radius:14px;line-height:1.55}
-.msg.u{align-self:flex-end;background:#1d2a38;border-bottom-right-radius:4px}
-.msg.a{align-self:flex-start;background:#121a24;border:1px solid var(--line);border-bottom-left-radius:4px}
-.msg.a .who{font-size:.68rem;color:var(--accent);font-weight:600;margin-bottom:4px;display:block}
+.msg.u{align-self:flex-end;background:#f6f1f1;border:1px solid var(--line);border-bottom-right-radius:4px}
+.msg.a{align-self:flex-start;background:#fff;box-shadow:var(--shadow);border:1px solid var(--line);border-bottom-left-radius:4px}
+.msg.a .who{font-size:.68rem;color:var(--accent-ink);font-weight:600;margin-bottom:4px;display:block}
 .msg ul{padding-left:18px;margin-top:4px}
-.att-chip{display:block;width:max-content;font-size:.7rem;background:rgba(10,13,18,.55);border:1px solid var(--line);border-radius:7px;padding:2px 8px;margin-bottom:6px;color:#b5c2d1}
+.att-chip{display:block;width:max-content;font-size:.7rem;background:#fff;border:1px solid var(--line);border-radius:7px;padding:2px 8px;margin-bottom:6px;color:var(--muted)}
 .typing{display:inline-flex;gap:4px;margin-left:4px;vertical-align:middle}
 .typing span{width:5px;height:5px;border-radius:50%;background:var(--accent);animation:blink 1.2s infinite}
 .typing span:nth-child(2){animation-delay:.2s}.typing span:nth-child(3){animation-delay:.4s}
 @keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
-.app-input{margin-top:auto;display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;color:#5d6b7c;font-size:.8rem}
-.app-input .send{margin-left:auto;width:28px;height:28px;border-radius:8px;background:var(--grad);display:grid;place-items:center;color:#04140e;font-weight:800}
-.app-status{display:flex;gap:16px;font-size:.68rem;color:#5d6b7c;padding:8px 16px;border-top:1px solid var(--line);font-family:'JetBrains Mono',monospace}
-.app-status .ok{color:var(--accent)}
+.app-input{margin-top:auto;display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;color:var(--faint);font-size:.8rem}
+.app-input .send{margin-left:auto;width:28px;height:28px;border-radius:8px;background:var(--accent);display:grid;place-items:center;color:#fff;font-weight:800}
+.app-status{display:flex;gap:16px;font-size:.68rem;color:var(--faint);background:var(--bg2);padding:8px 16px;border-top:1px solid var(--line);font-family:'JetBrains Mono',monospace}
+.app-status .ok{color:#1a7f37}
 
 /* stats strip */
 .strip{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:28px 0;background:var(--bg2)}
@@ -112,9 +118,9 @@ header.scrolled{border-color:var(--line)}
 /* features */
 .feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:48px}
 .feat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:28px;transition:transform .3s,border-color .3s}
-.feat:hover{transform:translateY(-4px);border-color:rgba(46,230,166,.35)}
-.feat .ico{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;background:rgba(46,230,166,.1);color:var(--accent);margin-bottom:18px}
-.feat:nth-child(even) .ico{background:rgba(58,184,255,.1);color:var(--accent2)}
+.feat:hover{transform:translateY(-4px);border-color:rgba(215,38,61,.35)}
+.feat .ico{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);margin-bottom:18px}
+.feat:nth-child(even) .ico{background:var(--accent);color:#fff}
 .feat h3{font-size:1.12rem;font-weight:700;margin-bottom:8px}
 .feat p{color:var(--muted);font-size:.94rem}
 
@@ -125,37 +131,37 @@ header.scrolled{border-color:var(--line)}
 .search input{background:none;border:none;outline:none;color:var(--text);font:inherit;width:100%}
 .model-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:40px}
 .model{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:22px;display:flex;flex-direction:column;gap:12px;transition:border-color .3s,transform .3s}
-.model:hover{border-color:#2d3d4e;transform:translateY(-3px)}
+.model:hover{border-color:rgba(215,38,61,.35);transform:translateY(-3px)}
 .model-top{display:flex;align-items:center;gap:12px}
-.m-av{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;font-weight:800;font-size:.9rem;color:#04140e}
+.m-av{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;font-weight:800;font-size:.9rem;color:var(--accent-ink);background:rgba(215,38,61,.12)}
 .model h4{font-size:1rem;font-weight:700}
 .model .org{font-size:.78rem;color:var(--muted)}
 .model p{font-size:.88rem;color:var(--muted)}
 .tags{display:flex;flex-wrap:wrap;gap:6px}
-.tag{font-size:.72rem;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:#b5c2d1}
+.tag{font-size:.72rem;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
 .model-foot{display:flex;justify-content:space-between;align-items:center;margin-top:auto;padding-top:12px;border-top:1px dashed var(--line);font-size:.8rem;color:var(--muted)}
-.model-foot a{color:var(--accent);font-weight:600}
-.disclaimer{margin-top:22px;font-size:.8rem;color:#66768a;text-align:center}
+.model-foot a{color:var(--accent-ink);font-weight:600}
+.disclaimer{margin-top:22px;font-size:.8rem;color:var(--faint);text-align:center}
 .model.hide{display:none}
 
 /* dev */
 .dev-grid{display:grid;grid-template-columns:1fr 1.15fr;gap:56px;align-items:center}
 .checks{list-style:none;margin-top:26px;display:grid;gap:14px}
-.checks li{display:flex;gap:12px;color:#c9d4e0}
-.checks li::before{content:"✓";flex:none;width:22px;height:22px;border-radius:6px;background:rgba(46,230,166,.12);color:var(--accent);display:grid;place-items:center;font-size:.8rem;font-weight:700}
-.code{background:#080b10;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:.82rem}
-.code-tabs{display:flex;border-bottom:1px solid var(--line);background:#0b1016}
+.checks li{display:flex;gap:12px;color:var(--text)}
+.checks li::before{content:"✓";flex:none;width:22px;height:22px;border-radius:6px;background:var(--accent);color:#fff;display:grid;place-items:center;font-size:.8rem;font-weight:700}
+.code{background:#1f2328;box-shadow:0 30px 60px -30px rgba(31,35,40,.45);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:.82rem}
+.code-tabs{display:flex;border-bottom:1px solid #30363d;background:#171a1f}
 .code-tabs button{background:none;border:none;color:var(--muted);font:inherit;font-size:.78rem;padding:12px 18px;cursor:pointer;border-bottom:2px solid transparent}
-.code-tabs button.on{color:var(--text);border-color:var(--accent)}
+.code-tabs button.on{color:#fff;border-color:var(--accent)}
 .code-tabs .copy{margin-left:auto}
-.code pre{padding:20px;overflow-x:auto;line-height:1.7;color:#cdd8e4;display:none}
+.code pre{padding:20px;overflow-x:auto;line-height:1.7;color:#e6e8eb;display:none}
 .code pre.on{display:block}
-.k{color:#ff8fb1}.s{color:#9ef0c7}.c{color:#5d6b7c}.f{color:#7cc7ff}.n{color:#ffb547}
+.k{color:#ff7b8a}.s{color:#ffc4cc}.c{color:#8b929c}.f{color:#ffffff;font-weight:600}.n{color:#ffab70}
 
 /* privacy */
-.privacy{background:linear-gradient(135deg,rgba(46,230,166,.08),rgba(58,184,255,.06));border:1px solid var(--line);border-radius:24px;padding:56px;display:grid;grid-template-columns:1.1fr 1fr;gap:48px;align-items:center}
+.privacy{background:linear-gradient(135deg,#fff5f6,#faf6f6);border:1px solid var(--line);border-radius:24px;padding:56px;display:grid;grid-template-columns:1.1fr 1fr;gap:48px;align-items:center}
 .shield{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
-.shield div{background:rgba(10,13,18,.6);border:1px solid var(--line);border-radius:14px;padding:18px}
+.shield div{background:#fff;box-shadow:var(--shadow);border:1px solid var(--line);border-radius:14px;padding:18px}
 .shield b{display:block;font-size:.98rem;margin-bottom:4px}
 .shield span{font-size:.85rem;color:var(--muted)}
 
@@ -163,8 +169,8 @@ header.scrolled{border-color:var(--line)}
 .faq{max-width:820px;margin:44px auto 0}
 .qa{border:1px solid var(--line);border-radius:14px;margin-bottom:12px;background:var(--card);overflow:hidden}
 .qa button{width:100%;background:none;border:none;color:var(--text);font:inherit;font-weight:600;font-size:1rem;text-align:left;padding:20px 22px;display:flex;justify-content:space-between;align-items:center;gap:16px;cursor:pointer}
-.qa button .pm{flex:none;width:26px;height:26px;border-radius:8px;border:1px solid var(--line);display:grid;place-items:center;transition:transform .3s,background .3s;color:var(--accent)}
-.qa.open button .pm{transform:rotate(45deg);background:rgba(46,230,166,.1)}
+.qa button .pm{flex:none;width:26px;height:26px;border-radius:8px;border:1px solid var(--line);display:grid;place-items:center;transition:transform .3s,background .3s;color:var(--accent-ink)}
+.qa.open button .pm{transform:rotate(45deg);background:var(--accent-soft)}
 .qa .ans{max-height:0;overflow:hidden;transition:max-height .35s ease}
 .qa .ans p{padding:0 22px 20px;color:var(--muted)}
 
@@ -177,9 +183,9 @@ footer{border-top:1px solid var(--line);padding:56px 0 32px;background:var(--bg2
 .foot-grid h5{font-size:.85rem;margin-bottom:14px;color:var(--text)}
 .foot-grid ul{list-style:none;display:grid;gap:8px}
 .foot-grid li a{color:var(--muted);font-size:.9rem}
-.foot-grid li a:hover{color:var(--accent)}
+.foot-grid li a:hover{color:var(--accent-ink)}
 .foot-about p{color:var(--muted);font-size:.9rem;margin-top:14px;max-width:320px}
-.foot-bottom{margin-top:44px;padding-top:22px;border-top:1px solid var(--line);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;color:#66768a;font-size:.82rem}
+.foot-bottom{margin-top:44px;padding-top:22px;border-top:1px solid var(--line);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;color:var(--faint);font-size:.82rem}
 
 /* reveal */
 .reveal{opacity:0;transform:translateY(24px);transition:opacity .7s ease,transform .7s ease}
@@ -199,7 +205,7 @@ footer{border-top:1px solid var(--line);padding:56px 0 32px;background:var(--bg2
   .cta .mac-wrap .mac-menu{transform:none}
   .nav ul,.nav-cta .btn{display:none}
   .burger{display:inline-flex}
-  .mobile-menu{display:block;position:fixed;top:68px;left:0;right:0;background:rgba(10,13,18,.97);border-bottom:1px solid var(--line);padding:0 24px;max-height:0;overflow:hidden;transition:max-height .35s ease,padding .35s ease;z-index:49}
+  .mobile-menu{display:block;position:fixed;top:68px;left:0;right:0;background:rgba(255,255,255,.98);border-bottom:1px solid var(--line);padding:0 24px;max-height:0;overflow:hidden;transition:max-height .35s ease,padding .35s ease;z-index:49}
   .mobile-menu.open{max-height:420px;padding:16px 24px 24px}
   .mobile-menu a{display:block;padding:12px 0;border-bottom:1px solid var(--line);font-weight:500}
   .mobile-menu .btn{margin-top:16px;width:100%;justify-content:center}
@@ -216,6 +222,19 @@ footer{border-top:1px solid var(--line);padding:56px 0 32px;background:var(--bg2
   .foot-grid{grid-template-columns:1fr}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}.reveal{opacity:1;transform:none}}
+/* v0.11.1: thương hiệu đỏ trắng */
+::selection{background:rgba(215,38,61,.2)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.logo img{width:30px;height:30px}
+.feat,.model,.qa{box-shadow:var(--shadow)}
+.code-tabs button{color:#b7bdc6}
+.code pre .c{font-style:italic}
+.app-side .s-brand{display:flex;align-items:center;gap:8px;font-weight:800;font-size:.85rem;padding:2px 8px 10px}
+.app-side .s-brand img{width:22px;height:22px}
+.ocr-note{align-self:flex-start;font-size:.7rem;color:var(--accent-ink);background:var(--accent-soft);border:1px solid rgba(215,38,61,.3);border-radius:8px;padding:5px 10px;max-width:86%}
+a.inline,.ans a{color:var(--accent-ink);text-decoration:underline}
+.cta .dl-btn:not(.detected):not([aria-disabled=true]):not(.soon){border-color:var(--accent);color:var(--accent-ink)}
+.cta .dl-btn:not(.detected):hover{background:var(--accent-soft)}
 </style>
 </head>
 <body>
@@ -223,12 +242,7 @@ footer{border-top:1px solid var(--line);padding:56px 0 32px;background:var(--bg2
 <header id="top">
   <div class="wrap nav">
     <a href="#" class="logo" aria-label="AIVN trang chủ">
-      <svg width="34" height="34" viewBox="0 0 40 40" aria-hidden="true">
-        <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2ee6a6"/><stop offset="1" stop-color="#3ab8ff"/></linearGradient></defs>
-        <rect x="2" y="2" width="36" height="36" rx="11" fill="url(#lg)"/>
-        <path d="M11 28 L18 12 L22 12 L29 28 H25 L23.4 24 H16.6 L15 28 Z M17.8 21 H22.2 L20 15.4 Z" fill="#06150f"/>
-        <circle cx="31" cy="10" r="3" fill="#ffb547" stroke="#06150f" stroke-width="1.5"/>
-      </svg>
+      <img src="favicon.svg" alt="" width="30" height="30">
       AIVN <small>beta</small>
     </a>
     <ul>
@@ -260,11 +274,11 @@ footer{border-top:1px solid var(--line);padding:56px 0 32px;background:var(--bg2
 <section class="hero">
   <div class="wrap hero-grid">
     <div>
-      <span class="badge"><span class="dot"></span>Phiên bản 0.11.0 · Mới: tìm mô hình GGUF trên Hugging Face, đọc chữ trong ảnh</span>
+      <span class="badge"><span class="dot"></span>Phiên bản 0.11.1 · Mới: giao diện đỏ trắng, logo rồng</span>
       <h1>Trí tuệ nhân tạo,<br><span class="grad-text">chạy ngay trên máy bạn.</span></h1>
       <p class="lead">AIVN giúp bạn tải về và trò chuyện với các mô hình ngôn ngữ mã nguồn mở mà không cần Internet, không cần tài khoản, và dữ liệu không bao giờ rời khỏi máy tính.</p>
       <div class="dl-row" id="tai-ve">
-        <a href="AIVN-Setup.exe" download class="btn dl-btn" data-os="windows" title="Tải bộ cài AIVN cho Windows 10/11 (64-bit, ~175 MB)">
+        <a href="AIVN-Setup.exe" download class="btn dl-btn" data-os="windows" title="Tải bộ cài AIVN cho Windows 10/11 (64-bit, ~215 MB)">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5 10.5 4.5v7H3zM11.5 4.3 21 3v8.5h-9.5zM3 12.5h7.5v7L3 18.5zM11.5 12.5H21V21l-9.5-1.3z"/></svg>
           <span><span class="os-sub">Tải cho</span><span class="os-main">Windows</span></span>
         </a>
@@ -274,8 +288,8 @@ footer{border-top:1px solid var(--line);padding:56px 0 32px;background:var(--bg2
             <span><span class="os-sub">Tải cho</span><span class="os-main">macOS ▾</span></span>
           </button>
           <div class="mac-menu" role="menu">
-            <a role="menuitem" href="AIVN-mac-arm64.zip" download><b>Apple Silicon</b><small>Chip M1, M2, M3, M4… · ~179 MB</small></a>
-            <a role="menuitem" href="AIVN-mac-x64.zip" download><b>Intel</b><small>Mac dùng bộ xử lý Intel · ~191 MB</small></a>
+            <a role="menuitem" href="AIVN-mac-arm64.zip" download><b>Apple Silicon</b><small>Chip M1, M2, M3, M4… · ~240 MB</small></a>
+            <a role="menuitem" href="AIVN-mac-x64.zip" download><b>Intel</b><small>Mac dùng bộ xử lý Intel · ~253 MB</small></a>
             <p>Không chắc? Bấm logo Apple ở góc trên trái → Giới thiệu về máy Mac này: thấy “Chip Apple M…” là Apple Silicon.</p>
           </div>
         </div>
@@ -290,30 +304,32 @@ footer{border-top:1px solid var(--line);padding:56px 0 32px;background:var(--bg2
     <!-- mock app window -->
     <div class="app" aria-label="Minh họa giao diện ứng dụng AIVN">
       <div class="app-bar"><i></i><i></i><i></i>
-        <span class="model-pill">● <b>Qwen2.5 3B</b> · Q4_K_M · đang chạy offline</span>
+        <span class="model-pill">● <b>Qwen3 4B Instruct</b> · Q4_K_M · đang chạy offline</span>
       </div>
       <div class="app-body">
         <aside class="app-side">
+          <div class="s-brand"><img src="favicon.svg" alt="">AIVN</div>
           <div class="s-item on">💬 Trò chuyện</div>
           <div class="s-item">🔍 Khám phá</div>
           <div class="s-item">📦 Mô hình của tôi</div>
           <div class="s-item">⚡ Máy chủ API</div>
           <div class="s-title">Gần đây</div>
+          <div class="s-item">Lịch thi học kỳ 1</div>
           <div class="s-item">Ôn thi Vật lý</div>
-          <div class="s-item">Dịch email</div>
           <div class="s-item">Ý tưởng đồ án</div>
         </aside>
         <div class="app-chat">
-          <div class="msg u"><span class="att-chip">📕 giao-trinh-kinh-te-vi-mo.pdf · 2,4 MB</span>Chương 3 của giáo trình này nói gì về cung và cầu?</div>
-          <div class="msg a"><span class="who">AIVN · Qwen2.5 3B</span>Theo chương 3 của tài liệu, ý chính về <b>cung và cầu</b>:
-            <ul><li>Giá tăng thì lượng cầu giảm (luật cầu).</li><li>Điểm cân bằng là nơi cung gặp cầu.</li><li>Thuế và trợ cấp làm dịch chuyển đường cung.</li></ul>
+          <div class="msg u"><span class="att-chip">🖼 anh-chup-lich-thi.png · 48 KB</span>Lịch thi môn Kinh tế vi mô là khi nào, ở phòng nào?</div>
+          <div class="ocr-note">🖼 Mô hình hiện tại không nhìn được ảnh, AIVN đã đọc chữ trong ảnh.</div>
+          <div class="msg a"><span class="who">AIVN · Qwen3 4B Instruct</span>Theo ảnh lịch thi bạn gửi:
+            <ul><li>Môn <b>Kinh tế vi mô</b>: 7h30 ngày 15/12/2026.</li><li>Phòng thi: <b>B.204</b>.</li><li>Nhớ mang thẻ sinh viên.</li></ul>
           </div>
-          <div class="msg u">Cho mình 3 câu hỏi trắc nghiệm để tự kiểm tra?</div>
-          <div class="msg a"><span class="who">AIVN · Qwen2.5 3B</span>Đang soạn câu hỏi<span class="typing"><span></span><span></span><span></span></span></div>
-          <div class="app-input">Nhập tin nhắn… (Enter để gửi)<span class="send">↑</span></div>
+          <div class="msg u">Lập giúp mình kế hoạch ôn tập 1 tuần nhé?</div>
+          <div class="msg a"><span class="who">AIVN · Qwen3 4B Instruct</span>Đang soạn kế hoạch<span class="typing"><span></span><span></span><span></span></span></div>
+          <div class="app-input">Nhập tin nhắn… hoặc dán ảnh bằng Ctrl+V<span class="send">↑</span></div>
         </div>
       </div>
-      <div class="app-status"><span class="ok">● Không có kết nối mạng</span><span>24 token/giây</span><span>RAM 2,6 GB</span></div>
+      <div class="app-status"><span class="ok">● Không có kết nối mạng</span><span>21 token/giây</span><span>RAM 3,1 GB</span></div>
     </div>
   </div>
 </section>
@@ -362,55 +378,55 @@ footer{border-top:1px solid var(--line);padding:56px 0 32px;background:var(--bg2
     </div>
     <div class="model-grid" id="modelGrid">
       <div class="model reveal" data-name="qwen2.5 1.5b instruct qwen khuyên dùng đa ngôn ngữ">
-        <div class="model-top"><div class="m-av" style="background:#2ee6a6">Qw</div><div><h4>Qwen2.5 1.5B Instruct</h4><span class="org">Họ mô hình Qwen · Apache 2.0</span></div></div>
+        <div class="model-top"><div class="m-av">Qw</div><div><h4>Qwen2.5 1.5B Instruct</h4><span class="org">Họ mô hình Qwen · Apache 2.0</span></div></div>
         <p>Cân bằng tốt giữa tốc độ và chất lượng, trả lời tiếng Việt khá ổn.</p>
         <div class="tags"><span class="tag">1.5B tham số</span><span class="tag">Q4_K_M · ~1,12 GB</span><span class="tag">Khuyên dùng</span></div>
         <div class="model-foot"><span>Cần ≥ 2 GB RAM</span><span>Gợi ý trong AIVN</span></div>
       </div>
       <div class="model reveal" data-name="gemma 3 1b it gemma">
-        <div class="model-top"><div class="m-av" style="background:#ffb547">Ge</div><div><h4>Gemma 3 1B it</h4><span class="org">Họ mô hình Gemma · Gemma</span></div></div>
+        <div class="model-top"><div class="m-av">Ge</div><div><h4>Gemma 3 1B it</h4><span class="org">Họ mô hình Gemma · Gemma</span></div></div>
         <p>Gemma thế hệ 3 bản siêu nhẹ, nhanh trên mọi máy.</p>
         <div class="tags"><span class="tag">1B tham số</span><span class="tag">Q4_K_M · ~806 MB</span><span class="tag">Siêu nhẹ</span></div>
         <div class="model-foot"><span>Cần ≥ 2 GB RAM</span><span>Gợi ý trong AIVN</span></div>
       </div>
       <div class="model reveal" data-name="qwen3 4b instruct 2507 qwen khuyên dùng đa ngôn ngữ">
-        <div class="model-top"><div class="m-av" style="background:#2ee6a6">Qw</div><div><h4>Qwen3 4B Instruct 2507</h4><span class="org">Họ mô hình Qwen · Apache 2.0</span></div></div>
+        <div class="model-top"><div class="m-av">Qw</div><div><h4>Qwen3 4B Instruct 2507</h4><span class="org">Họ mô hình Qwen · Apache 2.0</span></div></div>
         <p>Bản Qwen3 4B trả lời trực tiếp (không thinking), nhanh và chất lượng cao.</p>
         <div class="tags"><span class="tag">4B tham số</span><span class="tag">Q4_K_M · ~2,50 GB</span><span class="tag">Thế hệ mới</span></div>
         <div class="model-foot"><span>Cần ≥ 4 GB RAM</span><span>Gợi ý trong AIVN</span></div>
       </div>
       <div class="model reveal" data-name="arcee vylinh 3b (tiếng việt) vylinh tiếng việt">
-        <div class="model-top"><div class="m-av" style="background:#ff7a90">Vy</div><div><h4>Arcee VyLinh 3B (tiếng Việt)</h4><span class="org">Họ mô hình VyLinh · Apache 2.0</span></div></div>
+        <div class="model-top"><div class="m-av">Vy</div><div><h4>Arcee VyLinh 3B (tiếng Việt)</h4><span class="org">Họ mô hình VyLinh · Apache 2.0</span></div></div>
         <p>Mô hình 3B tinh chỉnh riêng cho tiếng Việt (Arcee AI, nền Qwen2.5).</p>
         <div class="tags"><span class="tag">3B tham số</span><span class="tag">Q4_K_M · ~2,10 GB</span><span class="tag">Tiếng Việt</span></div>
         <div class="model-foot"><span>Cần ≥ 3 GB RAM</span><span>Gợi ý trong AIVN</span></div>
       </div>
       <div class="model reveal" data-name="gemma 3 4b it gemma đa ngôn ngữ">
-        <div class="model-top"><div class="m-av" style="background:#ffb547">Ge</div><div><h4>Gemma 3 4B it</h4><span class="org">Họ mô hình Gemma · Gemma</span></div></div>
+        <div class="model-top"><div class="m-av">Ge</div><div><h4>Gemma 3 4B it</h4><span class="org">Họ mô hình Gemma · Gemma</span></div></div>
         <p>Đa ngôn ngữ tốt, ngữ cảnh dài. AIVN dùng phần văn bản (chưa hỗ trợ ảnh).</p>
         <div class="tags"><span class="tag">4B tham số</span><span class="tag">Q4_K_M · ~2,49 GB</span><span class="tag">Đa ngôn ngữ</span></div>
         <div class="model-foot"><span>Cần ≥ 4 GB RAM</span><span>Gợi ý trong AIVN</span></div>
       </div>
       <div class="model reveal" data-name="llama 3.2 3b instruct llama đa năng">
-        <div class="model-top"><div class="m-av" style="background:#7cc7ff">Ll</div><div><h4>Llama 3.2 3B Instruct</h4><span class="org">Họ mô hình Llama · Llama 3.2 Community</span></div></div>
+        <div class="model-top"><div class="m-av">Ll</div><div><h4>Llama 3.2 3B Instruct</h4><span class="org">Họ mô hình Llama · Llama 3.2 Community</span></div></div>
         <p>Đa năng, ngữ cảnh dài, phù hợp làm trợ lý hằng ngày.</p>
         <div class="tags"><span class="tag">3B tham số</span><span class="tag">Q4_K_M · ~2,02 GB</span><span class="tag">Đa năng</span></div>
         <div class="model-foot"><span>Cần ≥ 3 GB RAM</span><span>Gợi ý trong AIVN</span></div>
       </div>
       <div class="model reveal" data-name="phi-4 mini instruct phi suy luận">
-        <div class="model-top"><div class="m-av" style="background:#b69cff">Ph</div><div><h4>Phi-4 mini Instruct</h4><span class="org">Họ mô hình Phi · MIT</span></div></div>
+        <div class="model-top"><div class="m-av">Ph</div><div><h4>Phi-4 mini Instruct</h4><span class="org">Họ mô hình Phi · MIT</span></div></div>
         <p>Phi thế hệ 4 bản nhỏ, đa ngôn ngữ tốt hơn Phi-3.5.</p>
         <div class="tags"><span class="tag">3.8B tham số</span><span class="tag">Q4_K_M · ~2,49 GB</span><span class="tag">Suy luận</span></div>
         <div class="model-foot"><span>Cần ≥ 4 GB RAM</span><span>Gợi ý trong AIVN</span></div>
       </div>
       <div class="model reveal" data-name="qwen2.5 coder 7b instruct qwen lập trình">
-        <div class="model-top"><div class="m-av" style="background:#2ee6a6">Qw</div><div><h4>Qwen2.5 Coder 7B Instruct</h4><span class="org">Họ mô hình Qwen · Apache 2.0</span></div></div>
+        <div class="model-top"><div class="m-av">Qw</div><div><h4>Qwen2.5 Coder 7B Instruct</h4><span class="org">Họ mô hình Qwen · Apache 2.0</span></div></div>
         <p>Chuyên viết, giải thích và sửa mã nguồn.</p>
         <div class="tags"><span class="tag">7B tham số</span><span class="tag">Q4_K_M · ~4,68 GB</span><span class="tag">Lập trình</span></div>
         <div class="model-foot"><span>Cần ≥ 6 GB RAM</span><span>Gợi ý trong AIVN</span></div>
       </div>
       <div class="model reveal" data-name="gpt-oss 20b gpt-oss mạnh suy luận">
-        <div class="model-top"><div class="m-av" style="background:#e6e6e6">GP</div><div><h4>gpt-oss 20B</h4><span class="org">Họ mô hình GPT-OSS · Apache 2.0</span></div></div>
+        <div class="model-top"><div class="m-av">GP</div><div><h4>gpt-oss 20B</h4><span class="org">Họ mô hình GPT-OSS · Apache 2.0</span></div></div>
         <p>Mô hình mở của OpenAI (MoE), suy luận mạnh. Cần từ 16 GB RAM.</p>
         <div class="tags"><span class="tag">20B (MoE) tham số</span><span class="tag">MXFP4 · ~12,11 GB</span><span class="tag">Máy mạnh</span></div>
         <div class="model-foot"><span>Cần ≥ 16 GB RAM</span><span>Gợi ý trong AIVN</span></div>
@@ -522,11 +538,11 @@ console.<span class="f">log</span>(data.choices[<span class="n">0</span>].messag
     <h2>Sẵn sàng có trợ lý AI <span class="grad-text">của riêng bạn?</span></h2>
     <p class="lead" style="margin:0 auto">Tải AIVN, chọn một mô hình và bắt đầu trò chuyện chỉ trong vài phút.</p>
     <div class="dl-row">
-      <a href="AIVN-Setup.exe" download class="btn dl-btn" data-os="windows" title="Tải bộ cài AIVN cho Windows 10/11 (64-bit, ~175 MB)"><span class="os-main">Windows</span></a>
+      <a href="AIVN-Setup.exe" download class="btn dl-btn" data-os="windows" title="Tải bộ cài AIVN cho Windows 10/11 (64-bit, ~215 MB)"><span class="os-main">Windows</span></a>
       <div class="mac-wrap"><button type="button" class="btn dl-btn mac-toggle" data-os="mac" aria-haspopup="true" aria-expanded="false"><span class="os-main">macOS ▾</span></button>
         <div class="mac-menu" role="menu">
-          <a role="menuitem" href="AIVN-mac-arm64.zip" download><b>Apple Silicon</b><small>Chip M1, M2, M3, M4… · ~179 MB</small></a>
-          <a role="menuitem" href="AIVN-mac-x64.zip" download><b>Intel</b><small>Mac dùng bộ xử lý Intel · ~191 MB</small></a>
+          <a role="menuitem" href="AIVN-mac-arm64.zip" download><b>Apple Silicon</b><small>Chip M1, M2, M3, M4… · ~240 MB</small></a>
+          <a role="menuitem" href="AIVN-mac-x64.zip" download><b>Intel</b><small>Mac dùng bộ xử lý Intel · ~253 MB</small></a>
           <p>Không chắc? Bấm logo Apple ở góc trên trái → Giới thiệu về máy Mac này: thấy “Chip Apple M…” là Apple Silicon.</p>
         </div></div>
       <a href="#" class="btn dl-btn soon" data-os="linux" title="Sắp ra mắt" aria-disabled="true"><span class="os-main">Linux · Sắp ra mắt</span></a>
@@ -539,7 +555,7 @@ console.<span class="f">log</span>(data.choices[<span class="n">0</span>].messag
   <div class="wrap">
     <div class="foot-grid">
       <div class="foot-about">
-        <a href="#" class="logo"><svg width="28" height="28" viewBox="0 0 40 40" aria-hidden="true"><rect x="2" y="2" width="36" height="36" rx="11" fill="url(#lg)"/><path d="M11 28 L18 12 L22 12 L29 28 H25 L23.4 24 H16.6 L15 28 Z M17.8 21 H22.2 L20 15.4 Z" fill="#06150f"/><circle cx="31" cy="10" r="3" fill="#ffb547" stroke="#06150f" stroke-width="1.5"/></svg>AIVN</a>
+        <a href="#" class="logo"><img src="favicon.svg" alt="" width="28" height="28">AIVN</a>
         <p>Ứng dụng giúp mọi người Việt Nam tiếp cận AI một cách riêng tư, miễn phí và không phụ thuộc Internet.</p>
         <p>Phát triển bởi <b style="color:var(--accent)">NGUYỄN NGỌC KHÔI SINH VIÊN VLU</b></p>
       </div>

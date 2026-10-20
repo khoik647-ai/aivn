@@ -5,6 +5,7 @@ Phát triển bởi **NGUYỄN NGỌC KHÔI SINH VIÊN VLU** · © 2026 AIVN
 Electron + node-llama-cpp (llama.cpp, MIT). Giao diện tiếng Việt.
 
 ## Chức năng
+- **Giao diện**: logo rồng AIVN; chủ đề sáng đỏ–trắng mặc định, có chế độ Tối và Tự động (theo hệ điều hành) ở góc dưới thanh bên. Màu chữ/nút đạt tương phản WCAG AA.
 - **Trò chuyện**: trả lời theo luồng (streaming), nút Dừng, lịch sử lưu cục bộ, lời nhắc hệ thống, nhiệt độ, số token tối đa, độ dài ngữ cảnh.
 - **Gửi kèm tài liệu** (nút ghim hoặc kéo thả vào khung chat): PDF có lớp chữ (pdfjs-dist), DOCX (mammoth), TXT/MD/CSV/JSON và tệp mã nguồn. Tối đa 20 MB/tệp, 5 tệp/lần. Ảnh PNG/JPG/WEBP/GIF/BMP: dán bằng Ctrl+V / Cmd+V hoặc kéo thả, hiện ảnh thu nhỏ; AIVN đọc chữ trong ảnh bằng OCR cục bộ (tesseract.js, dữ liệu tiếng Việt + tiếng Anh đi kèm, không cần mạng) và ghi chú "Mô hình hiện tại không nhìn được ảnh, AIVN đã đọc chữ trong ảnh" (node-llama-cpp chưa hỗ trợ mmproj/thị giác). PDF scan chưa hỗ trợ. Nội dung được đưa vào lời nhắc giữa `<<<TÀI LIỆU: tên>>>` … `<<<HẾT TÀI LIỆU>>>`; nếu dài hơn ngữ cảnh thì giữ phần mở đầu + các đoạn khớp từ khoá câu hỏi và hiện cảnh báo. Chỉ tên tệp được lưu trong lịch sử; tài liệu của tin nhắn gần nhất được giữ để hỏi tiếp. Mọi thứ xử lý cục bộ.
 - **Tự động cập nhật** (electron-updater, GitHub Releases `OWNER/aivn`): kiểm tra khi mở và bằng nút *Kiểm tra cập nhật* trong mục Giới thiệu. Windows: Tải về → Khởi động lại để cập nhật (bản chưa ký, `verifyUpdateCodeSignature: false`). macOS: chỉ báo có bản mới và mở trang Releases (Squirrel.Mac cần chữ ký Apple Developer ID).

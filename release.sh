@@ -92,7 +92,8 @@ sed -e "s#href=\"AIVN-Setup.exe\"#href=\"$BASE_URL/AIVN-Setup.exe\"#g" \
     -e "s#href=\"AIVN-mac-arm64.zip\"#href=\"$BASE_URL/AIVN-mac-arm64.zip\"#g" \
     -e "s#href=\"AIVN-mac-x64.zip\"#href=\"$BASE_URL/AIVN-mac-x64.zip\"#g" \
     site/index.html > "$SITE/index.html"
-[[ -f site/preview-desktop.png ]] && cp site/preview-desktop.png "$SITE/"
+for f in preview-desktop.png preview-mobile.png favicon.svg favicon.ico apple-touch-icon.png; do [[ -f "site/$f" ]] && cp "site/$f" "$SITE/"; done
+[[ -f "$SITE/favicon.svg" ]] || die "thiếu site/favicon.svg (logo)"
 touch "$SITE/.nojekyll"
 grep -q "$BASE_URL/AIVN-Setup.exe" "$SITE/index.html" || die "không thay được link tải Windows trong trang web"
 ls -la "$OUT" "$SITE"
@@ -127,6 +128,7 @@ fi
 step "Tạo GitHub Release $TAG"
 NOTES="AIVN $VERSION · Phát triển bởi NGUYỄN NGỌC KHÔI SINH VIÊN VLU
 
+- Mới ở 0.11.1: logo rồng AIVN, giao diện sáng đỏ–trắng (có chế độ Tối / Tự động), biểu tượng ứng dụng mới
 - Khám phá: tìm mọi mô hình GGUF trên Hugging Face (sắp xếp theo lượt tải / mới nhất / lượt thích), gộp tệp chia nhỏ, nhãn vừa RAM, gợi ý Q4_K_M; 26 mô hình gợi ý đã kiểm tra (Qwen3, Gemma 3, Llama 3.x, Phi-4, Mistral, DeepSeek R1, gpt-oss, VyLinh tiếng Việt…)
 - Tải mô hình có hàng đợi, tạm dừng/tải tiếp, tốc độ và thời gian còn lại; mã truy cập Hugging Face tuỳ chọn (chỉ lưu trên máy)
 - Ảnh: dán Ctrl+V / Cmd+V hoặc kéo thả PNG/JPG/WEBP/GIF; AIVN đọc chữ trong ảnh (OCR tiếng Việt + tiếng Anh, offline). Mô hình hiện tại chưa nhìn được hình.

@@ -81,7 +81,7 @@ function setStatus(st) {
 A.onModelStatus(st => { setStatus(st); if (!st.loading) refreshModels(); });
 
 // ---------- Khám phá ----------
-const COLORS = { Qwen: '#2ee6a6', Llama: '#7cc7ff', Gemma: '#ffb547', Mistral: '#ff8a65', Phi: '#b69cff', DeepSeek: '#5c9dff', SmolLM: '#ffd54f', VyLinh: '#ff6b8b', 'GPT-OSS': '#9ad0c2' };
+
 const jobs = new Map(); // id -> snapshot
 const disc = { fam: 'all', results: null, repo: null, lastQuery: null };
 const fmtNum = (n) => n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' Tr' : n >= 1e3 ? (n / 1e3).toFixed(1).replace('.', ',') + ' N' : String(n || 0);
@@ -119,7 +119,7 @@ async function renderCatalog() {
   $('#famFilter').innerHTML = fams.map(f => `<button class="chip-btn ${disc.fam === f ? 'on' : ''}" data-fam="${esc(f)}">${f === 'all' ? 'Tất cả' : esc(f)}</button>`).join('');
   const list = state.catalog.filter(c => disc.fam === 'all' || c.family === disc.fam);
   $('#catalog').innerHTML = list.map(c => `<div class="card" data-id="${esc(c.id)}">
-    <div class="card-top"><div class="av" style="background:${COLORS[c.family] || '#b69cff'}">${esc(c.family.slice(0, 2))}</div><div><h4>${esc(c.name)}</h4><div class="sub">${esc(c.params)} tham số · ${esc(c.quant)} · ${fmtBytes(c.size)}</div></div></div>
+    <div class="card-top"><div class="av">${esc(c.family.slice(0, 2))}</div><div><h4>${esc(c.name)}</h4><div class="sub">${esc(c.params)} tham số · ${esc(c.quant)} · ${fmtBytes(c.size)}</div></div></div>
     <p>${esc(c.desc)}</p>
     <div class="tags">${fitBadge(c.fit)}${c.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.vision ? '<span class="tag" title="Mô hình có khả năng xem ảnh, AIVN hiện chỉ dùng phần văn bản">Chưa hỗ trợ ảnh</span>' : ''}</div>
     <div class="card-foot" data-job="${esc(jobIdFor(c.repo, c.file))}">${footHtml(c, `data-act="dl-cat" data-id="${esc(c.id)}"`, c.file)}</div>
@@ -234,7 +234,7 @@ function renderMessages() {
   const box = $('#messages');
   const msgs = state.current ? state.current.messages : [];
   if (!msgs.length) {
-    box.innerHTML = `<div class="empty"><svg class="logo-big" viewBox="0 0 40 40"><rect x="2" y="2" width="36" height="36" rx="11" fill="url(#lg)"/><path d="M11 28 L18 12 L22 12 L29 28 H25 L23.4 24 H16.6 L15 28 Z M17.8 21 H22.2 L20 15.4 Z" fill="#06150f"/><circle cx="31" cy="10" r="3" fill="#ffb547" stroke="#06150f" stroke-width="1.5"/></svg>
+    box.innerHTML = `<div class="empty"><img class="logo-big" src="logo-tile.svg" alt="">
       <h2>Xin chào! Hôm nay bạn muốn hỏi gì?</h2><p>${state.status.loaded ? 'Mô hình đã sẵn sàng. Mọi thứ chạy ngay trên máy bạn, không cần Internet.' : 'Hãy chọn một mô hình ở thanh phía trên, hoặc vào <b>Khám phá</b> để tải mô hình đầu tiên.'}</p></div>`;
     return;
   }
@@ -483,9 +483,23 @@ $('#updAction').addEventListener('click', async (e) => {
 });
 A.onUpdate((st) => A.updateState().then(full => paintUpdate({ ...full, ...st })));
 
+// ---------- Giao diện sáng / tối ----------
+const darkMq = window.matchMedia('(prefers-color-scheme: dark)');
+function applyTheme(t) {
+  t = ['light', 'dark', 'system'].includes(t) ? t : 'light';
+  const dark = t === 'dark' || (t === 'system' && darkMq.matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  for (const b of document.querySelectorAll('#themeRow button')) b.classList.toggle('on', b.dataset.theme === t);
+}
+darkMq.addEventListener('change', () => applyTheme(state.settings && state.settings.theme));
+$('#themeRow').addEventListener('click', async (e) => {
+  const b = e.target.closest('button[data-theme]'); if (!b) return;
+  applyTheme(b.dataset.theme); state.settings = await A.setSettings({ theme: b.dataset.theme });
+});
 // ---------- Khởi động ----------
 (async () => {
   state.settings = await A.getSettings();
+  applyTheme(state.settings.theme);
   bindSettings();
   for (const j of await A.dlList()) jobs.set(j.id, j);
   renderDlPanel();
@@ -494,7 +508,7 @@ A.onUpdate((st) => A.updateState().then(full => paintUpdate({ ...full, ...st }))
   renderMessages();
   const info = await A.info();
   const h = info.hardware || {};
-  $('#hwInfo').innerHTML = `RAM: ${fmtBytes(h.ram)} · ${h.cpus || '?'} luồng CPU<br>Tăng tốc: ${h.gpu ? '<b style="color:var(--accent)">GPU ' + esc(String(h.gpu)) + '</b>' : 'CPU'}${h.vram && h.vram.total ? ' · VRAM ' + fmtBytes(h.vram.total) : ''}<br>Phiên bản ${info.version}`;
+  $('#hwInfo').innerHTML = `RAM: ${fmtBytes(h.ram)} · ${h.cpus || '?'} luồng CPU<br>Tăng tốc: ${h.gpu ? '<b style="color:var(--accent-ink)">GPU ' + esc(String(h.gpu)) + '</b>' : 'CPU'}${h.vram && h.vram.total ? ' · VRAM ' + fmtBytes(h.vram.total) : ''}<br>Phiên bản ${info.version}`;
   $('#aboutVer').textContent = 'phiên bản ' + info.version;
   paintUpdate(await A.updateState());
   $('#modelsDir').textContent = 'Thư mục lưu: ' + info.paths.models;
