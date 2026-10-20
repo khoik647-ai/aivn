@@ -63,6 +63,7 @@ async function unloadModel() {
   if (!current) return;
   const c = current; current = null;
   await queue.catch(() => {});
+  try { if (c.seq && !c.seq.disposed) c.seq.dispose(); } catch {}
   try { await c.context.dispose(); } catch {}
   try { await c.model.dispose(); } catch {}
 }
@@ -71,6 +72,9 @@ function status() {
   if (visionOn) { const v = getVision().status(); if (v) return { loaded: true, id: v.id, path: v.path, contextSize: v.contextSize, vision: true, gpu: llama && llama.gpu }; }
   return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu } : { loaded: false, loading: !!loading };
 }
+
+// Một chuỗi ngữ cảnh dùng lại giữa các lượt (giữ bộ nhớ đệm KV: lượt sau chỉ tính phần mới của lời nhắc)
+function seqFor(c) { if (!c.seq || c.seq.disposed) c.seq = c.context.getSequence(); return c.seq; }
 
 function normalizeContent(c) {
   if (typeof c === 'string') return c;
@@ -99,7 +103,7 @@ function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal,
     for (const m of rest.slice(0, lastUserIdx)) {
       history.push(m.role === 'user' ? { type: 'user', text: m.content } : { type: 'model', response: [m.content] });
     }
-    const sequence = current.context.getSequence();
+    const sequence = seqFor(current);
     const session = new LlamaChatSession({ contextSequence: sequence, autoDisposeSequence: false });
     if (history.length) session.setChatHistory(history);
     const t0 = Date.now();
@@ -119,11 +123,111 @@ function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal,
       finishReason = 'abort';
     } finally {
       session.dispose({ disposeSequence: false });
-      sequence.dispose();
     }
     const completionTokens = current ? current.model.tokenize(text).length : 0;
     const secs = (Date.now() - t0) / 1000;
     return { text, finishReason, usage: { completion_tokens: completionTokens, tokensPerSecond: secs > 0 ? completionTokens / secs : 0, seconds: secs } };
+  };
+  const p = queue.then(run, run);
+  queue = p.catch(() => {});
+  return p;
+}
+
+// ---- Một bước hội thoại có công cụ (tool calling) / đầu ra JSON theo lược đồ ----
+// messages kiểu OpenAI (system/user/assistant có tool_calls/tool). tools: [{name, description, parameters}]
+// toolChoice: 'auto' | 'none' | 'required' | { name }. responseFormat: { type: 'json_object' } | { type: 'json_schema', schema }
+// Trả về { text, toolCalls: [{ id, name, arguments }], finishReason, usage }
+const { toGbnfSchema } = require('./schema');
+const grammarCache = new Map();
+async function grammarFor(key, make) {
+  if (grammarCache.has(key)) return grammarCache.get(key);
+  const g = await make(); grammarCache.set(key, g); if (grammarCache.size > 32) grammarCache.delete(grammarCache.keys().next().value);
+  return g;
+}
+const callId = () => 'call_' + require('crypto').randomBytes(9).toString('hex');
+function parseMaybeJson(v) { if (typeof v !== 'string') return v; const t = v.trim(); if (/^[\[{"]/.test(t)) { try { return JSON.parse(t); } catch {} } return v; }
+
+function toChatHistory(messages) {
+  const sys = [], items = [];
+  const results = new Map();
+  for (const m of messages) if (m && m.role === 'tool') results.set(m.tool_call_id, normalizeContent(m.content));
+  let open = null; // phản hồi của mô hình đang mở (gộp assistant + kết quả công cụ + assistant tiếp theo)
+  for (const m of messages) {
+    if (!m) continue;
+    if (m.role === 'system' || m.role === 'developer') { sys.push(normalizeContent(m.content)); continue; }
+    if (m.role === 'user') { items.push({ type: 'user', text: normalizeContent(m.content) }); open = null; continue; }
+    if (m.role === 'assistant') {
+      if (!open) { open = { type: 'model', response: [] }; items.push(open); }
+      const t = normalizeContent(m.content); if (t) open.response.push(t);
+      (m.tool_calls || []).forEach((tc, i) => {
+        const fn = tc && tc.function || {};
+        let params = fn.arguments; if (typeof params === 'string') { try { params = JSON.parse(params || '{}'); } catch {} }
+        open.response.push({ type: 'functionCall', name: String(fn.name || ''), params: params ?? {}, result: parseMaybeJson(results.has(tc.id) ? results.get(tc.id) : ''), ...(i === 0 ? { startsNewChunk: true } : {}) });
+      });
+    }
+  }
+  if (sys.length) items.unshift({ type: 'system', text: sys.join('\n\n') });
+  return items;
+}
+
+function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = null, temperature = 0.7, maxTokens = 1024, topP, signal, onToken } = {}) {
+  const run = async () => {
+    if (visionOn) return getVision().chatStep(messages, { tools, toolChoice, responseFormat, temperature, maxTokens, topP, signal, onToken });
+    if (!current) throw new Error('Chưa nạp mô hình nào.');
+    const { LlamaChat } = await getLib();
+    const l = await getLlama();
+    const forced = tools.length && toolChoice && toolChoice !== 'auto' && toolChoice !== 'none' ? (typeof toolChoice === 'object' ? tools.filter(t => t.name === toolChoice.name) : tools) : null;
+    if (forced && !forced.length) throw new Error(`Không có công cụ "${toolChoice.name}" trong "tools"`);
+    const useFns = tools.length && toolChoice !== 'none' && !forced && !responseFormat;
+    let history = toChatHistory(messages);
+    const hasCalls = history.some(h => h.type === 'model' && h.response.some(r => r && r.type === 'functionCall'));
+    const functions = {};
+    const noParams = (p) => !p || (p.type === 'object' || !p.type) && (!p.properties || !Object.keys(p.properties).length) && !p.additionalProperties;
+    for (const t of tools) functions[t.name] = { description: t.description || undefined, ...(noParams(t.parameters) ? {} : { params: toGbnfSchema(t.parameters) }) };
+    let grammar = null;
+    if (forced) {
+      // buộc gọi công cụ: ràng buộc đầu ra thành {"name": …, "arguments": {…}} bằng ngữ pháp JSON
+      const schema = { oneOf: forced.map(t => ({ type: 'object', properties: { name: { const: t.name }, arguments: noParams(t.parameters) ? { type: 'object', properties: {} } : toGbnfSchema(t.parameters) } })) };
+      grammar = await grammarFor('f:' + JSON.stringify(schema), () => l.createGrammarForJsonSchema(schema));
+      const doc = forced.map(t => `- ${t.name}: ${t.description || ''}\n  tham số (JSON Schema): ${JSON.stringify(t.parameters || {})}`).join('\n');
+      const note = `Bạn phải gọi đúng một công cụ trong danh sách sau và chỉ trả lời bằng một đối tượng JSON dạng {"name": "<tên công cụ>", "arguments": {…}}.\n${doc}`;
+      if (history[0] && history[0].type === 'system') history[0] = { type: 'system', text: history[0].text + '\n\n' + note }; else history.unshift({ type: 'system', text: note });
+    } else if (responseFormat && responseFormat.type === 'json_schema') {
+      const schema = toGbnfSchema(responseFormat.schema || {});
+      grammar = await grammarFor('s:' + JSON.stringify(schema), () => l.createGrammarForJsonSchema(schema));
+    } else if (responseFormat && responseFormat.type === 'json_object') {
+      grammar = await grammarFor('json', () => l.getGrammarFor('json'));
+    }
+    const last = history[history.length - 1];
+    if (!last || last.type !== 'model') history.push({ type: 'model', response: [] });
+    else if (grammar) history.push({ type: 'user', text: 'Tiếp tục.' }, { type: 'model', response: [] });
+    const chat = new LlamaChat({ contextSequence: seqFor(current), autoDisposeSequence: false });
+    const t0 = Date.now();
+    let streamed = '';
+    try {
+      const opts = { temperature, topP, maxTokens, signal, stopOnAbortSignal: true,
+        onTextChunk: (chunk) => { streamed += chunk; if (!grammar) onToken && onToken(chunk); } };
+      if (useFns || (hasCalls && !grammar)) Object.assign(opts, { functions, documentFunctionParams: true, maxParallelFunctionCalls: 4 });
+      if (grammar) opts.grammar = grammar;
+      const res = await chat.generateResponse(history, opts);
+      const stop = res.metadata && res.metadata.stopReason;
+      let text = (typeof res.response === 'string' ? res.response : streamed).replace(/^\s+/, '');
+      let toolCalls = [];
+      if (useFns || (hasCalls && !grammar)) toolCalls = (res.functionCalls || []).map(fc => ({ id: callId(), name: fc.functionName, arguments: fc.params ?? {} }));
+      if (toolChoice === 'none' || !useFns && !forced) toolCalls = []; // không được phép gọi: bỏ qua
+      if (forced) {
+        let j = null; try { j = JSON.parse(text); } catch {}
+        if (j && typeof j.name === 'string') { toolCalls = [{ id: callId(), name: j.name, arguments: j.arguments ?? {} }]; text = ''; }
+      }
+      const callText = useFns ? toolCalls.map(c => c.name + JSON.stringify(c.arguments)).join('') : '';
+      const completionTokens = current ? current.model.tokenize((streamed || text) + callText).length : 0;
+      const secs = (Date.now() - t0) / 1000;
+      const finishReason = signal && signal.aborted ? 'abort' : toolCalls.length ? 'tool_calls' : stop === 'maxTokens' ? 'length' : 'stop';
+      return { text, toolCalls, finishReason, usage: { completion_tokens: completionTokens, tokensPerSecond: secs > 0 ? completionTokens / secs : 0, seconds: secs } };
+    } catch (e) {
+      if (signal && signal.aborted) return { text: streamed, toolCalls: [], finishReason: 'abort', usage: { completion_tokens: 0, tokensPerSecond: 0, seconds: (Date.now() - t0) / 1000 } };
+      throw e;
+    } finally { chat.dispose({ disposeSequence: false }); }
   };
   const p = queue.then(run, run);
   queue = p.catch(() => {});
@@ -173,4 +277,4 @@ function embed(texts, kind = 'passage') {
 function countTokens(text) { if (!current) return Math.ceil(text.length / 3); try { return current.model.tokenize(text).length; } catch { return Math.ceil(text.length / 3); } }
 
 async function countTokensAsync(texts) { if (visionOn) { const r = await getVision().countTokens(texts); if (r) return r; } return texts.map(countTokens); }
-module.exports = { countTokens, countTokensAsync, hardwareInfo, loadModel, unloadModel, status, generate, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount };
+module.exports = { countTokens, countTokensAsync, hardwareInfo, loadModel, unloadModel, status, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount };

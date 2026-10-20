@@ -1,6 +1,28 @@
 // Máy chủ API cục bộ tương thích OpenAI
 const http = require('http');
 const crypto = require('crypto');
+const { normalizeTools, dropNullOptionals } = require('./schema');
+
+// tool_choice kiểu OpenAI → 'auto' | 'none' | 'required' | { name }
+function parseToolChoice(tc, tools) {
+  if (tc == null) return tools.length ? 'auto' : 'none';
+  if (tc === 'auto' || tc === 'none' || tc === 'required') return tc;
+  if (typeof tc === 'object' && tc.type === 'function' && tc.function && typeof tc.function.name === 'string') {
+    if (!tools.some(t => t.name === tc.function.name)) throw new Error(`tool_choice chỉ tới công cụ "${tc.function.name}" không có trong "tools"`);
+    return { name: tc.function.name };
+  }
+  throw new Error('"tool_choice" phải là "auto", "none", "required" hoặc {"type":"function","function":{"name":…}}');
+}
+function parseResponseFormat(rf) {
+  if (rf == null || rf.type === 'text') return null;
+  if (rf.type === 'json_object') return { type: 'json_object' };
+  if (rf.type === 'json_schema') {
+    const js = rf.json_schema || {};
+    if (!js.schema || typeof js.schema !== 'object') throw new Error('response_format.json_schema.schema phải là một JSON Schema');
+    return { type: 'json_schema', schema: js.schema, name: js.name || 'output' };
+  }
+  throw new Error('"response_format.type" phải là "text", "json_object" hoặc "json_schema"');
+}
 
 function createApiServer({ engine, models, ensureModel, log, embeddings = null }) {
   let server = null;
@@ -47,6 +69,40 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null }
       const ac = new AbortController();
       res.on('close', () => { if (!res.writableEnded) ac.abort(); });
       const opts = { temperature: body.temperature ?? 0.7, topP: body.top_p, maxTokens: body.max_tokens ?? body.max_completion_tokens ?? 1024, signal: ac.signal };
+      // Gọi công cụ (tools/tool_choice) và đầu ra JSON (response_format): công cụ do ứng dụng gọi API tự chạy, AIVN chỉ trả tool_calls
+      let tools, toolChoice, responseFormat;
+      try { tools = normalizeTools(body.tools); toolChoice = parseToolChoice(body.tool_choice, tools); responseFormat = parseResponseFormat(body.response_format); }
+      catch (e) { return err(res, 400, e.message); }
+      const usesTools = tools.length || responseFormat || body.messages.some(m => m && (m.role === 'tool' || Array.isArray(m.tool_calls)));
+      if (usesTools) {
+        const byName = new Map(tools.map(t => [t.name, t]));
+        const toOpenAi = (calls) => calls.map((c, index) => ({ index, id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(dropNullOptionals(c.arguments ?? {}, byName.get(c.name)?.parameters)) } }));
+        const stepOpts = { ...opts, tools, toolChoice, responseFormat };
+        if (body.stream) {
+          res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', ...cors() });
+          const chunk = (delta, finish = null) => res.write('data: ' + JSON.stringify({ id, object: 'chat.completion.chunk', created, model: st.id, choices: [{ index: 0, delta, finish_reason: finish }] }) + '\n\n');
+          chunk({ role: 'assistant', content: '' });
+          try {
+            const r = await engine.chatStep(body.messages, { ...stepOpts, onToken: t => chunk({ content: t }) });
+            if (responseFormat && r.text) chunk({ content: r.text }); // đầu ra JSON được gửi trọn một lần khi xong
+            if (r.toolCalls.length) chunk({ tool_calls: toOpenAi(r.toolCalls) });
+            chunk({}, r.toolCalls.length ? 'tool_calls' : r.finishReason === 'length' ? 'length' : 'stop');
+            res.write('data: [DONE]\n\n');
+          } catch (e) { res.write('data: ' + JSON.stringify({ error: { message: e.message } }) + '\n\n'); }
+          return res.end();
+        }
+        try {
+          const r = await engine.chatStep(body.messages, stepOpts);
+          const message = { role: 'assistant', content: r.toolCalls.length && !r.text ? null : r.text };
+          if (r.toolCalls.length) message.tool_calls = toOpenAi(r.toolCalls).map(({ index, ...c }) => c);
+          log(`  → ${r.toolCalls.length ? 'tool_calls: ' + r.toolCalls.map(c => c.name).join(', ') : responseFormat ? 'JSON theo lược đồ' : 'văn bản'}`);
+          return send(res, 200, {
+            id, object: 'chat.completion', created, model: st.id,
+            choices: [{ index: 0, message, finish_reason: r.toolCalls.length ? 'tool_calls' : r.finishReason === 'length' ? 'length' : 'stop' }],
+            usage: { prompt_tokens: 0, completion_tokens: r.usage.completion_tokens, total_tokens: r.usage.completion_tokens },
+          });
+        } catch (e) { return err(res, 500, e.message, 'server_error'); }
+      }
 
       if (body.stream) {
         res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', ...cors() });

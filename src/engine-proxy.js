@@ -61,6 +61,14 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
       try { return await call('generate', messages, opts, reqId); }
       finally { tokenCbs.delete(reqId); signal?.removeEventListener('abort', onAbort); }
     },
+    async chatStep(messages, { signal, onToken, ...opts } = {}) {
+      const reqId = 's' + (++seq);
+      if (onToken) tokenCbs.set(reqId, onToken);
+      const onAbort = () => { try { child && child.send({ type: 'abort', reqId }); } catch {} };
+      if (signal?.aborted) onAbort(); else signal?.addEventListener('abort', onAbort);
+      try { return await call('chatStep', messages, opts, reqId); }
+      finally { tokenCbs.delete(reqId); signal?.removeEventListener('abort', onAbort); }
+    },
     // Ước lượng đồng bộ (đã hiệu chỉnh) + đếm chính xác bất đồng bộ
     countTokens: (text) => Math.ceil(String(text).length * ratio * 1.05),
     async calibrate(texts) {

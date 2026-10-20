@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, Notification, Tray, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const catalog = require('./catalog');
@@ -10,6 +10,11 @@ const EMBED = catalog.EMBEDDING;
 const { createUpdater } = require('./updater');
 const hf = require('./hf');
 const { createDownloader } = require('./downloader');
+const { createAgent } = require('./agent/agent');
+const { createMemoryStore } = require('./agent/memory');
+const { createScheduler } = require('./agent/scheduler');
+const sandbox = require('./agent/sandbox');
+const { normalizeTools } = require('./schema');
 
 const isTest = process.env.AIVN_TEST === '1';
 if (process.env.AIVN_USER_DATA) app.setPath('userData', process.env.AIVN_USER_DATA);
@@ -41,8 +46,8 @@ if (nodePath) {
   engine = { ...inproc, external: false, calibrate: async () => {}, ocr: (b) => require('./ocr').recognize(b), start: async () => {}, stop: async () => {} };
 }
 
-let win = null;
-let paths, settings, convos;
+let win = null, tray = null, quitting = false;
+let paths, settings, convos, memory, scheduler, agent;
 let downloader = null;
 let hwCache = null;
 const hw = async () => (hwCache ||= await engine.hardwareInfo().catch(() => ({ ram: require('os').totalmem() })));
@@ -56,9 +61,14 @@ function initStores() {
   settings = new JsonStore(path.join(ud, 'settings.json'), {
     systemPrompt: 'Bạn là AIVN, một trợ lý AI thân thiện. Hãy trả lời bằng tiếng Việt, rõ ràng và chính xác.',
     temperature: 0.7, maxTokens: 1024, contextSize: 4096, apiPort: 1234, apiAutoStart: false, imported: [], lastModel: null, hfToken: '', theme: 'light', rag: true, vision: true,
+    agentFolders: [], agentWeb: false, agentPython: false, agentMemory: true, agentTemperature: 0.2, keepInTray: false, openAtLogin: false,
   });
   convos = new JsonStore(path.join(ud, 'conversations.json'), { list: [] });
   rag = createRagStore(path.join(ud, 'rag'));
+  memory = createMemoryStore(path.join(ud, 'memory.json'));
+  scheduler = createScheduler({ file: path.join(ud, 'schedules.json'), onFire: onScheduleFire, log: (m) => { console.log(m); log(m); } });
+  agent = createAgent({ engine, getSettings: () => settings.data, memory, scheduler, extractFile: docs.extractFile, embedForMemory, log,
+    trash: async (p) => { try { await shell.trashItem(p); } catch (e) { throw new Error('Không chuyển được tệp vào Thùng rác (' + e.message + '). Tệp vẫn còn nguyên.'); } } });
   downloader = createDownloader({ dir: paths.models, send, getToken: () => settings.data.hfToken || null, maxConcurrent: 2, log: (m) => isTest && console.log(m) });
 }
 // Cài đặt gửi sang giao diện: không bao giờ kèm token
@@ -169,6 +179,119 @@ async function ensureEmbedder() {
 }
 const ragActive = () => settings.data.rag !== false && embedInfo().installed;
 
+// ---------- Trợ lý ----------
+// Ghi nhớ: dùng BGE-M3 nếu đã tải (tìm theo ý nghĩa), không thì theo từ khoá
+async function embedForMemory() {
+  if (!ragActive()) return {};
+  try { if (!(await ensureEmbedder())) return {}; } catch { return {}; }
+  return { embed: (arr, kind) => engine.embed(arr, kind), model: EMBED.id };
+}
+// Mô hình nhỏ (< ~3,5 tỉ tham số) thường gọi công cụ sai: hiện cảnh báo trong Trợ lý
+function agentAdvice() {
+  const st = engine.status(); if (!st.loaded) return null;
+  const m = listModels().find(x => x.path === st.path) || null;
+  const p = m && m.catalog && m.catalog.params ? parseFloat(String(m.catalog.params).replace(',', '.')) : null;
+  const small = p != null ? p < 3.5 : m ? m.size < 2.2e9 : false;
+  const recommended = catalog.filter(c => c.agent && ['qwen3-4b-instruct-2507-q4_k_m', 'qwen_qwen3-8b-q4_k_m', 'gemma-3-4b-it-q4_k_m'].includes(c.id)).map(c => ({ id: c.id, name: c.name, size: c.size + (c.mmproj ? c.mmproj.size : 0), installed: isInstalled(c.file) }));
+  return { model: m ? (m.catalog ? m.catalog.name : m.file) : st.id, params: p, small, good: !!(m && m.catalog && m.catalog.agent), recommended };
+}
+function agentInfo() {
+  const py = sandbox.findPython();
+  return { folders: (settings.data.agentFolders || []).map(f => ({ path: f, name: path.basename(f), exists: (() => { try { return fs.statSync(f).isDirectory(); } catch { return false; } })() })),
+    web: !!settings.data.agentWeb, python: { enabled: !!settings.data.agentPython, available: !!py, version: py ? py.version : null }, memory: { enabled: settings.data.agentMemory !== false, count: memory.count(), semantic: ragActive() },
+    tools: agent.activeTools().map(n => ({ name: n, label: agent.defs[n].label, icon: agent.defs[n].icon })), advice: agentAdvice(), keepInTray: !!settings.data.keepInTray, openAtLogin: !!settings.data.openAtLogin };
+}
+// Xác nhận xoá/ghi đè: hộp thoại tiếng Việt trong cửa sổ AIVN; không trả lời trong 5 phút = từ chối
+const confirms = new Map();
+let confirmSeq = 0;
+function askConfirm(req) {
+  if (!win || win.isDestroyed()) return Promise.resolve(false);
+  if (!win.isVisible()) win.show(); if (win.isMinimized()) win.restore(); win.focus();
+  const id = 'c' + (++confirmSeq);
+  return new Promise((resolve) => {
+    const t = setTimeout(() => { confirms.delete(id); send('agent:confirm-cancel', { id }); resolve(false); }, 5 * 60e3);
+    confirms.set(id, (ok) => { clearTimeout(t); confirms.delete(id); resolve(!!ok); });
+    send('agent:confirm', { id, ...req });
+    if (isTest) console.log(`[xác nhận] ${req.kind}: ${req.message}`);
+  });
+}
+const slimStep = (x) => ({ id: x.id, name: x.name, label: x.label, icon: x.icon, args: x.args, status: x.status, summary: x.summary, detail: typeof x.detail === 'string' ? x.detail.slice(0, 4000) : x.detail, urls: x.urls, ms: x.ms, pre: x.pre });
+async function runAgentTurn({ reqId, convoId, messages, headless = false, signal }) {
+  if (!engine.status().loaded) {
+    if (headless && settings.data.lastModel) await loadById(settings.data.lastModel);
+    else throw new Error('Chưa nạp mô hình nào. Hãy chọn mô hình ở thanh phía trên (gợi ý: Qwen3 4B hoặc Gemma 3 4B trở lên).');
+  }
+  return agent.run({ messages, convoId, signal, headless, confirm: askConfirm,
+    onToken: (t) => reqId && send('chat:token', { reqId, t }),
+    onStep: (st) => reqId && send('agent:step', { reqId, step: slimStep(st) }),
+    onStatus: (st) => reqId && send('agent:status', { reqId, ...st }) });
+}
+
+// ---------- Lịch tự động ----------
+let lastNotice = null;
+function notify(title, body, convoId) {
+  lastNotice = { title, body, at: Date.now(), supported: Notification.isSupported(), shown: false };
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title, body: String(body || '').slice(0, 240), icon: path.join(__dirname, '..', 'build', 'icons', '128x128.png') });
+  n.on('show', () => { if (lastNotice) lastNotice.shown = true; });
+  n.on('click', () => { showWindow(); if (convoId) send('convos:open', { id: convoId }); });
+  n.show();
+}
+const fmtNow = () => { const d = new Date(), p = (n) => String(n).padStart(2, '0'); return `${p(d.getHours())}:${p(d.getMinutes())} ${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`; };
+async function onScheduleFire(t, { late, manual }) {
+  const convoId = 'sched_' + t.id;
+  let c = convos.data.list.find(x => x.id === convoId);
+  if (!c) { c = { id: convoId, title: '⏰ ' + t.title, mode: 'agent', scheduleId: t.id, messages: [], createdAt: Date.now(), updatedAt: Date.now() }; convos.data.list.unshift(c); }
+  const tag = { id: t.id, at: Date.now(), late: !!late, manual: !!manual };
+  let summary;
+  if (t.kind === 'reminder') {
+    c.messages.push({ role: 'assistant', content: `⏰ **${t.title}**${t.message ? '\n' + t.message : ''}`, model: 'Lịch tự động', scheduled: tag });
+    summary = t.message || t.title;
+  } else {
+    c.messages.push({ role: 'user', content: t.prompt, scheduled: tag });
+    const ac = new AbortController(); generations.set('sched:' + t.id, ac);
+    try {
+      const prior = c.messages.slice(-7, -1).filter(m => m.role === 'assistant' && m.content).map(m => ({ role: 'assistant', content: m.content }));
+      const r = await runAgentTurn({ convoId, headless: true, signal: ac.signal, messages: [...prior.slice(-2), { role: 'user', content: t.prompt }] });
+      c.messages.push({ role: 'assistant', content: r.text || '(Trợ lý không trả lời)', steps: r.steps.map(slimStep), urls: r.urls, model: engine.status().id, scheduled: tag });
+      summary = r.text;
+    } catch (e) {
+      c.messages.push({ role: 'assistant', content: '⚠ Không chạy được việc tự động: ' + e.message, error: true, model: 'Lịch tự động', scheduled: tag });
+      summary = 'Lỗi: ' + e.message;
+      throw e;
+    } finally { generations.delete('sched:' + t.id); }
+  }
+  c.updatedAt = Date.now();
+  convos.data.list.sort((a, b) => b.updatedAt - a.updatedAt); convos.save();
+  send('convos:changed', { id: convoId }); send('sched:changed', {});
+  if (t.notify !== false) notify(`⏰ ${t.title}${late ? ' (trễ)' : ''}`, String(summary || '').replace(/[*_`#]/g, '').slice(0, 200), convoId);
+  return { ok: true, convoId, summary: String(summary || '').slice(0, 200) };
+}
+
+// ---------- Chạy nền (khay hệ thống) và mở cùng hệ điều hành ----------
+function showWindow() { if (!win || win.isDestroyed()) createWindow(); else { if (!win.isVisible()) win.show(); if (win.isMinimized()) win.restore(); win.focus(); } }
+function applyBackgroundPrefs() {
+  if (settings.data.keepInTray && !tray) {
+    const img = nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'icons', process.platform === 'darwin' ? '16x16.png' : '32x32.png'));
+    tray = new Tray(img);
+    tray.setToolTip('AIVN · Lịch tự động vẫn chạy');
+    tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Mở AIVN', click: showWindow }, { type: 'separator' }, { label: 'Thoát AIVN', click: () => { quitting = true; app.quit(); } }]));
+    tray.on('click', showWindow);
+  } else if (!settings.data.keepInTray && tray) { tray.destroy(); tray = null; }
+  // mở cùng hệ điều hành: Windows/macOS dùng API của Electron, Linux ghi tệp ~/.config/autostart (chỉ bản đã đóng gói)
+  const want = !!settings.data.openAtLogin;
+  try {
+    if (process.platform === 'win32' || process.platform === 'darwin') {
+      if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: want, openAsHidden: want && !!settings.data.keepInTray, args: settings.data.keepInTray ? ['--hidden'] : [] });
+    } else if (process.platform === 'linux') {
+      const f = path.join(app.getPath('home'), '.config', 'autostart', 'aivn.desktop');
+      const exe = process.env.APPIMAGE || (app.isPackaged ? process.execPath : null);
+      if (want && exe) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, `[Desktop Entry]\nType=Application\nName=AIVN\nComment=Chạy mô hình AI ngay trên máy tính của bạn\nExec="${exe}"${settings.data.keepInTray ? ' --hidden' : ''}\nX-GNOME-Autostart-enabled=true\n`); }
+      else if (!want) fs.rmSync(f, { force: true });
+    }
+  } catch (e) { console.warn('[đăng nhập] ' + e.message); }
+}
+
 // Đóng gói tài liệu vào tin nhắn cuối, vừa với ngân sách ngữ cảnh của mô hình.
 // Có mô hình nhúng: tìm đoạn liên quan bằng vector (lưu chỉ mục theo cuộc trò chuyện). Không có: cách cũ theo từ khoá.
 async function packForPrompt(messages, attached, maxTokens, { convoId, reqId } = {}) {
@@ -261,7 +384,10 @@ function registerIpc() {
     if (typeof hfToken === 'string') settings.data.hfToken = hfToken.trim().slice(0, 300);
     if (['light', 'dark', 'system'].includes(settings.data.theme)) require('electron').nativeTheme.themeSource = settings.data.theme;
     if ('theme' in rest && win && !win.isDestroyed()) win.setBackgroundColor(windowBg());
-    settings.save(); return publicSettings();
+    if ('agentFolders' in rest) settings.data.agentFolders = (Array.isArray(rest.agentFolders) ? rest.agentFolders : []).filter(f => typeof f === 'string' && path.isAbsolute(f)); // chỉ thêm qua hộp thoại chọn thư mục
+    settings.save();
+    if ('keepInTray' in rest || 'openAtLogin' in rest) applyBackgroundPrefs();
+    return publicSettings();
   });
 
   ipcMain.handle('catalog:list', () => catalogList());
@@ -394,6 +520,37 @@ function registerIpc() {
   ipcMain.handle('rag:convo', (_e, id) => { try { return rag ? rag.summary(id) : null; } catch { return null; } });
   ipcMain.handle('vision:vcredist', () => shell.openExternal(VCREDIST_URL));
 
+  // --- Trợ lý ---
+  ipcMain.handle('agent:info', () => agentInfo());
+  ipcMain.handle('agent:run', async (_e, { reqId, convoId, messages }) => {
+    const ac = new AbortController(); generations.set(reqId, ac);
+    try { const r = await runAgentTurn({ reqId, convoId, messages, signal: ac.signal }); return { ...r, steps: r.steps.map(slimStep), model: engine.status().id }; }
+    finally { generations.delete(reqId); }
+  });
+  ipcMain.handle('agent:confirm-reply', (_e, { id, ok }) => { const f = confirms.get(id); if (f) f(ok === true); return !!f; });
+  ipcMain.handle('agent:add-folder', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Chọn thư mục Trợ lý được phép làm việc', properties: ['openDirectory', 'createDirectory', 'multiSelections'] });
+    if (!r.canceled) { for (const f of r.filePaths) if (!settings.data.agentFolders.includes(f)) settings.data.agentFolders.push(f); settings.save(); }
+    return agentInfo();
+  });
+  ipcMain.handle('agent:remove-folder', (_e, f) => { settings.data.agentFolders = settings.data.agentFolders.filter(x => x !== f); settings.save(); return agentInfo(); });
+  ipcMain.handle('agent:open-folder', (_e, f) => { if ((settings.data.agentFolders || []).includes(f)) shell.openPath(f); return true; });
+  ipcMain.handle('memory:list', () => memory.list());
+  ipcMain.handle('memory:add', (_e, text) => memory.add(text, { source: 'user' }));
+  ipcMain.handle('memory:update', (_e, { id, text }) => memory.update(id, text));
+  ipcMain.handle('memory:delete', (_e, id) => memory.remove(id));
+  ipcMain.handle('memory:clear', async () => {
+    const ok = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Huỷ', 'Xoá tất cả'], defaultId: 0, cancelId: 0, title: 'Xoá mọi ghi nhớ', message: `Xoá toàn bộ ${memory.count()} ghi nhớ của Trợ lý? Không hoàn tác được.` });
+    if (ok.response === 1) memory.clear();
+    return memory.list();
+  });
+  ipcMain.handle('sched:list', () => scheduler.list());
+  ipcMain.handle('sched:create', (_e, spec) => { const t = scheduler.create(spec); send('sched:changed', {}); return t; });
+  ipcMain.handle('sched:update', (_e, { id, ...spec }) => { const t = scheduler.update(id, spec); send('sched:changed', {}); return t; });
+  ipcMain.handle('sched:delete', (_e, id) => { scheduler.remove(id); send('sched:changed', {}); return scheduler.list(); });
+  ipcMain.handle('sched:run', async (_e, id) => scheduler.runNow(id));
+  ipcMain.handle('notify:test', () => { notify('AIVN · Thử thông báo', 'Thông báo của Lịch tự động hiện như thế này.'); return lastNotice; });
+
   ipcMain.handle('server:start', async (_e, port) => {
     port = Number(port) || settings.data.apiPort;
     try { await api.start(port); settings.data.apiPort = port; settings.save(); }
@@ -448,7 +605,7 @@ function windowBg() { // màu nền trước khi giao diện vẽ xong, tránh n
   const dark = t === 'dark' || (t === 'system' && require('electron').nativeTheme.shouldUseDarkColors);
   return dark ? '#17181b' : '#ffffff';
 }
-function createWindow() {
+function createWindow({ hidden = false } = {}) {
   if (['light', 'dark', 'system'].includes(settings.data.theme)) require('electron').nativeTheme.themeSource = settings.data.theme;
   win = new BrowserWindow({
     width: 1280, height: 820, minWidth: 900, minHeight: 600, backgroundColor: windowBg(), title: 'AIVN',
@@ -458,7 +615,14 @@ function createWindow() {
   });
   buildMenus();
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => { if (!hidden) win.show(); });
+  // Chạy nền: đóng cửa sổ thì thu xuống khay để Lịch tự động tiếp tục chạy
+  win.on('close', (e) => {
+    if (settings.data.keepInTray && tray && !quitting) {
+      e.preventDefault(); win.hide();
+      if (!settings.data.trayHintShown) { settings.data.trayHintShown = true; settings.save(); notify('AIVN vẫn đang chạy', 'Lịch tự động tiếp tục chạy trong khay hệ thống. Bấm biểu tượng AIVN để mở lại, hoặc chọn Thoát.'); }
+    }
+  });
   if (process.platform !== 'darwin') { win.setMenuBarVisibility(false); win.autoHideMenuBar = true; }
   attachContextMenu(win.webContents);
   if (isTest) win.webContents.on('console-message', (e) => console.log('[renderer]', e.message || e));
@@ -676,17 +840,177 @@ async function selfTestV12() {
   save(); app.quit();
 }
 
+// Tự kiểm thử v0.13 (AIVN_SELFTEST_V13=1): Trợ lý (nhiều bước, từ chối xoá, ghi nhớ, web), Lịch tự động, API công cụ, ảnh chụp
+async function selfTestV13() {
+  const wc = win.webContents; const out = { started: new Date().toISOString(), stages: {} };
+  const js = (code) => wc.executeJavaScript(code);
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const save = () => fs.writeFileSync(process.env.AIVN_SELFTEST_OUT, JSON.stringify(out, null, 2));
+  const until = async (code, ms = 120000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await js(code)) return true; await sleep(250); } return false; };
+  const shotDir = process.env.AIVN_SHOTS; if (shotDir) fs.mkdirSync(shotDir, { recursive: true });
+  const shot = async (name) => { if (shotDir) { await sleep(400); fs.writeFileSync(path.join(shotDir, name), (await wc.capturePage()).toPNG()); } };
+  const want = (k) => !process.env.AIVN_V13_ONLY || process.env.AIVN_V13_ONLY.split(',').includes(k);
+  const stage = async (k, fn) => { if (!want(k)) return; const t0 = Date.now(); console.log('[v13] ' + k); try { out.stages[k] = { ...(await fn()), ms: Date.now() - t0 }; } catch (e) { out.stages[k] = { error: e.stack || String(e), ms: Date.now() - t0 }; } save(); };
+  const lastMsg = () => js('(() => { const m = [...document.querySelectorAll("#messages .msg.assistant")].pop(); const i = Number(m.dataset.i); const d = state.current.messages[i] || {}; return { body: m.querySelector(".body").innerText, steps: (d.steps || []).map(s => ({ name: s.name, status: s.status, args: s.args, summary: s.summary })), urls: d.urls || [], memories: d.memories || [], stats: document.querySelector("#genStats").innerText, cards: m.querySelectorAll("details.step").length }; })()');
+  const ask = async (q, { onBusy } = {}) => {
+    const n = await js('document.querySelectorAll("#messages .msg.assistant").length');
+    await js(`document.querySelector("#input").value = ${JSON.stringify(q)}; document.querySelector("#composer").requestSubmit();`);
+    await sleep(400);
+    if (onBusy) await onBusy();
+    await until(`!document.querySelector("#sendBtn").hidden && document.querySelectorAll("#messages .msg.assistant").length > ${n}`, 900000);
+    await sleep(300);
+    return lastMsg();
+  };
+  const newAgentChat = () => js('show("agent"); document.querySelector("#newChat").click()').then(() => sleep(300));
+  const dir = process.env.AIVN_AGENT_DIR;
+  const small = process.env.AIVN_SMALL_MODEL, big = process.env.AIVN_AGENT_MODEL;
+  try {
+    await until('!!document.querySelector("#input") && !!state.settings');
+    settings.data.agentFolders = dir ? [dir] : []; settings.data.agentWeb = false; settings.data.agentPython = false; settings.data.agentMemory = true; settings.save();
+    await js('state.settings = null; A.getSettings().then(s => state.settings = s)'); await until('!!state.settings');
+
+    await stage('smallWarning', async () => {
+      if (!small) return { skipped: true };
+      await loadById(small); await js('show("agent")'); await until('!document.querySelector("#agentWarn").hidden', 10000); await js('refreshAgent()'); await sleep(500);
+      const r = { model: engine.status().id, advice: agentAdvice(), warn: await js('document.querySelector("#agentWarn").hidden ? null : document.querySelector("#agentWarn").innerText') };
+      await shot('app-agent-small-model-warning.png'); return r;
+    });
+    await loadById(big); await js('show("agent")'); await sleep(300); await js('refreshAgent()'); await sleep(400);
+    out.agentInfo = agentInfo();
+    await stage('emptyState', async () => { await newAgentChat(); await shot('app-agent-empty-light.png'); return { warnHidden: await js('document.querySelector("#agentWarn").hidden'), chips: await js('document.querySelector("#toolChips").innerText') }; });
+
+    await stage('multiStep', async () => {
+      const target = path.join(dir, 'bao-cao-chi-tieu.md'); try { fs.unlinkSync(target); } catch {}
+      await newAgentChat();
+      const a = await ask('Đọc tệp chi-tieu-thang-9.csv trong thư mục được phép, tính tổng chi tiêu, trung bình mỗi khoản và nhóm chi nhiều nhất, rồi ghi bản tóm tắt ngắn vào tệp bao-cao-chi-tieu.md.');
+      const written = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : null;
+      await js('[...document.querySelectorAll("#messages details.step")].slice(-3).forEach(d => d.open = true); document.querySelector("#messages .msg.assistant:last-child")?.scrollIntoView({ block: "start" })');
+      await shot('app-agent-multistep-light.png');
+      await js('document.querySelector("#messages").scrollTop = 1e9'); await shot('app-agent-multistep-answer-light.png');
+      return { answer: a, fileWritten: !!written, fileContent: written, hasTotal: !!written && /1[.,]?766[.,]?000/.test(written), hasTop: !!written && /Ăn uống/i.test(written) };
+    });
+
+    await stage('refusedDelete', async () => {
+      const victim = path.join(dir, 'ghi-chu-cu.txt'); fs.writeFileSync(victim, 'Ghi chú cũ, đừng xoá nhầm.\n');
+      await newAgentChat();
+      let modal = null;
+      const a = await ask('Xoá tệp ghi-chu-cu.txt trong thư mục được phép giúp tôi.', { onBusy: async () => {
+        const shown = await until('!document.querySelector("#confirmModal").hidden || !document.querySelector("#sendBtn").hidden', 300000);
+        if (shown && await js('!document.querySelector("#confirmModal").hidden')) {
+          modal = await js('({ title: cfTitle.innerText, msg: cfMsg.innerText, path: cfPath.innerText, yes: cfYes.innerText, no: cfNo.innerText })');
+          await shot('app-agent-confirm-delete-light.png');
+          await js('document.querySelector("#cfNo").click()');
+        }
+      } });
+      await shot('app-agent-delete-refused-light.png');
+      return { modal, answer: a, fileStillExists: fs.existsSync(victim) };
+    });
+
+    await stage('memory', async () => {
+      memory.clear();
+      await newAgentChat();
+      const a = await ask('Hãy ghi nhớ giúp tôi: tôi tên Khôi, là sinh viên VLU, môn học tôi thích nhất là Trí tuệ nhân tạo.');
+      const saved = memory.list().map(m => m.text);
+      await newAgentChat();
+      const convA = await js('state.current ? state.current.id : null');
+      const b = await ask('Môn học tôi thích nhất là gì, và tôi học trường nào?');
+      await shot('app-agent-memory-recall-light.png');
+      await js('show("memory")'); await sleep(600); await shot('app-memory-page-light.png');
+      return { save: a, saved, recall: b, newConvo: convA === null || convA !== (await js('state.current && state.current.id')), recalled: /trí tuệ nhân tạo/i.test(b.body) };
+    });
+
+    await stage('web', async () => {
+      settings.data.agentWeb = false; settings.save(); await js('A.getSettings().then(s => state.settings = s); refreshAgent()');
+      await newAgentChat();
+      const off = await ask('Tìm trên mạng xem Trường Đại học Văn Lang được thành lập năm nào.');
+      const offTools = agent.activeTools();
+      await js('show("agent")'); await sleep(200);
+      await js('document.querySelector("#agWeb").click()'); await sleep(800);
+      await newAgentChat();
+      const on = await ask('Tìm trên mạng xem Trường Đại học Văn Lang được thành lập năm nào.');
+      await js('document.querySelector("#messages").scrollTop = 1e9'); await shot('app-agent-web-light.png');
+      const onTools = agent.activeTools();
+      await js('document.querySelector("#agWeb").click()'); await sleep(500);
+      return { off: { ...off, toolsOffered: offTools, usedWeb: off.steps.some(s => /web_search|fetch_url/.test(s.name)) }, on: { ...on, toolsOffered: onTools, usedWeb: on.steps.some(s => /web_search|fetch_url/.test(s.name)) }, webAfter: settings.data.agentWeb };
+    });
+
+    await stage('schedule', async () => {
+      // tạo lời nhắc qua biểu mẫu (phút tới), và một việc Trợ lý chạy sau ~25 giây
+      await js('show("schedule")'); await sleep(400);
+      const at = new Date(Date.now() + 60e3); const p2 = (n) => String(n).padStart(2, '0');
+      await js(`(() => { document.querySelector("#sfTitle").value = "Uống nước"; document.querySelector('#sfKind [data-kind=reminder]').click(); document.querySelector("#sfMsg").value = "Đứng dậy uống một cốc nước nhé!"; document.querySelector('#sfRepeat [data-rep=once]').click(); document.querySelector("#sfDate").value = "${at.getFullYear()}-${p2(at.getMonth() + 1)}-${p2(at.getDate())}"; document.querySelector("#sfTime").value = "${p2(at.getHours())}:${p2(at.getMinutes())}"; document.querySelector("#schedForm").requestSubmit(); })()`);
+      await sleep(600);
+      const job = scheduler.create({ title: 'Tính tiền điện', kind: 'agent', prompt: 'Tính 15% của 2.400.000 đồng rồi trả lời một câu.', repeat: 'once', at: Date.now() + 25e3 });
+      scheduler.create({ title: 'Ôn bài Trí tuệ nhân tạo', kind: 'reminder', message: 'Ôn chương 3 trước buổi học.', repeat: 'weekly', time: '19:30', days: [1, 3, 5] });
+      scheduler.create({ title: 'Tóm tắt tin tức buổi sáng', kind: 'agent', prompt: 'Tìm 3 tin công nghệ nổi bật hôm nay và tóm tắt.', repeat: 'daily', time: '07:00' });
+      await js('refreshSched()'); await sleep(400); await shot('app-schedule-light.png');
+      const list0 = scheduler.list();
+      const rem = list0.find(t => t.title === 'Uống nước');
+      const fired = [];
+      const t0 = Date.now();
+      while (Date.now() - t0 < 200e3) {
+        const l = scheduler.list(); const r1 = l.find(t => t.id === rem.id), r2 = l.find(t => t.id === job.id);
+        if (r1.runs.length && r2.runs.length) break; await sleep(2000);
+      }
+      const l = scheduler.list(); const r1 = l.find(t => t.id === rem.id), r2 = l.find(t => t.id === job.id);
+      const conv = (id) => { const c = convos.data.list.find(x => x.id === 'sched_' + id); return c ? c.messages.map(m => ({ role: m.role, content: m.content.slice(0, 300), steps: (m.steps || []).map(s => s.name + ':' + s.status) })) : null; };
+      await js('refreshSched()'); await sleep(400); await shot('app-schedule-fired-light.png');
+      await js(`openConvo("sched_${job.id}")`); await sleep(800); await shot('app-schedule-agent-result-light.png');
+      return { reminder: { scheduledFor: new Date(rem.at).toString(), runs: r1.runs, convo: conv(rem.id) }, agentJob: { runs: r2.runs, convo: conv(job.id) }, lastNotice, describe: l.map(t => t.title + ' — ' + t.schedule) };
+    });
+
+    await stage('api', async () => {
+      const port = await api.start(settings.data.apiPort).catch(() => settings.data.apiPort);
+      const { execFile } = require('child_process');
+      const curl = (body) => new Promise((res, rej) => execFile('curl', ['-s', `http://localhost:${port}/v1/chat/completions`, '-H', 'Content-Type: application/json', '-d', JSON.stringify(body)], { encoding: 'utf8', timeout: 300000 }, (e, so) => e ? rej(e) : res(so)));
+      const tools = [{ type: 'function', function: { name: 'get_weather', description: 'Lấy thời tiết hiện tại của một thành phố', parameters: { type: 'object', properties: { city: { type: 'string', description: 'Tên thành phố' }, unit: { type: 'string', enum: ['c', 'f'] } }, required: ['city'] } } }];
+      const msgs = [{ role: 'user', content: 'Thời tiết ở Đà Nẵng bây giờ thế nào?' }];
+      const r1 = JSON.parse(await curl({ model: 'local', messages: msgs, tools, temperature: 0.2 }));
+      const call = r1.choices && r1.choices[0].message.tool_calls && r1.choices[0].message.tool_calls[0];
+      let r2 = null;
+      if (call) r2 = JSON.parse(await curl({ model: 'local', tools, messages: [...msgs, r1.choices[0].message, { role: 'tool', tool_call_id: call.id, content: JSON.stringify({ city: 'Đà Nẵng', temp_c: 29, sky: 'nắng nhẹ, có mây', humidity: 74 }) }] }));
+      const r3 = JSON.parse(await curl({ model: 'local', messages: [{ role: 'user', content: 'Chào bạn' }], tools, tool_choice: { type: 'function', function: { name: 'get_weather' } } }));
+      const r4 = JSON.parse(await curl({ model: 'local', messages: [{ role: 'user', content: 'Trích thông tin: Nguyễn Văn An, 21 tuổi, học ngành Công nghệ thông tin tại VLU.' }], response_format: { type: 'json_schema', json_schema: { name: 'sv', schema: { type: 'object', properties: { ho_ten: { type: 'string' }, tuoi: { type: 'integer' }, nganh: { type: 'string' }, truong: { type: 'string' } }, required: ['ho_ten', 'tuoi', 'nganh', 'truong'] } } } }));
+      const r5 = JSON.parse(await curl({ model: 'local', messages: msgs, tools, tool_choice: 'none', max_tokens: 80 }));
+      return { port, curlExample: `curl http://localhost:${port}/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"local","messages":[{"role":"user","content":"Thời tiết ở Đà Nẵng bây giờ thế nào?"}],"tools":[…get_weather…]}'`,
+        step1: { finish: r1.choices && r1.choices[0].finish_reason, message: r1.choices && r1.choices[0].message, error: r1.error },
+        step2: r2 && { finish: r2.choices[0].finish_reason, content: r2.choices[0].message.content },
+        forced: { finish: r3.choices && r3.choices[0].finish_reason, tool_calls: r3.choices && r3.choices[0].message.tool_calls, error: r3.error },
+        jsonSchema: { content: r4.choices && r4.choices[0].message.content, parsed: (() => { try { return JSON.parse(r4.choices[0].message.content); } catch { return null; } })(), error: r4.error },
+        none: { finish: r5.choices && r5.choices[0].finish_reason, hasToolCalls: !!(r5.choices && r5.choices[0].message.tool_calls), content: r5.choices && r5.choices[0].message.content } };
+    });
+
+    await stage('shots', async () => {
+      await js('show("discover")'); await until('document.querySelectorAll("#catalog .card").length > 0', 20000);
+      const tags = await js('[...document.querySelectorAll("#catalog .card")].filter(c => c.querySelector(".tag.agent")).map(c => c.querySelector("h4").innerText)');
+      await js('document.querySelector("#catalog .card .tag.agent")?.scrollIntoView({ block: "center" })'); await shot('app-kho-agent-tags-light.png');
+      await js('show("agent")'); await sleep(300);
+      await js('document.querySelector("#themeRow button[data-theme=dark]").click()'); await sleep(1200);
+      await js('state.current = state.convos.find(c => c.mode === "agent" && c.messages.some(m => m.steps && m.steps.length > 1)) || state.current; renderConvos(); renderMessages(); [...document.querySelectorAll("#messages details.step")].slice(0, 2).forEach(d => d.open = true)'); await shot('app-agent-dark.png');
+      await js('show("schedule")'); await shot('app-schedule-dark.png');
+      await js('show("memory")'); await shot('app-memory-dark.png');
+      await js('show("agent")'); await js('document.querySelector("#themeRow button[data-theme=light]").click()'); await sleep(900);
+      return { agentTaggedCards: tags };
+    });
+  } catch (e) { out.error = e.stack || String(e); }
+  out.finished = new Date().toISOString(); save(); app.quit();
+}
+
 const gotLock = isTest || app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
 else {
-  app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
+  app.on('second-instance', () => showWindow());
+  app.on('before-quit', () => { quitting = true; });
   app.whenReady().then(async () => {
     initStores();
     registerIpc();
-    createWindow();
+    createWindow({ hidden: process.argv.includes('--hidden') && settings.data.keepInTray });
+    applyBackgroundPrefs();
+    scheduler.start();
     if (settings.data.apiAutoStart || process.env.AIVN_API === '1') api.start(settings.data.apiPort).catch(e => log('Lỗi: ' + e.message));
     if (process.env.AIVN_LOAD) loadById(process.env.AIVN_LOAD).catch(e => log('Lỗi nạp: ' + e.message));
     if (app.isPackaged || process.env.AIVN_UPDATE_CHECK === '1') setTimeout(() => updater.check({ silent: true }), Number(process.env.AIVN_UPDATE_DELAY || 5000));
+    if (process.env.AIVN_SELFTEST_V13) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestV13().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));
     if (process.env.AIVN_SELFTEST_V12) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestV12().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));
     if (process.env.AIVN_SELFTEST_UI) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestUi().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));
     if (process.env.AIVN_SELFTEST_HF) selfTestHf().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); });
@@ -697,6 +1021,8 @@ else {
       if (process.env.AIVN_SHOT_QUIT) app.quit();
     }, Number(process.env.AIVN_SHOT_DELAY || 8000));
   });
-  app.on('window-all-closed', async () => { await api.stop().catch(() => {}); await engine.unloadModel().catch(() => {}); await engine.stop().catch(() => {}); app.quit(); });
-  app.on('will-quit', () => { engine.stop().catch(() => {}); });
+  app.on('window-all-closed', async () => {
+    if (settings && settings.data.keepInTray && tray && !quitting) return; // vẫn chạy trong khay
+    await api.stop().catch(() => {}); await engine.unloadModel().catch(() => {}); await engine.stop().catch(() => {}); app.quit(); });
+  app.on('will-quit', () => { scheduler && scheduler.stop(); engine.stop().catch(() => {}); });
 }

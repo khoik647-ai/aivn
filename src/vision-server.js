@@ -77,19 +77,21 @@ function createVisionServer({ log = () => {} } = {}) {
   }
 
   // messages kiểu OpenAI; phần ảnh: {type:'image_url', image_url:{url:'data:image/png;base64,…'}}
-  async function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal, onToken } = {}) {
+  async function stream(extra, messages, { temperature = 0.7, maxTokens = 1024, topP, signal, onToken } = {}) {
     if (!info) throw new Error('Chưa nạp mô hình nhìn ảnh.');
     const t0 = Date.now();
     // chống lặp: DRY (bắt chuỗi lặp dài) + phạt lặp nhẹ; mô hình nhìn ảnh nhỏ dễ lặp câu khi mô tả
     const body = { messages, temperature, max_tokens: maxTokens, stream: true, stream_options: { include_usage: true }, top_k: 40, min_p: 0.05,
-      repeat_penalty: 1.05, repeat_last_n: 256, dry_multiplier: 0.8, dry_base: 1.75, dry_allowed_length: 2, ...(topP != null ? { top_p: topP } : { top_p: 0.9 }) };
+      repeat_penalty: 1.05, repeat_last_n: 256, dry_multiplier: 0.8, dry_base: 1.75, dry_allowed_length: 2, ...(topP != null ? { top_p: topP } : { top_p: 0.9 }), ...extra };
     let res;
+    const empty = () => ({ text: '', toolCalls: [], finishReason: 'abort', usage: { completion_tokens: 0, tokensPerSecond: 0, seconds: 0 } });
     try {
       res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, { method: 'POST', signal,
         headers: { 'content-type': 'application/json', authorization: 'Bearer ' + key }, body: JSON.stringify(body) });
-    } catch (e) { if (signal?.aborted) return { text: '', finishReason: 'abort', usage: { completion_tokens: 0, tokensPerSecond: 0, seconds: 0 } }; throw e; }
+    } catch (e) { if (signal?.aborted) return empty(); throw e; }
     if (!res.ok) { const t = await res.text().catch(() => ''); let m = t; try { m = JSON.parse(t).error.message; } catch {} throw new Error('Mô hình nhìn ảnh báo lỗi: ' + String(m).slice(0, 300)); }
     let text = '', finishReason = 'stop', usage = null, buf = '';
+    const calls = []; // gom tool_calls theo index
     const dec = new TextDecoder();
     try {
       for await (const chunk of res.body) {
@@ -102,7 +104,14 @@ function createVisionServer({ log = () => {} } = {}) {
           let j; try { j = JSON.parse(data); } catch { continue; }
           const c = j.choices && j.choices[0];
           const piece = c?.delta?.content;
-          if (piece) { text += piece; onToken && onToken(piece); }
+          if (piece) { text += piece; if (!extra.response_format) onToken && onToken(piece); }
+          for (const tc of c?.delta?.tool_calls || []) {
+            const k = tc.index ?? calls.length;
+            calls[k] ||= { id: tc.id || '', name: '', args: '' };
+            if (tc.id) calls[k].id = tc.id;
+            if (tc.function?.name) calls[k].name += tc.function.name;
+            if (tc.function?.arguments) calls[k].args += tc.function.arguments;
+          }
           if (c?.finish_reason) finishReason = c.finish_reason;
           if (j.usage) usage = j.usage;
         }
@@ -111,7 +120,21 @@ function createVisionServer({ log = () => {} } = {}) {
     if (signal?.aborted) finishReason = 'abort';
     const secs = (Date.now() - t0) / 1000;
     const ct = usage?.completion_tokens ?? Math.ceil(text.length / 3.5);
-    return { text: text.replace(/^\s+/, ''), finishReason, usage: { prompt_tokens: usage?.prompt_tokens, completion_tokens: ct, tokensPerSecond: secs > 0 ? ct / secs : 0, seconds: secs } };
+    const toolCalls = calls.filter(Boolean).filter(c => c.name).map(c => { let a = {}; try { a = JSON.parse(c.args || '{}'); } catch { a = { _raw: c.args }; } return { id: c.id || 'call_' + crypto.randomBytes(9).toString('hex'), name: c.name, arguments: a }; });
+    if (toolCalls.length && finishReason !== 'abort') finishReason = 'tool_calls';
+    return { text: text.replace(/^\s+/, ''), toolCalls, finishReason, usage: { prompt_tokens: usage?.prompt_tokens, completion_tokens: ct, tokensPerSecond: secs > 0 ? ct / secs : 0, seconds: secs } };
+  }
+  const generate = (messages, opts = {}) => stream({}, messages, opts);
+  // Có công cụ / đầu ra JSON: llama-server tự áp mẫu hội thoại (--jinja) và ngữ pháp cho tool_calls / json_schema
+  function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = null, ...opts } = {}) {
+    const extra = {};
+    if (tools.length) {
+      extra.tools = tools.map(t => ({ type: 'function', function: { name: t.name, description: t.description || '', parameters: t.parameters || { type: 'object', properties: {} } } }));
+      extra.tool_choice = typeof toolChoice === 'object' && toolChoice ? { type: 'function', function: { name: toolChoice.name } } : toolChoice || 'auto';
+      extra.parallel_tool_calls = true;
+    }
+    if (responseFormat) extra.response_format = responseFormat.type === 'json_schema' ? { type: 'json_schema', json_schema: { name: 'output', schema: responseFormat.schema || {} } } : { type: 'json_object' };
+    return stream(extra, messages, opts);
   }
 
   async function countTokens(texts) {
@@ -121,7 +144,7 @@ function createVisionServer({ log = () => {} } = {}) {
     } catch { return null; }
   }
 
-  return { start, stop, generate, countTokens, status: () => info, available: () => !!findServer() };
+  return { start, stop, generate, chatStep, countTokens, status: () => info, available: () => !!findServer() };
 }
 
 module.exports = { createVisionServer, findServer, VisionError };

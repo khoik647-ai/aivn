@@ -19,4 +19,9 @@ contextBridge.exposeInMainWorld('aivn', {
   openVcredist: inv('vision:vcredist'), onVcredist: on('vision:vcredist'),
   onToken: on('chat:token'), onModelStatus: on('model:status'), onServerLog: on('server:log'),
   onDl: on('dl:update'), onDlDone: on('dl:done'), onDlRemoved: on('dl:removed'),
+  agentInfo: inv('agent:info'), agentRun: inv('agent:run'), agentConfirmReply: inv('agent:confirm-reply'), agentAddFolder: inv('agent:add-folder'), agentRemoveFolder: inv('agent:remove-folder'), agentOpenFolder: inv('agent:open-folder'),
+  onAgentStep: on('agent:step'), onAgentStatus: on('agent:status'), onAgentConfirm: on('agent:confirm'), onAgentConfirmCancel: on('agent:confirm-cancel'),
+  memList: inv('memory:list'), memAdd: inv('memory:add'), memUpdate: inv('memory:update'), memDelete: inv('memory:delete'), memClear: inv('memory:clear'),
+  schedList: inv('sched:list'), schedCreate: inv('sched:create'), schedUpdate: inv('sched:update'), schedDelete: inv('sched:delete'), schedRun: inv('sched:run'), notifyTest: inv('notify:test'),
+  onSchedChanged: on('sched:changed'), onConvosChanged: on('convos:changed'), onConvosOpen: on('convos:open'),
 });

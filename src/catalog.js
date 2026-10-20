@@ -1,5 +1,6 @@
 // Danh mục "Gợi ý" do AIVN tự tuyển chọn. Mọi URL đã được kiểm tra bằng HEAD (200) và kích thước khớp API Hugging Face (20/10/2026).
 // Không repo nào yêu cầu đăng nhập (gated). Mỗi mô hình tuân theo giấy phép riêng của nhà phát hành.
+// "agent": true = gọi công cụ tốt, hợp cho chế độ Trợ lý (đã thử Qwen3 4B Instruct 2507).
 // Mô hình "Nhìn được ảnh" có thêm tệp mmproj (bộ chiếu thị giác), được tải cùng mô hình.
 const CATALOG = [
  {
@@ -79,7 +80,8 @@ const CATALOG = [
   "tags": [
    "Đa ngôn ngữ",
    "Mạnh"
-  ]
+  ],
+  "agent": true
  },
  {
   "id": "qwen_qwen3-0.6b-q4_k_m",
@@ -138,7 +140,8 @@ const CATALOG = [
   "tags": [
    "Khuyên dùng",
    "Đa ngôn ngữ"
-  ]
+  ],
+  "agent": true
  },
  {
   "id": "qwen_qwen3-8b-q4_k_m",
@@ -158,7 +161,8 @@ const CATALOG = [
   "tags": [
    "Suy luận",
    "Lập trình"
-  ]
+  ],
+  "agent": true
  },
  {
   "id": "qwen2.5-coder-7b-instruct-q4_k_m",
@@ -234,7 +238,8 @@ const CATALOG = [
   "desc": "Mô hình 8B phổ biến, cân bằng giữa chất lượng và tốc độ.",
   "tags": [
    "Đa năng"
-  ]
+  ],
+  "agent": true
  },
  {
   "id": "gemma-2-2b-it-q4_k_m",
@@ -297,7 +302,8 @@ const CATALOG = [
    "Đa ngôn ngữ"
   ],
   "url": "https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf",
-  "vision": true
+  "vision": true,
+  "agent": true
  },
  {
   "id": "qwen2.5-vl-3b-instruct-q4_k_m",
@@ -392,7 +398,8 @@ const CATALOG = [
   "tags": [
    "Mạnh"
   ],
-  "visionNote": "Mô hình gốc nhìn được ảnh, nhưng bản này không kèm mmproj trong danh mục: AIVN dùng phần văn bản."
+  "visionNote": "Mô hình gốc nhìn được ảnh, nhưng bản này không kèm mmproj trong danh mục: AIVN dùng phần văn bản.",
+  "agent": true
  },
  {
   "id": "mistral-7b-instruct-v0.3-q4_k_m",
@@ -431,7 +438,8 @@ const CATALOG = [
   "tags": [
    "Mạnh",
    "Đa ngôn ngữ"
-  ]
+  ],
+  "agent": true
  },
  {
   "id": "phi-3.5-mini-instruct-q4_k_m",
@@ -489,7 +497,8 @@ const CATALOG = [
   "tags": [
    "Mạnh",
    "Suy luận"
-  ]
+  ],
+  "agent": true
  },
  {
   "id": "deepseek-r1-distill-qwen-1.5b-q4_k_m",
@@ -586,7 +595,8 @@ const CATALOG = [
   "tags": [
    "Mạnh",
    "Suy luận"
-  ]
+  ],
+  "agent": true
  }
 ];
 

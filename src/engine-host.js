@@ -30,6 +30,13 @@ process.on('message', async (msg) => {
         finally { gens.delete(reqId); }
         break;
       }
+      case 'chatStep': {
+        const [messages, opts, reqId] = args;
+        const ac = new AbortController(); gens.set(reqId, ac);
+        try { result = await engine.chatStep(messages, { ...opts, signal: ac.signal, onToken: (t) => reply({ type: 'token', reqId, t }) }); }
+        finally { gens.delete(reqId); }
+        break;
+      }
       case 'ocr': ocr ||= require('./ocr'); result = await ocr.recognize(Buffer.from(args[0], 'base64')); break;
       default: throw new Error('Không rõ lệnh ' + method);
     }

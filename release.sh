@@ -133,15 +133,15 @@ fi
 step "Tạo GitHub Release $TAG"
 NOTES="AIVN $VERSION · Phát triển bởi NGUYỄN NGỌC KHÔI SINH VIÊN VLU
 
-Mới ở 0.12.0:
-- Nhìn ảnh thật: mô hình thị giác (Qwen3-VL 2B, Qwen2.5-VL 3B, Gemma 3 4B, SmolVLM 500M) xem trực tiếp ảnh bạn dán/kéo thả, chạy bằng llama-server chính thức của llama.cpp (MIT) đi kèm ứng dụng. Kho mô hình tự tải kèm tệp thị giác (mmproj) và gắn nhãn “Nhìn được ảnh”. Mô hình chỉ có chữ vẫn dùng OCR như trước.
-- Hỏi đáp tài liệu dài bằng tìm kiếm ngữ nghĩa (RAG): chia đoạn ~500 token, nhúng trên máy bằng BGE-M3 (tải khi dùng lần đầu, ~605 MB), chỉ mục riêng cho từng cuộc trò chuyện, ghi nguồn “Trích từ: tệp, đoạn n” dưới câu trả lời. Chưa tải BGE-M3 thì dùng cách tìm theo từ khoá.
-- Máy chủ API: thêm POST /v1/embeddings (tương thích OpenAI).
-- Đổi giao diện Sáng/Tối mượt (hiệu ứng lan tròn từ nút bấm, tôn trọng “giảm chuyển động”), không còn nháy màu khi mở ứng dụng.
-- Mục “Khám phá” đổi tên thành “Kho mô hình”.
-- Windows: chế độ nhìn ảnh cần Microsoft Visual C++ Redistributable 2015–2022 (x64); AIVN báo và mở trang tải chính thức của Microsoft nếu máy chưa có.
+Mới ở 0.13.0 – Trợ lý (chạy hoàn toàn trên mô hình cục bộ):
+- Trợ lý tự gọi công cụ nhiều bước: máy tính, ngày giờ, đọc/liệt kê/ghi tệp (cả PDF, DOCX) chỉ trong thư mục bạn cho phép, chạy JavaScript trong hộp cát (không đọc tệp, không vào mạng, tối đa 3 giây), Python nếu máy có. Xoá hoặc ghi đè tệp luôn hỏi bằng hộp thoại tiếng Việt; xoá là chuyển vào Thùng rác.
+- Tìm kiếm web và đọc trang (DuckDuckGo, dự phòng Wikipedia) chỉ khi bạn bật “Cho phép truy cập mạng”; mọi địa chỉ đã mở được ghi dưới câu trả lời. Chặn địa chỉ nội bộ/LAN.
+- Mỗi bước hiện thành thẻ thu gọn (công cụ, đầu vào, kết quả), có nút Dừng; cảnh báo khi mô hình quá nhỏ để dùng công cụ (gợi ý Qwen3 4B/8B, Gemma 3 4B trở lên). Kho mô hình gắn nhãn “Hợp cho Trợ lý”.
+- Ghi nhớ: Trợ lý lưu điều bạn muốn nó nhớ, trang Ghi nhớ để xem/sửa/xoá; điều liên quan được đưa vào lời nhắc (theo ý nghĩa bằng BGE-M3 nếu đã tải, nếu không thì theo từ khoá).
+- Lịch tự động: lời nhắc và việc định kỳ cho Trợ lý (một lần, hằng ngày, hằng tuần), thông báo của hệ điều hành, kết quả lưu thành cuộc trò chuyện; tuỳ chọn chạy nền trong khay hệ thống và mở cùng máy.
+- Máy chủ API: /v1/chat/completions hỗ trợ tools / tool_choice (gọi hàm kiểu OpenAI, cả khi stream) và response_format json_schema / json_object.
 
-Vẫn có: logo rồng và giao diện đỏ–trắng; Kho mô hình tìm mọi GGUF trên Hugging Face, 29 gợi ý đã kiểm tra; tải có hàng đợi và tải tiếp; dán ảnh và OCR tiếng Việt; máy chủ API tương thích OpenAI; tự động cập nhật.
+Vẫn có: nhìn ảnh bằng mô hình thị giác; hỏi đáp tài liệu dài (RAG, BGE-M3); /v1/embeddings; logo rồng và giao diện đỏ–trắng; Kho mô hình tìm mọi GGUF trên Hugging Face, 29 gợi ý đã kiểm tra; tải có hàng đợi và tải tiếp; dán ảnh và OCR tiếng Việt; máy chủ API tương thích OpenAI; tự động cập nhật.
 
 Tải về:
 - Windows 10/11: AIVN-Setup.exe
