@@ -340,7 +340,7 @@ function renderMessages() {
     const ag = m.role === 'assistant' && (m.steps || m.agent);
     const extra = m.role === 'assistant' ? webSrcHtml(m) + (m.memories && m.memories.length ? `<div class="mem-used" title="${esc(m.memories.join('\n'))}">🧠 Đã dùng ${m.memories.length} ghi nhớ liên quan</div>` : '') : '';
     const sched = m.scheduled ? `<div class="sched-tag">⏰ Lịch tự động · ${new Date(m.scheduled.at).toLocaleString('vi-VN')}${m.scheduled.late ? ' · chạy bù (trễ)' : ''}${m.scheduled.manual ? ' · chạy thủ công' : ''}</div>` : '';
-    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN AGENT' : 'AIVN'}${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions"><button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning ? `<div class="no-action" role="alert"><b>⚠ Chưa có việc nào được làm</b><span>${esc(m.warning)}</span><button type="button" class="btn sm" data-rec-go="1">Mở Kho mô hình</button></div>` : ''}${srcs}${extra}${sched}${copyBtn}</div>${warn}`;
+    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN AGENT' : 'AIVN'}${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions">${/cần nhiều ngữ cảnh hơn|ngữ cảnh[^.]*quá nhỏ/i.test(m.content || '') ? '<button type="button" class="btn sm primary" data-ctx-grow="1">Tăng ngữ cảnh</button>' : ''}<button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning ? `<div class="no-action" role="alert"><b>⚠ Chưa có việc nào được làm</b><span>${esc(m.warning)}</span><button type="button" class="btn sm" data-rec-go="1">Mở Kho mô hình</button></div>` : ''}${srcs}${extra}${sched}${copyBtn}</div>${warn}`;
   }).join('');
   box.scrollTop = box.scrollHeight;
 }
@@ -526,7 +526,7 @@ $('#composer').addEventListener('submit', async (e) => {
     if (r !== reqId) return; reply.content += t;
     if (!rafPending) { rafPending = true; requestAnimationFrame(() => { rafPending = false; bodyEl.innerHTML = md(reply.content); const box = $('#messages'); box.scrollTop = box.scrollHeight; }); }
   });
-  const offRec = A.onChatRecover((x) => { if (x.reqId !== reqId) return; reply.content = ''; bodyEl.innerHTML = ''; $('#genStats').textContent = `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${x.ctx}) và thử lại…`; });
+  const offRec = A.onChatRecover((x) => { if (x.reqId !== reqId) return; reply.content = ''; bodyEl.innerHTML = ''; $('#genStats').textContent = x.grow ? `Ngữ cảnh chưa đủ — đang nạp lại mô hình với ngữ cảnh ${Number(x.ctx).toLocaleString('vi-VN')}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${x.ctx}) và thử lại…`; });
   try {
     const r = await A.generate({ reqId, convoId: conv.id, messages: history, temperature: s.temperature, maxTokens: s.maxTokens,
       docs: docsToSend.filter(a => !(vision && a.kind === 'image' && a.vis)).map(a => ({ name: a.name, text: a.text, kind: a.kind, pages: a.pages })),
@@ -549,7 +549,7 @@ $('#stopBtn').addEventListener('click', () => { if (!state.generating) return; i
 function bindSettings() {
   const s = state.settings;
   $('#sysPrompt').value = s.systemPrompt; $('#temp').value = s.temperature; $('#tempOut').textContent = s.temperature;
-  $('#maxTok').value = s.maxTokens; $('#ctxSize').value = String(s.contextSize); paintPerf();
+  $('#maxTok').value = s.maxTokens; $('#ctxSize').value = String(s.contextSize ? Math.max(4096, s.contextSize) : 8192); paintPerf();
   $('#srvPort').value = s.apiPort; $('#srvAuto').checked = !!s.apiAutoStart;
   const save = async (patch) => { state.settings = await A.setSettings(patch); };
   $('#sysPrompt').addEventListener('change', e => save({ systemPrompt: e.target.value }));
@@ -791,7 +791,7 @@ async function sendAgent(text) {
     if (st.stage === 'ask') setPhase('ask');
     if (st.stage === 'act' || st.stage === 'tools') setPhase('act');
     if (st.stage === 'think') $('#genStats').textContent = st.round ? `Đang suy nghĩ… (bước ${st.round + 1})` : 'Đang suy nghĩ…';
-    if (st.stage === 'recover') { reply.content = ''; reply.steps = []; paintBody(); paintSteps(); $('#genStats').textContent = `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${st.ctx}) và thử lại…`; return; }
+    if (st.stage === 'recover') { reply.content = ''; reply.steps = []; paintBody(); paintSteps(); $('#genStats').textContent = st.grow ? `Ngữ cảnh chưa đủ cho yêu cầu này — đang nạp lại mô hình với ngữ cảnh ${Number(st.ctx).toLocaleString('vi-VN')}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${st.ctx}) và thử lại…`; return; }
     if (st.stage === 'verify') { reply.content = ''; paintBody(); $('#genStats').textContent = 'Đang kiểm tra lại: câu trả lời chưa khớp với các bước đã làm…'; }
   });
   try {
@@ -1550,3 +1550,21 @@ document.addEventListener('pointerdown', (e) => { if (chipPop && !e.target.close
 window.addEventListener('resize', closeChipPop);
 
 $('#messages').addEventListener('click', (e) => { if (e.target.closest('[data-rec-go]')) show('discover'); });
+
+// 0.15.2: lỗi thiếu ngữ cảnh → nút "Tăng ngữ cảnh": nạp lại mô hình đang dùng với ngữ cảnh gấp đôi (tối đa 32768)
+const CTX_ERR_UI = /cần nhiều ngữ cảnh hơn|ngữ cảnh[^.]*quá nhỏ/i;
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-ctx-grow]'); if (!b) return;
+  const st = state.status || {}; const id = st.id || (state.settings && state.settings.lastModel);
+  if (!id) { toast('Hãy nạp một mô hình trước', true); return; }
+  const have = Number(st.contextSize) || Number(state.settings && state.settings.contextSize) || 4096;
+  const next = [8192, 16384, 32768].find(n => n > have) || 32768;
+  b.disabled = true; b.textContent = `Đang nạp lại với ngữ cảnh ${next.toLocaleString('vi-VN')}…`;
+  try {
+    state.settings = await A.setSettings({ contextSize: next });
+    const sel = $('#ctxSize'); if (sel && [...sel.options].some(o => Number(o.value || o.textContent) === next)) sel.value = String(next);
+    await A.unloadModel();
+    if (await loadModel(id)) toast(`Đã tăng ngữ cảnh lên ${Number((state.status || {}).contextSize || next).toLocaleString('vi-VN')} token. Hãy gửi lại tin nhắn.`);
+  } catch (err) { toast(cleanErr(err.message), true); }
+  b.disabled = false; b.textContent = 'Tăng ngữ cảnh';
+});
