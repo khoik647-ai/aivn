@@ -131,6 +131,16 @@ function createVisionServer({ log = () => {} } = {}) {
   async function textStep(messages, { tools = [], toolChoice = 'auto', responseFormat = null, ...opts }) {
     const offer = toolChoice === 'none' ? [] : tools;
     const extra = {};
+    const forced = offer.length && toolChoice && toolChoice !== 'auto' ? (typeof toolChoice === 'object' ? offer.filter(t => t.name === toolChoice.name) : offer) : null;
+    if (forced && forced.length) {
+      // buộc gọi công cụ: ràng buộc đầu ra JSON {"name","arguments"} bằng json_schema của llama-server
+      const schema = { oneOf: forced.map(t => ({ type: 'object', properties: { name: { const: t.name }, arguments: t.parameters && t.parameters.properties && Object.keys(t.parameters.properties).length ? t.parameters : { type: 'object' } }, required: ['name', 'arguments'] })) };
+      const note = { role: 'user', content: 'Chỉ trả lời bằng MỘT đối tượng JSON {"name": "<tên công cụ>", "arguments": {…}} để gọi một công cụ trong danh sách.' };
+      const r = await stream({ response_format: { type: 'json_schema', json_schema: { name: 'call', schema } } }, TP.normalizeMessages([...messages, note], { tools: forced }), { ...opts, onToken: null });
+      let j = null; try { j = JSON.parse(r.text); } catch {}
+      if (j && typeof j.name === 'string') return { ...r, text: '', toolCalls: [{ id: 'call_' + crypto.randomBytes(9).toString('hex'), name: j.name, arguments: j.arguments || {} }], finishReason: 'tool_calls' };
+      return r;
+    }
     if (responseFormat) extra.response_format = responseFormat.type === 'json_schema' ? { type: 'json_schema', json_schema: { name: 'output', schema: responseFormat.schema || {} } } : { type: 'json_object' };
     const f = TP.streamFilter(opts.onToken);
     const r = await stream(extra, TP.normalizeMessages(messages, { tools: offer }), { ...opts, onToken: (t) => f.push(t) });

@@ -26,8 +26,18 @@ function toolPrompt(tools) {
     'Muốn gọi công cụ, trả lời CHỈ bằng một hoặc vài khối đúng dạng sau rồi dừng, không viết gì thêm:',
     '<tool_call>{"name": "tên_công_cụ", "arguments": {…}}</tool_call>',
     'Kết quả sẽ được gửi lại trong khối <tool_result name="…">…</tool_result>. Khi đã đủ thông tin, trả lời người dùng bình thường bằng tiếng Việt, không dùng khối <tool_call>.',
-    'Không bao giờ bịa kết quả công cụ; không nói đã làm khi chưa nhận được <tool_result>.',
+    'Không bao giờ bịa kết quả công cụ; không nói đã làm khi chưa nhận được <tool_result>. Không viết bước giả kiểu "[screen,act] …" hay "[open_app] …": muốn làm gì thì phải xuất khối <tool_call>.',
+    ...examples(tools.map(t => t.name)),
   ].join('\n');
+}
+
+function examples(names) {
+  const ex = [];
+  if (names.includes('open_app')) ex.push('Người dùng: mở máy tính giúp tôi', 'Bạn: <tool_call>{"name": "open_app", "arguments": {"name": "Calculator"}}</tool_call>');
+  if (names.includes('calculator')) ex.push('Người dùng: 15% của 2.350.000 là bao nhiêu?', 'Bạn: <tool_call>{"name": "calculator", "arguments": {"expression": "15% * 2350000"}}</tool_call>');
+  if (names.includes('screen_act')) ex.push('Người dùng: bấm nút Gửi', 'Bạn: <tool_call>{"name": "screen_act", "arguments": {"action": "click", "target": "nút Gửi"}}</tool_call>');
+  if (!ex.length && names.length) ex.push('Người dùng: (một yêu cầu cần công cụ)', `Bạn: <tool_call>{"name": "${names[0]}", "arguments": {}}</tool_call>`);
+  return ex.length ? ['', 'Ví dụ:', ...ex, 'Sau khi nhận <tool_result>, trả lời người dùng dựa trên kết quả đó.'] : [];
 }
 
 const callText = (c) => `<tool_call>${JSON.stringify({ name: c.function ? c.function.name : c.name, arguments: (() => { const a = c.function ? c.function.arguments : c.arguments; if (typeof a === 'string') { try { return JSON.parse(a); } catch { return a; } } return a ?? {}; })() })}</tool_call>`;

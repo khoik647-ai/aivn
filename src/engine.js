@@ -1,6 +1,7 @@
 // Bộ máy suy luận: bọc node-llama-cpp
 const path = require('path');
 const os = require('os');
+const TP = require('./agent/textproto');
 
 let lib = null;           // module node-llama-cpp (ESM)
 let llama = null;         // instance Llama
@@ -151,7 +152,7 @@ async function unloadModel() {
 
 function status() {
   if (visionOn) { const v = getVision().status(); if (v) return { loaded: true, id: v.id, path: v.path, contextSize: v.contextSize, vision: true, gpu: llama && llama.gpu }; }
-  return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: !!loading };
+  return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: !!loading };
 }
 
 // Một chuỗi ngữ cảnh dùng lại giữa các lượt (giữ bộ nhớ đệm KV: lượt sau chỉ tính phần mới của lời nhắc)
@@ -251,16 +252,33 @@ function toChatHistory(messages) {
   return items;
 }
 
+// Mô hình đang nạp có gọi công cụ gốc không? (theo bộ bọc chat của node-llama-cpp / mẫu chat trong GGUF)
+function toolModeFor(chat) {
+  if (process.env.AIVN_TOOL_MODE) return process.env.AIVN_TOOL_MODE;
+  if (current.toolMode) return current.toolMode;
+  const name = (chat && chat.chatWrapper && chat.chatWrapper.wrapperName) || '';
+  let mode = 'text';
+  if (/^(Qwen|Llama 3|Functionary|Harmony|Mistral|DeepSeek|Seed)/i.test(name)) mode = 'native';
+  else if (/jinja/i.test(name)) { let tpl = null; try { tpl = current.model.fileInfo.metadata.tokenizer.chat_template; } catch {} mode = TP.analyzeTemplate(tpl).nativeTools ? 'native' : 'text'; }
+  current.toolMode = mode; current.chatWrapper = name;
+  return mode;
+}
+
 function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = null, temperature = 0.7, maxTokens = 1024, topP, signal, onToken } = {}) {
   const run = async () => {
     if (visionOn) return getVision().chatStep(messages, { tools, toolChoice, responseFormat, temperature, maxTokens, topP, signal, onToken });
     if (!current) throw new Error('Chưa nạp mô hình nào.');
     const { LlamaChat } = await getLib();
     const l = await getLlama();
+    const chat = new LlamaChat({ contextSequence: seqFor(current), autoDisposeSequence: false });
+    try {
+    const textMode = toolModeFor(chat) === 'text';
     const forced = tools.length && toolChoice && toolChoice !== 'auto' && toolChoice !== 'none' ? (typeof toolChoice === 'object' ? tools.filter(t => t.name === toolChoice.name) : tools) : null;
     if (forced && !forced.length) throw new Error(`Không có công cụ "${toolChoice.name}" trong "tools"`);
     const useFns = tools.length && toolChoice !== 'none' && !forced && !responseFormat;
-    let history = toChatHistory(messages);
+    // Mô hình không có gọi công cụ gốc (Gemma, Mistral cũ…): giao thức <tool_call> dạng văn bản của AIVN, hội thoại chuẩn hoá xen kẽ
+    const textTools = textMode && tools.length && !forced && !responseFormat;
+    let history = textMode ? toChatHistory(TP.normalizeMessages(messages, { tools: textTools && toolChoice !== 'none' ? tools : [] })) : toChatHistory(messages);
     const hasCalls = history.some(h => h.type === 'model' && h.response.some(r => r && r.type === 'functionCall'));
     const functions = {};
     const noParams = (p) => !p || (p.type === 'object' || !p.type) && (!p.properties || !Object.keys(p.properties).length) && !p.additionalProperties;
@@ -282,20 +300,21 @@ function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = 
     const last = history[history.length - 1];
     if (!last || last.type !== 'model') history.push({ type: 'model', response: [] });
     else if (grammar) history.push({ type: 'user', text: 'Tiếp tục.' }, { type: 'model', response: [] });
-    const chat = new LlamaChat({ contextSequence: seqFor(current), autoDisposeSequence: false });
     const t0 = Date.now();
     let streamed = '';
+    const filt = textTools ? TP.streamFilter(onToken) : null;
     try {
       const opts = { temperature, topP, maxTokens, signal, stopOnAbortSignal: true,
-        onTextChunk: (chunk) => { streamed += chunk; if (!grammar) onToken && onToken(chunk); } };
-      if (useFns || (hasCalls && !grammar)) Object.assign(opts, { functions, documentFunctionParams: true, maxParallelFunctionCalls: 4 });
+        onTextChunk: (chunk) => { streamed += chunk; if (grammar) return; if (filt) filt.push(chunk); else onToken && onToken(chunk); } };
+      if (!textMode && (useFns || (hasCalls && !grammar))) Object.assign(opts, { functions, documentFunctionParams: true, maxParallelFunctionCalls: 4 });
       if (grammar) opts.grammar = grammar;
       const res = await chat.generateResponse(history, opts);
       const stop = res.metadata && res.metadata.stopReason;
       let text = (typeof res.response === 'string' ? res.response : streamed).replace(/^\s+/, '');
       let toolCalls = [];
-      if (useFns || (hasCalls && !grammar)) toolCalls = (res.functionCalls || []).map(fc => ({ id: callId(), name: fc.functionName, arguments: fc.params ?? {} }));
-      if (toolChoice === 'none' || !useFns && !forced) toolCalls = []; // không được phép gọi: bỏ qua
+      if (filt) { filt.end(); if (toolChoice !== 'none') { const pr = TP.parseToolCalls(text, tools.map(t => t.name)); text = pr.text; toolCalls = pr.toolCalls; } }
+      else if (useFns || (hasCalls && !grammar)) toolCalls = (res.functionCalls || []).map(fc => ({ id: callId(), name: fc.functionName, arguments: fc.params ?? {} }));
+      if (toolChoice === 'none' || !useFns && !forced && !textTools) toolCalls = []; // không được phép gọi: bỏ qua
       if (forced) {
         let j = null; try { j = JSON.parse(text); } catch {}
         if (j && typeof j.name === 'string') { toolCalls = [{ id: callId(), name: j.name, arguments: j.arguments ?? {} }]; text = ''; }
@@ -308,6 +327,7 @@ function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = 
     } catch (e) {
       if (signal && signal.aborted) return { text: streamed, toolCalls: [], finishReason: 'abort', usage: { completion_tokens: 0, tokensPerSecond: 0, seconds: (Date.now() - t0) / 1000 } };
       throw e;
+    }
     } finally { chat.dispose({ disposeSequence: false }); }
   };
   const p = queue.then(run, run);
