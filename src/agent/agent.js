@@ -1,6 +1,7 @@
 // AIVN AGENT: vòng lặp gọi công cụ chạy hoàn toàn trên mô hình cục bộ.
 // Mỗi bước: mô hình trả lời hoặc yêu cầu gọi công cụ → AIVN chạy công cụ (có kiểm soát quyền) → đưa kết quả lại cho mô hình.
 const fs = require('fs');
+const AP = require('./approval');
 const { AsyncLocalStorage } = require('async_hooks');
 const runStore = new AsyncLocalStorage(); // dữ liệu riêng của từng lượt chạy (tệp đính kèm được phép đọc)
 // Nhóm công cụ mà người dùng bật/tắt bằng các nút trên đầu AIVN AGENT (tắt = không gửi cho mô hình)
@@ -402,9 +403,15 @@ function createAgent(deps) {
     ];
     if (names.includes('open_app')) lines.push('Máy tính: bạn mở được ứng dụng (open_app, list_apps), tệp/thư mục (open_path), trang web (open_url), xem/đóng ứng dụng đang mở, chạy lệnh terminal (run_command, người dùng duyệt từng lệnh) và thao tác hệ thống (system_action). Hệ điều hành: ' + ({ win32: 'Windows (lệnh chạy bằng PowerShell)', darwin: 'macOS (lệnh chạy bằng zsh)' }[process.platform] || 'Linux') + '. Ưu tiên công cụ chuyên dụng (open_app, open_url…) thay vì run_command. "Mở máy tính" nghĩa là mở ứng dụng Máy tính (Calculator) bằng open_app; Không bao giờ khẳng định một ứng dụng "không có" hay "chưa cài" trên máy; nếu open_app báo không tìm thấy: thử list_apps với từ khoá ngắn (vd. "zalo"), rồi trên Windows thử run_command `cmd /c start "" "<tên>"` (người dùng duyệt lệnh) trước khi bỏ cuộc; cuối cùng mới nói là chưa tìm/mở được và hỏi tên chính xác. KHÔNG tự mở trang web hay tìm trên mạng để thay cho ứng dụng (vd. mở zalo.me thay cho Zalo) khi người dùng chưa đồng ý — hãy hỏi trước. khi người dùng nhờ mở/chạy ứng dụng, hãy GỌI open_app ngay thay vì nói không làm được. Không bao giờ chạy lệnh xoá hàng loạt, tải mã từ mạng về chạy, hay đổi cài đặt bảo mật.');
     else lines.push('Máy tính: các công cụ mở ứng dụng/chạy lệnh đang TẮT (Cài đặt AIVN AGENT → Truy cập máy tính).');
-    if (names.includes('open_app') && !names.includes('screen_act')) lines.push('Gửi tin nhắn, bấm hay gõ trong ứng dụng khác (Zalo, Messenger…) cần bật "Điều khiển màn hình" và nạp mô hình nhìn ảnh; hiện CHƯA có, nên bạn chỉ mở được ứng dụng (open_app) rồi phải nói rõ người dùng tự gõ và gửi.');
-    if (names.includes('screen_act')) lines.push('Nhắn tin cho người khác: mở ứng dụng bằng open_app → screen_look xem màn hình → screen_act tìm người nhận, bấm vào ô chat, gõ nội dung → cuối cùng screen_act bấm nút Gửi (hoặc phím Enter); AIVN sẽ hỏi người dùng duyệt lần cuối trước khi gửi.');
-    if (names.includes('screen_act')) lines.push('Điều khiển màn hình (THỬ NGHIỆM): dùng screen_look để xem màn hình, rồi screen_act cho từng thao tác nhỏ (một cú bấm hoặc một lần gõ). Sau mỗi thao tác hãy screen_look lại để kiểm tra. Người dùng duyệt từng thao tác; nếu họ từ chối hoặc bấm Dừng khẩn cấp thì dừng hẳn.');
+    lines.push(`Công cụ ĐANG BẬT trong lượt này (gọi được ngay): ${names.join(', ') || '(không có)'}. Tuyệt đối không bảo người dùng "bật" hay "cho phép" một công cụ đã có trong danh sách này — cứ gọi nó. Chỉ khi công cụ cần thiết KHÔNG có trong danh sách mới nói người dùng bật trong Cài đặt AIVN AGENT.`);
+    if (names.includes('open_app') && !names.includes('screen_act')) lines.push('Gửi tin nhắn, bấm hay gõ trong ứng dụng khác (Zalo, Messenger…) cần bật "Điều khiển màn hình" (Cài đặt AIVN AGENT); hiện ĐANG TẮT, nên bạn chỉ mở được ứng dụng (open_app) rồi phải nói rõ người dùng tự gõ và gửi, hoặc bật Điều khiển màn hình.');
+    if (names.includes('screen_act')) lines.push(
+      'Điều khiển máy tính (bạn thao tác như người dùng thật, từng bước nhỏ):',
+      '1) Mở ứng dụng bằng open_app (hoặc screen_act focus_window nếu đã mở). 2) screen_look để lấy danh sách phần tử [eN]. 3) screen_act MỘT thao tác với element = id [eN] trong danh sách MỚI NHẤT (không đoán id, không dùng id cũ). 4) Đọc phần "Kiểm tra" và danh sách mới trong kết quả rồi làm bước tiếp. Lặp lại tới khi xong.',
+      'Gõ chữ: screen_act type_text (element = ô cần gõ; nếu ô đang được chọn sẵn — vd. tài liệu vừa mở có con trỏ nhấp nháy — thì bỏ element). Phím tắt: hotkey ("ctrl+s", "enter", "ctrl+f"). Không thấy phần tử: screen_look với query, hoặc scroll, hoặc wait 1-2 giây cho ứng dụng tải xong.',
+      'Ưu tiên phím tắt thay vì tìm biểu tượng: lưu = hotkey "ctrl+s" (Lưu thành… = "ctrl+shift+s"), mở tệp "ctrl+o", tạo mới "ctrl+n", hoàn tác "ctrl+z", chọn hết "ctrl+a", tìm "ctrl+f". Hộp thoại lưu tệp: ô Tên tệp thường đã được chọn sẵn → type_text tên tệp (có thể kèm đường dẫn đầy đủ, vd. "' + require('path').join(require('os').homedir(), 'Documents', 'ten-tep') + '") rồi hotkey "enter"; hỏi "giữ định dạng?" thì chọn nút giữ định dạng hiện tại. Không bấm "Close"/"Đóng" khi chưa xong việc.',
+      'Nhắn tin (Zalo, Messenger…): mở ứng dụng → bấm ô tìm kiếm → type_text tên người → chọn đúng người trong kết quả → bấm ô soạn tin → type_text nội dung → hotkey "enter" để gửi (AIVN luôn hỏi người dùng trước khi gửi). Người dùng nói "hỏi trước khi gửi" thì dừng ở bước gửi để họ duyệt.',
+      'Không bao giờ gõ mật khẩu, mã PIN, OTP. Nếu người dùng từ chối một bước (có thể kèm lý do), làm theo góp ý hoặc dừng và hỏi. Khi xong, báo ngắn gọn đã làm gì và đã kiểm tra thấy gì; không nói đã làm nếu kết quả kiểm tra chưa xác nhận.');
     if (names.includes('save_memory')) lines.push('Ghi nhớ: khi người dùng chia sẻ thông tin bền vững về họ (tên, sở thích, công việc, thói quen) hoặc bảo "hãy nhớ", gọi save_memory với một câu ngắn ở ngôi thứ ba.');
     const att = (runStore.getStore() || {}).attachments || [];
     if (att.length) lines.push('', 'Tệp người dùng đính kèm trong lượt này (nội dung đã có trong tin nhắn; đọc thêm bằng read_file với đường dẫn đầy đủ):', ...att.map(f => `- ${f.path}`));
@@ -415,7 +422,7 @@ function createAgent(deps) {
 
   // messages: lịch sử kiểu OpenAI (không có system). Trả { text, steps, usage, finishReason, urls, memories }
   function run(args) { return runStore.run({ attachments: (args && args.attachments) || [] }, () => runInner(args)); }
-  async function runInner({ messages, convoId = null, signal, onToken = () => {}, onStep = () => {}, onStatus = () => {}, headless = false, confirm, confirmScreen }) {
+  async function runInner({ messages, convoId = null, signal, onToken = () => {}, onStep = () => {}, onStatus = () => {}, headless = false, confirm, confirmScreen, approve = null }) {
     const s = S_();
     const names = activeTools({ headless });
     const att = (runStore.getStore() || {}).attachments || [];
@@ -429,7 +436,7 @@ function createAgent(deps) {
     if (san.hidden) deps.log && deps.log(`[aivn agent] ẩn ${san.hidden} câu trả lời cũ khẳng định ứng dụng chưa cài`);
     const msgs = [{ role: 'system', content: sys.text }, ...san.messages];
     const st = deps.engine.status();
-    const ctx = { signal, convoId, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
+    const ctx = { signal, convoId, userQuery: query, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
     const steps = [], seen = new Map();
     let text = '', finishReason = 'stop', calls = 0, nudged = false, forcedTried = false, warning = null, fakeSeen = false;
     const usage = { completion_tokens: 0, seconds: 0 };
@@ -458,8 +465,9 @@ function createAgent(deps) {
     }
     // yêu cầu thao tác trên máy mà chưa có bước thật nào thành công → lượt đầu BẮT BUỘC gọi công cụ (hoặc cannot_do)
     const forceFirst = !headless && names.some(n => COMP.includes(n)) && !(autoOpen && autoOpen.ok) && (!!intent || /^\s*(?:(?:hãy|giúp (?:tôi|mình|em)|làm ơn|vui lòng|bạn)\s+)*(mở|khởi động|gửi tin|nhắn tin|nhắn cho|gửi cho|đóng|tắt ứng dụng)(?=\s|$)/iu.test(query));
-    for (let round = 0; round < MAX_ROUNDS; round++) {
-      const last = round === MAX_ROUNDS - 1 || calls >= MAX_CALLS;
+    const desk = names.includes('screen_act'); const maxRounds = desk ? 45 : MAX_ROUNDS, maxCalls = desk ? 60 : MAX_CALLS; // điều khiển máy cần nhiều bước nhỏ (quan sát → làm → kiểm tra)
+    for (let round = 0; round < maxRounds; round++) {
+      const last = round === maxRounds - 1 || calls >= maxCalls;
       onStatus({ stage: 'think', round });
       let streamed = '';
       const forcing = round === 0 && forceFirst && !last;
@@ -481,7 +489,7 @@ function createAgent(deps) {
       if (!r.toolCalls || !r.toolCalls.length) {
         const fake = r.finishReason === 'abort' ? null : fakeActionCheck(r.text, steps, names, query);
         if (fake) fakeSeen = true;
-        const nudge = !nudged && round < MAX_ROUNDS - 2 ? (claimCheck(query, r.text || '', steps, names) || (fake ? FAKE_NUDGE : null)) : null;
+        const nudge = !nudged && round < maxRounds - 2 ? (claimCheck(query, r.text || '', steps, names) || (fake ? FAKE_NUDGE : null)) : null;
         if (nudge) { nudged = true; msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: nudge }); onStatus({ stage: 'verify', round, discarded: r.text || '' }); continue; }
         if (fake && !forcedTried && names.length && !signal?.aborted) {
           // lần cuối: buộc mô hình chọn MỘT công cụ thật hoặc cannot_do (sinh có ràng buộc ngữ pháp JSON)
@@ -514,15 +522,31 @@ function createAgent(deps) {
         const sig = call.name + ':' + JSON.stringify(args);
         try {
           if (!names.includes(call.name)) throw new ToolError(`Công cụ "${call.name}" không có hoặc chưa được bật.`);
-          if (seen.has(sig) && !['get_datetime'].includes(call.name)) { out = { ...seen.get(sig), forModel: seen.get(sig).forModel + '\n(Bạn đã gọi đúng công cụ này với cùng tham số; đây là kết quả cũ. Hãy dùng nó và tiếp tục.)', summary: '(lặp lại) ' + seen.get(sig).summary }; }
-          else { out = await exec(call.name, args, ctx); seen.set(sig, out); }
+          if (seen.has(sig) && !['get_datetime', 'screen_look', 'screen_act', 'read_screen_text', 'list_apps', 'running_apps'].includes(call.name)) { out = { ...seen.get(sig), forModel: seen.get(sig).forModel + '\n(Bạn đã gọi đúng công cụ này với cùng tham số; đây là kết quả cũ. Hãy dùng nó và tiếp tục.)', summary: '(lặp lại) ' + seen.get(sig).summary }; }
+          else {
+            // Thẻ xin phép chung: công cụ có tác động (ghi/xoá tệp, chạy mã/lệnh, MCP…) — trừ khi người dùng đã chọn "Luôn cho phép"
+            let ctxRun = ctx; let refusedOut = null;
+            if (approve && !headless && AP.needsApproval(call.name) && !(AP.policy(call.name).allowAlways && (S_().agentAlwaysAllow || []).includes(call.name))) {
+              const card = AP.buildCard(call.name, args, { label: step.label, icon: step.icon, resolvePath: (p, o) => resolvePath(p, o) });
+              step.status = 'asking'; onStep({ ...step }); onStatus({ stage: 'ask', round, tool: call.name });
+              const ans = await approve(card);
+              if (!ans || !ans.ok) refusedOut = { refused: true, forModel: AP.refusalText(card, ans && ans.reason), summary: 'Bạn từ chối' + (ans && ans.reason ? `: “${String(ans.reason).slice(0, 80)}”` : '') };
+              else {
+                if (ans.always && card.allowAlways && deps.allowAlways) deps.allowAlways(call.name);
+                ctxRun = { ...ctx, confirm: async () => true, preApproved: true };
+                step.status = 'running'; onStep({ ...step }); onStatus({ stage: 'act', round, tool: call.name });
+              }
+            }
+            if (refusedOut) out = refusedOut;
+            else { out = await exec(call.name, args, ctxRun); seen.set(sig, out); }
+          }
         } catch (e) {
           const userErr = e instanceof ToolError || (deps.computer && e instanceof deps.computer.CompError);
           const msg = userErr ? e.message : (e && e.message) || String(e);
           out = { error: msg, forModel: `Lỗi: ${msg}`, summary: msg };
           if (!userErr) deps.log && deps.log(`[aivn agent] ${call.name} lỗi: ${msg}`);
         }
-        Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, ms: Date.now() - step.startedAt });
+        Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, ms: Date.now() - step.startedAt });
         logTool(step);
         onStep({ ...step });
         msgs.push({ role: 'tool', tool_call_id: call.id, content: typeof out.forModel === 'string' && out.forModel ? out.forModel : String(out.forModel ?? out.message ?? out.summary ?? JSON.stringify(out)) || '(không có kết quả)' });

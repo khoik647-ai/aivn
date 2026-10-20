@@ -47,6 +47,31 @@ async function recognize(image) {
   } finally { scheduleIdle(); }
 }
 
+// Chữ kèm vị trí (từng dòng): dùng để mô hình không nhìn ảnh vẫn bấm được vào chữ trên màn hình
+async function recognizeLines(image, { minConf = 45 } = {}) {
+  const w = await getWorker();
+  try {
+    const { data } = await w.recognize(Buffer.from(image), {}, { blocks: true, text: true });
+    const lines = [];
+    for (const b of data.blocks || []) for (const p of b.paragraphs || []) for (const l of p.lines || []) {
+      // tách dòng thành các cụm chữ cách xa nhau (vd. các nút trên thanh công cụ nằm cùng một dòng)
+      const words = (l.words || []).filter(wd => String(wd.text || '').trim());
+      const lh = Math.max(8, l.bbox.y1 - l.bbox.y0); const segs = []; let cur = null;
+      for (const wd of words) {
+        if (!cur || wd.bbox.x0 - cur.x1 > lh * 0.9) { cur = { words: [], x0: wd.bbox.x0, y0: wd.bbox.y0, x1: wd.bbox.x1, y1: wd.bbox.y1, conf: 0 }; segs.push(cur); }
+        cur.words.push(wd.text); cur.x1 = Math.max(cur.x1, wd.bbox.x1); cur.y0 = Math.min(cur.y0, wd.bbox.y0); cur.y1 = Math.max(cur.y1, wd.bbox.y1); cur.conf += wd.confidence || 0;
+      }
+      if (!words.length) segs.push({ words: [l.text], x0: l.bbox.x0, y0: l.bbox.y0, x1: l.bbox.x1, y1: l.bbox.y1, conf: (l.confidence || 0) });
+      for (const sg of segs) {
+        const t = sg.words.join(' ').replace(/\s+/g, ' ').trim(); const conf = words.length ? sg.conf / sg.words.length : sg.conf;
+        if (!t || conf < minConf || t.replace(/[^\p{L}\p{N}]/gu, '').length < 2) continue;
+        lines.push({ text: t.slice(0, 160), conf: Math.round(conf), box: [sg.x0, sg.y0, sg.x1 - sg.x0, sg.y1 - sg.y0] });
+      }
+    }
+    return { text: String(data.text || '').trim(), lines };
+  } finally { scheduleIdle(); }
+}
+
 async function terminate() { clearTimeout(idleTimer); const w = workerP; workerP = null; try { (await w)?.terminate(); } catch {} }
 
-module.exports = { recognize, terminate };
+module.exports = { recognize, recognizeLines, terminate };

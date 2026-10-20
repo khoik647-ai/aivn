@@ -54,6 +54,21 @@
         <div class="doc-warn offer rag-offer" id="sysNotice" hidden></div>
         <div class="doc-warn offer rag-offer" id="ragOffer" hidden></div>
         <div class="chips" id="chips" hidden></div>
+        <div class="phase-strip" id="phaseStrip" hidden aria-live="polite"><span data-ph="think">Nghĩ</span><i>→</i><span data-ph="ask">Xin phép</span><i>→</i><span data-ph="act">Làm</span><i>→</i><span data-ph="done">Kết quả</span></div>
+        <section class="approve-card" id="approveCard" hidden role="alertdialog" aria-labelledby="apTitle">
+          <div class="ap-head"><span class="ap-icon" id="apIcon">🔧</span><div><b id="apTitle"></b><div class="muted small" id="apSub"></div></div></div>
+          <table class="ap-fields" id="apFields"></table>
+          <pre class="ap-preview" id="apPreview" hidden></pre>
+          <pre class="ap-diff" id="apDiff" hidden></pre>
+          <div class="ap-reason" id="apReasonBox" hidden><textarea id="apReason" rows="2" maxlength="500" placeholder="Lý do / góp ý cho AIVN AGENT (vd. “đặt tên tệp là tom-tat.md”)…"></textarea></div>
+          <label class="ap-always small" id="apAlwaysRow" hidden><input type="checkbox" id="apAlways"> Luôn cho phép công cụ này</label>
+          <div class="ap-warn small" id="apWarn" hidden></div>
+          <div class="ap-actions">
+            <button type="button" class="btn primary" id="apAllow" title="Ctrl+Enter">Cho phép <kbd>Ctrl+Enter</kbd></button>
+            <button type="button" class="btn" id="apDeny" title="Esc">Từ chối <kbd>Esc</kbd></button>
+            <button type="button" class="btn ghost" id="apDenyReason">Từ chối kèm lý do</button>
+          </div>
+        </section>
         <form class="composer" id="composer">
           <button type="button" class="btn icon" id="attachBtn" title="Đính kèm tệp (PDF có lớp chữ, DOCX, TXT, MD, CSV, JSON, mã nguồn, ảnh · tối đa 20 MB)" aria-label="Đính kèm tệp">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.4 11.6-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
@@ -76,9 +91,20 @@
           <label class="check toggle"><input type="checkbox" id="agPy"> <span><b>🐍 Cho phép chạy Python</b><small id="agPyNote">Đang kiểm tra Python trên máy…</small></span></label>
           <label class="check toggle"><input type="checkbox" id="agMem"> <span><b>🧠 Cho phép ghi nhớ</b><small id="agMemNote">AIVN AGENT lưu điều cần nhớ lâu dài và tự nhắc lại khi liên quan.</small></span></label>
           <div class="set-block comp-block">
+            <div class="always-box small" id="alwaysBox" hidden><b>✅ Luôn cho phép (không hỏi lại):</b> <span class="muted">bấm × để AIVN AGENT hỏi lại trước khi dùng.</span><div class="always-list" id="alwaysList"></div></div>
             <label class="check toggle"><input type="checkbox" id="agComp"> <span><b>💻 Truy cập máy tính</b><small>Mở ứng dụng, tệp, thư mục, trang web; xem/đóng ứng dụng; chạy lệnh terminal; khoá màn hình, âm lượng… Chạy lệnh, đóng ứng dụng, tắt máy luôn hỏi bạn trước. Lệnh nguy hiểm (xoá hàng loạt, định dạng ổ đĩa, tải mã về chạy, quyền quản trị) bị chặn.</small></span></label>
             <label class="check toggle sub"><input type="checkbox" id="agAutoRO"> <span><b>Không hỏi lại với lệnh chỉ đọc</b><small>Ví dụ dir, ls, ipconfig, git status. Mặc định tắt: mọi lệnh đều hiện thẻ duyệt.</small></span></label>
-            <label class="check toggle"><input type="checkbox" id="agScreen"> <span><b>🖱 Điều khiển màn hình <em class="beta">Thử nghiệm</em></b><small id="agScreenNote">AIVN AGENT chụp màn hình, mô hình nhìn ảnh đề xuất chỗ bấm; mỗi cú bấm/gõ hiện thẻ có khung đỏ để bạn duyệt. Cần mô hình nhìn ảnh. Dừng khẩn cấp: Ctrl+Alt+Q.</small></span></label>
+            <label class="check toggle"><input type="checkbox" id="agScreen"> <span><b>🖱 Điều khiển màn hình <em class="beta">Thử nghiệm</em></b><small id="agScreenNote">AIVN AGENT tự mở ứng dụng và bấm/gõ từng bước như bạn. Dừng: Esc hoặc Ctrl+Alt+Q.</small></span></label>
+            <div class="screen-opts" id="agScreenOpts" hidden>
+              <label class="small">Xin phép <select id="agScreenMode"><option value="each">Hỏi từng bước</option><option value="important">Chỉ hỏi bước quan trọng</option></select></label>
+              <label class="small grounder-row">Mô hình định vị (tuỳ chọn) <select id="agGrounder"><option value="">Không dùng — chỉ cây giao diện + đọc chữ</option></select>
+                <small class="muted">Chế độ hai mô hình: mô hình đang chat (vd. Qwen3 4B/8B) lập kế hoạch; mô hình định vị nhìn ảnh (Holo, UI-TARS, Qwen-VL) chỉ tìm toạ độ khi cửa sổ không cho biết vị trí nút. Holo/UI-TARS định vị tốt nhưng lập kế hoạch kém — đừng dùng chúng làm mô hình chat. Cần thêm RAM/VRAM để chạy song song.</small></label>
+              <div class="bench-box" id="benchBox"><b>📏 Đo Điểm tác vụ trên máy này</b>
+                <small class="muted">AIVN mở một cửa sổ thử “AIVN Bench” và để mô hình tự làm 10 việc có kịch bản (mở ứng dụng, bấm nút có tên, gõ tiếng Việt, đọc chữ, nhấp đúp…) + 1 bài an toàn (phải hỏi trước khi gửi). Chấm điểm tự động bằng trạng thái thật của cửa sổ. Mất khoảng 10–40 phút; đừng dùng chuột/bàn phím trong lúc đo (Esc để dừng).</small>
+                <div class="row wrap"><select id="benchModel" aria-label="Mô hình cần đo"></select><button type="button" class="btn sm" id="benchRun">Bắt đầu đo</button><button type="button" class="btn sm" id="benchStop" hidden>Dừng</button></div>
+                <div class="bench-res" id="benchRes"></div></div>
+              <label class="small">Tối đa <select id="agScreenBudget"><option>20</option><option>40</option><option>60</option><option>100</option></select> thao tác mỗi lượt</label>
+            </div>
             <div class="perm-guide" id="permGuide" hidden></div>
           </div>
 <div class="set-block diag-block">
@@ -174,7 +200,7 @@
           <div class="row between"><h3>Gợi ý của AIVN</h3><div class="fam-filter" id="famFilter"></div></div>
           <section id="screenArea" class="screen-area" hidden>
             <h3>🖥 Mô hình điều khiển máy tính</h3>
-            <p class="muted small">Nhìn được màn hình (👁) và gọi công cụ tốt: dùng cho “Điều khiển màn hình” của AIVN AGENT (mở ứng dụng, tìm nút, bấm/gõ — bạn duyệt từng thao tác). Mỗi mô hình ở đây đã được AIVN kiểm tra thật: nạp được, đọc đúng ảnh, chỉ đúng nút trên ảnh chụp màn hình và gọi công cụ.</p>
+            <p class="muted small">AIVN AGENT điều khiển máy bằng <b>hai vai</b>: <b>🧠 Lập kế hoạch</b> — một mô hình chữ gọi công cụ tốt (Qwen3 4B/8B) đọc danh sách nút/ô của cửa sổ qua Trợ năng của hệ điều hành và quyết định bước tiếp; <b>🎯 Định vị</b> (tuỳ chọn, chế độ hai mô hình) — một mô hình nhìn ảnh (Holo1.5, UI-TARS, Qwen-VL) chỉ ra toạ độ khi danh sách thiếu nút. Nhãn ⭐ Gợi ý chỉ dành cho mô hình đã qua bài đo thật (<b>Điểm tác vụ</b> ≥ 7/10 và luôn hỏi trước khi gửi); điểm ghi rõ đo ở đâu.</p>
             <div class="cards" id="screenCards"></div>
             <h3 class="mt">Các mô hình khác</h3>
           </section>

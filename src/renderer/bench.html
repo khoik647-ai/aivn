@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><title>AIVN Bench</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 17px/1.4 "Segoe UI", "Noto Sans", Arial, sans-serif; background: #fff; color: #111; }
+  header { background: #c8102e; color: #fff; padding: 10px 18px; font-size: 20px; font-weight: 600; }
+  nav { display: flex; gap: 6px; padding: 10px 18px 0; border-bottom: 2px solid #ddd; }
+  nav button { border: 1px solid #bbb; border-bottom: none; background: #f3f3f3; padding: 8px 18px; font-size: 17px; border-radius: 6px 6px 0 0; cursor: pointer; }
+  nav button.on { background: #fff; font-weight: 600; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 16px 18px; }
+  label { display: block; margin: 8px 0 3px; font-weight: 600; }
+  input[type=text], textarea { width: 100%; font-size: 17px; padding: 7px 9px; border: 1px solid #888; border-radius: 5px; }
+  textarea { height: 64px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+  .row button, #settings button { font-size: 17px; padding: 8px 16px; border-radius: 6px; border: 1px solid #888; background: #f7f7f7; cursor: pointer; }
+  .code { margin-top: 12px; font-size: 18px; }
+  ul.files { list-style: none; padding: 0; margin: 6px 0; border: 1px solid #ccc; border-radius: 5px; }
+  ul.files li { padding: 6px 10px; border-bottom: 1px solid #eee; cursor: default; user-select: none; }
+  ul.files li.sel { background: #fde3e7; }
+  #products { height: 170px; overflow-y: auto; border: 1px solid #ccc; border-radius: 5px; padding: 4px 10px; }
+  #products div { padding: 3px 0; }
+  #status { padding: 6px 18px; color: #333; font-size: 16px; border-top: 1px solid #ddd; position: fixed; bottom: 0; left: 0; right: 0; background: #fafafa; }
+  #settings { padding: 18px; display: none; }
+  .hidden { display: none !important; }
+</style></head>
+<body>
+<header>AIVN Bench — Quản lý đơn hàng</header>
+<nav><button id="tabOrder" class="on" aria-label="Đơn hàng">Đơn hàng</button><button id="tabSettings" aria-label="Cài đặt">Cài đặt</button></nav>
+<main id="order">
+  <section>
+    <label for="fName">Họ và tên</label><input type="text" id="fName" aria-label="Họ và tên">
+    <label for="fPhone">Số điện thoại</label><input type="text" id="fPhone" aria-label="Số điện thoại">
+    <label for="fNote">Ghi chú</label><textarea id="fNote" aria-label="Ghi chú"></textarea>
+    <label style="font-weight:400"><input type="checkbox" id="fAgree" aria-label="Đồng ý điều khoản"> Đồng ý điều khoản</label>
+    <div class="row">
+      <button id="bDraft">Lưu nháp</button><button id="bConfirm">Xác nhận đơn</button><button id="bCancel">Huỷ</button><button id="bSend">Gửi đơn hàng</button>
+    </div>
+    <div class="code">Mã đơn hàng: <b id="code">AV-0000</b></div>
+  </section>
+  <section>
+    <div style="font-weight:600">Tài liệu</div>
+    <ul class="files" id="files"><li>Báo cáo quý 1</li><li>Báo cáo quý 2</li><li>Báo cáo quý 3</li><li>Báo cáo quý 4</li></ul>
+    <div style="font-weight:600;margin-top:10px">Danh sách sản phẩm</div>
+    <div id="products"></div>
+  </section>
+</main>
+<div id="settings"><p>Cài đặt thông báo</p><button id="bNotify">Bật thông báo</button> <span id="notifyState">Thông báo: đang tắt</span></div>
+<div id="status">Sẵn sàng</div>
+<script>
+  const $ = (s) => document.querySelector(s);
+  window.benchState = {};
+  const st = (t) => { $('#status').textContent = t; };
+  window.benchReset = (seed) => {
+    const code = 'AV-' + String(1000 + Math.floor(Math.random() * 9000));
+    window.benchState = { clicks: [], code, opened: null, notify: false, loadMore: false, sent: false, seed };
+    for (const id of ['#fName', '#fPhone', '#fNote']) $(id).value = '';
+    $('#fAgree').checked = false; $('#code').textContent = code; $('#notifyState').textContent = 'Thông báo: đang tắt';
+    document.querySelectorAll('#files li').forEach(li => li.classList.remove('sel'));
+    $('#products').innerHTML = Array.from({ length: 24 }, (_, i) => `<div>Sản phẩm số ${i + 1}</div>`).join('') + '<button id="bMore" style="margin:8px 0;font-size:17px;padding:6px 14px">Tải thêm</button>';
+    $('#bMore').onclick = () => { benchState.loadMore = true; st('Đã tải thêm sản phẩm'); };
+    $('#products').scrollTop = 0; tab('order'); st('Sẵn sàng');
+    return code;
+  };
+  window.benchRead = () => ({ ...benchState, name: $('#fName').value, phone: $('#fPhone').value, note: $('#fNote').value, agree: $('#fAgree').checked, scroll: $('#products').scrollTop });
+  function tab(t) { $('#order').classList.toggle('hidden', t !== 'order'); $('#settings').style.display = t === 'settings' ? 'block' : 'none'; $('#tabOrder').classList.toggle('on', t === 'order'); $('#tabSettings').classList.toggle('on', t === 'settings'); }
+  $('#tabOrder').onclick = () => tab('order'); $('#tabSettings').onclick = () => tab('settings');
+  for (const [id, n] of [['#bDraft', 'Lưu nháp'], ['#bConfirm', 'Xác nhận đơn'], ['#bCancel', 'Huỷ']]) $(id).onclick = () => { benchState.clicks.push(n); st('Đã bấm: ' + n); };
+  $('#bSend').onclick = () => { benchState.sent = true; benchState.clicks.push('Gửi đơn hàng'); st('Đã gửi đơn hàng'); };
+  $('#bNotify').onclick = () => { benchState.notify = true; $('#notifyState').textContent = 'Thông báo: đang bật'; st('Đã bật thông báo'); };
+  document.querySelectorAll('#files li').forEach(li => { li.onclick = () => { document.querySelectorAll('#files li').forEach(x => x.classList.remove('sel')); li.classList.add('sel'); }; li.ondblclick = () => { benchState.opened = li.textContent; st('Đã mở: ' + li.textContent); }; });
+  benchReset(0);
+</script>
+</body></html>

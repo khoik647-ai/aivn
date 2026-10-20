@@ -228,6 +228,10 @@ function expandPath(p, home = os.homedir(), env = process.env) {
   const k = knownFolder(s, home); if (k) return k;
   if (s === '~' || s.startsWith('~/') || s.startsWith('~\\')) s = path.join(home, s.slice(1));
   s = s.replace(/%([A-Za-z_]+)%/g, (m, v) => env[v] ?? env[v.toUpperCase()] ?? m).replace(/\$(HOME|USERPROFILE)\b/g, home);
+  if (!path.isAbsolute(s) && !/^[A-Za-z]:/.test(s)) { // đường dẫn tương đối: tính từ thư mục nhà (không phải thư mục cài AIVN)
+    const seg = s.split(/[\\/]/); const k2 = knownFolder(seg[0], home);
+    return k2 ? path.join(k2, ...seg.slice(1)) : path.resolve(home, s);
+  }
   return path.resolve(s);
 }
 const EXEC_EXT = /\.(exe|msi|bat|cmd|com|ps1|vbs|vbe|js|jse|wsf|wsh|scr|pif|hta|cpl|reg|jar|sh|command|app|pkg|dmg|appimage|run|lnk|url)$/i;

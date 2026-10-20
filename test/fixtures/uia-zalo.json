@@ -1,0 +1,13 @@
+{"win":{"title":"Zalo","pid":4312,"proc":"Zalo","hwnd":132456,"b":[0,0,1920,1040]},"seen":412,"els":[
+{"r":"Pane","n":"","a":"","b":[0,0,1920,1040],"e":true,"p":false,"f":false,"v":null,"d":1},
+{"r":"Edit","n":"Tìm kiếm","a":"contact-search-input","b":[70,60,250,32],"e":true,"p":false,"f":false,"v":"","d":6},
+{"r":"ListItem","n":"Trần Quỳnh Anh","a":"","b":[64,130,330,72],"e":true,"p":false,"f":false,"v":null,"d":8},
+{"r":"ListItem","n":"Nhóm lớp K27","a":"","b":[64,202,330,72],"e":true,"p":false,"f":false,"v":null,"d":8},
+{"r":"Text","n":"Trần Quỳnh Anh","a":"","b":[130,140,180,20],"e":true,"p":false,"f":false,"v":null,"d":9},
+{"r":"Edit","n":"Nhập @, tin nhắn tới Trần Quỳnh Anh","a":"richInput","b":[420,960,1300,40],"e":true,"p":false,"f":true,"v":"","d":10},
+{"r":"Button","n":"Gửi","a":"","b":[1830,962,60,36],"e":true,"p":false,"f":false,"v":null,"d":10},
+{"r":"Button","n":"","a":"","b":[1760,962,36,36],"e":true,"p":false,"f":false,"v":null,"d":10},
+{"r":"Edit","n":"Mật khẩu","a":"pw","b":[700,500,300,32],"e":true,"p":true,"f":false,"v":"secret","d":5},
+{"r":"Button","n":"Gửi","a":"","b":[1830,962,60,36],"e":true,"p":false,"f":false,"v":null,"d":11},
+{"r":"Button","n":"Đính kèm","a":"","b":[1700,962,36,36],"e":false,"p":false,"f":false,"v":null,"d":10}
+]}

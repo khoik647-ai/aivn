@@ -18,11 +18,12 @@ const DEFS = {
   close_app: { label: 'Đóng ứng dụng', icon: '✖', description: 'Đóng một ứng dụng đang mở (cần người dùng xác nhận; dữ liệu chưa lưu có thể mất).', parameters: O({ name: S('Tên ứng dụng hoặc tiến trình, vd. "Zalo", "chrome"') }) },
   run_command: { label: 'Chạy lệnh', icon: '⌨️', description: 'Chạy một lệnh terminal (Windows: PowerShell; macOS: zsh/sh). LUÔN hiện thẻ để người dùng duyệt trước khi chạy; lệnh nguy hiểm bị chặn. Tối đa 60 giây.', parameters: O({ command: S('Lệnh cần chạy, một dòng'), cwd: S('(Không bắt buộc) thư mục chạy lệnh; mặc định thư mục cá nhân') }, ['command']) },
   system_action: { label: 'Thao tác hệ thống', icon: '🖥', description: 'Thao tác hệ thống cơ bản. lock: khoá màn hình; sleep: cho máy ngủ; shutdown/restart: tắt/khởi động lại (Windows chờ 30 giây); volume_up/volume_down/mute: âm lượng; open_settings: mở Cài đặt; show_desktop: thu nhỏ mọi cửa sổ; empty_trash: dọn Thùng rác.', parameters: O({ action: { type: 'string', enum: Object.keys(C.SYS) } }) },
-  screen_look: { label: 'Nhìn màn hình', icon: '👁', description: 'THỬ NGHIỆM. Chụp màn hình hiện tại và mô tả những gì đang hiển thị (cửa sổ, nút, chữ). Dùng trước screen_act.', parameters: O({ question: S('(Không bắt buộc) điều cần tìm trên màn hình') }, []) },
-  screen_act: { label: 'Thao tác màn hình', icon: '🖱', description: 'THỬ NGHIỆM. Thao tác chuột/bàn phím trên màn hình. AIVN chụp màn hình, tìm phần tử theo mô tả target, rồi hiện thẻ có khung đỏ để người dùng duyệt; chỉ làm khi người dùng đồng ý. action: click, double_click, right_click, type (bấm vào target rồi gõ text; bỏ target để gõ vào ô đang chọn), key (bấm tổ hợp phím, vd. "ctrl+s", "enter"), scroll (amount âm = cuộn xuống).', parameters: O({ action: { type: 'string', enum: ['click', 'double_click', 'right_click', 'type', 'key', 'scroll'] }, target: S('Mô tả phần tử trên màn hình, vd. "nút Gửi màu xanh", "ô tìm kiếm"'), text: S('Chữ cần gõ (action=type)'), keys: S('Tổ hợp phím (action=key), vd. "ctrl+s"'), amount: { type: 'integer', description: 'Số nấc cuộn (action=scroll), âm = xuống' } }, ['action']) },
+  screen_look: { label: 'Quan sát màn hình', icon: '👁', description: 'Quan sát cửa sổ đang dùng: trả danh sách phần tử giao diện có id [eN] (loại, tên, giá trị, vị trí x,y thang 0-1000) lấy từ cây giao diện của hệ điều hành và chữ đọc được (OCR). Gọi trước khi thao tác bằng screen_act. window: tên cửa sổ/ứng dụng cần chuyển tới trước khi quan sát; query: lọc phần tử theo chữ.', parameters: O({ window: S('(Không bắt buộc) tên cửa sổ hoặc ứng dụng, vd. "Zalo"'), query: S('(Không bắt buộc) chữ cần tìm, vd. "Trần Quỳnh Anh"'), question: S('(Không bắt buộc) câu hỏi cho mô hình nhìn ảnh, nếu có') }, []) },
+  screen_act: { label: 'Thao tác màn hình', icon: '🖱', description: 'Làm MỘT thao tác trên máy: click / double_click / right_click (element = id [eN] từ lần quan sát mới nhất, hoặc tên phần tử; hoặc x,y thang 0-1000), type_text (gõ text, có thể kèm element là ô cần gõ; tiếng Việt có dấu được), hotkey (keys, vd. "ctrl+s", "enter", "ctrl+f"), scroll (amount âm = xuống), wait (seconds), focus_window (window = tên cửa sổ/ứng dụng). Kết quả trả về đã kèm kiểm tra và danh sách phần tử MỚI. AIVN tự hỏi người dùng trước bước quan trọng (gửi, thanh toán, xoá, nộp) và không bao giờ gõ mật khẩu.', parameters: O({ action: { type: 'string', enum: ['click', 'double_click', 'right_click', 'type_text', 'hotkey', 'scroll', 'wait', 'focus_window'] }, element: S('id phần tử, vd. "e12", hoặc tên, vd. "nút Gửi"'), x: { type: 'integer', description: 'Toạ độ ngang 0-1000 (khi không có element)' }, y: { type: 'integer', description: 'Toạ độ dọc 0-1000' }, text: S('Chữ cần gõ (type_text)'), replace: { type: 'boolean', description: 'type_text: true = xoá nội dung cũ của ô một dòng (tên tệp, ô tìm kiếm) rồi mới gõ' }, keys: S('Phím (hotkey), vd. "ctrl+s"'), amount: { type: 'integer', description: 'Số nấc cuộn, âm = xuống' }, seconds: { type: 'number', description: 'Số giây chờ (wait)' }, window: S('Tên cửa sổ (focus_window)') }, ['action']) },
+  read_screen_text: { label: 'Đọc chữ trên màn hình', icon: '🔤', description: 'Đọc toàn bộ chữ đang hiển thị trên màn hình bằng OCR (tiếng Việt + tiếng Anh). Dùng khi cần đọc nội dung (tin nhắn, bài viết) chứ không phải để bấm.', parameters: O({}, []) },
 };
 const LEVEL1 = ['list_apps', 'open_app', 'open_path', 'open_url', 'running_apps', 'close_app', 'run_command', 'system_action'];
-const LEVEL2 = ['screen_look', 'screen_act'];
+const LEVEL2 = ['screen_look', 'screen_act', 'read_screen_text'];
 
 function isSendAction(a = {}) {
   const t = String(a.target || '');
@@ -68,7 +69,7 @@ function createComputerTools(deps) {
     if (headless) return []; // chạy theo lịch: không có ai để duyệt
     const s = st(); const out = [];
     if (s.agentComputer !== false) out.push(...LEVEL1);
-    if (s.agentScreen && deps.visionReady()) out.push(...LEVEL2);
+    if (s.agentScreen) out.push(...LEVEL2); // không cần mô hình nhìn ảnh: thao tác theo cây giao diện + OCR
     return out;
   }
   async function confirmOrRefuse(ctx, req, refusedMsg) {
@@ -115,7 +116,8 @@ function createComputerTools(deps) {
         if (!hit && process.platform === 'darwin') hit = C.findApp(q, await C.macSpotlight(q));
         // macOS: tên gần đúng (điểm thấp) → thử "open -a <tên>" trước, vì LaunchServices biết cả ứng dụng ngoài /Applications (vd. Zalo cài từ App Store)
         if (process.platform === 'darwin' && (!hit || hit.s < 60) && await macOpenApp(q)) return { forModel: `Đã mở ứng dụng "${q}".`, summary: `Đã mở ${q}` };
-        if (hit) { await openApp(hit); return { forModel: `Đã mở ứng dụng "${hit.name}".`, summary: `Đã mở ${hit.name}` }; }
+        if (ctx) ctx.lastOpenedApp = q;
+        if (hit) { await openApp(hit); if (ctx) ctx.lastOpenedApp = hit.name; return { forModel: `Đã mở ứng dụng "${hit.name}".`, summary: `Đã mở ${hit.name}` }; }
         if (process.platform === 'win32') { const b = C.WIN_BUILTIN[q.toLowerCase()]; if (b) { if (b.endsWith(':')) await deps.openExternal(b); else { const { spawn } = require('child_process'); spawn(b, [], { detached: true, stdio: 'ignore' }).unref(); } return { forModel: `Đã mở "${q}".`, summary: `Đã mở ${q}` }; } }
         if (process.platform === 'darwin') { const r = await new Promise(res => require('child_process').execFile('open', ['-a', q], (e) => res(!e))); if (r) return { forModel: `Đã mở ứng dụng "${q}".`, summary: `Đã mở ${q}` }; }
         if (process.platform === 'win32' || deps.psRun) { const got = await winLaunchByName(q); if (got) return { forModel: `Đã mở ứng dụng "${got}".`, summary: `Đã mở ${got}` }; }
@@ -176,16 +178,8 @@ function createComputerTools(deps) {
         return { forModel: `Đã thực hiện: ${lbl}.`, summary: lbl };
       }
       case 'screen_look': return deps.screen.look(a, ctx);
-      case 'screen_act': {
-        // Gửi tin nhắn cho người khác: luôn hỏi duyệt riêng lần cuối trước khi bấm Gửi / Enter
-        if (isSendAction(a)) {
-          const r = await confirmOrRefuse(ctx, { kind: 'send-message', icon: '✉️', title: 'Gửi tin nhắn cho người khác?', short: 'gửi tin nhắn', okLabel: 'Đồng ý gửi', noLabel: 'Không gửi',
-            message: `AIVN AGENT sắp ${a.action === 'key' ? `bấm phím ${a.keys}` : `bấm “${a.target || 'nút Gửi'}”`}: thao tác này sẽ GỬI tin nhắn tới người khác và không thu hồi được dễ dàng. Hãy kiểm tra đúng người nhận và nội dung trên màn hình trước khi đồng ý.` },
-            'Người dùng KHÔNG đồng ý gửi tin nhắn. Dừng lại, không gửi, và báo cho người dùng.');
-          if (r) return r;
-        }
-        return deps.screen.act(a, ctx);
-      }
+      case 'screen_act': return deps.screen.act(a, ctx); // xin phép + bước quan trọng (gửi/thanh toán/xoá) do desktop-agent xử lý
+      case 'read_screen_text': return deps.screen.readText(a, ctx);
       default: throw new CompError(`Không có công cụ "${name}".`);
     }
   }
