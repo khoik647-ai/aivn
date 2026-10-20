@@ -44,7 +44,7 @@ function mk(replies) {
 test('lời gọi <tool_call> trong văn bản (chế độ gốc) được thực thi; lặp lại thì dừng gọn, không cảnh báo', async () => {
   const tc = '<tool_call>{"name":"open_app","arguments":{"name":"Calculator"}}</tool_call>';
   const { agent, opened, sent } = mk([{ text: tc }, { text: tc }]);
-  const r = await agent.run({ messages: [{ role: 'user', content: 'Mở Calculator' }], confirm: async () => true });
+  const r = await agent.run({ messages: [{ role: 'user', content: 'Cho mình dùng Calculator' }], confirm: async () => true });
   assert.deepStrictEqual(opened, ['Calculator']);
   assert.ok(!r.warning, 'không cảnh báo khi đã thật sự mở');
   assert.ok(!/<tool_call>/.test(r.text) && r.text.length > 0, r.text);

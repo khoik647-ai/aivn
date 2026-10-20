@@ -81,7 +81,12 @@
             <label class="check toggle"><input type="checkbox" id="agScreen"> <span><b>🖱 Điều khiển màn hình <em class="beta">Thử nghiệm</em></b><small id="agScreenNote">AIVN BOT chụp màn hình, mô hình nhìn ảnh đề xuất chỗ bấm; mỗi cú bấm/gõ hiện thẻ có khung đỏ để bạn duyệt. Cần mô hình nhìn ảnh. Dừng khẩn cấp: Ctrl+Alt+Q.</small></span></label>
             <div class="perm-guide" id="permGuide" hidden></div>
           </div>
-          <p class="small"><button class="linkish" data-goto="memory">Quản lý ghi nhớ →</button> · <button class="linkish" data-goto="schedule">Lịch tự động →</button></p>
+<div class="set-block diag-block">
+            <div class="set-head"><b>🧾 Nhật ký &amp; chẩn đoán</b></div>
+            <div class="row wrap"><button type="button" class="btn sm" data-logs="open">Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy" title="Sao chép 200 dòng nhật ký cuối để dán vào tin nhắn hỗ trợ">Sao chép nhật ký</button></div>
+            <div class="row wrap scan-row"><input type="text" class="scan-q" value="zalo" aria-label="Tên ứng dụng cần tìm" maxlength="60"><button type="button" class="btn sm" data-scan="1" title="Quét lại mọi nguồn (Desktop, Start Menu, sổ đăng ký, Store…) và cho biết số mục, lỗi, mục khớp">Kiểm tra quét ứng dụng</button></div>
+          </div>
+                    <p class="small"><button class="linkish" data-goto="memory">Quản lý ghi nhớ →</button> · <button class="linkish" data-goto="schedule">Lịch tự động →</button></p>
           <p class="small muted">JavaScript luôn chạy trong hộp cát riêng: không đọc tệp, không vào mạng, tối đa 3 giây.</p>
         </div>
         <div class="only-chat">
@@ -97,7 +102,7 @@
           <input type="number" id="maxTok" min="16" max="8192" step="16">
         </label>
         <label class="check"><input type="checkbox" id="gpuOn"> Tăng tốc bằng GPU (Vulkan/CUDA/Metal)<small>Tắt nếu nạp mô hình bị lỗi. AIVN tự chuyển sang CPU khi GPU nạp lỗi. Đổi cài đặt này sẽ gỡ mô hình đang nạp.</small></label>
-        <button type="button" class="btn sm" id="openLogs2">🧾 Mở thư mục nhật ký</button>
+        <div class="row wrap"><button type="button" class="btn sm" id="openLogs2">🧾 Mở thư mục nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>
         <details class="adv" id="advBox">
           <summary>Nâng cao: phần cứng &amp; ghi đè</summary>
           <div class="hw-info small" id="hwInfo">Đang đọc phần cứng…</div>
@@ -113,6 +118,10 @@
             <input type="number" id="vramLimit" min="0" max="256" step="0.5" placeholder="Tự đo">
           </label>
           <button type="button" class="btn sm" id="advReset">Về mặc định (tự động)</button>
+          <div class="diag-block mt"><b class="small">Chẩn đoán</b>
+            <div class="row wrap"><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button><button type="button" class="btn sm" data-logs="open">Mở nhật ký</button></div>
+            <div class="row wrap scan-row"><input type="text" class="scan-q" value="zalo" aria-label="Tên ứng dụng cần tìm" maxlength="60"><button type="button" class="btn sm" data-scan="1">Kiểm tra quét ứng dụng</button></div>
+          </div>
         </details>
         <label>Độ dài ngữ cảnh (áp dụng khi nạp lại)
           <select id="ctxSize"><option>2048</option><option>4096</option><option>8192</option><option>16384</option></select>
