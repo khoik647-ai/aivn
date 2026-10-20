@@ -189,7 +189,17 @@ function createComputerTools(deps) {
       default: throw new CompError(`Không có công cụ "${name}".`);
     }
   }
-  return { defs: DEFS, names, exec, has: (n) => n in DEFS, CompError };
+  // Nút "Kiểm tra quét ứng dụng": quét lại từ đầu, trả nguồn/số lượng/lỗi + các mục khớp tên cần tìm
+  async function scanReport(query = 'zalo') {
+    deepCache = null; appCache = null; const t = Date.now();
+    const all = await apps();
+    const q = C.fold(query);
+    const matches = all.map(a => ({ a, s: Math.max(C.score(query, a.name), C.fold(a.name).includes(q) ? 50 : 0) })).filter(x => x.s >= 40).sort((x, y) => y.s - x.s).slice(0, 8)
+      .map(({ a }) => ({ name: a.name, path: a.path || null, target: a.target || null, appId: a.appId || null, source: a.source || a.s || null }));
+    const best = C.findApp(query, all);
+    return { platform: process.platform, total: all.length, ms: Date.now() - t, sources: lastDiag ? lastDiag.sources : {}, errors: lastDiag ? lastDiag.errors : [], dirs: lastDiag ? lastDiag.dirs : null, deepMs: lastDiag ? lastDiag.ms : null, query, best: best ? { name: best.name, path: best.path || null, target: best.target || null, appId: best.appId || null } : null, matches };
+  }
+  return { defs: DEFS, names, exec, has: (n) => n in DEFS, CompError, scanReport };
 }
 
 module.exports = { createComputerTools, DEFS: DEFS, LEVEL1, LEVEL2, CompError, isSendAction };
