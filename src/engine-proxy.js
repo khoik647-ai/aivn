@@ -7,12 +7,13 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
   const tokenCbs = new Map(); // reqId -> onToken
   let cached = { loaded: false };
   let loading = null;
-  let ratio = 1 / 3; // token / ký tự, được hiệu chỉnh theo văn bản thật
+  let ratio = 1 / 3;
+  let extraEnv = {}, restarting = false; // token / ký tự, được hiệu chỉnh theo văn bản thật
 
   function start() {
     if (readyP) return readyP;
     readyP = new Promise((resolve, reject) => {
-      const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE; delete env.NODE_OPTIONS; if (process.resourcesPath && !env.AIVN_RESOURCES) env.AIVN_RESOURCES = process.resourcesPath;
+      const env = { ...process.env, ...extraEnv }; for (const k of Object.keys(env)) if (env[k] === '' || env[k] == null) delete env[k]; delete env.ELECTRON_RUN_AS_NODE; delete env.NODE_OPTIONS; if (process.resourcesPath && !env.AIVN_RESOURCES) env.AIVN_RESOURCES = process.resourcesPath;
       child = fork(hostScript, [], { execPath: nodePath, execArgv: [], serialization: 'json', stdio: ['ignore', 'pipe', 'pipe', 'ipc'], env, windowsHide: true });
       child.stdout.on('data', (d) => log(String(d).trimEnd()));
       child.stderr.on('data', (d) => log(String(d).trimEnd()));
@@ -20,7 +21,7 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
         if (m.type === 'ready') { log(`[engine] tiến trình ${m.pid}, Node ${m.node}`); return resolve(); }
         if (m.type === 'token') { tokenCbs.get(m.reqId)?.(m.t); return; }
         const p = pending.get(m.id); if (!p) return; pending.delete(m.id);
-        if (m.error) { const e = new Error(m.error); if (m.code) e.code = m.code; p.reject(e); } else p.resolve(m.result);
+        if (m.error) { const e = new Error(m.error); if (m.code) e.code = m.code; if (m.stack) e.hostStack = m.stack; if (m.attempts) e.attempts = m.attempts; if (m.gpu != null) e.gpu = m.gpu; p.reject(e); } else p.resolve(m.result);
       });
       child.on('error', (e) => { log('[engine] lỗi khởi động: ' + e.message); reject(e); });
       child.on('exit', (code, signal) => {
@@ -31,7 +32,7 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
         pending.clear(); tokenCbs.clear();
         log(`[engine] tiến trình kết thúc code=${code} signal=${signal}`);
         reject(err);
-        if (wasLoaded || code) onCrash(err);
+        if ((wasLoaded || code) && !restarting) onCrash(err);
       });
     });
     return readyP;
@@ -86,6 +87,14 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
     // trả Float32Array[] (chuẩn hoá L2)
     async embed(texts, kind) { const r = await call('embed', texts, kind); return r.map(b => { const u = Uint8Array.from(Buffer.from(b, 'base64')); return new Float32Array(u.buffer); }); },
     async stop() { if (child) { try { child.kill(); } catch {} } },
+    // Khởi động lại tiến trình bộ máy với biến môi trường mới (vd. AIVN_GPU=off để chỉ dùng CPU)
+    async restart(envPatch = {}) {
+      extraEnv = { ...extraEnv, ...envPatch };
+      const c = child; restarting = true;
+      if (c) await new Promise((r) => { const t = setTimeout(r, 8000); c.once('exit', () => { clearTimeout(t); r(); }); try { c.kill(); } catch { r(); } });
+      restarting = false; cached = { loaded: false };
+    },
+    env: () => ({ ...extraEnv }),
   };
 }
 

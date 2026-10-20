@@ -19,3 +19,7 @@ Thumbs.db
 npm-debug.log*
 build/node/
 build/llama/
+
+# Khoá quản trị (khoá riêng Ed25519) — tuyệt đối không đưa lên git
+*admin-key*.json
+aivn-admin/

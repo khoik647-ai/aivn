@@ -1,7 +1,7 @@
 {
   "name": "aivn",
   "productName": "AIVN",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "AIVN - Chạy mô hình AI ngay trên máy tính của bạn",
   "author": {
     "name": "NGUYỄN NGỌC KHÔI SINH VIÊN VLU"
@@ -19,6 +19,9 @@
     "@node-llama-cpp/mac-x64": "3.22.2",
     "@node-llama-cpp/win-x64": "3.22.2",
     "@node-llama-cpp/win-x64-vulkan": "3.22.2",
+    "@nut-tree-fork/libnut-darwin": "2.7.5",
+    "@nut-tree-fork/libnut-linux": "2.7.5",
+    "@nut-tree-fork/libnut-win32": "2.7.5",
     "@tesseract.js-data/eng": "1.0.0",
     "@tesseract.js-data/vie": "1.0.0",
     "electron-updater": "6.8.9",
@@ -59,7 +62,8 @@
       "!test/**",
       "!node_modules/@napi-rs/**",
       "!node_modules/@tesseract.js-data/*/4.0.0/**",
-      "!node_modules/tesseract.js/{dist,docs,examples,benchmarks,tests}/**"
+      "!node_modules/tesseract.js/{dist,docs,examples,benchmarks,tests}/**",
+      "!node_modules/@nut-tree-fork/*/build/Release/*.{lib,exp}"
     ],
     "asar": true,
     "asarUnpack": [
@@ -95,7 +99,9 @@
         "!node_modules/@node-llama-cpp/linux-*/**",
         "!node_modules/@node-llama-cpp/mac-*/**",
         "!node_modules/@reflink/reflink-linux-*/**",
-        "!node_modules/@reflink/reflink-darwin-*/**"
+        "!node_modules/@reflink/reflink-darwin-*/**",
+        "!node_modules/@nut-tree-fork/libnut-linux/**",
+        "!node_modules/@nut-tree-fork/libnut-darwin/**"
       ],
       "artifactName": "${productName}-${version}-${arch}-${target}.${ext}",
       "signAndEditExecutable": true,
@@ -151,7 +157,9 @@
       "category": "Utility",
       "files": [
         "!node_modules/@node-llama-cpp/win-*/**",
-        "!node_modules/@node-llama-cpp/mac-*/**"
+        "!node_modules/@node-llama-cpp/mac-*/**",
+        "!node_modules/@nut-tree-fork/libnut-win32/**",
+        "!node_modules/@nut-tree-fork/libnut-darwin/**"
       ],
       "artifactName": "AIVN-${version}-${arch}.${ext}",
       "maintainer": "NGUYỄN NGỌC KHÔI SINH VIÊN VLU",
@@ -188,13 +196,17 @@
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
       "extendInfo": {
-        "NSHumanReadableCopyright": "© 2026 AIVN · NGUYỄN NGỌC KHÔI SINH VIÊN VLU"
+        "NSHumanReadableCopyright": "© 2026 AIVN · NGUYỄN NGỌC KHÔI SINH VIÊN VLU",
+        "NSAppleEventsUsageDescription": "AIVN BOT cần quyền này để mở, đóng ứng dụng và thực hiện thao tác bạn đã đồng ý.",
+        "NSScreenCaptureUsageDescription": "AIVN BOT chụp màn hình để đề xuất thao tác (chế độ Điều khiển màn hình thử nghiệm)."
       },
       "files": [
         "!node_modules/@node-llama-cpp/win-*/**",
         "!node_modules/@node-llama-cpp/linux-*/**",
         "!node_modules/@reflink/reflink-linux-*/**",
-        "!node_modules/@reflink/reflink-win32-*/**"
+        "!node_modules/@reflink/reflink-win32-*/**",
+        "!node_modules/@nut-tree-fork/libnut-linux/**",
+        "!node_modules/@nut-tree-fork/libnut-win32/**"
       ],
       "artifactName": "AIVN-${version}-${arch}.${ext}"
     },

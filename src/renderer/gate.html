@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'">
+<title>AIVN</title>
+<script src="theme-init.js"></script>
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="gate.css">
+</head>
+<body class="gate-body">
+<main class="gate" id="gate" aria-live="polite">
+  <div class="gate-hero"><img src="dragon-white.svg" alt="" width="72" height="72"><h1>AIVN</h1><p>Trí tuệ nhân tạo chạy ngay trên máy bạn</p></div>
+
+  <!-- Kích hoạt -->
+  <section class="gate-card" id="gActivate" hidden>
+    <h2 id="gaTitle">Kích hoạt AIVN</h2>
+    <p class="gate-why" id="gaWhy">AIVN chỉ dùng được khi chủ sở hữu cấp quyền cho máy này.</p>
+    <ol class="gate-steps">
+      <li>Gửi <b>Mã máy</b> dưới đây cho chủ sở hữu: <b class="owner" id="gaOwner"></b>.</li>
+      <li>Chủ sở hữu gửi lại cho bạn một <b>Mã kích hoạt</b> dành riêng cho máy này.</li>
+      <li>Dán Mã kích hoạt vào ô bên dưới rồi bấm <b>Kích hoạt</b>.</li>
+    </ol>
+    <label class="gate-label">Mã máy của bạn</label>
+    <div class="machine"><code id="gaMachine">…</code><button class="btn" id="gaCopy" type="button">Sao chép</button></div>
+    <form id="gaForm">
+      <label class="gate-label" for="gaCode">Mã kích hoạt</label>
+      <textarea id="gaCode" rows="4" spellcheck="false" autocomplete="off" placeholder="Dán mã kích hoạt, ví dụ 05ZFKR-83M6HK-…"></textarea>
+      <div class="gate-err" id="gaErr" role="alert" hidden></div>
+      <div class="gate-row"><button class="btn primary big" type="submit" id="gaGo">Kích hoạt</button><button class="btn" type="button" id="gaRetry" hidden>Kiểm tra lại qua Internet</button></div>
+    </form>
+    <details class="gate-owner" id="gaOwnerBox">
+      <summary>Tôi là chủ sở hữu (có tệp khoá quản trị)</summary>
+      <p class="gate-small">Tự kích hoạt máy này bằng khoá quản trị <code>aivn-admin-key.json</code>. Khoá được mã hoá bằng cụm mật khẩu quản trị và chỉ lưu trên máy này; sau đó bạn cấp/thu hồi mã cho người khác trong mục <b>Bảo mật &amp; Quản trị</b>.</p>
+      <input type="password" id="goPass" placeholder="Cụm mật khẩu quản trị (ít nhất 8 ký tự)" autocomplete="off" maxlength="256">
+      <input id="goName" placeholder="Tên của bạn" maxlength="60" value="Nguyễn Ngọc Khôi">
+      <div class="gate-err" id="goErr" role="alert" hidden></div>
+      <div class="gate-row"><button class="btn" type="button" id="goGo">Chọn tệp khoá và kích hoạt máy này</button></div>
+    </details>
+    <p class="gate-small">Mã kích hoạt gắn với máy này, không dùng được trên máy khác. AIVN kiểm tra danh sách mã bị thu hồi khi có mạng; nếu không có mạng vẫn dùng được tới 14 ngày kể từ lần kiểm tra gần nhất.</p>
+  </section>
+
+  <!-- Khoá ứng dụng -->
+  <section class="gate-card" id="gLock" hidden>
+    <h2>AIVN đang khoá</h2>
+    <p class="gate-why">Nhập mật khẩu Khóa ứng dụng để mở.</p>
+    <form id="glForm">
+      <label class="gate-label" for="glPw">Mật khẩu</label>
+      <input type="password" id="glPw" autocomplete="current-password" maxlength="256">
+      <div class="gate-err" id="glErr" role="alert" hidden></div>
+      <div class="gate-row"><button class="btn primary big" type="submit" id="glGo">Mở khoá</button><button class="btn link" type="button" id="glForgot">Quên mật khẩu?</button></div>
+    </form>
+    <div class="forgot" id="glForgotBox" hidden>
+      <h3>Quên mật khẩu</h3>
+      <p>AIVN không lưu mật khẩu của bạn (chỉ lưu một giá trị băm) nên <b>không thể khôi phục</b>. Cách duy nhất là <b>xoá dữ liệu AIVN trên máy này</b>: toàn bộ cuộc trò chuyện, ghi nhớ, lịch tự động, cài đặt và nhật ký thao tác sẽ bị xoá vĩnh viễn. <b>Mô hình đã tải và kích hoạt được giữ lại.</b></p>
+      <label class="gate-label" for="glWord">Gõ chữ <b>XOÁ</b> để xác nhận</label>
+      <input id="glWord" autocomplete="off">
+      <div class="gate-row"><button class="btn danger" type="button" id="glReset">Xoá dữ liệu và mở lại AIVN</button><button class="btn" type="button" id="glForgotNo">Huỷ</button></div>
+    </div>
+  </section>
+
+  <footer class="gate-foot">Phát triển bởi <b>NGUYỄN NGỌC KHÔI SINH VIÊN VLU</b> · <button class="btn link" id="gQuit" type="button">Thoát</button></footer>
+</main>
+<script src="gate.js"></script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-// Bộ nhớ dài hạn của Trợ lý ("Ghi nhớ"): các điều ngắn gọn về người dùng/công việc, lưu cục bộ trong userData/memory.json.
+// Bộ nhớ dài hạn của AIVN BOT ("Ghi nhớ"): các điều ngắn gọn về người dùng/công việc, lưu cục bộ trong userData/memory.json.
 // Truy xuất: có BGE-M3 thì tìm theo ý nghĩa (vector lưu kèm, tính lại khi đổi nội dung), không có thì theo từ khoá.
 const fs = require('fs');
 const path = require('path');

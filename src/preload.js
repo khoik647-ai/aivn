@@ -24,4 +24,10 @@ contextBridge.exposeInMainWorld('aivn', {
   memList: inv('memory:list'), memAdd: inv('memory:add'), memUpdate: inv('memory:update'), memDelete: inv('memory:delete'), memClear: inv('memory:clear'),
   schedList: inv('sched:list'), schedCreate: inv('sched:create'), schedUpdate: inv('sched:update'), schedDelete: inv('sched:delete'), schedRun: inv('sched:run'), notifyTest: inv('notify:test'),
   onSchedChanged: on('sched:changed'), onConvosChanged: on('convos:changed'), onConvosOpen: on('convos:open'),
+  gateState: inv('gate:state'), gateActivate: inv('gate:activate'), gateRetry: inv('gate:retry'), gateUnlock: inv('gate:unlock'), gateReset: inv('gate:reset'), gateCopy: inv('gate:copy'), gateQuit: inv('gate:quit'), gateEnter: inv('gate:enter'), onGateChanged: on('gate:changed'),
+  lockInfo: inv('lock:info'), lockSet: inv('lock:set'), lockDisable: inv('lock:disable'), lockOptions: inv('lock:options'), lockNow: inv('lock:now'),
+  licenseInfo: inv('license:info'), licenseCheck: inv('license:check'),
+  computerStop: inv('computer:stop'), openLogs: inv('logs:open'), computerPermOpen: inv('computer:perm-open'), computerPermTest: inv('computer:perm-test'), agentScreenReply: inv('agent:screen-reply'),
+  onAgentScreen: on('agent:screen'), onAgentScreenCancel: on('agent:screen-cancel'), onComputerStopped: on('computer:stopped'),
+  adminState: inv('admin:state'), adminImport: inv('admin:import'), adminUnlock: inv('admin:unlock'), adminLock: inv('admin:lock'), adminIssue: inv('admin:issue'), adminRevoke: inv('admin:revoke'), adminPublish: inv('admin:publish'), adminSetToken: inv('admin:token'), adminForget: inv('admin:forget'), adminSelf: inv('admin:self-activate'),
 });

@@ -41,7 +41,7 @@ process.on('message', async (msg) => {
       default: throw new Error('Không rõ lệnh ' + method);
     }
     reply({ id, result });
-  } catch (e) { reply({ id, error: String(e && e.message || e), code: e && e.code }); }
+  } catch (e) { reply({ id, error: String(e && e.message || e), code: e && e.code, stack: String(e && e.stack || ''), attempts: e && e.attempts, gpu: e && e.gpu }); }
 });
 process.on('disconnect', async () => { try { await engine.unloadModel(); } catch {} process.exit(0); });
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, async () => { try { await engine.unloadModel(); } catch {} process.exit(0); });

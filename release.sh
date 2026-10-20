@@ -99,6 +99,7 @@ sed -e "s#href=\"AIVN-Setup.exe\"#href=\"$BASE_URL/AIVN-Setup.exe\"#g" \
     site/index.html > "$SITE/index.html"
 for f in preview-desktop.png preview-mobile.png favicon.svg favicon.ico apple-touch-icon.png; do [[ -f "site/$f" ]] && cp "site/$f" "$SITE/"; done
 [[ -f "$SITE/favicon.svg" ]] || die "thiếu site/favicon.svg (logo)"
+node build/merge-revoked.cjs site/revoked.json "$SITE/revoked.json" || die "thiếu revoked.json hợp lệ (chạy /workspace/aivn-admin/admin.cjs publish)"
 touch "$SITE/.nojekyll"
 grep -q "$BASE_URL/AIVN-Setup.exe" "$SITE/index.html" || die "không thay được link tải Windows trong trang web"
 ls -la "$OUT" "$SITE"
