@@ -57,11 +57,13 @@ let engine;
 if (nodePath) {
   const { createEngineProxy } = require('./engine-proxy');
   engine = createEngineProxy({ nodePath, hostScript, log: (m) => { console.log(m); LOG.log('engine', m); },
+    onProgress: (p) => send('model:progress', { id: p.id, pct: p.pct, mode: p.mode }),
     onCrash: (e) => { engineDied = true; send('model:status', { loaded: false }); send('engine:crash', { message: e.message }); } });
 } else {
   console.warn('[engine] không tìm thấy Node.js đi kèm, chạy llama.cpp ngay trong Electron (mô hình > 2 GB chạy CPU có thể lỗi)');
   if (process.resourcesPath && !process.env.AIVN_RESOURCES) process.env.AIVN_RESOURCES = process.resourcesPath;
   const inproc = require('./engine');
+  inproc.setLoadProgress((p) => send('model:progress', { id: p.id, pct: p.pct, mode: p.mode }));
   engine = { ...inproc, external: false, calibrate: async () => {}, ocr: (b) => require('./ocr').recognize(b), start: async () => {}, stop: async () => {} };
 }
 

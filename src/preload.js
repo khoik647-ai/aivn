@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld('aivn', {
   onUpdate: on('update:status'), onDocInfo: on('chat:docinfo'), onRagProgress: on('chat:ragprogress'),
   ragInfo: inv('rag:info'), ragDownload: inv('rag:download'), ragDelete: inv('rag:delete'), ragConvo: inv('rag:convo'),
   openVcredist: inv('vision:vcredist'), onVcredist: on('vision:vcredist'),
-  onToken: on('chat:token'), onModelStatus: on('model:status'), onServerLog: on('server:log'),
+  onToken: on('chat:token'), onModelStatus: on('model:status'), onModelProgress: on('model:progress'), onServerLog: on('server:log'),
   onDl: on('dl:update'), onDlDone: on('dl:done'), onDlRemoved: on('dl:removed'),
   agentInfo: inv('agent:info'), agentRun: inv('agent:run'), agentConfirmReply: inv('agent:confirm-reply'), agentAddFolder: inv('agent:add-folder'), agentRemoveFolder: inv('agent:remove-folder'), agentOpenFolder: inv('agent:open-folder'),
   onAgentStep: on('agent:step'), onAgentStatus: on('agent:status'), onAgentConfirm: on('agent:confirm'), onAgentApprove: on('agent:approve'), onAgentApproveCancel: on('agent:approve-cancel'), agentApproveReply: inv('agent:approve-reply'), agentAlwaysRevoke: inv('agent:always-revoke'), onAgentConfirmCancel: on('agent:confirm-cancel'),

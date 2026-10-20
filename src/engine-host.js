@@ -4,6 +4,7 @@ const engine = require('./engine');
 let ocr = null; let grounder = null;
 const gens = new Map();
 const reply = (m) => { try { process.send(m); } catch {} };
+engine.setLoadProgress((p) => reply({ type: 'progress', ...p }));
 
 process.on('message', async (msg) => {
   if (!msg) return;

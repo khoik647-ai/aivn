@@ -39,6 +39,8 @@ async function vramInfo(l) {
   if (lim > 0) { total = Math.min(total, lim); free = Math.min(free, lim); }
   return { total, free, shared: unified, reportedTotal: v.total, mixed: unified > 0 && unified < v.total, integratedOnly: l.gpu !== 'metal' && unified >= v.total };
 }
+let progressCb = null; // 0.16: báo tiến độ nạp mô hình (viên chọn mô hình hiển thị %)
+const setLoadProgress = (cb) => { progressCb = cb; };
 async function hardwareInfo() {
   const l = await getLlama();
   const vram = await vramInfo(l).catch(() => null);
@@ -139,7 +141,7 @@ async function loadModel(id, modelPath, opts = {}) {
     for (const plan of plans) {
       let model = null;
       try {
-        model = await l.loadModel({ modelPath, gpuLayers: plan.gpuLayers, ...(opts.useMmap === false ? { useMmap: false } : {}), ...(opts.useMlock ? { useMlock: true } : {}) });
+        let lastPct = -1; model = await l.loadModel({ modelPath, gpuLayers: plan.gpuLayers, onLoadProgress: (x) => { const pct = Math.floor(x * 100); if (pct >= lastPct + 2 || pct === 100) { lastPct = pct; try { progressCb && progressCb({ id, pct, mode: plan.mode }); } catch {} } }, ...(opts.useMmap === false ? { useMmap: false } : {}), ...(opts.useMlock ? { useMlock: true } : {}) });
         let context, kvUsed = kvQuant;
         try { context = await model.createContext(ctxOpts(plan, kvUsed)); }
         catch (e) { if (!kvUsed) throw e; kvUsed = false; attempts.push({ mode: `${plan.mode} KV q8_0`, message: String(e && e.message || e) }); context = await model.createContext(ctxOpts(plan, false)); } // KV nén lỗi (mô hình/GPU không hỗ trợ) → f16
@@ -416,4 +418,4 @@ function embed(texts, kind = 'passage') {
 function countTokens(text) { if (!current) return Math.ceil(text.length / 3); try { return current.model.tokenize(text).length; } catch { return Math.ceil(text.length / 3); } }
 
 async function countTokensAsync(texts) { if (visionOn) { const r = await getVision().countTokens(texts); if (r) return r; } return texts.map(countTokens); }
-module.exports = { loadPlans, modelGeometry, vramInfo, countTokens, countTokensAsync, hardwareInfo, loadModel, unloadModel, status, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount };
+module.exports = { setLoadProgress, loadPlans, modelGeometry, vramInfo, countTokens, countTokensAsync, hardwareInfo, loadModel, unloadModel, status, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount };

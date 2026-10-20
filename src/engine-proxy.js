@@ -7,7 +7,7 @@ function firstErrorLine(t) {
   const l = lines.find(x => /^(\w*Error|Error)\b[:\s]/.test(x) || /^(Uncaught|FATAL|Fatal)/i.test(x)) || lines.find(x => /cannot find module|not found|failed|lỗi/i.test(x));
   return l ? l.slice(0, 240) : '';
 }
-function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () => {} }) {
+function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () => {}, onProgress = () => {} }) {
   let child = null, readyP = null, seq = 0;
   const pending = new Map(); // id -> {resolve, reject}
   const tokenCbs = new Map(); // reqId -> onToken
@@ -30,6 +30,7 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
         if (m.type === 'child') { kids.add(m.pid); return; }
         if (m.type === 'child-exit') { kids.delete(m.pid); return; }
         if (m.type === 'token') { tokenCbs.get(m.reqId)?.(m.t); return; }
+        if (m.type === 'progress') { try { onProgress(m); } catch {} return; }
         const p = pending.get(m.id); if (!p) return; pending.delete(m.id); inflight.delete(m.id);
         if (m.error) { const e = new Error(m.error); if (m.code) e.code = m.code; if (m.stack) e.hostStack = m.stack; if (m.attempts) e.attempts = m.attempts; if (m.gpu != null) e.gpu = m.gpu; p.reject(e); } else p.resolve(m.result);
       });

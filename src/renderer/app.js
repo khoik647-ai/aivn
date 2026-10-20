@@ -145,12 +145,14 @@ const fmtTok = (n) => Number(n || 0).toLocaleString('vi-VN');
 function paintPill(st) {
   const m = (state.models || []).find(x => x.id === st.id);
   $('#ldDot').className = 'dot' + (st.loading ? ' busy' : st.loaded ? '' : ' off');
-  $('#ldPill').classList.toggle('on', !!st.loaded); $('#ldPill').classList.toggle('busy', !!st.loading);
+  $('#ldPill').classList.toggle('on', !!st.loaded); $('#ldPill').classList.toggle('busy', !!st.loading); if (!st.loading) $('#ldPill').style.setProperty('--ldp', '0%');
   $('#ldName').textContent = st.loading ? `Đang nạp ${mName(m) || st.id || ''}…` : st.loaded ? (mName(m) || st.id) : 'Chọn mô hình để nạp';
   $('#ldMeta').textContent = st.loaded ? [`ngữ cảnh ${fmtTok(st.contextSize)}`, st.gpu ? (st.totalLayers ? `GPU ${st.gpuLayers}/${st.totalLayers}` : 'GPU') : 'CPU'].join(' · ') : '';
   $('#loaderBtn').title = (st.loaded ? `${$('#ldName').textContent} · ${$('#ldMeta').textContent}\n` : '') + 'Chọn mô hình để nạp (Ctrl+L)';
 }
 $('#loaderBtn').addEventListener('click', () => openLoader());
+A.onModelProgress((p) => { if (!state.status.loading) return; const m = (state.models || []).find(x => x.id === p.id);
+  $('#ldPill').style.setProperty('--ldp', p.pct + '%'); $('#ldName').textContent = `Đang nạp ${mName(m) || p.id || ''}…`; $('#ldMeta').textContent = p.pct + '%' + (({ 'gpu-partial': ' · GPU một phần', 'gpu-manual': ' · GPU (đặt tay)', cpu: ' · CPU', 'cpu-only': ' · CPU' })[p.mode] || ''); });
 const CTX_STEPS = [4096, 8192, 12288, 16384, 24576, 32768, 49152, 65536, 98304, 131072, 196608, 262144];
 function ctxSteps(max) { const a = CTX_STEPS.filter(x => x <= max); if (!a.length || a[a.length - 1] !== max) a.push(max); return a; }
 async function openLoader(id) {
