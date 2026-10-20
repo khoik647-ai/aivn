@@ -45,4 +45,16 @@ function sentence(list, scores = {}) {
   const chat = r.chat ? nameOf(list, r.chat) : 'Qwen3 4B Instruct 2507';
   return { chat, text: `gợi ý: ${chat} (gọi công cụ tốt, vừa máy này)`, rec: r };
 }
-module.exports = { recommend, annotate, sentence, passes, gPasses, PLANNERS, GROUNDERS, pickBench };
+// Hai mô hình cùng lúc (mô hình chính + mô hình định vị) trên GPU ít VRAM (vd. RTX 3050 Ti 4 GB với hai mô hình ~5 GB):
+// không nạp cả hai lên GPU — mô hình định vị chạy CPU, và gợi ý cặp nhỏ hơn. Kích thước tính bằng byte.
+function pairPlan({ vram = 0, main = 0, grounder = 0, mainVision = false } = {}) {
+  const GB = 1024 ** 3; const need = main + grounder + 1.2 * GB; // + bộ nhớ ngữ cảnh/đệm
+  const fmt = (b) => (b / GB).toFixed(1).replace('.', ',') + ' GB';
+  if (!vram || !grounder) return { ok: true, grounderGpu: !!vram, message: '' };
+  if (need <= vram) return { ok: true, grounderGpu: true, message: '' };
+  const msg = `GPU có ${fmt(vram)} VRAM nhưng mô hình chính (${fmt(main)}) + mô hình định vị (${fmt(grounder)}) cần khoảng ${fmt(need)}. ` +
+    `AIVN sẽ chạy mô hình định vị bằng CPU (chậm hơn) để không tràn bộ nhớ GPU. Gợi ý: mô hình chính Qwen3 4B Instruct 2507 (≈2,5 GB) + mô hình định vị nhỏ (Qwen3-VL 2B ≈1,8 GB)` +
+    (mainVision ? '; mô hình chính hiện là mô hình nhìn ảnh lớn — không cần nếu đã có mô hình định vị.' : '.');
+  return { ok: false, grounderGpu: false, message: msg, needBytes: need };
+}
+module.exports = { pairPlan, recommend, annotate, sentence, passes, gPasses, PLANNERS, GROUNDERS, pickBench };

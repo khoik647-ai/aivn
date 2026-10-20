@@ -484,7 +484,13 @@ async function getGrounder(force) {
   const st = engine.groundStatus();
   if (!(st && st.loaded && st.id === m.id)) {
     LOG.log('load', `Nạp mô hình định vị ${m.file}`, { mmproj: path.basename(m.mmproj) }); const t = Date.now();
-    await engine.groundLoad(m.id, m.path, m.mmproj, { contextSize: 4096, gpu: settings.data.gpu !== false });
+    let gpu = settings.data.gpu !== false;
+    try { // GPU ít VRAM: không nạp hai mô hình lớn cùng lúc lên GPU
+      const h = await hw(); const cur = engine.status(); const mm = cur && cur.loaded ? listModels().find(x => x.id === cur.id) : null;
+      const plan = require('./recommend').pairPlan({ vram: h.vram ? h.vram.total : 0, main: mm ? mm.size || 0 : 0, grounder: m.size || 0, mainVision: !!(cur && cur.vision) });
+      if (!plan.ok) { gpu = false; LOG.log('load', 'Cảnh báo bộ nhớ GPU: ' + plan.message); send('app:notice', { text: plan.message, kind: 'warn' }); }
+    } catch {}
+    await engine.groundLoad(m.id, m.path, m.mmproj, { contextSize: 4096, gpu });
     LOG.log('load', `Đã nạp mô hình định vị sau ${Date.now() - t} ms`);
   }
   return { id: m.path, engine: { generate: (msgs, o) => engine.groundGenerate(msgs, o) } };
@@ -942,7 +948,12 @@ function registerIpc() {
         if (docInfo) send('chat:docinfo', { reqId, ...docInfo });
       }
       const tb = tokenBatcher(reqId);
-      let r; try { r = await withEngineRecovery(() => engine.generate(messages, { temperature, maxTokens, signal: ac.signal, onToken: t => tb.push(t) }), { onRetry: (ctx) => { tb.flush(); send('chat:recover', { reqId, ctx }); } }); } finally { tb.flush(); }
+      // chống lặp (0.15): tham số lấy mẫu theo họ mô hình + dừng khi câu trả lời lặp lại
+      const SMP = require('./agent/sampling'); const RG = require('./agent/repeat');
+      const guard = RG.createRepeatGuard((info) => { LOG.log('chat', `Phát hiện lặp (${info.kind}, ${info.count} lần): “${info.sample}” — dừng sinh`); stopReasons.set(reqId, 'mô hình bắt đầu lặp lại, AIVN tự dừng'); ac.abort(); });
+      const sampling = SMP.samplingFor(engine.status().id || '', 'chat', { temperature: typeof temperature === 'number' ? temperature : null });
+      let r; try { r = await withEngineRecovery(() => engine.generate(messages, { temperature: sampling.temperature, maxTokens, sampling, signal: ac.signal, onToken: t => { guard.push(t); if (!guard.hit) tb.push(t); } }), { onRetry: (ctx) => { tb.flush(); send('chat:recover', { reqId, ctx }); } }); } finally { tb.flush(); }
+      if (guard.hit && typeof r.text === 'string') r = { ...r, text: r.text.slice(0, guard.hit.cut).trim() };
       return { ...r, docInfo, stoppedBy: r.finishReason === 'abort' ? (stopReasons.get(reqId) || 'không rõ') : null };
     } finally { generations.delete(reqId); stopReasons.delete(reqId); }
   });

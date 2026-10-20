@@ -1,4 +1,5 @@
 // Bộ máy suy luận: bọc node-llama-cpp
+const SMP = require('./agent/sampling');
 const path = require('path');
 const os = require('os');
 const TP = require('./agent/textproto');
@@ -180,9 +181,9 @@ function normalizeContent(c) {
  * Sinh câu trả lời từ danh sách messages kiểu OpenAI.
  * onToken(text) được gọi cho từng đoạn văn bản. Trả về { text, usage, finishReason }.
  */
-function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal, onToken } = {}) {
+function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal, onToken, sampling = null } = {}) {
   const run = async () => {
-    if (visionOn) return getVision().generate(messages, { temperature, maxTokens, topP, signal, onToken });
+    if (visionOn) return getVision().generate(messages, { temperature, maxTokens, topP, signal, onToken, sampling });
     if (!current) throw new Error('Chưa nạp mô hình nào.');
     const { LlamaChatSession } = await getLib();
     const msgs = messages.map(m => ({ role: m.role, content: normalizeContent(m.content) }));
@@ -205,7 +206,7 @@ function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal,
     let finishReason = 'stop';
     try {
       const res = await session.promptWithMeta(prompt, {
-        temperature, topP, maxTokens, signal, stopOnAbortSignal: true,
+        temperature, topP, maxTokens, signal, stopOnAbortSignal: true, ...SMP.toLlamaCpp(sampling), ...(topP != null ? { topP } : {}),
         onTextChunk: (chunk) => { text += chunk; onToken && onToken(chunk); },
       });
       if (res && res.stopReason === 'maxTokens') finishReason = 'length';
@@ -276,9 +277,9 @@ function toolModeFor(chat) {
   return mode;
 }
 
-function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = null, temperature = 0.7, maxTokens = 1024, topP, signal, onToken } = {}) {
+function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = null, temperature = 0.7, maxTokens = 1024, topP, signal, onToken, sampling = null } = {}) {
   const run = async (messages, tools) => {
-    if (visionOn) return getVision().chatStep(messages, { tools, toolChoice, responseFormat, temperature, maxTokens, topP, signal, onToken });
+    if (visionOn) return getVision().chatStep(messages, { tools, toolChoice, responseFormat, temperature, maxTokens, topP, signal, onToken, sampling });
     if (!current) throw new Error('Chưa nạp mô hình nào.');
     const { LlamaChat } = await getLib();
     const l = await getLlama();
@@ -320,6 +321,7 @@ function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = 
         onTextChunk: (chunk) => { streamed += chunk; if (grammar) return; if (filt) filt.push(chunk); else onToken && onToken(chunk); } };
       if (!textMode && (useFns || (hasCalls && !grammar))) Object.assign(opts, { functions, documentFunctionParams: true, maxParallelFunctionCalls: 4 });
       if (grammar) opts.grammar = grammar;
+      else if (sampling) { Object.assign(opts, SMP.toLlamaCpp(sampling)); if (topP != null) opts.topP = topP; } // chống lặp (không áp cho sinh JSON có ngữ pháp)
       const res = await chat.generateResponse(history, opts);
       const stop = res.metadata && res.metadata.stopReason;
       let text = (typeof res.response === 'string' ? res.response : streamed).replace(/^\s+/, '');

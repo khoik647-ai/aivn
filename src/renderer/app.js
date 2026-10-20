@@ -9,7 +9,7 @@ const fmtBytes = (b) => { if (!b) return '0 B'; const u = ['B', 'KB', 'MB', 'GB'
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 let toastTimer;
-function toast(msg, err = false) { const t = $('#toast'); t.textContent = msg; t.className = 'toast show' + (err ? ' err' : ''); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = 'toast', 3500); }
+function toast(msg, err = false) { const t = $('#toast'); t.textContent = msg; t.className = 'toast show' + (err ? ' err' : ''); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.className = 'toast', Math.max(3500, Math.min(15000, String(msg).length * 55))); }
 
 // Markdown tối giản: khối code, code inline, in đậm, nghiêng, xuống dòng
 function md(src) {
@@ -866,6 +866,8 @@ document.addEventListener('keydown', (e) => {
 }, true);
 A.onAgentApprove((c) => { apQueue.push(c); apShow(); });
 A.onAgentApproveCancel(({ id }) => { if (apOpen && apOpen.id === id) { apOpen = null; $('#approveCard').hidden = true; apShow(); } const i = apQueue.findIndex(x => x.id === id); if (i >= 0) apQueue.splice(i, 1); });
+
+if (A.onNotice) A.onNotice((n) => toast((n.kind === 'warn' ? '⚠ ' : '') + n.text, n.kind === 'warn'));
 
 // --- Kinh doanh → Khách hàng (CRM) ---
 const crm = { tab: 'dash', contacts: [] };

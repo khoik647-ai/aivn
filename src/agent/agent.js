@@ -1,5 +1,7 @@
 // AIVN AGENT: vòng lặp gọi công cụ chạy hoàn toàn trên mô hình cục bộ.
 // Mỗi bước: mô hình trả lời hoặc yêu cầu gọi công cụ → AIVN chạy công cụ (có kiểm soát quyền) → đưa kết quả lại cho mô hình.
+const SMP = require('./sampling');
+const RG = require('./repeat');
 const fs = require('fs');
 const AP = require('./approval');
 const { AsyncLocalStorage } = require('async_hooks');
@@ -13,7 +15,7 @@ const web = require('./web');
 const { DAY_VI } = require('./scheduler');
 const TP = require('./textproto');
 
-const MAX_ROUNDS = 8, MAX_CALLS = 16;
+const MAX_ROUNDS = 20, MAX_CALLS = 32; // 0.15: 8 vòng không đủ cho việc nhiều tệp (6 ghi chú = 8 lời gọi) — giới hạn token mỗi lượt vẫn chặn chạy mãi
 const WRITE_EXT = new Set(['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'jsonl', 'xml', 'yaml', 'yml', 'toml', 'ini', 'log', 'html', 'htm', 'css', 'js', 'mjs', 'cjs', 'ts', 'py', 'sql', 'sh', 'bat', 'ps1', 'java', 'c', 'h', 'cpp', 'cs', 'go', 'rs', 'php', 'rb', 'kt', 'swift', 'tex', 'srt', 'vtt']);
 const pad = (n) => String(n).padStart(2, '0');
 const nowVi = (d = new Date()) => `${DAY_VI[d.getDay()]}, ${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -130,6 +132,10 @@ function claimCheck(query, text, steps, names) {
 // Chống "giả vờ làm": mô hình viết bước giả ("[screen,act] Gõ…") hoặc nói đã gửi/đã mở khi chưa có công cụ nào báo thành công
 const NO_ACTION_WARN = 'Mô hình này chưa thực sự thao tác gì — chưa có việc nào được làm. Hãy dùng Qwen3 4B/8B (hỗ trợ công cụ tốt).';
 const FAKE_NUDGE = '[AIVN kiểm tra] Bạn CHƯA gọi công cụ nào trong lượt này, nên chưa có việc gì thực sự được làm. Không được viết bước giả (như "[screen,act] …") hay nói đã làm. Hãy gọi công cụ thật ngay bây giờ (khối <tool_call> hoặc lời gọi công cụ), hoặc nói thẳng là bạn không làm được và vì sao.';
+const REPEAT_WARN = 'Mô hình bắt đầu lặp lại cùng một câu nên AIVN đã tự dừng lại. Mẹo: dùng Qwen3 4B Instruct 2507 hoặc Qwen3 8B cho việc dùng công cụ, và nạp ít mô hình cùng lúc nếu GPU ít bộ nhớ.';
+const BUDGET_WARN = 'Lượt này đã dài quá giới hạn của AIVN AGENT nên được dừng lại. Hãy chia việc thành các bước nhỏ hơn.';
+const REPEAT_NUDGE = '(Kiểm tra tự động của AIVN) Bạn đang lặp lại cùng một câu. Dừng lặp: trả lời ngắn gọn, mỗi ý một lần, không hỏi lại.';
+const REPEAT_ACT_NUDGE = '(Kiểm tra tự động của AIVN) Bạn đang lặp lại câu hỏi xin phép. Người dùng ĐÃ yêu cầu bạn làm, và các công cụ máy tính đang bật. Không hỏi lại, không viết hướng dẫn: gọi công cụ đầu tiên ngay bây giờ (vd. open_app để mở ứng dụng).';
 const CANNOT = { name: 'cannot_do', description: 'Dùng khi không có công cụ phù hợp hoặc không thể làm yêu cầu. Nêu lý do ngắn gọn bằng tiếng Việt.', parameters: { type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'] } };
 const CLAIMS = [
   [/(đã|vừa)\s+(mở|khởi động|bật)(?!\p{L})/iu, ['open_app', 'open_path', 'open_url', 'run_command']],
@@ -160,8 +166,14 @@ function openIntent(query) {
 }
 // Bỏ các câu trả lời CŨ khẳng định "ứng dụng chưa cài" để mô hình không chép lại (phải kiểm tra lại bằng công cụ trong lượt này)
 const STALE_NOTE = '(Câu trả lời cũ này đã được ẩn: nó khẳng định một ứng dụng chưa cài/không có hoặc đề nghị dùng bản web mà không kiểm tra bằng công cụ. Không lặp lại nó; lượt này phải kiểm tra lại bằng công cụ.)';
-function sanitizeHistory(messages) {
-  let n = 0;
+const GUIDE_NOTE = '(Câu trả lời cũ này đã được ẩn: AIVN AGENT khi đó chỉ viết hướng dẫn/hỏi lại mà không gọi công cụ. Lượt này phải gọi công cụ để làm thật, không lặp lại cách trả lời đó.)';
+function sanitizeHistory(messages, { act = false } = {}) {
+  let n = 0, guides = 0;
+  messages = messages.map((m, i) => {
+    if (i === messages.length - 1 || m.role !== 'assistant' || typeof m.content !== 'string' || (m.tool_calls && m.tool_calls.length)) return m;
+    if (act && (REFUSE_RE.test(m.content) || looksManual(m.content) || CHIPS_RE.test(m.content) || RG.detectLoop(m.content))) { guides++; return { ...m, content: GUIDE_NOTE }; }
+    const tl = RG.trimLoop(m.content); return tl.loop ? { ...m, content: tl.text } : m; // câu trả lời cũ bị lặp: chỉ giữ phần trước chỗ lặp
+  });
   const out = messages.map((m, i) => {
     if (i === messages.length - 1 || m.role !== 'assistant' || typeof m.content !== 'string' || !NOT_INSTALLED_RE.test(m.content)) return m;
     n++; return { ...m, content: STALE_NOTE };
@@ -173,7 +185,7 @@ function sanitizeHistory(messages) {
     const c = stripIntro(m.content, q === '' ? 'x' : q, { history: [{ role: 'assistant' }] });
     return c === m.content ? m : { ...m, content: c };
   });
-  return { messages: out, hidden: n };
+  return { messages: out, hidden: n, guides };
 }
 function fakeActionCheck(text, steps, names, query = '') {
   const t = String(text || '');
@@ -181,6 +193,9 @@ function fakeActionCheck(text, steps, names, query = '') {
   // yêu cầu thao tác rõ ràng mà mô hình lờ đi (không gọi công cụ, cũng không nói không làm được)
   if (!steps.length && names.some(n => COMP.includes(n)) && /^\s*(hãy |giúp (tôi|mình|em) |làm ơn |bạn |(?:aivn (?:bot|agent)),? )?(mở|gửi|nhắn|bấm|nhấn|gõ|chạy|đóng|tắt|khởi động|bật)\s/iu.test(String(query)) && !/(cần bật|chưa bật|không được phép)/iu.test(t)) return 'ignored';
   const ok = (list) => steps.some(x => list.includes(x.name) && x.status === 'ok');
+  const comp = names.some(n => COMP.includes(n));
+  if (comp && CHIPS_RE.test(t) && !ok(COMP)) return 'pseudo'; // "[Máy tính] [Mở Zalo] [Nhắn tin]…" — nhãn giả, không phải lời gọi công cụ
+  if (comp && isActAsk(query) && !ok(COMP) && (REFUSE_RE.test(t) || looksManual(t)) && !/(cần bật|chưa bật|không được phép|bị chặn|từ chối)/iu.test(t)) return 'refuse'; // từ chối/hướng dẫn tay/hỏi lại thay vì làm
   if (/\[\s*(screen|tool|open_app|open_url|screen_act|screen_look|run_command|close_app|action|bước \d+:?\s*(mở|bấm|gõ))[^\]\n]{0,40}\]/i.test(t)) return 'pseudo';
   if (/\b(screen_act|screen_look|open_app|run_command|open_url|close_app|list_apps)\s*[({]/.test(t) || /<\/?tool_(call|result)/i.test(t)) return 'pseudo';
   if (/(gõ|nhập|trả lời|nói|gửi)\s*["“'‘]?\s*tiếp tục/i.test(t) && !steps.length) return 'continue';
@@ -190,7 +205,19 @@ function fakeActionCheck(text, steps, names, query = '') {
   return null;
 }
 
-const stripFake = (t) => String(t || '').split('\n').filter(l => !/^\s*[-*]?\s*\[\s*(screen|tool|open_app|open_url|screen_act|screen_look|run_command|close_app|action)[^\]]*\]/i.test(l)).join('\n').trim();
+// dòng chỉ gồm các "nhãn" giả trong ngoặc vuông, bắt chước nút công cụ của giao diện: "[Máy tính] [Mở Zalo] [Nhắn tin] [Đọc màn hình]"
+const CHIPS_RE = /(?:\[[^\]\n]{1,32}\]\s*[,·|→>-]?\s*){3,}/u;
+const CHIP_LINE_RE = /^\s*[-*]?\s*(?:\[[^\]\n]{1,32}\]\s*[,·|→>-]?\s*){2,}\s*$/u;
+const stripFake = (t) => String(t || '').split('\n').filter(l => !/^\s*[-*]?\s*\[\s*(screen|tool|open_app|open_url|screen_act|screen_look|run_command|close_app|action)[^\]]*\]/i.test(l) && !CHIP_LINE_RE.test(l)).join('\n').replace(CHIPS_RE, '').trim();
+// Người dùng nhờ LÀM một việc trên máy (kể cả câu nối tiếp "hãy làm cho tôi", "làm đi", "ok thực hiện đi")
+const ACT_RE = /^\s*(?:(?:ok(?:e|ay)?|ừ|ừm|vâng|dạ|có|được|tôi muốn|mình muốn|em muốn|hãy|giúp (?:tôi|mình|em)|làm ơn|vui lòng|bạn|(?:aivn (?:bot|agent)),?)[\s,]+)*(mở|khởi động|gửi|nhắn|bấm|nhấn|gõ|đóng|tắt ứng dụng|chụp)(?=\s|$)/iu;
+const FOLLOW_RE = /^\s*(?:(?:ok(?:e|ay)?|ừ|ừm|vâng|dạ|có|được|rồi|tôi muốn|mình muốn|em muốn|hãy|bạn|vậy|thì)[\s,!.]*)*(?:hãy\s+)?(?:(?:tự\s+)?(?:làm|thực hiện|tiến hành|tiếp tục)(?:\s+(?:luôn|đi|nó|việc (?:đó|này)|các bước (?:đó|này)|hộ|giùm|giúp|cho|toàn bộ|hết|ngay))*(?:\s+(?:tôi|mình|em))?(?:\s+(?:luôn|đi|nhé|nha|ngay|với))*|(?:do it|go ahead|yes))[\s!.]*$/iu;
+const isActAsk = (q) => ACT_RE.test(String(q || '')) || FOLLOW_RE.test(String(q || ''));
+// Từ chối / chỉ hướng dẫn tay / hỏi lại thay vì làm (khi công cụ máy tính đang bật)
+const REFUSE_RE = /((do|vì|bởi)\s+(những\s+)?(giới hạn|hạn chế)[^.\n]{0,60}(công cụ|khả năng|hệ thống)|(tôi|mình|em)\s+(hiện\s+)?(không thể|không có khả năng|chưa thể)\s+(tự\s+)?(động\s+)?(thực hiện|thao tác|điều khiển|truy cập|mở|gửi|nhấp|bấm)|(tôi|mình|em)\s+(chỉ\s+)?(có thể\s+)?hướng dẫn|(bạn\s+)?(hãy|có thể|vui lòng)\s+(tự\s+)?(làm|thực hiện)\s+theo|(làm|thực hiện)\s+theo\s+(các\s+)?bước\s+(sau|dưới)|bạn có muốn (tôi|mình|em) (thực hiện|làm|giúp|tiến hành)|nếu bạn muốn,?\s+(tôi|mình|em)\s+(sẽ|có thể)|i (can't|cannot|am unable to|am not able to)|as an ai)/iu;
+const MANUAL_RE = /(^|\n)\s*(?:\d+[.)]|[-*•]|bước\s*\d+:?)\s*\**\s*(mở|nhấp|nhấn|bấm|chọn|gõ|nhập|tìm|vào|click)/giu;
+const looksManual = (t) => (String(t || '').match(MANUAL_RE) || []).length >= 2;
+
 
 function createAgent(deps) {
   // deps: { engine, getSettings, memory, scheduler, confirm, trash, extractFile, embedForMemory, log }
@@ -426,6 +453,7 @@ function createAgent(deps) {
     else lines.push('Máy tính: các công cụ mở ứng dụng/chạy lệnh đang TẮT (Cài đặt AIVN AGENT → Truy cập máy tính).');
     lines.push(`Công cụ ĐANG BẬT trong lượt này (gọi được ngay): ${names.join(', ') || '(không có)'}. Tuyệt đối không bảo người dùng "bật" hay "cho phép" một công cụ đã có trong danh sách này — cứ gọi nó. Chỉ khi công cụ cần thiết KHÔNG có trong danh sách mới nói người dùng bật trong Cài đặt AIVN AGENT.`);
     if (names.includes('open_app') && !names.includes('screen_act')) lines.push('Gửi tin nhắn, bấm hay gõ trong ứng dụng khác (Zalo, Messenger…) cần bật "Điều khiển màn hình" (Cài đặt AIVN AGENT); hiện ĐANG TẮT, nên bạn chỉ mở được ứng dụng (open_app) rồi phải nói rõ người dùng tự gõ và gửi, hoặc bật Điều khiển màn hình.');
+    if (names.includes('open_app')) lines.push('QUAN TRỌNG: các công cụ máy tính ở trên ĐANG BẬT và hoạt động thật. Khi người dùng nhờ làm một việc trên máy (mở ứng dụng, nhắn tin, bấm, gõ…), hãy TỰ LÀM bằng lời gọi công cụ ngay — KHÔNG viết hướng dẫn từng bước cho người dùng tự làm, KHÔNG hỏi lại "bạn có muốn tôi thực hiện không" (người dùng đã yêu cầu rồi), KHÔNG viết nhãn giả trong ngoặc vuông như [Mở Zalo] [Nhắn tin]. Chỉ hỏi lại ngay trước bước gửi/xoá/thanh toán.');
     if (names.includes('screen_act')) lines.push(
       'Điều khiển máy tính (bạn thao tác như người dùng thật, từng bước nhỏ):',
       '1) Mở ứng dụng bằng open_app (hoặc screen_act focus_window nếu đã mở). 2) screen_look để lấy danh sách phần tử [eN]. 3) screen_act MỘT thao tác với element = id [eN] trong danh sách MỚI NHẤT (không đoán id, không dùng id cũ). 4) Đọc phần "Kiểm tra" và danh sách mới trong kết quả rồi làm bước tiếp. Lặp lại tới khi xong.',
@@ -450,16 +478,30 @@ function createAgent(deps) {
     if (att.length && !names.includes('read_file') && !(s.agentToolsOff || []).includes('files')) names.push('read_file'); // đọc tệp đính kèm
     const tools = specs(names);
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
-    const query = lastUser ? (typeof lastUser.content === 'string' ? lastUser.content : (lastUser.content || []).map(x => x.text || '').join(' ')) : '';
+    let query = lastUser ? (typeof lastUser.content === 'string' ? lastUser.content : (lastUser.content || []).map(x => x.text || '').join(' ')) : '';
+    const compOn = names.some(n => COMP.includes(n)) && !headless;
+    // câu nối tiếp ("tôi muốn hãy làm cho tôi"): lấy việc cần làm từ câu yêu cầu trước của người dùng
+    if (compOn && FOLLOW_RE.test(query)) {
+      const prevTask = [...messages].slice(0, -1).reverse().filter(m => m.role === 'user' && typeof m.content === 'string').map(m => m.content).find(c => ACT_RE.test(c) || /zalo|messenger|ứng dụng|tin nhắn|nhắn|gửi|mở/iu.test(c));
+      if (prevTask) {
+        deps.log && deps.log(`[aivn agent] câu nối tiếp "${query.slice(0, 60)}" → làm việc trước: "${prevTask.slice(0, 80)}"`);
+        messages = [...messages.slice(0, -1), { ...lastUser, content: `${query}\n\n(Việc cần làm ngay bây giờ, bằng công cụ: “${prevTask}”)` }];
+        query = prevTask;
+      }
+    }
+    const actAsk = compOn && isActAsk(query);
     onStatus({ stage: 'prepare' });
     const sys = await systemPrompt({ query, names, headless });
-    const san = sanitizeHistory(messages);
+    const san = sanitizeHistory(messages, { act: actAsk });
     if (san.hidden) deps.log && deps.log(`[aivn agent] ẩn ${san.hidden} câu trả lời cũ khẳng định ứng dụng chưa cài`);
+    if (san.guides) deps.log && deps.log(`[aivn agent] ẩn ${san.guides} câu trả lời cũ chỉ hướng dẫn/hỏi lại (không gọi công cụ)`);
     const msgs = [{ role: 'system', content: sys.text }, ...san.messages];
     const st = deps.engine.status();
     const ctx = { signal, convoId, userQuery: query, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
     const steps = [], seen = new Map();
-    let text = '', finishReason = 'stop', calls = 0, nudged = false, deskNudged = false, forcedTried = false, warning = null, fakeSeen = false, emptyNudged = false;
+    let text = '', finishReason = 'stop', calls = 0, nudged = false, deskNudged = false, forcedTried = false, warning = null, fakeSeen = false, emptyNudged = false, loopRetried = false;
+    const smp = SMP.samplingFor(st.id || '', 'agent', { temperature: typeof s.agentTemperature === 'number' && s.agentTemperature !== 0.2 ? s.agentTemperature : null }); // 0.2 = mặc định cũ (dễ lặp) → tự động theo mô hình
+    const turnBudget = Number(s.agentTurnMaxTokens) || 6000;
     const usage = { completion_tokens: 0, seconds: 0 };
     const t0 = Date.now();
     const logTool = (st) => { try { deps.logTool && deps.logTool({ name: st.name, args: st.args, status: st.status, summary: st.summary, ms: st.ms, auto: !!st.auto }); } catch {} };
@@ -485,17 +527,41 @@ function createAgent(deps) {
       }
     }
     // yêu cầu thao tác trên máy mà chưa có bước thật nào thành công → lượt đầu BẮT BUỘC gọi công cụ (hoặc cannot_do)
-    const forceFirst = !headless && names.some(n => COMP.includes(n)) && !(autoOpen && autoOpen.ok) && (!!intent || /^\s*(?:(?:hãy|giúp (?:tôi|mình|em)|làm ơn|vui lòng|bạn)\s+)*(mở|khởi động|gửi tin|nhắn tin|nhắn cho|gửi cho|đóng|tắt ứng dụng)(?=\s|$)/iu.test(query));
+    const forceFirst = !headless && names.some(n => COMP.includes(n)) && !(autoOpen && autoOpen.ok) && (!!intent || actAsk || /^\s*(?:(?:hãy|giúp (?:tôi|mình|em)|làm ơn|vui lòng|bạn)\s+)*(mở|khởi động|gửi tin|nhắn tin|nhắn cho|gửi cho|đóng|tắt ứng dụng)(?=\s|$)/iu.test(query));
     const desk = names.includes('screen_act'); const maxRounds = desk ? 45 : MAX_ROUNDS, maxCalls = desk ? 60 : MAX_CALLS; // điều khiển máy cần nhiều bước nhỏ (quan sát → làm → kiểm tra)
     for (let round = 0; round < maxRounds; round++) {
       const last = round === maxRounds - 1 || calls >= maxCalls;
       onStatus({ stage: 'think', round });
       let streamed = '';
       const forcing = round === 0 && forceFirst && !last;
-      let r = await deps.engine.chatStep(msgs, { tools: forcing ? [...tools, CANNOT] : tools, toolChoice: last ? 'none' : forcing ? 'required' : 'auto', temperature: s.agentTemperature ?? 0.2, maxTokens: s.maxTokens || 1024, signal,
-        onToken: (t) => { streamed += t; onToken(t, round); } });
+      // chống lặp khi đang sinh: phát hiện câu lặp → dừng ngay bước này (không đợi người dùng bấm Dừng)
+      const rc = new AbortController(); const relay = () => rc.abort();
+      if (signal) { if (signal.aborted) rc.abort(); else signal.addEventListener('abort', relay, { once: true }); }
+      let loopHit = null;
+      const guard = RG.createRepeatGuard((info) => { loopHit = info; deps.log && deps.log(`[aivn agent] phát hiện lặp (${info.kind}, ${info.count} lần): “${info.sample}” — dừng sinh`); rc.abort(); });
+      const budgetLeft = Math.max(256, turnBudget - usage.completion_tokens);
+      let r = await deps.engine.chatStep(msgs, { tools: forcing ? [...tools, CANNOT] : tools, toolChoice: last ? 'none' : forcing ? 'required' : 'auto', temperature: smp.temperature, sampling: forcing ? null : smp, maxTokens: Math.min(s.maxTokens || 1024, budgetLeft), signal: rc.signal,
+        onToken: (t) => { streamed += t; guard.push(t); if (!loopHit) onToken(t, round); } });
+      if (signal) signal.removeEventListener('abort', relay);
       usage.completion_tokens += r.usage?.completion_tokens || 0;
+      if (!loopHit && !signal?.aborted && (!r.toolCalls || !r.toolCalls.length) && r.text) { const tl = RG.trimLoop(r.text); if (tl.loop) loopHit = tl.loop; }
+      if (loopHit && !signal?.aborted) {
+        const raw = String(r.text || streamed || ''); const kept = stripFake(raw.slice(0, Math.min(loopHit.cut, raw.length))).trim();
+        onStatus({ stage: 'verify', round, discarded: raw, repeat: true });
+        if (!loopRetried && round < maxRounds - 2) {
+          loopRetried = true;
+          if (actAsk && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) {
+            // thử lại MỘT lần bằng lời gọi công cụ có ràng buộc ngữ pháp (không thể lặp câu)
+            msgs.push({ role: 'assistant', content: kept }, { role: 'user', content: REPEAT_ACT_NUDGE });
+            let fr = null; try { const compTools = tools.filter(t => COMP.includes(t.name)); fr = await deps.engine.chatStep(msgs, { tools: [...(compTools.length ? compTools : tools), CANNOT], toolChoice: 'required', temperature: 0, maxTokens: 400, signal }); } catch (e) { deps.log && deps.log('[aivn agent] buộc gọi công cụ sau khi lặp lỗi: ' + e.message); }
+            const c = fr && fr.toolCalls && fr.toolCalls[0];
+            if (c && c.name !== 'cannot_do' && names.includes(c.name)) { msgs.pop(); msgs.pop(); r = { ...fr, text: '', toolCalls: [c] }; loopHit = null; }
+            else { text = c && c.arguments && c.arguments.reason ? 'Mình chưa làm được việc này: ' + String(c.arguments.reason) : kept; warning = REPEAT_WARN; finishReason = 'stop'; break; }
+          } else { msgs.push({ role: 'assistant', content: kept }, { role: 'user', content: REPEAT_NUDGE }); continue; }
+        } else { text = kept; warning = REPEAT_WARN; finishReason = 'stop'; break; }
+      }
       if (signal?.aborted || r.finishReason === 'abort') { text = r.text || streamed; finishReason = 'abort'; break; }
+      if (usage.completion_tokens >= turnBudget && (!r.toolCalls || !r.toolCalls.length)) { text = RG.trimLoop(stripFake(r.text || '')).text; warning = warning || BUDGET_WARN; finishReason = 'length'; break; }
       if (forcing && r.toolCalls && r.toolCalls[0] && r.toolCalls[0].name === 'cannot_do') { const why = r.toolCalls[0].arguments && r.toolCalls[0].arguments.reason; text = 'Mình chưa làm được việc này' + (why ? ': ' + String(why) : '.'); finishReason = 'stop'; break; }
       if ((!r.toolCalls || !r.toolCalls.length) && r.finishReason !== 'abort' && /<tool_call>|"name"\s*:/.test(r.text || '')) {
         // mô hình viết lời gọi công cụ dạng văn bản (vd. SmolVLM qua llama-server, Qwen nhỏ): tự tách thành lời gọi thật
@@ -589,6 +655,11 @@ function createAgent(deps) {
       const why = String(e.summary || '').replace(/^\(lặp lại\)\s*/, '').split(/\s*(?:Bước tiếp|Gợi ý cho mô hình|Không mở trang web)/)[0].trim().replace(/[.\s]+$/, '');
       text = `Mình chưa làm được việc này: ${why}.` + (e.name === 'open_app' ? ' Bạn kiểm tra lại tên ứng dụng giúp mình (hoặc bấm "Kiểm tra quét ứng dụng" trong Cài đặt → Nâng cao để xem AIVN thấy những ứng dụng nào).' : '');
     }
+    if (!String(text || '').trim() && finishReason !== 'abort' && steps.some(x => x.status === 'ok')) {
+      // hết vòng/giới hạn mà mô hình chưa kịp báo cáo: tự tóm tắt những gì công cụ đã làm thật
+      const okSteps = steps.filter(x => x.status === 'ok');
+      text = 'Đã làm:\n' + okSteps.slice(-12).map(x => `- ${x.label || x.name}: ${String(x.summary || '').slice(0, 120)}`).join('\n') + (okSteps.length > 12 ? `\n- … và ${okSteps.length - 12} bước khác` : '');
+    }
     if (fakeSeen && !warning && finishReason !== 'abort' && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) warning = NO_ACTION_WARN;
     usage.seconds = (Date.now() - t0) / 1000;
     usage.tokensPerSecond = usage.seconds ? usage.completion_tokens / usage.seconds : 0;
@@ -600,4 +671,4 @@ function createAgent(deps) {
   return { run, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck };
 }
 
-module.exports = { stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN };
+module.exports = { isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN };
