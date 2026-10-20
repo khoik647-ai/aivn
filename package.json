@@ -25,9 +25,11 @@
     "@tesseract.js-data/eng": "1.0.0",
     "@tesseract.js-data/vie": "1.0.0",
     "electron-updater": "6.8.9",
+    "fflate": "0.8.2",
     "mammoth": "1.13.0",
     "node-llama-cpp": "3.22.2",
     "pdfjs-dist": "5.6.205",
+    "sql.js": "1.13.0",
     "tesseract.js": "7.0.0"
   },
   "devDependencies": {
@@ -63,7 +65,10 @@
       "!node_modules/@napi-rs/**",
       "!node_modules/@tesseract.js-data/*/4.0.0/**",
       "!node_modules/tesseract.js/{dist,docs,examples,benchmarks,tests}/**",
-      "!node_modules/@nut-tree-fork/*/build/Release/*.{lib,exp}"
+      "!node_modules/@nut-tree-fork/*/build/Release/*.{lib,exp}",
+      "!node_modules/sql.js/dist/{*.zip,sql-asm*,*debug*,worker*}",
+      "!node_modules/sql.js/{documentation,examples,coverage}/**",
+      "!node_modules/fflate/{esm,umd}/**"
     ],
     "asar": true,
     "asarUnpack": [
@@ -75,7 +80,9 @@
       "src/schema.js",
       "src/ocr.js",
       "src/llama-archs.json",
-      "package.json"
+      "package.json",
+      "src/docs.js",
+      "src/docs-worker.js"
     ],
     "npmRebuild": false,
     "nodeGypRebuild": false,

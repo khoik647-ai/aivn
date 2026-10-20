@@ -23,8 +23,12 @@ const { WELCOME, TOOL_GROUPS } = require('./agent/agent');
 const { toolSupport } = require('./toolsupport');
 const { createAppLock, resetData } = require('./applock');
 const LIC = require('./license');
+const PERF = require('./perf');
+const docsPool = require('./docs-pool');
 
 const isTest = process.env.AIVN_TEST === '1';
+// Giới hạn bộ nhớ JS của giao diện trên máy yếu (đọc mức đã tính ở lần chạy trước; phải đặt trước khi app sẵn sàng)
+try { const ud0 = process.env.AIVN_USER_DATA || app.getPath('userData'); const pc = JSON.parse(fs.readFileSync(path.join(ud0, 'perf-cache.json'), 'utf8')); if (pc.rendererHeapMB > 0) app.commandLine.appendSwitch('js-flags', `--max-old-space-size=${pc.rendererHeapMB}`); } catch {}
 if (process.env.AIVN_USER_DATA) app.setPath('userData', process.env.AIVN_USER_DATA);
 
 // Bộ máy suy luận chạy trong tiến trình Node.js thuần đi kèm (resources/node). Bộ cấp phát của Electron làm sập
@@ -54,6 +58,8 @@ if (nodePath) {
   engine = { ...inproc, external: false, calibrate: async () => {}, ocr: (b) => require('./ocr').recognize(b), start: async () => {}, stop: async () => {} };
 }
 
+let lastUse = Date.now(); let busy = 0; // dùng để tự gỡ mô hình khi rảnh lâu (mức Tiết kiệm)
+for (const k of ['generate', 'chatStep']) { const f = engine[k]; if (typeof f === 'function') engine[k] = (...a) => { lastUse = Date.now(); busy++; const p = Promise.resolve().then(() => f(...a)); p.finally(() => { busy--; lastUse = Date.now(); }).catch(() => {}); return p; }; }
 let win = null, tray = null, quitting = false;
 let paths, settings, convos, memory, scheduler, agent;
 let downloader = null;
@@ -75,9 +81,10 @@ function initStores() {
   fs.mkdirSync(paths.models, { recursive: true });
   settings = new JsonStore(path.join(ud, 'settings.json'), {
     systemPrompt: 'Bạn là AIVN, một trợ lý AI thân thiện. Hãy trả lời bằng tiếng Việt, rõ ràng và chính xác.',
-    temperature: 0.7, maxTokens: 1024, contextSize: 4096, apiPort: 1234, apiAutoStart: false, imported: [], lastModel: null, hfToken: '', theme: 'light', rag: true, vision: true,
+    temperature: 0.7, maxTokens: 1024, contextSize: 0, perfMode: 'auto', apiPort: 1234, apiAutoStart: false, imported: [], lastModel: null, hfToken: '', theme: 'light', rag: true, vision: true,
     agentFolders: [], agentWeb: false, agentPython: false, agentMemory: true, agentTemperature: 0.2, agentComputer: true, agentScreen: false, agentAutoReadOnly: false, keepInTray: false, openAtLogin: false,
   });
+  if (!settings.data.perfMigrated) { if (settings.data.contextSize === 4096) settings.data.contextSize = 0; settings.data.perfMigrated = 1; settings.save(); } // 4096 là mặc định cũ → chuyển sang Tự động theo mức máy
   Object.assign(process.env, Object.fromEntries(Object.entries(engineEnv()).filter(([k, v]) => v && !process.env[k]))); // bộ máy (tiến trình riêng) kế thừa các biến này khi khởi động
   convos = new JsonStore(path.join(ud, 'conversations.json'), { list: [] });
   rag = createRagStore(path.join(ud, 'rag'));
@@ -85,7 +92,7 @@ function initStores() {
   scheduler = createScheduler({ file: path.join(ud, 'schedules.json'), onFire: onScheduleFire, log: (m) => { console.log(m); log(m); } });
   computerTools = createComputerTools({ getSettings: () => settings.data, openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => engineLog('Quét ứng dụng đã cài (AIVN BOT)', null, { 'nguồn': d.sources, 'lỗi': d.errors.length ? d.errors : 'không', 'thư mục Desktop': d.dirs ? d.dirs.desktop : [], 'thư mục Start Menu': d.dirs ? d.dirs.start : [], 'thời gian tìm sâu (ms)': d.ms }),
     keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: screenLook, act: screenAct } });
-  agent = createAgent({ engine, getSettings: () => settings.data, memory, scheduler, extractFile: docs.extractFile, embedForMemory, log, computer: computerTools,
+  agent = createAgent({ engine, getSettings: () => settings.data, memory, scheduler, extractFile: docsPool.extractFile, embedForMemory, log, computer: computerTools,
     trash: async (p) => { try { await shell.trashItem(p); } catch (e) { throw new Error('Không chuyển được tệp vào Thùng rác (' + e.message + '). Tệp vẫn còn nguyên.'); } } });
   lic = createLicenseState({ file: path.join(ud, 'license.json'), isPackaged: app.isPackaged, log: (m) => { log(m); if (isTest) console.log(m); }, fetchJson });
   appLock = createAppLock(path.join(ud, 'applock.json'));
@@ -119,7 +126,7 @@ function lockNow(reason) {
   loadUi(); return true;
 }
 function startServices() {
-  if (servicesOn) return; servicesOn = true;
+  if (servicesOn) return; servicesOn = true; startIdleUnload();
   applyBackgroundPrefs();
   scheduler.start();
   if (settings.data.apiAutoStart || process.env.AIVN_API === '1') api.start(settings.data.apiPort).catch(e => log('Lỗi: ' + e.message));
@@ -165,6 +172,12 @@ function registerGateIpc(handle) {
 const publicSettings = () => { const { hfToken, ...rest } = settings.data; return { ...rest, hfTokenSet: !!hfToken }; };
 
 const send = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send(ch, data); };
+// Gộp token trong ~16 ms thành một tin IPC (bớt hàng trăm tin/giây khi mô hình nhanh); flush() trước mọi sự kiện khác của cùng lượt
+function tokenBatcher(reqId) {
+  let buf = '', t = null;
+  const flush = () => { if (t) { clearTimeout(t); t = null; } if (buf && reqId) { send('chat:token', { reqId, t: buf }); } buf = ''; };
+  return { push: (s) => { buf += s; if (!t) t = setTimeout(flush, 16); }, flush };
+}
 const log = (msg) => { const e = { t: Date.now(), msg }; serverLog.push(e); if (serverLog.length > 200) serverLog.shift(); send('server:log', e); };
 
 const SPLIT_RE = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i;
@@ -238,6 +251,27 @@ function verifyGguf(m) {
 }
 const MODE_VI = { gpu: 'GPU', 'gpu-partial': 'GPU một phần + CPU', cpu: 'CPU', 'cpu-only': 'CPU (không dùng GPU)' };
 
+async function perfProfile() {
+  const p = PERF.profileFor(await hw(), settings.data.perfMode || 'auto');
+  try { fs.writeFileSync(path.join(paths.userData, 'perf-cache.json'), JSON.stringify({ tier: p.tier, rendererHeapMB: p.rendererHeapMB })); } catch {}
+  return p;
+}
+// Mức Tiết kiệm: gỡ mô hình sau N phút không dùng để trả lại RAM/VRAM cho máy
+let idleUnloadTimer = null;
+function startIdleUnload() {
+  clearInterval(idleUnloadTimer);
+  idleUnloadTimer = setInterval(async () => {
+    try {
+      const st = engine.status(); if (!st.loaded || busy > 0 || generations.size) return;
+      const p = await perfProfile(); if (!p.idleUnloadMin) return;
+      if (Date.now() - lastUse < p.idleUnloadMin * 60000) return;
+      if (api.status().running) return; // máy chủ API đang bật: giữ mô hình
+      await engine.unloadModel(); send('model:status', engine.status());
+      send('perf:unloaded', { id: st.id, minutes: p.idleUnloadMin }); log(`[hiệu năng] đã gỡ ${st.id} sau ${p.idleUnloadMin} phút không dùng`);
+    } catch {}
+  }, 60000);
+  if (idleUnloadTimer.unref) idleUnloadTimer.unref();
+}
 async function loadById(id, { force = false } = {}) {
   const m = listModels().find(x => x.id === id);
   if (!m) throw new Error(`Không tìm thấy mô hình "${id}"`);
@@ -257,7 +291,7 @@ async function loadById(id, { force = false } = {}) {
       }
     }
     const gl = settings.data.gpuLayers;
-    const opts = { contextSize: settings.data.contextSize, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj } : {}) };
+    const pf = await perfProfile(); const opts = { contextSize: settings.data.contextSize || pf.ctx, perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj } : {}) };
     try {
       try { st = await engine.loadModel(m.id, m.path, opts); }
       catch (e) {
@@ -281,7 +315,7 @@ async function loadById(id, { force = false } = {}) {
       x.code = 'LOAD_FAILED'; throw x;
     }
     if (st.fallbackFrom && st.fallbackFrom.length) { engineLog('Nạp ' + m.file + ' bằng chế độ dự phòng: ' + st.mode, null, { attempts: st.fallbackFrom }); st.notice = `GPU không nạp được mô hình này, AIVN đã chuyển sang chế độ ${MODE_VI[st.mode] || st.mode} (chậm hơn nhưng vẫn dùng được).`; }
-    settings.data.lastModel = m.id; settings.save();
+    settings.data.lastModel = m.id; settings.save(); lastUse = Date.now();
     send('model:status', st);
     return st;
   } catch (e) { send('model:status', engine.status()); throw e; }
@@ -368,11 +402,12 @@ async function runAgentTurn({ reqId, convoId, messages, headless = false, signal
   const comp = !headless && agent.activeTools({ headless }).some(n => computerTools.has(n));
   if (comp) computerSessionStart();
   const files = (Array.isArray(attachments) ? attachments : []).filter(f => f && typeof f.path === 'string' && path.isAbsolute(f.path) && fs.existsSync(f.path) && fs.statSync(f.path).isFile()).slice(0, 10);
-  try { return await agent.run({ messages, convoId, signal, headless, attachments: files, confirm: askConfirm, confirmScreen: askScreen,
-    onToken: (t) => reqId && send('chat:token', { reqId, t }),
-    onStep: (st) => reqId && send('agent:step', { reqId, step: slimStep(st) }),
-    onStatus: (st) => reqId && send('agent:status', { reqId, ...st }) }); }
-  finally { if (comp) computerSessionEnd(); }
+  const tb = tokenBatcher(reqId);
+  try { return await agent.run({ messages, convoId, signal, headless, attachments: files, confirm: (...a) => { tb.flush(); return askConfirm(...a); }, confirmScreen: (...a) => { tb.flush(); return askScreen(...a); },
+    onToken: (t) => reqId && tb.push(t),
+    onStep: (st) => { tb.flush(); reqId && send('agent:step', { reqId, step: slimStep(st) }); },
+    onStatus: (st) => { tb.flush(); reqId && send('agent:status', { reqId, ...st }); } }); }
+  finally { tb.flush(); if (comp) computerSessionEnd(); }
 }
 // ---------- Truy cập máy tính: dừng khẩn cấp, thẻ duyệt thao tác màn hình ----------
 const STOP_KEY = 'CommandOrControl+Alt+Q';
@@ -678,6 +713,8 @@ function registerIpc() {
     if ('gpuDevice' in rest) settings.data.gpuDevice = intOrNull(rest.gpuDevice, 15);
     if ('vramLimitGB' in rest) settings.data.vramLimitGB = Number(rest.vramLimitGB) > 0 ? Math.min(256, Number(rest.vramLimitGB)) : null;
     if (typeof hfToken === 'string') settings.data.hfToken = hfToken.trim().slice(0, 300);
+    if ('perfMode' in rest) { settings.data.perfMode = PERF.MODE_VI[rest.perfMode] ? rest.perfMode : 'auto'; perfProfile().then(p => send('perf:changed', p)).catch(() => {}); }
+    if ('contextSize' in rest) settings.data.contextSize = [0, 2048, 4096, 8192, 16384, 32768].includes(Number(rest.contextSize)) ? Number(rest.contextSize) : 0;
     if (['light', 'dark', 'system'].includes(settings.data.theme)) require('electron').nativeTheme.themeSource = settings.data.theme;
     if ('theme' in rest && win && !win.isDestroyed()) win.setBackgroundColor(windowBg());
     if ('agentFolders' in rest) settings.data.agentFolders = (Array.isArray(rest.agentFolders) ? rest.agentFolders : []).filter(f => typeof f === 'string' && path.isAbsolute(f)); // chỉ thêm qua hộp thoại chọn thư mục
@@ -712,6 +749,7 @@ function registerIpc() {
   ipcMain.handle('dl:remove', (_e, id) => downloader.remove(id));
   ipcMain.handle('dl:list', () => downloader.list());
   ipcMain.handle('hw:info', () => hw());
+  ipcMain.handle('perf:info', async () => { const h = await hw(); return { profile: await perfProfile(), hw: { ram: h.ram, cpus: h.cpus, mathCores: h.mathCores, gpu: h.gpu, vram: h.vram, cpu: h.cpu } }; });
 
   ipcMain.handle('models:list', () => listModels());
   ipcMain.handle('models:import', async () => {
@@ -761,7 +799,8 @@ function registerIpc() {
         messages = packed.messages; docInfo = packed.docInfo;
         if (docInfo) send('chat:docinfo', { reqId, ...docInfo });
       }
-      const r = await engine.generate(messages, { temperature, maxTokens, signal: ac.signal, onToken: t => send('chat:token', { reqId, t }) });
+      const tb = tokenBatcher(reqId);
+      let r; try { r = await engine.generate(messages, { temperature, maxTokens, signal: ac.signal, onToken: t => tb.push(t) }); } finally { tb.flush(); }
       return { ...r, docInfo };
     } finally { generations.delete(reqId); }
   });
@@ -786,7 +825,7 @@ function registerIpc() {
   ipcMain.handle('files:extract', async (_e, paths) => {
     const out = [];
     for (const p of paths || []) {
-      try { const d = await docs.extractFile(p); out.push({ ok: true, name: d.name, size: d.size, kind: d.kind, pages: d.pages, chars: d.chars, text: d.text }); }
+      try { const d = await docsPool.extractFile(p); out.push({ ok: true, name: d.name, size: d.size, kind: d.kind, pages: d.pages, chars: d.chars, text: d.text }); }
       catch (e) { out.push({ ok: false, name: path.basename(p), error: e.userMessage || ('Không đọc được tệp: ' + e.message) }); }
     }
     return out;
@@ -1510,6 +1549,30 @@ else {
     if (process.env.AIVN_SELFTEST_UI) win.webContents.once('did-finish-load', () => setTimeout(() => selfTestUi().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); }), 1500));
     if (process.env.AIVN_SELFTEST_HF) selfTestHf().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); });
     if (process.env.AIVN_SELFTEST_DOC) selfTestDoc().catch(e => { console.error('SELFTEST lỗi', e); app.exit(2); });
+    if (process.env.AIVN_BENCH_STARTUP && !app.isPackaged) { // chỉ kiểm thử: đo thời gian khởi động + bộ nhớ
+      const t0 = (process.getCreationTime && process.getCreationTime()) || Date.now();
+      win.webContents.once('did-finish-load', async () => {
+        const dfl = Date.now() - t0;
+        const until = async (c) => { for (let i = 0; i < 200; i++) { try { if (await win.webContents.executeJavaScript(c)) return; } catch {} await new Promise(r => setTimeout(r, 25)); } };
+        await until('typeof state !== "undefined" && !!(state.settings && document.querySelector("#input"))'); const ready = Date.now() - t0;
+        await new Promise(r => setTimeout(r, 5000));
+        const m = app.getAppMetrics(); const mem = m.reduce((a, x) => a + (x.memory ? x.memory.workingSetSize : 0), 0);
+        let engMB = 0; try { const { execSync } = require('child_process'); engMB = Math.round(execSync(`for p in $(pgrep -P ${process.pid} -f engine-host); do ps -o rss= -p $p; done`, { shell: '/bin/bash' }).toString().split(/\s+/).filter(Boolean).map(Number).reduce((a, b) => a + b, 0) / 1024); } catch {}
+        const res = { didFinishLoadMs: dfl, uiReadyMs: ready, appMemMB: Math.round(mem / 1024), engineHostMB: engMB, byType: m.map(x => x.type + ':' + Math.round((x.memory ? x.memory.workingSetSize : 0) / 1024)).join(' ') };
+        fs.writeFileSync(process.env.AIVN_BENCH_STARTUP, JSON.stringify(res)); app.exit(0);
+      });
+    }
+    if (process.env.AIVN_SHOTSET && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(async () => { // chỉ kiểm thử: chụp loạt ảnh theo danh sách JSON [{name, js, w, h, wait}]
+      const dir = process.env.AIVN_SHOTSET; fs.mkdirSync(dir, { recursive: true });
+      const list = JSON.parse(fs.readFileSync(process.env.AIVN_SHOTSET_LIST, 'utf8'));
+      for (const s of list) {
+        try { win.setBounds({ x: 0, y: 0, width: s.w || 1280, height: s.h || 720 }); await new Promise(r => setTimeout(r, 300));
+          if (s.js) await win.webContents.executeJavaScript(s.js); await new Promise(r => setTimeout(r, s.wait || 900));
+          fs.writeFileSync(path.join(dir, s.name + '.png'), (await win.webContents.capturePage()).toPNG()); console.log('[shot] ' + s.name);
+        } catch (e) { console.error('[shot] ' + s.name, e.message); }
+      }
+      app.exit(0);
+    }, Number(process.env.AIVN_SHOT_DELAY || 3000)));
     if (process.env.AIVN_SHOT) setTimeout(async () => { // chỉ dùng khi kiểm thử: chụp màn hình cửa sổ
       try { if (process.env.AIVN_SHOT_JS) await win.webContents.executeJavaScript(process.env.AIVN_SHOT_JS); await new Promise(r => setTimeout(r, 1500));
         fs.writeFileSync(process.env.AIVN_SHOT, (await win.webContents.capturePage()).toPNG()); } catch (e) { console.error(e); }
