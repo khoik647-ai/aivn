@@ -28,10 +28,13 @@
   <main class="content">
     <header class="topbar">
       <div class="model-picker">
-        <select id="modelSelect"><option value="">— Chọn mô hình để nạp —</option></select>
-        <button class="btn sm" id="ejectBtn" title="Gỡ mô hình khỏi bộ nhớ" disabled>⏏ Gỡ</button>
+        <select id="modelSelect" hidden aria-hidden="true" tabindex="-1"><option value="">— Chọn mô hình để nạp —</option></select>
+        <div class="ld-pill" id="ldPill">
+          <button class="ld-open" id="loaderBtn" title="Chọn mô hình để nạp (Ctrl+L)" aria-haspopup="dialog"><span class="dot off" id="ldDot"></span><span class="ld-name" id="ldName">Chọn mô hình để nạp</span><span class="ld-meta" id="ldMeta"></span><kbd>Ctrl+L</kbd></button>
+          <button class="ld-eject" id="ejectBtn" title="Gỡ mô hình khỏi bộ nhớ" aria-label="Gỡ mô hình khỏi bộ nhớ" disabled>⏏</button>
+        </div>
       </div>
-      <div class="model-state" id="modelState"><span class="dot off"></span>Chưa nạp mô hình</div>
+      <div class="model-state" id="modelState" hidden><span class="dot off"></span>Chưa nạp mô hình</div>
       <div class="top-tools"><button class="btn sm ghost" id="paletteBtn" title="Tìm lệnh nhanh (Ctrl+K)" aria-label="Tìm lệnh nhanh">⌘ Lệnh <kbd>Ctrl+K</kbd></button><button class="btn sm ghost" id="panelToggle" title="Ẩn/hiện bảng cài đặt bên phải (Ctrl+.)" aria-label="Ẩn hoặc hiện bảng cài đặt">⇥ Bảng cài đặt</button><button class="btn sm ghost" id="helpKeys" title="Phím tắt (Ctrl+/)" aria-label="Phím tắt">⌨</button></div>
     </header>
 
@@ -395,6 +398,11 @@
     <div class="row end"><button class="btn" id="scNo">Từ chối</button><button class="btn danger" id="scStop">■ Dừng AIVN AGENT</button><button class="btn primary" id="scYes">Đồng ý thực hiện</button></div>
   </div>
 </div>
+<div class="modal-back loader-back" id="loader" hidden><div class="loader" role="dialog" aria-modal="true" aria-labelledby="ldTitle">
+  <div class="ld-head"><h3 id="ldTitle" class="sr-only">Nạp mô hình</h3><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg><input id="ldQ" type="text" placeholder="Tìm trong các mô hình đã tải về…" aria-label="Tìm mô hình" autocomplete="off"><span class="ld-count small muted" id="ldCount"></span><kbd>Esc</kbd></div>
+  <div class="ld-body"><div class="ld-list" id="ldList" role="listbox" aria-label="Mô hình đã tải về"></div><div class="ld-pane" id="ldPane"></div></div>
+  <div class="ld-foot"><label class="ld-remember"><input type="checkbox" id="ldRemember" checked> Nhớ cài đặt nạp cho mô hình này</label><span class="grow"></span><button class="btn" id="ldCancel">Huỷ</button><button class="btn danger" id="ldUnload" hidden>⏏ Gỡ khỏi bộ nhớ</button><button class="btn primary" id="ldGo" disabled>Nạp mô hình</button></div>
+</div></div>
 <div class="modal-back palette-back" id="palette" hidden><div class="palette" role="dialog" aria-label="Tìm lệnh nhanh"><input id="palQ" type="text" placeholder="Gõ để tìm lệnh: “mô hình”, “AIVN AGENT”, “MCP”, “tốc độ”…" aria-label="Tìm lệnh"><div class="pal-list" id="palList" role="listbox"></div><div class="small muted pal-foot">↑↓ chọn · Enter chạy · Esc đóng</div></div></div>
 <div class="modal-back" id="keysModal" hidden><div class="modal keys-modal" role="dialog" aria-labelledby="keysTitle"><h3 id="keysTitle">⌨ Phím tắt</h3><table class="keys-table">
 <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Tìm lệnh nhanh</td></tr><tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>Cuộc trò chuyện mới</td></tr><tr><td><kbd>Ctrl</kbd>+<kbd>.</kbd></td><td>Ẩn/hiện bảng cài đặt</td></tr><tr><td><kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Gửi / xuống dòng</td></tr><tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Cho phép bước AIVN AGENT đang xin</td></tr><tr><td><kbd>Esc</kbd></td><td>Từ chối bước đang xin · đóng hộp thoại</td></tr><tr><td><kbd>Esc</kbd> hoặc <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Q</kbd></td><td>Dừng ngay khi AIVN AGENT điều khiển máy</td></tr><tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>Bảng phím tắt này</td></tr></table><div class="row"><button class="btn primary" id="keysClose">Đóng</button></div></div></div>

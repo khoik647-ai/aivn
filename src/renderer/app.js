@@ -87,7 +87,7 @@ async function refreshModels() {
       <span>${fmtBytes(m.size)}</span><span>${m.source === 'imported' ? 'Đã nhập' : 'Đã tải'}</span>
       <span class="path" title="${esc(m.path)}">${esc(m.path)}</span>
       <span class="acts">${m.loaded ? '<button class="btn sm" data-act="unload">Gỡ khỏi bộ nhớ</button>' : '<button class="btn sm primary" data-act="load">Nạp</button>'}
-        <button class="btn sm" data-act="reveal" title="Hiện trong thư mục">📁</button><button class="btn sm danger" data-act="delete" title="Xoá">🗑</button></span></div>`).join('');
+        <button class="btn sm" data-act="params" title="Tham số nạp cho mô hình này" aria-label="Tham số nạp">⚙</button><button class="btn sm" data-act="reveal" title="Hiện trong thư mục">📁</button><button class="btn sm danger" data-act="delete" title="Xoá">🗑</button></span></div>`).join('');
 }
 $('#modelTable').addEventListener('click', async (e) => {
   const b = e.target.closest('button[data-act]'); if (!b) return;
@@ -95,19 +95,20 @@ $('#modelTable').addEventListener('click', async (e) => {
   try {
     if (b.dataset.act === 'load') await loadModel(id);
     if (b.dataset.act === 'unload') await A.unloadModel();
+    if (b.dataset.act === 'params') return openLoader(id);
     if (b.dataset.act === 'reveal') await A.reveal(m.path);
     if (b.dataset.act === 'delete') await A.deleteModel(id);
   } catch (err) { toast(err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), true); }
   refreshModels();
 });
-async function loadModel(id) {
+async function loadModel(id, extra = {}) {
   if (!id) return false;
   let ok = false;
-  let r = await A.loadModel(id).catch(err => ({ ok: false, error: cleanErr(err.message) }));
+  let r = await A.loadModel(id, extra).catch(err => ({ ok: false, error: cleanErr(err.message) }));
   if (r && r.code === 'LOW_MEM') {
     const go = await modalAsk({ icon: '🧠', title: 'Có thể không đủ bộ nhớ', message: r.error, okLabel: 'Vẫn nạp', noLabel: 'Chọn bản nhỏ hơn' });
     if (!go) { show('discover'); return false; }
-    r = await A.loadModel(id, { force: true }).catch(err => ({ ok: false, error: cleanErr(err.message) }));
+    r = await A.loadModel(id, { ...extra, force: true }).catch(err => ({ ok: false, error: cleanErr(err.message) }));
   }
   if (r && r.ok) { ok = true; toast(r.status && r.status.notice ? '⚠ ' + r.status.notice : 'Đã nạp mô hình ✓', !!(r.status && r.status.notice)); }
   else if (r && r.code === 'BAD_FILE') {
@@ -137,6 +138,183 @@ const doImport = async () => { state.models = await A.importModel(); refreshMode
 $('#importBtn').addEventListener('click', doImport); $('#importBtn2').addEventListener('click', doImport);
 $('#openDir').addEventListener('click', () => A.reveal());
 
+// ---------- Hộp nạp mô hình (0.16, bố cục kiểu LM Studio): danh sách bên trái, tham số nạp theo từng mô hình bên phải ----------
+const ld = { sel: null, metas: new Map(), form: null, est: null, estSeq: 0 };
+const mName = (m) => m ? (m.catalog ? m.catalog.name : (m.file || m.id).replace(/\.gguf$/i, '').replace(/-0000\d-of-0000\d$/i, '')) : '';
+const fmtTok = (n) => Number(n || 0).toLocaleString('vi-VN');
+function paintPill(st) {
+  const m = (state.models || []).find(x => x.id === st.id);
+  $('#ldDot').className = 'dot' + (st.loading ? ' busy' : st.loaded ? '' : ' off');
+  $('#ldPill').classList.toggle('on', !!st.loaded); $('#ldPill').classList.toggle('busy', !!st.loading);
+  $('#ldName').textContent = st.loading ? `Đang nạp ${mName(m) || st.id || ''}…` : st.loaded ? (mName(m) || st.id) : 'Chọn mô hình để nạp';
+  $('#ldMeta').textContent = st.loaded ? [`ngữ cảnh ${fmtTok(st.contextSize)}`, st.gpu ? (st.totalLayers ? `GPU ${st.gpuLayers}/${st.totalLayers}` : 'GPU') : 'CPU'].join(' · ') : '';
+  $('#loaderBtn').title = (st.loaded ? `${$('#ldName').textContent} · ${$('#ldMeta').textContent}\n` : '') + 'Chọn mô hình để nạp (Ctrl+L)';
+}
+$('#loaderBtn').addEventListener('click', () => openLoader());
+const CTX_STEPS = [4096, 8192, 12288, 16384, 24576, 32768, 49152, 65536, 98304, 131072, 196608, 262144];
+function ctxSteps(max) { const a = CTX_STEPS.filter(x => x <= max); if (!a.length || a[a.length - 1] !== max) a.push(max); return a; }
+async function openLoader(id) {
+  if (!state.models) await refreshModels();
+  $('#loader').hidden = false; $('#ldQ').value = '';
+  const list = ldSorted();
+  ld.sel = id || (state.status.loaded && state.status.id) || (state.settings && list.some(m => m.id === state.settings.lastModel) ? state.settings.lastModel : null) || (list[0] && list[0].id) || null;
+  renderLdList(); const p = selectLd(ld.sel); $('#ldQ').focus();
+  (async () => { for (const m of list) { if (!ld.metas.has(m.id)) { await ldMeta(m.id); if (!$('#loader').hidden) renderLdList(); } } })();
+  await p;
+}
+function closeLoader() { $('#loader').hidden = true; $('#loaderBtn').focus(); }
+function ldSorted() {
+  const q = $('#ldQ').value.trim().toLowerCase(); const last = state.settings && state.settings.lastModel;
+  return (state.models || []).filter(m => !q || (mName(m) + ' ' + m.file).toLowerCase().includes(q))
+    .sort((a, b) => (b.loaded - a.loaded) || ((b.id === last) - (a.id === last)) || mName(a).localeCompare(mName(b), 'vi'));
+}
+function renderLdList() {
+  const list = ldSorted(), el = $('#ldList'), all = (state.models || []).length;
+  $('#ldCount').textContent = all ? (list.length === all ? `${all} mô hình` : `${list.length}/${all} mô hình`) : '';
+  if (!all) { el.innerHTML = ''; $('#ldPane').innerHTML = `<div class="ld-empty"><div class="ld-empty-ic">📦</div><h4>Chưa có mô hình nào trên máy</h4><p class="muted">Tải một mô hình ở mục Khám phá (gợi ý: Qwen3 4B Instruct 2507), hoặc nhập tệp GGUF bạn đã có.</p><div class="row"><button class="btn primary" data-ld="discover">Mở Khám phá</button><button class="btn" data-ld="import">Nhập tệp GGUF…</button></div></div>`; ldFoot(); return; }
+  if (!list.length) { el.innerHTML = `<div class="ld-none muted small">Không có mô hình nào khớp “${esc($('#ldQ').value.trim())}”.</div>`; return; }
+  const loadingId = state.status.loading ? state.status.id : null;
+  el.innerHTML = list.map(m => { const g = ld.metas.get(m.id); const saved = state.settings && state.settings.modelLoad && state.settings.modelLoad[m.id];
+    return `<div class="ld-item${m.id === ld.sel ? ' sel' : ''}" role="option" aria-selected="${m.id === ld.sel}" data-id="${esc(m.id)}" tabindex="-1">
+      <div class="ld-i-main"><b>${esc(mName(m))}</b>${m.loaded ? '<span class="ld-tag on">Đang dùng</span>' : ''}${m.id === loadingId ? '<span class="ld-tag busy">Đang nạp…</span>' : ''}</div>
+      <div class="ld-i-sub small muted">${[g && g.arch, g && g.sizeLabel, g && g.quant || (m.file.match(/(I?Q\d[_A-Z0-9]*|F16|BF16)/i) || [])[1], fmtBytes(m.size)].filter(Boolean).map(esc).join(' · ')}${m.vision ? ' · 👁' : ''}${saved ? ' · <span title="Đã lưu tham số nạp riêng">⚙ riêng</span>' : ''}</div></div>`; }).join('');
+  const s = el.querySelector('.ld-item.sel'); if (s) s.scrollIntoView({ block: 'nearest' });
+}
+async function ldMeta(id) {
+  if (!ld.metas.has(id)) { const g = await A.modelMeta(id).catch(() => null); ld.metas.set(id, g); }
+  return ld.metas.get(id);
+}
+function defaultForm(g) {
+  const sv = (g && g.saved) || {}; const max = Math.max(4096, (g && g.trainCtx) || 32768);
+  const ctx = Math.min(max, Math.max(4096, sv.contextSize || (g && g.global && g.global.contextSize) || 8192));
+  const gl = sv.gpuLayers != null ? sv.gpuLayers : (g && g.global && g.global.gpuLayers != null ? g.global.gpuLayers : 'auto');
+  return { contextSize: ctx, gpuLayers: gl, flashAttention: sv.flashAttention == null ? 'auto' : sv.flashAttention ? 'on' : 'off', kvCache: sv.kvCache || 'auto', threads: sv.threads || 0, batchSize: sv.batchSize || 0, mmap: sv.mmap !== false, mlock: !!sv.mlock };
+}
+function formToLoad(f) {
+  const o = { contextSize: f.contextSize };
+  if (f.gpuLayers !== 'auto') o.gpuLayers = f.gpuLayers;
+  if (f.flashAttention !== 'auto') o.flashAttention = f.flashAttention === 'on';
+  if (f.kvCache !== 'auto') o.kvCache = f.kvCache;
+  if (f.threads) o.threads = f.threads; if (f.batchSize) o.batchSize = f.batchSize;
+  if (!f.mmap) o.mmap = false; if (f.mlock) o.mlock = true;
+  return o;
+}
+async function selectLd(id) {
+  ld.sel = id; renderLdList();
+  const m = (state.models || []).find(x => x.id === id); const pane = $('#ldPane');
+  if (!m) { ldFoot(); return; }
+  pane.innerHTML = `<div class="ld-skel"><div></div><div></div><div></div></div>`;
+  const g = await ldMeta(id); if (ld.sel !== id) return;
+  ld.form = defaultForm(g); renderLdPane(m, g); ldFoot(); ldEstimate();
+}
+function renderLdPane(m, g) {
+  const f = ld.form; const bad = !g || g.error;
+  const max = Math.max(4096, (g && g.trainCtx) || 32768); const steps = ctxSteps(max); const L = g && g.layers ? g.layers + 1 : null;
+  const si = steps.reduce((bi, v, i) => Math.abs(v - f.contextSize) < Math.abs(steps[bi] - f.contextSize) ? i : bi, 0);
+  const st = state.status; const cur = m.loaded && st.loaded ? `<div class="ld-cur small">Đang chạy với ngữ cảnh <b>${fmtTok(st.contextSize)}</b> · ${st.gpu ? `GPU <b>${st.gpuLayers ?? '?'}/${st.totalLayers ?? '?'}</b> lớp` : '<b>chỉ CPU</b>'}${st.perf && st.perf.kv ? ` · bộ đệm K/V ${esc(st.perf.kv)}` : ''}</div>` : '';
+  $('#ldPane').innerHTML = `
+    <div class="ld-title"><h4 title="${esc(m.file)}">${esc(mName(m))}</h4>
+      <div class="ld-chips">${[g && g.arch, g && g.sizeLabel && g.sizeLabel + ' tham số', g && g.quant, fmtBytes(m.size), g && g.trainCtx && 'tối đa ' + fmtTok(g.trainCtx) + ' token', m.vision && '👁 nhìn ảnh', g && g.templateTools && 'gọi công cụ'].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('')}</div>
+      <div class="small muted ld-file" title="${esc(m.path)}">${esc(m.file)}</div>${cur}</div>
+    ${bad ? `<div class="ld-warn" role="alert">⚠ Không đọc được thông tin tệp mô hình (${esc((g && g.error) || 'không tìm thấy tệp hoặc tệp bị hỏng')}). AIVN vẫn có thể thử nạp với tham số tự động.</div>` : ''}
+    <section class="ld-sec"><div class="ld-row"><label for="ldCtx">Độ dài ngữ cảnh</label><span class="ld-val"><input type="number" id="ldCtxN" min="4096" max="${max}" step="1024" value="${f.contextSize}" aria-label="Độ dài ngữ cảnh (token)"> token</span></div>
+      <input type="range" id="ldCtx" min="0" max="${steps.length - 1}" step="1" value="${si}" aria-label="Độ dài ngữ cảnh" aria-valuetext="${fmtTok(f.contextSize)} token">
+      <div class="ld-ticks small muted"><span>${fmtTok(steps[0])}</span><span>${fmtTok(max)}</span></div>
+      <p class="hint">Số token mô hình nhớ được trong một cuộc trò chuyện. Trò chuyện cần ít nhất 4.096; AIVN AGENT cần ít nhất 8.192. Ngữ cảnh lớn tốn thêm bộ nhớ.</p></section>
+    <section class="ld-sec" id="ldGpuSec"${L ? '' : ' hidden'}><div class="ld-row"><label for="ldGpu">Tăng tốc GPU</label><span class="ld-val"><label class="ld-auto"><input type="checkbox" id="ldGpuAuto" ${f.gpuLayers === 'auto' ? 'checked' : ''}> Tự động</label><input type="number" id="ldGpuN" min="0" max="${L || 999}" value="${f.gpuLayers === 'auto' ? '' : f.gpuLayers}" ${f.gpuLayers === 'auto' ? 'disabled' : ''} aria-label="Số lớp đưa lên GPU"> ${L ? '/ ' + L + ' lớp' : 'lớp'}</span></div>
+      <input type="range" id="ldGpu" min="0" max="${L || 99}" step="1" value="${f.gpuLayers === 'auto' ? (L || 0) : f.gpuLayers}" ${f.gpuLayers === 'auto' ? 'disabled' : ''} aria-label="Số lớp đưa lên GPU">
+      <p class="hint" id="ldGpuHint">Đưa càng nhiều lớp lên GPU càng nhanh. Nếu không đủ VRAM, giảm số lớp — phần còn lại chạy bằng CPU và RAM.</p></section>
+    <section class="ld-sec ld-mem" id="ldMem" aria-live="polite"${bad ? ' hidden' : ''}><div class="ld-row"><span class="lbl">Ước lượng bộ nhớ</span><span class="ld-verdict" id="ldVerdict">…</span></div><div id="ldBars"></div></section>
+    <details class="ld-adv" id="ldAdv"><summary>Nâng cao</summary><div class="ld-grid">
+      <label>Flash Attention<select id="ldFa"><option value="auto">Tự động</option><option value="on">Bật</option><option value="off">Tắt</option></select></label>
+      <label>Bộ đệm K/V<select id="ldKv"><option value="auto">Tự động</option><option value="f16">F16 (chuẩn)</option><option value="q8_0">Q8_0 (tiết kiệm ~½)</option></select></label>
+      <label>Số luồng CPU<input type="number" id="ldThr" min="0" max="256" value="${f.threads || ''}" placeholder="Tự động"></label>
+      <label>Kích thước lô<input type="number" id="ldBatch" min="32" max="8192" step="32" value="${f.batchSize || ''}" placeholder="Tự động"></label>
+      <label class="ck"><input type="checkbox" id="ldMmap" ${f.mmap ? 'checked' : ''}> Ánh xạ tệp vào bộ nhớ (mmap)</label>
+      <label class="ck"><input type="checkbox" id="ldMlock" ${f.mlock ? 'checked' : ''}> Giữ mô hình trong RAM (không cho đẩy ra ổ đĩa)</label>
+    </div><button class="linkbtn small" id="ldReset">Khôi phục mặc định</button></details>`;
+  $('#ldFa').value = f.flashAttention; $('#ldKv').value = f.kvCache;
+  if (localStorage.getItem('aivn.ldAdv') === '1') $('#ldAdv').open = true;
+}
+function ldRead() {
+  const f = ld.form; if (!f) return;
+  const g = ld.metas.get(ld.sel); const max = Math.max(4096, (g && g.trainCtx) || 32768);
+  const n = Math.round(Number($('#ldCtxN').value)); if (Number.isFinite(n)) f.contextSize = Math.max(4096, Math.min(max, n));
+  f.gpuLayers = $('#ldGpuAuto').checked ? 'auto' : Math.max(0, Math.round(Number($('#ldGpuN').value) || 0));
+  f.flashAttention = $('#ldFa').value; f.kvCache = $('#ldKv').value;
+  f.threads = Math.max(0, Math.round(Number($('#ldThr').value) || 0)); f.batchSize = Math.round(Number($('#ldBatch').value) || 0);
+  f.mmap = $('#ldMmap').checked; f.mlock = $('#ldMlock').checked;
+}
+async function ldEstimate() {
+  const f = ld.form, id = ld.sel; if (!f || !id) return; const seq = ++ld.estSeq; const gm = ld.metas.get(id); if (!gm || gm.error) return;
+  const e = await A.modelEstimate(id, { ctx: f.contextSize, gpuLayers: f.gpuLayers, kvType: f.kvCache === 'q8_0' ? 'q8_0' : 'f16' }).catch(() => null);
+  if (seq !== ld.estSeq || $('#loader').hidden || !$('#ldBars')) return; ld.est = e;
+  if (!e) { $('#ldVerdict').textContent = 'Không ước lượng được'; $('#ldVerdict').className = 'ld-verdict'; $('#ldBars').innerHTML = ''; return; }
+  const h = e.hw || {}; const gb = (b) => (b / 1024 ** 3).toFixed(1).replace('.', ',') + ' GB';
+  const lvl = (p) => p < 0.85 ? 'ok' : p < 1 ? 'warn' : 'bad';
+  const bar = (label, used, total, note) => { const p = total ? used / total : 0; return `<div class="ld-bar ${lvl(p)}"><div class="ld-bar-h small"><span>${label}</span><span><b>${gb(used)}</b>${total ? ' / ' + gb(total) : ''}${note ? ' · ' + note : ''}</span></div><div class="ld-track"><div style="width:${Math.min(100, p * 100).toFixed(1)}%"></div></div></div>`; };
+  const vt = h.vram && h.vram.total || 0; let html = '', worst = 0;
+  if (h.unified) { const tot = h.ram || 0; const used = e.vram + e.ram; worst = tot ? used / tot / 0.75 : 0; html = bar('Bộ nhớ hợp nhất (GPU + RAM)', used, tot, 'Apple Metal'); }
+  else { if (h.gpu && vt) { const p = e.vram / vt * 0.9; worst = Math.max(worst, p); html += bar('VRAM' + (h.devices && h.devices[0] ? ' · ' + esc(h.devices[0]) : ''), e.vram, vt, e.gpuLayers + '/' + e.totalLayers + ' lớp'); }
+    const rt = h.ram || 0; if (rt) { const p = e.ram / (rt * 0.8); worst = Math.max(worst, p); html += bar('RAM', e.ram, rt, ''); } }
+  html += `<div class="small muted ld-kvline">Bộ đệm K/V cho ${fmtTok(f.contextSize)} token: ${gb(e.kv)}${f.kvCache === 'q8_0' ? ' (đã nén Q8_0)' : ''}</div>`;
+  $('#ldBars').innerHTML = html;
+  const v = $('#ldVerdict'); const l = lvl(worst);
+  v.className = 'ld-verdict ' + l; v.textContent = l === 'ok' ? '✓ Vừa với máy của bạn' : l === 'warn' ? '⚠ Sát giới hạn — có thể chậm' : '✕ Có thể không đủ bộ nhớ';
+  if (f.gpuLayers === 'auto') { $('#ldGpu').value = e.gpuLayers; $('#ldGpuN').placeholder = String(e.gpuLayers); }
+  const hint = $('#ldGpuHint'); if (hint) hint.textContent = !h.gpu ? 'Không thấy GPU dùng được — mô hình sẽ chạy bằng CPU và RAM.' : f.gpuLayers === 'auto' ? `Tự động: AIVN ước lượng đưa ${e.gpuLayers}/${e.totalLayers} lớp lên GPU (${esc(String(h.gpu).toUpperCase())}) và vẫn giữ đủ ngữ cảnh.` : 'Đưa càng nhiều lớp lên GPU càng nhanh. Nếu không đủ VRAM, giảm số lớp — phần còn lại chạy bằng CPU và RAM.';
+  if (!h.gpu) { for (const x of ['#ldGpu', '#ldGpuN', '#ldGpuAuto']) $(x).disabled = true; $('#ldGpuSec').classList.add('off'); }
+}
+function ldFoot() {
+  const m = (state.models || []).find(x => x.id === ld.sel); const st = state.status; const go = $('#ldGo');
+  $('#ldUnload').hidden = !(m && m.loaded);
+  go.disabled = !m || !!st.loading; go.classList.toggle('busy', !!st.loading);
+  go.textContent = st.loading ? 'Đang nạp…' : m && m.loaded ? 'Nạp lại với cài đặt này' : 'Nạp mô hình';
+  $('#ldRemember').disabled = !m;
+}
+let ldTimer = null;
+$('#ldPane').addEventListener('input', (e) => {
+  const t = e.target; const g = ld.metas.get(ld.sel); if (!ld.form) return;
+  if (t.id === 'ldCtx') { const steps = ctxSteps(Math.max(4096, (g && g.trainCtx) || 32768)); $('#ldCtxN').value = steps[+t.value]; t.setAttribute('aria-valuetext', fmtTok(steps[+t.value]) + ' token'); }
+  if (t.id === 'ldGpu') $('#ldGpuN').value = t.value;
+  if (t.id === 'ldGpuN') $('#ldGpu').value = t.value;
+  ldRead(); clearTimeout(ldTimer); ldTimer = setTimeout(ldEstimate, 60);
+});
+$('#ldPane').addEventListener('change', (e) => {
+  const t = e.target; if (!ld.form) return;
+  if (t.id === 'ldGpuAuto') { const on = t.checked; $('#ldGpu').disabled = on; $('#ldGpuN').disabled = on; if (!on) { $('#ldGpuN').value = $('#ldGpu').value; } }
+  if (t.id === 'ldCtxN') { ldRead(); t.value = ld.form.contextSize; const g = ld.metas.get(ld.sel); const steps = ctxSteps(Math.max(4096, (g && g.trainCtx) || 32768)); $('#ldCtx').value = steps.reduce((bi, v, i) => Math.abs(v - ld.form.contextSize) < Math.abs(steps[bi] - ld.form.contextSize) ? i : bi, 0); }
+  ldRead(); ldEstimate();
+});
+$('#ldPane').addEventListener('toggle', (e) => { if (e.target.id === 'ldAdv') localStorage.setItem('aivn.ldAdv', e.target.open ? '1' : '0'); }, true);
+$('#ldPane').addEventListener('click', async (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.id === 'ldReset') { const g = ld.metas.get(ld.sel); await A.saveModelLoad(ld.sel, null); if (g) g.saved = {}; state.settings = await A.getSettings().catch(() => state.settings); ld.form = defaultForm(g); renderLdPane((state.models || []).find(x => x.id === ld.sel), g); ldEstimate(); renderLdList(); toast('Đã khôi phục tham số nạp mặc định'); }
+  if (b.dataset.ld === 'discover') { closeLoader(); show('discover'); }
+  if (b.dataset.ld === 'import') { closeLoader(); doImport(); }
+});
+$('#ldList').addEventListener('click', (e) => { const it = e.target.closest('.ld-item'); if (it) selectLd(it.dataset.id); });
+$('#ldList').addEventListener('dblclick', (e) => { const it = e.target.closest('.ld-item'); if (it) ldLoad(); });
+$('#ldQ').addEventListener('input', () => { const list = ldSorted(); if (list.length && !list.some(m => m.id === ld.sel)) selectLd(list[0].id); else renderLdList(); });
+$('#loader').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.preventDefault(); closeLoader(); return; }
+  const inList = document.activeElement === $('#ldQ') || $('#ldList').contains(document.activeElement);
+  if (inList && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); const list = ldSorted(); if (!list.length) return; let i = list.findIndex(m => m.id === ld.sel); i = Math.max(0, Math.min(list.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1))); selectLd(list[i].id); }
+  else if (e.key === 'Enter' && (inList || (e.ctrlKey || e.metaKey))) { e.preventDefault(); if (!$('#ldGo').disabled) ldLoad(); }
+});
+$('#loader').addEventListener('mousedown', (e) => { if (e.target.id === 'loader') closeLoader(); });
+$('#ldCancel').addEventListener('click', closeLoader);
+$('#ldUnload').addEventListener('click', async () => { await A.unloadModel(); await refreshModels(); renderLdList(); ldFoot(); selectLd(ld.sel); });
+async function ldLoad() {
+  if (!ld.sel || state.status.loading) return; if ($('#ldPane input')) ldRead();
+  const id = ld.sel, load = ld.form ? formToLoad(ld.form) : null, remember = $('#ldRemember').checked;
+  closeLoader();
+  const ok = await loadModel(id, load ? { load, remember } : {});
+  if (remember) { state.settings = await A.getSettings().catch(() => state.settings); ld.metas.delete(id); }
+  return ok;
+}
+$('#ldGo').addEventListener('click', ldLoad);
+
 function setStatus(st) {
   state.status = st;
   const el = $('#modelState');
@@ -146,7 +324,8 @@ function setStatus(st) {
   el.title = el.textContent;
   $('#ejectBtn').disabled = !st.loaded;
   $('#modelSelect').disabled = !!st.loading;
-  paintSbModel(st);
+  paintSbModel(st); paintPill(st);
+  if (!$('#loader').hidden) { renderLdList(); ldFoot(); }
 }
 A.onModelStatus(st => { setStatus(st); if (!st.loading) refreshModels(); if (!st.loading && isAgent()) refreshAgent(); });
 
@@ -334,7 +513,7 @@ function renderMessages() {
   }
   if (!msgs.length) {
     box.innerHTML = `<div class="empty"><img class="logo-big" src="logo-tile.svg" alt="">
-      <h2>Xin chào! Hôm nay bạn muốn hỏi gì?</h2><p>${state.status.loaded ? 'Mô hình đã sẵn sàng. Mọi thứ chạy ngay trên máy bạn, không cần Internet.' : 'Hãy chọn một mô hình ở thanh phía trên, hoặc vào <b>Kho mô hình</b> để tải mô hình đầu tiên.'}</p></div>`;
+      <h2>Xin chào! Hôm nay bạn muốn hỏi gì?</h2><p>${state.status.loaded ? 'Mô hình đã sẵn sàng. Mọi thứ chạy ngay trên máy bạn, không cần Internet.' : 'Hãy chọn một mô hình ở thanh phía trên (Ctrl+L), hoặc vào <b>Khám phá</b> để tải mô hình đầu tiên.'}</p></div>`;
     return;
   }
   box.innerHTML = msgs.map((m, i) => {
@@ -982,6 +1161,7 @@ function paletteCommands() {
     { i: '🔐', t: 'Bảo mật & Quản trị', run: () => show('settings', { tab: 'security' }) },
     { i: '🖥', t: 'Phần cứng & bộ máy', run: () => show('settings', { tab: 'hardware' }) },
     { i: '⇤', t: 'Thu gọn / mở rộng thanh bên', k: 'Ctrl+B', run: () => toggleRail() },
+    { i: '⏏', t: 'Chọn mô hình để nạp (tham số nạp)', k: 'Ctrl+L', run: () => openLoader() },
     { i: '🔌', t: 'Kết nối (MCP)', run: () => { show('agent'); togglePanel(false); $('#mcpBlock').open = true; refreshMcp(true); $('#mcpBlock').scrollIntoView({ block: 'start' }); } },
     { i: '⏱', t: 'Đo tốc độ mô hình đang nạp', run: () => { $('#perfSpeedBtn').scrollIntoView({ block: 'center' }); $('#perfSpeedBtn').click(); } },
     { i: '📏', t: 'Đo Điểm tác vụ (điều khiển máy)', run: () => { show('agent'); togglePanel(false); $('#benchBox').scrollIntoView({ block: 'center' }); } },
@@ -1021,6 +1201,7 @@ document.addEventListener('keydown', (e) => {
   else if (mod && (e.key === 'n' || e.key === 'N') && !e.shiftKey) { e.preventDefault(); $('#newChat').click(); }
   else if (mod && !e.shiftKey && !e.altKey && ['1', '2', '3', '4'].includes(e.key)) { e.preventDefault(); show({ 1: 'chat', 2: 'server', 3: 'models', 4: 'discover' }[e.key]); }
   else if (mod && e.key === ',') { e.preventDefault(); show('settings'); }
+  else if (mod && (e.key === 'l' || e.key === 'L') && !e.shiftKey && !e.altKey) { e.preventDefault(); $('#loader').hidden ? openLoader() : closeLoader(); }
   else if (mod && (e.key === 'b' || e.key === 'B') && !e.shiftKey) { e.preventDefault(); toggleRail(); }
 });
 // Giới thiệu nhanh lần đầu (4 bước)

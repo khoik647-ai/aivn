@@ -79,10 +79,8 @@ function loadPlans({ gpu, vram, fileSize, geo, ctx, userLayers, kvScale = 1, min
     if (Number.isInteger(userLayers) && userLayers >= 0) add({ mode: userLayers ? 'gpu-manual' : 'cpu', gpuLayers: userLayers, ctx });
     let fitN = null;
     if (L && vram && vram.total > 0 && gpu !== 'metal') {
-      const perLayer = fileSize / L;
-      const kv = (geo.kvPerToken ? geo.kvPerToken * ctx : 0.4 * 1024 * MB) * kvScale; // KV q8_0 ≈ ½ f16
-      const budget = Math.min(vram.free || vram.total, vram.total) * 0.9 - 350 * MB - kv * 0.6;
-      fitN = Math.max(0, Math.min(L, Math.floor(budget / perLayer)));
+      // 0.16: cùng công thức với hộp nạp (src/gguf.js) — mỗi lớp trên GPU mang theo cả bộ đệm K/V của nó
+      fitN = require('./gguf').gpuFit({ fileSize, layers: geo.layers, kvPerToken: geo.kvPerToken }, { ctx, kvScale, vram });
     }
     if (fitN === null) add({ mode: 'gpu', gpuLayers: 'auto', ctx });
     else if (fitN >= L) add({ mode: 'gpu', gpuLayers: L, ctx });
@@ -103,8 +101,8 @@ function loadPlans({ gpu, vram, fileSize, geo, ctx, userLayers, kvScale = 1, min
 async function loadModel(id, modelPath, opts = {}) {
   // cùng tệp đã nạp: giữ nguyên, TRỪ khi cần ngữ cảnh lớn hơn ngữ cảnh đang có (0.15.2: tự tăng ngữ cảnh)
   const wantCtx = opts.minContextSize || Math.min(Number(opts.contextSize) || 0, 8192);
-  if (!opts.mmproj && current && current.path === modelPath && !(wantCtx && current.context.contextSize < wantCtx)) return status();
-  if (opts.mmproj && visionOn && getVision().status()?.path === modelPath && !(wantCtx && (getVision().status().contextSize || 0) < wantCtx)) return status();
+  if (!opts.reload && !opts.mmproj && current && current.path === modelPath && !(wantCtx && current.context.contextSize < wantCtx)) return status();
+  if (!opts.reload && opts.mmproj && visionOn && getVision().status()?.path === modelPath && !(wantCtx && (getVision().status().contextSize || 0) < wantCtx)) return status();
   if (loading) await loading.catch(() => {});
   if (opts.mmproj) {
     loading = (async () => {
@@ -141,7 +139,7 @@ async function loadModel(id, modelPath, opts = {}) {
     for (const plan of plans) {
       let model = null;
       try {
-        model = await l.loadModel({ modelPath, gpuLayers: plan.gpuLayers });
+        model = await l.loadModel({ modelPath, gpuLayers: plan.gpuLayers, ...(opts.useMmap === false ? { useMmap: false } : {}), ...(opts.useMlock ? { useMlock: true } : {}) });
         let context, kvUsed = kvQuant;
         try { context = await model.createContext(ctxOpts(plan, kvUsed)); }
         catch (e) { if (!kvUsed) throw e; kvUsed = false; attempts.push({ mode: `${plan.mode} KV q8_0`, message: String(e && e.message || e) }); context = await model.createContext(ctxOpts(plan, false)); } // KV nén lỗi (mô hình/GPU không hỗ trợ) → f16

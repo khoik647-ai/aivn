@@ -338,9 +338,27 @@ function startIdleUnload() {
   }, 60000);
   if (idleUnloadTimer.unref) idleUnloadTimer.unref();
 }
-async function loadById(id, { force = false, ctx = null, reason = null, minCtx = null } = {}) {
+// 0.16: tham số nạp theo từng mô hình (hộp nạp kiểu LM Studio). Lưu ở settings.modelLoad[id].
+const LOAD_KEYS = ['contextSize', 'gpuLayers', 'flashAttention', 'kvCache', 'threads', 'batchSize', 'mmap', 'mlock'];
+function cleanLoad(o) {
+  const r = {}; if (!o || typeof o !== 'object') return r;
+  const int = (v, lo, hi) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n >= lo && n <= hi ? n : undefined; };
+  if (o.contextSize != null) r.contextSize = int(o.contextSize, MIN_CTX_CHAT, 1 << 20);
+  if (o.gpuLayers === 'auto' || o.gpuLayers == null) {} else r.gpuLayers = int(o.gpuLayers, 0, 1000);
+  if (o.flashAttention === true || o.flashAttention === false) r.flashAttention = o.flashAttention;
+  if (['f16', 'q8_0'].includes(o.kvCache)) r.kvCache = o.kvCache;
+  if (o.threads != null && o.threads !== 0) r.threads = int(o.threads, 1, 256);
+  if (o.batchSize != null) r.batchSize = int(o.batchSize, 32, 8192);
+  if (typeof o.mmap === 'boolean') r.mmap = o.mmap; if (typeof o.mlock === 'boolean') r.mlock = o.mlock;
+  for (const k of Object.keys(r)) if (r[k] === undefined) delete r[k];
+  return r;
+}
+const modelLoadFor = (id) => cleanLoad(((settings.data.modelLoad || {})[id]) || {});
+async function loadById(id, { force = false, ctx = null, reason = null, minCtx = null, load = null } = {}) {
   const m = listModels().find(x => x.id === id);
   if (!m) throw new Error(`Không tìm thấy mô hình "${id}"`);
+  const ml = { ...modelLoadFor(id), ...cleanLoad(load) };
+  if (!ctx && ml.contextSize) ctx = ml.contextSize;
   send('model:status', { loading: true, id });
   try {
     let st;
@@ -357,15 +375,17 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       }
     }
     if (pendingEngineRestart && engine.restart) { const env = pendingEngineRestart; pendingEngineRestart = null; await engine.restart(env, 'áp dụng cài đặt GPU đã đổi'); hwCache = null; }
-    const gl = settings.data.gpuLayers;
-    const pf = await perfProfile();
+    const gl = ml.gpuLayers != null ? ml.gpuLayers : settings.data.gpuLayers;
+    let pf = await perfProfile();
+    pf = { ...pf, ...(ml.flashAttention != null ? { flashAttention: ml.flashAttention } : {}), ...(ml.kvCache ? { kvQuant: ml.kvCache === 'q8_0' } : {}),
+      ...(ml.threads ? { threads: ml.threads } : {}), ...(ml.batchSize ? { batchSize: ml.batchSize } : {}) };
     let ctxWant = ctx || settings.data.contextSize || pf.ctx, ctxNote = null;
     ctxWant = Math.max(MIN_CTX_CHAT, Number(ctxWant) || MIN_CTX_AGENT); // 0.15.2: không bao giờ nạp dưới 4096
     if (!ctx && ctxWant > 8192) { // GPU rời ≤ 6 GB: ngữ cảnh 16k làm bộ đệm KV tràn VRAM/RAM → giới hạn 8192
       const h = await hw(); const vt = h.gpu && h.gpu !== 'metal' && h.vram && !h.vram.integratedOnly ? h.vram.total : 0;
       if (vt > 0 && vt < 6 * 1024 ** 3) { ctxNote = `Đã giới hạn độ dài ngữ cảnh ở 8192 (bạn chọn ${ctxWant}) vì GPU chỉ có ${(vt / 1024 ** 3).toFixed(1)} GB VRAM.`; ctxWant = 8192; }
     }
-    const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj } : {}) };
+    const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj } : {}), ...(ml.mmap === false ? { useMmap: false } : {}), ...(ml.mlock ? { useMlock: true } : {}), ...(load ? { reload: true } : {}) };
     LOG.log('load', `Bắt đầu nạp ${m.file}`, { size: m.size, ctx: opts.contextSize, gpuLayers: opts.gpuLayers ?? 'tự động', vision: !!opts.mmproj });
     const tLoad = Date.now();
     try {
@@ -401,7 +421,7 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       x.code = 'LOAD_FAILED'; throw x;
     }
     if (st.fallbackFrom && st.fallbackFrom.length) { engineLog('Nạp ' + m.file + ' bằng chế độ dự phòng: ' + st.mode, null, { attempts: st.fallbackFrom }); st.notice = `GPU không nạp được mô hình này, AIVN đã chuyển sang chế độ ${MODE_VI[st.mode] || st.mode} (chậm hơn nhưng vẫn dùng được).`; }
-    lastCtx = st.contextSize || lastCtx; engineDied = false;
+    st = { ...st, loadParams: ml }; lastCtx = st.contextSize || lastCtx; engineDied = false;
     if (ctxNote) { st = { ...st, notice: [st.notice, ctxNote].filter(Boolean).join(' ') }; LOG.log('load', ctxNote); }
     if (reason) LOG.log('load', 'Lý do nạp lại: ' + reason);
     LOG.log('load', `Đã nạp ${m.file} sau ${Date.now() - tLoad} ms`, { mode: st.mode, ctx: st.contextSize, gpu: st.gpu, gpuLayers: st.gpuLayers, totalLayers: st.totalLayers, toolMode: st.toolMode, fallbackFrom: st.fallbackFrom });
@@ -923,7 +943,10 @@ function registerIpc() {
     settings.save();
     return listModels();
   });
-  ipcMain.handle('models:load', async (_e, id, o = {}) => { try { return { ok: true, status: await loadById(id, { force: !!(o && o.force) }) }; } catch (e) { return { ok: false, error: e.message, code: e.code || null, modelId: e.modelId || id, catalogId: e.catalogId || null }; } });
+  ipcMain.handle('models:meta', async (_e, id) => { const m = listModels().find(x => x.id === id); if (!m) return null; const g = require('./gguf').cachedSummary(m.path); return g ? { ...g, fileSize: m.size, file: m.file, id: m.id, vision: !!m.vision, saved: modelLoadFor(id), global: { contextSize: settings.data.contextSize || null, gpuLayers: Number.isInteger(settings.data.gpuLayers) ? settings.data.gpuLayers : null } } : null; });
+  ipcMain.handle('models:estimate', async (_e, id, o = {}) => { const m = listModels().find(x => x.id === id); if (!m) return null; const g = require('./gguf').cachedSummary(m.path); if (!g || g.error) return null; let h = await hw().catch(() => ({})); if (process.env.AIVN_QA_FAKEHW && !app.isPackaged) h = { ...h, ...JSON.parse(process.env.AIVN_QA_FAKEHW) }; const gpu = !!(h.gpu); const est = require('./gguf').estimate({ ...g, fileSize: m.size }, { ...o, gpu, vram: gpu && h.gpu !== 'metal' ? h.vram : null }); return { ...est, hw: { gpu: h.gpu || false, vram: h.vram || null, ram: h.ram || 0, freeRam: h.freeRam || 0, devices: h.devices || [], unified: h.gpu === 'metal' } }; });
+  ipcMain.handle('models:saveLoad', async (_e, id, o) => { settings.data.modelLoad = { ...(settings.data.modelLoad || {}) }; const c = cleanLoad(o); if (o === null || !Object.keys(c).length) delete settings.data.modelLoad[id]; else settings.data.modelLoad[id] = c; settings.save(); return modelLoadFor(id); });
+  ipcMain.handle('models:load', async (_e, id, o = {}) => { try { if (o && o.remember && o.load) { settings.data.modelLoad = { ...(settings.data.modelLoad || {}), [id]: cleanLoad(o.load) }; settings.save(); } return { ok: true, status: await loadById(id, { force: !!(o && o.force), load: o && o.load || null }) }; } catch (e) { return { ok: false, error: e.message, code: e.code || null, modelId: e.modelId || id, catalogId: e.catalogId || null }; } });
   ipcMain.handle('models:unload', async () => { await engine.unloadModel(); const st = engine.status(); send('model:status', st); return st; });
   ipcMain.handle('models:delete', async (_e, id) => {
     const m = listModels().find(x => x.id === id);

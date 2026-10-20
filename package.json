@@ -80,6 +80,7 @@
       "src/vision-server.js",
       "src/agent/textproto.js",
       "src/agent/sampling.js",
+      "src/gguf.js",
       "src/schema.js",
       "src/ocr.js",
       "src/llama-archs.json",
