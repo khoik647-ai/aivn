@@ -103,17 +103,49 @@ async function refreshModels() {
   const sel = $('#modelSelect');
   const cur = state.status.loaded ? state.status.id : '';
   sel.innerHTML = modelOptionsHtml(state.models, cur, isAgent());
-  const t = $('#modelTable');
-  if (!state.models.length) { t.innerHTML = `<div class="tr"><span class="muted">Chưa có mô hình nào. Hãy tải ở mục Khám phá hoặc nhập tệp GGUF có sẵn.</span></div>`; return; }
-  t.innerHTML = `<div class="tr head"><span>Tên</span><span>Dung lượng</span><span>Nguồn</span><span>Đường dẫn</span><span>Thao tác</span></div>` +
-    state.models.map(m => `<div class="tr" data-id="${esc(m.id)}">
-      <span><b>${esc(m.catalog ? m.catalog.name : m.file)}</b>${m.loaded ? '<span class="badge">Đang nạp</span>' : ''}${m.vision ? '<span class="badge vis" title="Có tệp thị giác (mmproj) cạnh mô hình">👁 Nhìn được ảnh</span>' : ''}<div class="muted" style="font-size:11.5px">${esc(m.id)}</div></span>
-      <span>${fmtBytes(m.size)}</span><span>${m.source === 'imported' ? 'Đã nhập' : 'Đã tải'}</span>
-      <span class="path" title="${esc(m.path)}">${esc(m.path)}</span>
-      <span class="acts">${m.loaded ? '<button class="btn sm" data-act="unload">Gỡ khỏi bộ nhớ</button>' : '<button class="btn sm primary" data-act="load">Nạp</button>'}
-        <button class="btn sm" data-act="params" title="Tham số nạp cho mô hình này" aria-label="Tham số nạp">⚙</button><button class="btn sm" data-act="reveal" title="Hiện trong thư mục">📁</button><button class="btn sm danger" data-act="delete" title="Xoá">🗑</button></span></div>`).join('');
+  renderModelTable();
 }
+// 0.16 Mô hình của tôi dạng bảng (như LM Studio): bấm tiêu đề cột để sắp xếp, ô lọc + bộ lọc nhanh; mức chạy ước tính + tốc độ đo được thật
+const mmSort = { key: 'lastUsed', dir: -1 };
+const MM_COLS = [
+  ['name', 'Tên', (m) => (m.catalog ? m.catalog.name : m.file).toLowerCase()],
+  ['quant', 'Lượng tử', (m) => m.quant || ''],
+  ['size', 'Dung lượng', (m) => m.size || 0],
+  ['fit', 'Mức chạy (ước tính)', (m) => { const f = m.fit || {}; return ({ smooth: 3, slow: 2, no: 1 })[fitGroupOf(f)] * 1e4 + (f.tps || 0); }],
+  ['tps', 'Đo được', (m) => (m.usage && m.usage.tps) || 0],
+  ['lastUsed', 'Dùng lần cuối', (m) => (m.usage && m.usage.lastUsed) || (m.mtime || 0) / 1e6],
+];
+const fmtUsedAgo = (t) => { if (!t) return '—'; const d = (Date.now() - t) / 1000; return d < 90 ? 'vừa xong' : d < 3600 ? Math.round(d / 60) + ' phút trước' : d < 86400 ? Math.round(d / 3600) + ' giờ trước' : d < 86400 * 30 ? Math.round(d / 86400) + ' ngày trước' : new Date(t).toLocaleDateString('vi-VN'); };
+function mmVisible() {
+  const q = foldVi($('#mmFilter').value.trim()); const k = $('#mmKind').value;
+  return (state.models || []).filter(m => {
+    if (q && !foldVi([m.catalog ? m.catalog.name : '', m.file, m.quant, m.params, m.catalog && m.catalog.family].filter(Boolean).join(' ')).includes(q)) return false;
+    if (k === 'smooth') return fitGroupOf(m.fit) === 'smooth';
+    if (k === 'vision') return !!m.vision;
+    if (k === 'agent') return !!(m.agent && m.agent.ok);
+    if (k === 'loaded') return !!m.loaded;
+    return true;
+  });
+}
+function renderModelTable() {
+  const t = $('#modelTable');
+  if (!(state.models || []).length) { t.innerHTML = `<div class="tr"><span class="muted">Chưa có mô hình nào. Hãy tải ở mục Khám phá hoặc nhập tệp GGUF có sẵn.</span></div>`; $('#mmCount').textContent = ''; return; }
+  const col = MM_COLS.find(c => c[0] === mmSort.key) || MM_COLS[0];
+  const list = mmVisible().sort((a, b) => { const x = col[2](a), y = col[2](b); return (x < y ? -1 : x > y ? 1 : 0) * mmSort.dir; });
+  $('#mmCount').textContent = `${list.length}/${state.models.length} mô hình`;
+  const head = MM_COLS.map(([k, label]) => `<button type="button" class="th" data-sort="${k}" role="columnheader" aria-sort="${mmSort.key === k ? (mmSort.dir > 0 ? 'ascending' : 'descending') : 'none'}">${esc(label)}${mmSort.key === k ? (mmSort.dir > 0 ? ' ▲' : ' ▼') : ''}</button>`).join('');
+  t.innerHTML = `<div class="tr head" role="row">${head}<span role="columnheader">Thao tác</span></div>` + (list.length ? list.map(m => `<div class="tr" role="row" data-id="${esc(m.id)}">
+      <span title="${esc(m.path)}"><b>${esc(m.catalog ? m.catalog.name : m.file)}</b>${m.loaded ? '<span class="badge">Đang nạp</span>' : ''}${m.vision ? '<span class="badge vis" title="Có tệp thị giác (mmproj) cạnh mô hình">👁 Nhìn được ảnh</span>' : ''}${m.agent && m.agent.ok ? '<span class="badge" title="Dùng được cho AIVN AGENT">🤖</span>' : ''}<div class="muted" style="font-size:11.5px">${esc([m.params && m.params + ' tham số', m.source === 'imported' ? 'đã nhập' : 'đã tải', m.id].filter(Boolean).join(' · '))}</div></span>
+      <span>${esc(m.quant || '—')}</span><span>${fmtBytes(m.size)}</span><span>${fitBadge(m.fit)}</span>
+      <span title="Tốc độ sinh chữ đo được khi bạn dùng mô hình này trên máy này (trung bình gần đây)">${m.usage && m.usage.tps ? `${String(m.usage.tps).replace('.', ',')} token/giây` : '<span class="muted">chưa đo</span>'}</span>
+      <span>${m.usage && m.usage.lastUsed ? fmtUsedAgo(m.usage.lastUsed) + (m.usage.uses ? `<div class="muted small">${m.usage.uses} lượt</div>` : '') : '<span class="muted">chưa dùng</span>'}</span>
+      <span class="acts">${m.loaded ? '<button class="btn sm" data-act="unload">Gỡ khỏi bộ nhớ</button>' : '<button class="btn sm primary" data-act="load">Nạp</button>'}
+        <button class="btn sm" data-act="params" title="Tham số nạp cho mô hình này" aria-label="Tham số nạp">⚙</button><button class="btn sm" data-act="reveal" title="Hiện trong thư mục" aria-label="Hiện trong thư mục">📁</button><button class="btn sm danger" data-act="delete" title="Xoá" aria-label="Xoá">🗑</button></span></div>`).join('') : '<div class="tr"><span class="muted">Không có mô hình nào khớp bộ lọc.</span></div>');
+}
+$('#mmFilter').addEventListener('input', renderModelTable);
+$('#mmKind').addEventListener('change', renderModelTable);
 $('#modelTable').addEventListener('click', async (e) => {
+  const th = e.target.closest('[data-sort]'); if (th) { const k = th.dataset.sort; mmSort.dir = mmSort.key === k ? -mmSort.dir : (k === 'name' || k === 'quant' ? 1 : -1); mmSort.key = k; renderModelTable(); return; }
   const b = e.target.closest('button[data-act]'); if (!b) return;
   const id = b.closest('.tr').dataset.id; const m = state.models.find(x => x.id === id);
   try {
@@ -450,7 +482,7 @@ const catCard = (c, agent = false) => `<div class="card" data-id="${esc(c.id)}">
     <div class="tags">${c.recommended ? '<span class="tag rec" title="Qwen3 gọi công cụ tốt nhất trong các mô hình vừa máy này">⭐ Gợi ý: trò chuyện &amp; công cụ</span>' : ''}${c.recScreen && agent && c.agentCheck && c.agentCheck.ok ? '<span class="tag rec" title="Một mô hình vừa lập kế hoạch vừa nhìn màn hình, chọn theo VRAM máy này. Nhà phát triển (Qwen) ghi: Visual Agent — Operates PC/mobile GUIs.">⭐ Gợi ý: điều khiển máy (tự nhìn màn hình)</span>' : ''}${c.recGround ? `<span class="tag rec" title="${esc('Mắt nhìn cho mô hình lập kế hoạch Qwen3, chọn theo VRAM máy này.' + (/phi thương mại/i.test(c.license || '') ? ' Lưu ý giấy phép: ' + c.license + '.' : ''))}">⭐ Gợi ý: mắt nhìn (cặp hai mô hình)</span>` : ''}${c.recPairPlanner ? '<span class="tag rec" title="Lập kế hoạch trong cặp hai mô hình — dùng kèm mắt nhìn được gợi ý.">⭐ Gợi ý: lập kế hoạch (cặp)</span>' : ''}${roleTag(c)}${benchTag(c)}${fitBadge(agent === true ? (c.agentFit || c.fit) : c.fit)}${agent === true && c.agentCheck && !c.agentCheck.ok ? `<span class="tag warn" title="${esc(c.agentCheck.reason)}">⛔ ${esc(c.agentCheck.reason.split(' (')[0])}</span>` : agent === true && c.agentCheck && c.agentCheck.slow ? `<span class="tag warn" title="${esc(c.agentCheck.reason)}">⚠ Chạy chậm cho AIVN AGENT</span>` : ''}${c.vision ? visTag(c) : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
     ${claimsRow(c)}
     <div class="card-foot" data-job="${esc(jobIdFor(c.repo, c.file))}">${footHtml({ ...c, size: c.size + (c.mmproj ? c.mmproj.size : 0) }, `data-act="dl-cat" data-id="${esc(c.id)}"`, c.file)}</div>
-    <button class="linkish" data-act="open-repo" data-repo="${esc(c.repo)}">Các bản lượng tử khác · ${esc(c.repo)}</button></div>`;
+    <button class="linkish" data-act="open-repo" data-repo="${esc(c.repo)}" title="Bảng mọi bản lượng tử (Q4/Q5/Q6/Q8…) của repo này, mỗi dòng có mức chạy trên máy bạn">Chọn bản lượng tử khác (Q4/Q5/Q8…) · ${esc(c.repo)}</button></div>`;
 
 
 function renderDlPanel() {
@@ -512,7 +544,7 @@ async function openRepo(repo, quiet) {
       <button class="btn sm" data-act="open-hf" data-url="${esc(r.url)}">Mở trên Hugging Face ↗</button></div>
     ${notes.map(n => `<div class="note">${n}</div>`).join('')}
     <div class="qtable">${chat.length ? `<div class="qr head"><span>Tệp mô hình</span><span>Lượng tử</span><span>Dung lượng</span><span>Máy bạn</span><span></span></div>` + chat.map(g => `<div class="qr${g.recommended ? ' rec' : ''}">
-        <span class="fname" title="${esc(g.files.map(f => f.path).join('\n'))}">${esc(g.name)}${g.split ? ` <span class="tag">${g.parts} phần · tải tất cả</span>` : ''}${g.recommended ? ' <span class="tag ok">★ Khuyên dùng</span>' : ''}${g.vision ? ' <span class="tag vis">👁 Nhìn được ảnh</span>' : ''}${g.folder ? `<div class="muted small">${esc(g.folder)}/</div>` : ''}</span>
+        <span class="fname" title="${esc(g.files.map(f => f.path).join('\n'))}">${esc(g.name)}${g.split ? ` <span class="tag">${g.parts} phần · tải tất cả</span>` : ''}${g.recommended ? ` <span class="tag ok" title="${esc(g.recWhy || '')}">★ Khuyên dùng</span>` : ''}${g.vision ? ' <span class="tag vis">👁 Nhìn được ảnh</span>' : ''}${g.folder ? `<div class="muted small">${esc(g.folder)}/</div>` : ''}</span>
         <span><b>${esc(g.quant || '—')}</b></span><span>${fmtBytes(g.size)}</span><span>${fitBadge(g.fit)}</span>
         <span class="foot" data-job="${esc(jobIdFor(r.id, g.files[0].path))}">${footHtml(g, `data-act="dl-group" data-key="${esc(g.key)}"`, g.files[0].path)}${g.installed && r.mmproj && !r.mmprojInstalled ? `<button class="btn sm" data-act="dl-mmproj" title="Tải tệp thị giác để mô hình này xem được ảnh">⬇ Phần nhìn ảnh · ${fmtBytes(r.mmproj.size)}</button>` : ''}</span></div>`).join('') : '<div class="muted pad">Repo này không có tệp GGUF dùng để trò chuyện.</div>'}</div>
     ${other.length ? `<details class="others"><summary>Tệp không dùng để trò chuyện (${other.length})</summary>${other.map(g => `<div class="qr other"><span class="fname">${esc(g.name)}</span><span>${esc(g.quant || '')}</span><span>${fmtBytes(g.size)}</span><span class="muted small">${!g.complete ? 'Thiếu phần, không tải được' : g.kind === 'mmproj' ? (r.mmproj && g.files[0].path === r.mmproj.path ? 'Tệp thị giác (mmproj) · AIVN tải kèm bản này' : 'Tệp thị giác (mmproj) · bản thay thế') : 'Mô hình embedding'}</span></div>`).join('')}</details>` : ''}`;
@@ -926,10 +958,10 @@ async function cpSetParam(k, v) { const q = cpParams(); if (v === null || v === 
 function paintPresetBar() {
   const all = presetsAll(); const cur = activePreset(); const sel = $('#presetSel');
   const b = all.filter(p => p.builtin), u = all.filter(p => !p.builtin);
-  sel.innerHTML = `<optgroup label="Preset của AIVN">${b.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</optgroup>` + (u.length ? `<optgroup label="Preset của tôi">${u.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</optgroup>` : '');
+  sel.innerHTML = `<optgroup label="Cấu hình mẫu của AIVN">${b.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</optgroup>` + (u.length ? `<optgroup label="Cấu hình mẫu của tôi">${u.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</optgroup>` : '');
   if (cur) sel.value = cur.id;
   const dirty = cpDirty(); $('#presetDirty').hidden = !dirty;
-  $('#presetSave').disabled = !dirty && !!cur; $('#presetSave').title = cur && cur.builtin ? 'Preset của AIVN không sửa được — lưu thành preset mới' : 'Lưu thay đổi vào preset này';
+  $('#presetSave').disabled = !dirty && !!cur; $('#presetSave').title = cur && cur.builtin ? 'Cấu hình mẫu của AIVN không sửa được — lưu thành cấu hình mẫu mới' : 'Lưu thay đổi vào cấu hình mẫu này';
   for (const it of $('#presetMenu').querySelectorAll('[data-pm=rename],[data-pm=delete]')) it.disabled = !cur || cur.builtin;
   $('#presetMenu').querySelector('[data-pm=reset]').disabled = !dirty;
 }
@@ -967,25 +999,25 @@ function promptText({ title, value = '', okLabel = 'Lưu', validate }) {
   });
 }
 const curSnapshot = () => { const s = state.settings; return { systemPrompt: s.systemPrompt || '', temperature: Number(s.temperature), maxTokens: Number(s.maxTokens) || 1024, params: cpParams() }; };
-const nameTaken = (n, exceptId) => presetsAll().some(p => p.id !== exceptId && p.name.toLowerCase() === n.toLowerCase()) ? 'Đã có preset tên này' : null;
+const nameTaken = (n, exceptId) => presetsAll().some(p => p.id !== exceptId && p.name.toLowerCase() === n.toLowerCase()) ? 'Đã có cấu hình mẫu tên này' : null;
 async function presetSaveAs(snapshot = curSnapshot(), name = null) {
   const cur = activePreset();
-  name = name || await promptText({ title: 'Lưu thành preset mới', value: cur ? cur.name + ' (của tôi)' : 'Preset của tôi', validate: (v) => nameTaken(v) });
+  name = name || await promptText({ title: 'Lưu thành cấu hình mẫu mới', value: cur ? cur.name + ' (của tôi)' : 'Cấu hình mẫu của tôi', validate: (v) => nameTaken(v) });
   if (!name) return;
   const p = { id: 'u:' + uid(), name, ...snapshot };
-  await cpSave({ presets: [...(state.settings.presets || []), p], activePreset: p.id }); paintCp(); toast(`Đã lưu preset “${name}” ✓`);
+  await cpSave({ presets: [...(state.settings.presets || []), p], activePreset: p.id }); paintCp(); toast(`Đã lưu cấu hình mẫu “${name}” ✓`);
 }
 async function presetAction(act) {
   $('#presetMenu').hidden = true; $('#presetMore').setAttribute('aria-expanded', 'false');
   const cur = activePreset(); const user = state.settings.presets || [];
-  if (act === 'save') { if (!cur || cur.builtin) return presetSaveAs(); await cpSave({ presets: user.map(p => p.id === cur.id ? { ...p, ...curSnapshot() } : p) }); paintCp(); toast(`Đã lưu preset “${cur.name}” ✓`); }
+  if (act === 'save') { if (!cur || cur.builtin) return presetSaveAs(); await cpSave({ presets: user.map(p => p.id === cur.id ? { ...p, ...curSnapshot() } : p) }); paintCp(); toast(`Đã lưu cấu hình mẫu “${cur.name}” ✓`); }
   if (act === 'saveas') return presetSaveAs();
   if (act === 'reset') return applyPreset(cur);
-  if (act === 'rename' && cur && !cur.builtin) { const n = await promptText({ title: 'Đổi tên preset', value: cur.name, validate: (v) => nameTaken(v, cur.id) }); if (n) { await cpSave({ presets: user.map(p => p.id === cur.id ? { ...p, name: n } : p) }); paintCp(); } }
-  if (act === 'delete' && cur && !cur.builtin) { const ok = await modalAsk({ icon: '🗑', title: `Xoá preset “${cur.name}”?`, message: 'Cài đặt trò chuyện hiện tại vẫn giữ nguyên; chỉ xoá preset đã lưu.', okLabel: 'Xoá', noLabel: 'Huỷ' }); if (ok) { await cpSave({ presets: user.filter(p => p.id !== cur.id), activePreset: cp.builtin[0] && cp.builtin[0].id }); paintCp(); toast('Đã xoá preset'); } }
-  if (act === 'export') { const r = await A.presetExport({ name: cur ? cur.name : 'Preset', ...curSnapshot() }).catch(e => ({ ok: false, error: cleanErr(e.message) })); if (r.ok) toast('Đã xuất preset ✓'); else if (r.error) toast(r.error, true); }
-  if (act === 'import') { const r = await A.presetImport().catch(e => ({ ok: false, error: cleanErr(e.message) })); if (r.error) return toast('Không nhập được preset: ' + r.error, true); if (!r.ok) return;
-    let name = r.preset.name; if (nameTaken(name)) name = await promptText({ title: 'Tên preset đã có — đặt tên khác', value: name + ' (nhập)', validate: (v) => nameTaken(v) }); if (!name) return;
+  if (act === 'rename' && cur && !cur.builtin) { const n = await promptText({ title: 'Đổi tên cấu hình mẫu', value: cur.name, validate: (v) => nameTaken(v, cur.id) }); if (n) { await cpSave({ presets: user.map(p => p.id === cur.id ? { ...p, name: n } : p) }); paintCp(); } }
+  if (act === 'delete' && cur && !cur.builtin) { const ok = await modalAsk({ icon: '🗑', title: `Xoá cấu hình mẫu “${cur.name}”?`, message: 'Cài đặt trò chuyện hiện tại vẫn giữ nguyên; chỉ xoá cấu hình mẫu đã lưu.', okLabel: 'Xoá', noLabel: 'Huỷ' }); if (ok) { await cpSave({ presets: user.filter(p => p.id !== cur.id), activePreset: cp.builtin[0] && cp.builtin[0].id }); paintCp(); toast('Đã xoá cấu hình mẫu'); } }
+  if (act === 'export') { const r = await A.presetExport({ name: cur ? cur.name : 'Cấu hình mẫu', ...curSnapshot() }).catch(e => ({ ok: false, error: cleanErr(e.message) })); if (r.ok) toast('Đã xuất cấu hình mẫu ✓'); else if (r.error) toast(r.error, true); }
+  if (act === 'import') { const r = await A.presetImport().catch(e => ({ ok: false, error: cleanErr(e.message) })); if (r.error) return toast('Không nhập được cấu hình mẫu: ' + r.error, true); if (!r.ok) return;
+    let name = r.preset.name; if (nameTaken(name)) name = await promptText({ title: 'Tên cấu hình mẫu đã có — đặt tên khác', value: name + ' (nhập)', validate: (v) => nameTaken(v) }); if (!name) return;
     const { name: _n, ...snap } = r.preset; await presetSaveAs(snap, name); await applyPreset(activePreset()); }
 }
 async function initChatPanel() {
@@ -1010,8 +1042,8 @@ async function initChatPanel() {
   $('#jsonSchema').addEventListener('change', async (e) => { await cpSetParam('jsonSchema', e.target.value); paintJsonErr(); });
   $('#presetSel').addEventListener('change', async (e) => {
     const p = presetsAll().find(x => x.id === e.target.value); if (!p) return;
-    if (cpDirty()) { const ok = await modalAsk({ icon: '⚠️', title: 'Bỏ thay đổi chưa lưu?', message: `Cài đặt hiện tại khác preset “${(activePreset() || {}).name || ''}”. Chuyển sang “${p.name}” sẽ bỏ các thay đổi này.`, okLabel: 'Chuyển preset', noLabel: 'Ở lại' }); if (!ok) { paintPresetBar(); return; } }
-    await applyPreset(p); toast(`Đang dùng preset “${p.name}”`);
+    if (cpDirty()) { const ok = await modalAsk({ icon: '⚠️', title: 'Bỏ thay đổi chưa lưu?', message: `Cài đặt hiện tại khác cấu hình mẫu “${(activePreset() || {}).name || ''}”. Chuyển sang “${p.name}” sẽ bỏ các thay đổi này.`, okLabel: 'Chuyển cấu hình mẫu', noLabel: 'Ở lại' }); if (!ok) { paintPresetBar(); return; } }
+    await applyPreset(p); toast(`Đang dùng cấu hình mẫu “${p.name}”`);
   });
   $('#presetSave').addEventListener('click', () => presetAction('save'));
   $('#presetMore').addEventListener('click', (e) => { e.stopPropagation(); const m = $('#presetMenu'); m.hidden = !m.hidden; $('#presetMore').setAttribute('aria-expanded', String(!m.hidden)); if (!m.hidden) m.querySelector('button:not(:disabled)').focus(); });
@@ -1032,7 +1064,7 @@ function cpTab(t) {
 // ---- Lệnh "/" trong ô nhập ----
 const SLASH = [
   { c: '/moi', d: 'Bắt đầu cuộc trò chuyện mới', run: () => { if (state.generating) return toast('Đang tạo câu trả lời — bấm Dừng trước khi mở cuộc trò chuyện mới', true); $('#newChat').click(); } },
-  { c: '/preset', a: '<tên>', d: 'Chuyển preset (vd. /preset Lập trình viên)', run: async (arg) => { const p = presetsAll().find(x => x.name.toLowerCase() === arg.toLowerCase()) || presetsAll().find(x => x.name.toLowerCase().includes(arg.toLowerCase())); if (!p) return toast('Không thấy preset “' + arg + '”', true); await applyPreset(p); toast(`Đang dùng preset “${p.name}”`); } },
+  { c: '/preset', a: '<tên>', d: 'Chuyển cấu hình mẫu (vd. /preset Lập trình viên)', run: async (arg) => { const p = presetsAll().find(x => x.name.toLowerCase() === arg.toLowerCase()) || presetsAll().find(x => x.name.toLowerCase().includes(arg.toLowerCase())); if (!p) return toast('Không thấy cấu hình mẫu “' + arg + '”', true); await applyPreset(p); toast(`Đang dùng cấu hình mẫu “${p.name}”`); } },
   { c: '/he-thong', a: '<lời nhắc>', d: 'Đặt lời nhắc hệ thống', run: async (arg) => { if (!arg) return cpTab('sys'), $('#sysPrompt').focus(); await cpSave({ systemPrompt: arg }); paintCp(); toast('Đã đặt lời nhắc hệ thống'); } },
   { c: '/nhiet-do', a: '<0–2>', d: 'Đặt nhiệt độ', run: async (arg) => { const v = Number(String(arg).replace(',', '.')); if (!(v >= 0 && v <= 2)) return toast('Nhiệt độ phải từ 0 đến 2', true); await cpSave({ temperature: v }); paintCp(); toast('Nhiệt độ: ' + v); } },
   { c: '/sao-chep', d: 'Sao chép cả cuộc trò chuyện (Markdown)', run: async () => { const c = state.current; if (!c || !c.messages.length) return toast('Chưa có gì để sao chép', true); await A.copyText(c.messages.map(m => `**${m.role === 'user' ? 'Bạn' : 'AIVN'}:** ${m.content}`).join('\n\n')); toast('Đã sao chép cuộc trò chuyện ✓'); } },
@@ -1072,9 +1104,9 @@ function bindSettings() {
 }
 
 // ---------- Máy chủ ----------
-function curlExample(port) {
+function curlExample(port, keySet) {
   return `curl http://localhost:${port}/v1/chat/completions \\
-  -H "Content-Type: application/json" \\
+  -H "Content-Type: application/json" \\${keySet ? '\n  -H "Authorization: Bearer $AIVN_API_KEY" \\' : ''}
   -d '{
     "model": "${state.status.loaded ? state.status.id : 'qwen2.5-0.5b-instruct-q4_k_m'}",
     "messages": [{"role": "user", "content": "Xin chào!"}],
@@ -1087,9 +1119,31 @@ function paintServer(st) {
   const port = st.port || $('#srvPort').value;
   $('#srvState').textContent = st.running ? 'Đang chạy' : 'Đang tắt';
   $('#srvUrl').textContent = `http://localhost:${port}/v1`;
-  $('#srvPort').disabled = st.running; $('#curlEx').textContent = curlExample(port);
+  $('#srvPort').disabled = st.running; $('#curlEx').textContent = curlExample(port, st.keySet);
+  if ('lan' in st) {
+    $('#srvLan').checked = st.lan; $('#srvCors').checked = st.cors; $('#srvTtl').value = String(st.ttlMin || 0);
+    $('#srvLanUrls').innerHTML = st.lan ? (st.lanUrls.length ? 'Địa chỉ cho thiết bị khác: ' + st.lanUrls.map(u => `<code>${esc(u)}</code>`).join(' ') : '<span class="warn-ink">Máy chưa có địa chỉ mạng LAN.</span>') : '';
+    $('#srvKeyState').textContent = st.keySet ? 'Đã có khoá: mọi yêu cầu phải gửi "Authorization: Bearer <khoá>".' : 'Chưa có: ai trên máy này cũng gọi được API.';
+    $('#srvKeyGen').textContent = st.keySet ? 'Tạo khoá mới' : 'Tạo khoá'; $('#srvKeyReveal').hidden = !st.keySet; $('#srvKeyClear').hidden = !st.keySet; if (!st.keySet) $('#srvKeyShow').hidden = true;
+    $('#srvLoaded').innerHTML = (st.loaded || []).length ? st.loaded.map(m => `<div class="row"><code>${esc(m.id)}</code><span class="muted small">${m.kind === 'eyes' ? 'mắt nhìn của AIVN AGENT' : `trò chuyện · ngữ cảnh ${Number(m.ctx || 0).toLocaleString('vi-VN')}${m.vision ? ' · nhìn ảnh' : ''}${m.jit ? ' · nạp theo yêu cầu API' : ''}`}</span>${m.kind === 'chat' ? '<button type="button" class="btn sm" data-srv-unload="1">Gỡ khỏi bộ nhớ</button>' : ''}</div>`).join('') : '<span class="muted small">Chưa nạp mô hình nào. Yêu cầu API ghi "model" là mô hình đã tải sẽ được tự nạp.</span>';
+  }
   const sb = $('#sbServer'); sb.textContent = st.running ? `API: đang chạy · cổng ${port}` : 'API: tắt'; sb.classList.toggle('on', !!st.running);
 }
+const srvErr = (err) => toast(String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), true);
+$('#srvLan').addEventListener('change', async (e) => {
+  if (e.target.checked && !(await modalAsk({ icon: '🌐', title: 'Mở máy chủ API cho mạng LAN?', message: 'Thiết bị khác trong cùng mạng (Wi-Fi quán cà phê, ký túc xá…) sẽ thấy cổng này. Chỉ ai có khoá API mới dùng được mô hình của bạn. Chỉ bật trong mạng bạn tin tưởng.', okLabel: 'Mở cho LAN', noLabel: 'Huỷ' }))) { e.target.checked = false; return; }
+  try { if (e.target.checked && !(await A.serverStatus()).keySet) { const k = await A.serverKey('generate'); showKey(k.key); } paintServer(await A.serverConfig({ lan: e.target.checked })); } catch (err) { srvErr(err); paintServer(await A.serverStatus()); }
+});
+$('#srvCors').addEventListener('change', async (e) => { try { paintServer(await A.serverConfig({ cors: e.target.checked })); } catch (err) { srvErr(err); } });
+$('#srvTtl').addEventListener('change', async (e) => { try { paintServer(await A.serverConfig({ ttlMin: Number(e.target.value) })); } catch (err) { srvErr(err); } });
+function showKey(k) { const el = $('#srvKeyShow'); el.textContent = k || ''; el.hidden = !k; if (k) { A.copyText(k).then(() => toast('Đã sao chép khoá API')).catch(() => {}); } }
+$('#srvKeyGen').addEventListener('click', async () => {
+  const st0 = await A.serverStatus(); if (st0.keySet && !(await modalAsk({ icon: '🔑', title: 'Tạo khoá API mới?', message: 'Khoá cũ sẽ ngừng hoạt động: các ứng dụng đang dùng khoá cũ phải đổi sang khoá mới.', okLabel: 'Tạo khoá mới', noLabel: 'Huỷ' }))) return;
+  try { const r = await A.serverKey('generate'); showKey(r.key); paintServer(r.info); } catch (err) { srvErr(err); }
+});
+$('#srvKeyReveal').addEventListener('click', async () => { const r = await A.serverKey('reveal'); showKey(r.key); });
+$('#srvKeyClear').addEventListener('click', async () => { try { const r = await A.serverKey('clear'); showKey(null); paintServer(r.info); } catch (err) { srvErr(err); } });
+$('#srvLoaded').addEventListener('click', async (e) => { if (!e.target.closest('[data-srv-unload]')) return; await A.unloadModel(); refreshServer(); });
 async function refreshServer() { const st = await A.serverStatus(); $('#srvLog').innerHTML = ''; st.log.forEach(logLine); paintServer(st); }
 $('#srvToggle').addEventListener('change', async (e) => {
   try { paintServer(e.target.checked ? await A.startServer(Number($('#srvPort').value)) : await A.stopServer()); }

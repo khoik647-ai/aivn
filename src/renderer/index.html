@@ -150,21 +150,21 @@
         <div class="only-chat cp">
           <div class="cp-head"><h3>Cài đặt trò chuyện</h3></div>
           <div class="preset-bar">
-            <select id="presetSel" aria-label="Preset"></select>
-            <button type="button" class="btn sm" id="presetSave" title="Lưu thay đổi vào preset này">Lưu</button>
-            <button type="button" class="btn sm" id="presetMore" aria-haspopup="menu" aria-expanded="false" title="Thao tác khác với preset" aria-label="Thao tác khác với preset">⋯</button>
+            <select id="presetSel" aria-label="Cấu hình mẫu"></select>
+            <button type="button" class="btn sm" id="presetSave" title="Lưu thay đổi vào cấu hình mẫu này">Lưu</button>
+            <button type="button" class="btn sm" id="presetMore" aria-haspopup="menu" aria-expanded="false" title="Thao tác khác với cấu hình mẫu" aria-label="Thao tác khác với cấu hình mẫu">⋯</button>
             <div class="menu preset-menu" id="presetMenu" role="menu" hidden>
-              <button type="button" role="menuitem" data-pm="saveas">Lưu thành preset mới…</button>
-              <button type="button" role="menuitem" data-pm="reset">Bỏ thay đổi (về preset đã lưu)</button>
+              <button type="button" role="menuitem" data-pm="saveas">Lưu thành cấu hình mẫu mới…</button>
+              <button type="button" role="menuitem" data-pm="reset">Bỏ thay đổi (về cấu hình mẫu đã lưu)</button>
               <button type="button" role="menuitem" data-pm="rename">Đổi tên…</button>
               <hr>
               <button type="button" role="menuitem" data-pm="import">Nhập từ tệp JSON… <small class="muted">(AIVN hoặc LM Studio)</small></button>
               <button type="button" role="menuitem" data-pm="export">Xuất ra tệp JSON…</button>
               <hr>
-              <button type="button" role="menuitem" data-pm="delete" class="danger-item">Xoá preset</button>
+              <button type="button" role="menuitem" data-pm="delete" class="danger-item">Xoá cấu hình mẫu</button>
             </div>
           </div>
-          <div class="preset-dirty small" id="presetDirty" hidden>● Đã thay đổi so với preset · <button type="button" class="linkbtn" data-pm="reset">bỏ thay đổi</button></div>
+          <div class="preset-dirty small" id="presetDirty" hidden>● Đã thay đổi so với cấu hình mẫu · <button type="button" class="linkbtn" data-pm="reset">bỏ thay đổi</button></div>
           <div class="cp-tabs" role="tablist" aria-label="Nhóm cài đặt">
             <button type="button" role="tab" data-cpt="sys" aria-selected="true" class="on">Hệ thống</button>
             <button type="button" role="tab" data-cpt="smp" aria-selected="false">Lấy mẫu</button>
@@ -173,7 +173,7 @@
           <div class="cp-pane" data-cpp="sys" role="tabpanel">
             <div class="prm-h"><label for="sysPrompt">Lời nhắc hệ thống</label><span class="muted small" id="sysTok"></span></div>
             <textarea id="sysPrompt" rows="10" placeholder="Mô tả vai trò, giọng văn, quy tắc trả lời cho mô hình…"></textarea>
-            <p class="hint">Mô hình đọc phần này trước mỗi câu trả lời. Đổi preset ở trên để dùng lời nhắc soạn sẵn.</p>
+            <p class="hint">Mô hình đọc phần này trước mỗi câu trả lời. Đổi cấu hình mẫu ở trên để dùng lời nhắc soạn sẵn.</p>
           </div>
           <div class="cp-pane" data-cpp="smp" role="tabpanel" hidden>
             <div class="prm" data-k="temperature"><div class="prm-h"><label for="temp">Nhiệt độ</label><input type="number" class="prm-n" id="tempN" min="0" max="2" step="0.05" aria-label="Nhiệt độ (số)"><output id="tempOut" hidden></output></div>
@@ -240,7 +240,12 @@
           <div><h2>Mô hình của tôi</h2><p class="muted" id="modelsDir"></p></div>
           <div class="row"><button class="btn" id="openLogs" title="Nhật ký lỗi khi nạp mô hình (logs/engine.log), gửi cho người hỗ trợ khi cần">🧾 Mở thư mục nhật ký</button><button class="btn" id="openDir">📁 Mở thư mục</button><button class="btn primary" id="importBtn">📂 Nhập tệp GGUF</button></div>
         </div>
-        <div class="table" id="modelTable"></div>
+        <div class="mm-tools row wrap">
+          <input type="search" id="mmFilter" placeholder="Lọc theo tên, lượng tử, kiến trúc…" aria-label="Lọc mô hình">
+          <select id="mmKind" aria-label="Chỉ hiện"><option value="">Tất cả</option><option value="smooth">Chạy mượt trên máy này</option><option value="vision">Nhìn được ảnh</option><option value="agent">Dùng được cho AIVN AGENT</option><option value="loaded">Đang nạp</option></select>
+          <span class="muted small" id="mmCount"></span>
+        </div>
+        <div class="table mm-table" id="modelTable" role="table" aria-label="Mô hình của tôi"></div>
       </div>
     </section>
 
@@ -259,9 +264,18 @@
           <label class="port">Cổng <input type="number" id="srvPort" min="1" max="65535"></label>
           <label class="check"><input type="checkbox" id="srvAuto"> Tự bật khi mở ứng dụng</label>
         </div>
+        <div class="srv-opts">
+          <div class="srv-opt"><label class="check toggle"><input type="checkbox" id="srvLan"> <span><b>Cho thiết bị khác trong mạng LAN dùng</b><small>Lắng nghe trên mọi địa chỉ của máy (0.0.0.0). Bắt buộc có khoá API. Chỉ bật trong mạng bạn tin tưởng.</small></span></label><div class="small" id="srvLanUrls"></div></div>
+          <div class="srv-opt"><label class="check toggle"><input type="checkbox" id="srvCors"> <span><b>Cho trang web gọi API (CORS)</b><small>Tắt (mặc định): trang web mở trong trình duyệt không gọi được API của bạn. Chỉ bật khi bạn tự làm ứng dụng web cần gọi AIVN.</small></span></label></div>
+          <div class="srv-opt"><b>🔑 Khoá API</b> <span class="muted small" id="srvKeyState">Chưa có: ai trên máy này cũng gọi được API.</span>
+            <div class="row wrap"><code class="srv-key" id="srvKeyShow" hidden></code><button type="button" class="btn sm" id="srvKeyGen">Tạo khoá</button><button type="button" class="btn sm" id="srvKeyReveal" hidden>Hiện &amp; sao chép</button><button type="button" class="btn sm" id="srvKeyClear" hidden>Xoá khoá</button></div></div>
+          <div class="srv-opt"><label class="small">Tự gỡ mô hình nạp theo yêu cầu API (TTL) <select id="srvTtl"><option value="0">Không tự gỡ</option><option value="5">sau 5 phút không dùng</option><option value="15">sau 15 phút không dùng</option><option value="60">sau 60 phút không dùng</option><option value="240">sau 4 giờ không dùng</option></select></label>
+            <small class="muted">Khi yêu cầu API ghi "model" là mô hình chưa nạp, AIVN tự nạp mô hình đó (JIT); TTL giải phóng bộ nhớ khi không còn ai dùng.</small></div>
+          <div class="srv-opt"><b>Mô hình đang nạp</b><div class="srv-loaded" id="srvLoaded"></div></div>
+        </div>
         <div class="grid2">
           <div>
-            <h4>Endpoint</h4>
+            <h4>Đường dẫn API</h4>
             <ul class="endpoints">
               <li><code>GET</code> /v1/models</li>
               <li><code>POST</code> /v1/chat/completions <span class="muted">(hỗ trợ "stream", "tools"/"tool_choice", "response_format" json_schema)</span></li>

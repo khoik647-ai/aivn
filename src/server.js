@@ -24,15 +24,23 @@ function parseResponseFormat(rf) {
   throw new Error('"response_format.type" phải là "text", "json_object" hoặc "json_schema"');
 }
 
-function createApiServer({ engine, models, ensureModel, log, embeddings = null, isBlocked = null }) {
+// 0.16 (như LM Studio): getOpts() → { cors: bool, apiKey: string|null, loaded: () => [...] }
+//   cors tắt (mặc định): không gửi Access-Control-Allow-Origin → trang web lạ mở trong trình duyệt KHÔNG gọi được API của bạn
+//   apiKey: mọi yêu cầu phải có "Authorization: Bearer <khoá>" (hoặc x-api-key); bắt buộc khi mở cho mạng LAN
+function keyOk(req, key) {
+  const h = String(req.headers.authorization || ''); const got = /^Bearer\s+(.+)$/i.exec(h) ? /^Bearer\s+(.+)$/i.exec(h)[1].trim() : String(req.headers['x-api-key'] || '').trim();
+  const a = Buffer.from(got); const b = Buffer.from(String(key));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function createApiServer({ engine, models, ensureModel, log, embeddings = null, isBlocked = null, getOpts = () => ({}) }) {
   let server = null;
-  let port = null;
+  let port = null; let host = null;
 
   const send = (res, code, obj) => {
     res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', ...cors() });
     res.end(JSON.stringify(obj));
   };
-  const cors = () => ({ 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' });
+  const cors = () => (getOpts().cors ? { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' } : {});
   const err = (res, code, message, type = 'invalid_request_error') => send(res, code, { error: { message, type, code } });
 
   const readBody = (req) => new Promise((resolve, reject) => {
@@ -59,7 +67,9 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
     if (req.method === 'OPTIONS') { res.writeHead(204, cors()); return res.end(); }
     const blocked = isBlocked && isBlocked();
     if (blocked) return err(res, 423, blocked, 'locked');
-    log(`${req.method} ${p}`);
+    const key = getOpts().apiKey;
+    if (key && !keyOk(req, key)) { log(`${req.method} ${p} → 401 (thiếu hoặc sai khoá API) từ ${req.socket.remoteAddress || '?'}`); return err(res, 401, 'Thiếu hoặc sai khoá API. Gửi tiêu đề "Authorization: Bearer <khoá>" (khoá ở mục Máy chủ API của AIVN).', 'invalid_api_key'); }
+    log(`${req.method} ${p}${host === '0.0.0.0' ? ` từ ${req.socket.remoteAddress || '?'}` : ''}`);
 
     if (req.method === 'GET' && (p === '/v1/models' || p === '/models')) {
       const st = engine.status();
@@ -168,18 +178,18 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
   }
 
   return {
-    start(p = 1234, host = '127.0.0.1') {
+    start(p = 1234, h = '127.0.0.1') {
       return new Promise((resolve, reject) => {
         if (server) return resolve(port);
         const s = http.createServer((req, res) => handle(req, res).catch(e => { try { err(res, 500, e.message, 'server_error'); } catch {} }));
         s.once('error', reject);
-        s.listen(p, host, () => { server = s; port = p; log(`Máy chủ đang chạy tại http://${host}:${p}`); resolve(p); });
+        s.listen(p, h, () => { server = s; port = p; host = h; log(`Máy chủ đang chạy tại http://${h}:${p}${h === '0.0.0.0' ? ' (mọi thiết bị trong mạng LAN)' : ''}`); resolve(p); });
       });
     },
     stop() {
-      return new Promise(resolve => { if (!server) return resolve(); server.close(() => resolve()); server.closeAllConnections?.(); server = null; port = null; log('Đã dừng máy chủ'); });
+      return new Promise(resolve => { if (!server) return resolve(); server.close(() => resolve()); server.closeAllConnections?.(); server = null; port = null; host = null; log('Đã dừng máy chủ'); });
     },
-    status() { return { running: !!server, port }; },
+    status() { return { running: !!server, port, host }; },
   };
 }
-module.exports = { createApiServer };
+module.exports = { createApiServer, keyOk };

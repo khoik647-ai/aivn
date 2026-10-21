@@ -58,8 +58,8 @@ test('AIVN AGENT chạy trọn một lượt với bộ não đám mây (máy ch
 });
 test('main: khoá không đi qua settings:set, không trả về giao diện; thiếu khoá thì không bật được', () => {
   const m = fs.readFileSync(path.join(__dirname, '..', 'src/main.js'), 'utf8');
-  assert.match(m, /const \{ hfToken, hfTokenSet, cloudBrain: _cloudIgnored, \.\.\.rest \} = patch/);
-  assert.match(m, /const \{ hfToken, cloudBrain: _cb, \.\.\.rest \} = settings\.data; return \{ \.\.\.rest, hfTokenSet: !!hfToken, cloudBrain: cloudPublic\(\) \}/);
+  assert.match(m, /const \{ hfToken, hfTokenSet, cloudBrain: _cloudIgnored, [^}]*\.\.\.rest \} = patch/);
+  assert.match(m, /const \{ hfToken, cloudBrain: _cb, [^}]*\.\.\.rest \} = settings\.data; return \{ \.\.\.rest, hfTokenSet: !!hfToken, [^}]*cloudBrain: cloudPublic\(\) \}/);
   assert.ok(!/keyEnc/.test(m.match(/const cloudPublic = [^\n]+/)[0]));
 });
 test('lời chào khi bật bộ não đám mây không còn nói “không gửi dữ liệu đi đâu cả”', () => {

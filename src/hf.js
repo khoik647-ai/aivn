@@ -129,12 +129,25 @@ function groupFiles(entries, repoInfo = {}, hw = null) {
     });
   }
   out.sort((a, b) => (a.kind === 'chat' ? 0 : 1) - (b.kind === 'chat' ? 0 : 1) || a.size - b.size);
-  const chat = out.filter(g => g.kind === 'chat' && g.complete);
-  const rank = (g) => { const i = QUANT_PREF.indexOf(g.quant || ''); return i < 0 ? 99 : i; };
-  let rec = chat.find(g => g.quant === 'Q4_K_M' && !g.split) || chat.find(g => g.quant === 'Q4_K_M');
-  if (!rec) rec = [...chat].sort((a, b) => rank(a) - rank(b) || a.size - b.size).find(g => !g.fit || g.fit.level !== 'big') || chat[0];
-  if (rec) rec.recommended = true;
+  recommendQuant(out);
   return out;
+}
+// Khuyên dùng (giống LM Studio): bản lượng tử CHẤT LƯỢNG CAO NHẤT còn nằm trọn VRAM (Chạy mượt) trên máy có GPU;
+// không bản nào chạy mượt → Q4_K_M; không có Q4_K_M → bản theo thứ tự ưu tiên còn chạy được
+const QUALITY = ['Q8_0', 'Q6_K', 'Q6_K_L', 'Q5_K_M', 'Q5_K_L', 'Q5_K_S', 'Q4_K_M', 'Q4_K_L', 'Q4_K_S', 'IQ4_XS', 'IQ4_NL', 'Q4_0', 'Q3_K_L', 'Q3_K_M', 'IQ3_M', 'IQ3_XS', 'Q3_K_S', 'Q2_K_L', 'Q2_K', 'IQ2_M'];
+function recommendQuant(groups) {
+  for (const g of groups) { delete g.recommended; delete g.recWhy; }
+  const chat = groups.filter(g => g.kind === 'chat' && g.complete);
+  const q = (g) => { const i = QUALITY.indexOf(String(g.quant || '').toUpperCase()); return i < 0 ? 99 : i; };
+  const rank = (g) => { const i = QUANT_PREF.indexOf(g.quant || ''); return i < 0 ? 99 : i; };
+  const Q4 = QUALITY.indexOf('Q4_0'); // dưới Q4 chất lượng giảm rõ: không tự khuyên dùng khi còn bản Q4 chạy được
+  // chỉ máy có GPU (nằm trọn VRAM): chạy CPU thì bản nhỏ nhanh hơn rõ → Q4_K_M
+  let rec = [...chat].filter(g => q(g) <= Q4 && g.fit && g.fit.level === 'fit' && g.fit.vram > 0 && !g.fit.ram).sort((a, b) => q(a) - q(b) || (a.split ? 1 : 0) - (b.split ? 1 : 0))[0];
+  let why = rec ? 'Chất lượng cao nhất còn nằm trọn VRAM trên máy này' : null;
+  if (!rec) { rec = chat.find(g => g.quant === 'Q4_K_M' && !g.split && (!g.fit || g.fit.level !== 'big')) || chat.find(g => g.quant === 'Q4_K_M' && (!g.fit || g.fit.level !== 'big')); why = rec ? 'Cân bằng chất lượng và dung lượng (không bản Q4 trở lên nào nằm trọn VRAM)' : null; }
+  if (!rec) { rec = [...chat].sort((a, b) => rank(a) - rank(b) || a.size - b.size).find(g => !g.fit || g.fit.level !== 'big') || chat[0]; why = rec ? 'Bản phù hợp nhất còn chạy được trên máy này' : null; }
+  if (rec) { rec.recommended = true; rec.recWhy = why; }
+  return rec || null;
 }
 
 async function repoFiles(repo, { token, hw, fetchImpl } = {}) {
@@ -149,6 +162,9 @@ async function repoFiles(repo, { token, hw, fetchImpl } = {}) {
   const groups = groupFiles(tree, sum, hw);
   const mmproj = pickMmproj(groups);
   if (mmproj) for (const g of groups) if (g.kind === 'chat') g.vision = true;
+  // độ vừa máy từng bản lượng tử tính giống thẻ Khám phá: theo số tham số (tốc độ ước tính) + phần nhìn ảnh tải kèm
+  const pstr = sum.params ? `${(sum.params / 1e9).toFixed(2)}B${(/-A\d+(?:\.\d+)?B/i.exec(String(sum.name || repo)) || [''])[0]}` : null;
+  if (hw) { for (const g of groups) if (g.kind === 'chat') g.fit = fitFor(g.size, hw, { params: pstr, mmprojSize: mmproj ? mmproj.size : 0 }); recommendQuant(groups); }
   return { ...sum, url: `${HF}/${repo}`, groups, mmproj, vision: sum.vision || !!mmproj };
 }
 
@@ -171,4 +187,4 @@ function pickMmprojFile(names) {
 
 function resolveUrl(repo, file) { return `${HF}/${repo}/resolve/main/${file.split('/').map(encodeURIComponent).join('/')}`; }
 
-module.exports = { screenFit, search, repoFiles, groupFiles, pickMmproj, pickMmprojFile, parseQuant, fitFor, archSupported, resolveUrl, summarize, HfError, QUANT_PREF, SPLIT_RE, llamaCpp: ARCHS.llamaCpp };
+module.exports = { recommendQuant, QUALITY, screenFit, search, repoFiles, groupFiles, pickMmproj, pickMmprojFile, parseQuant, fitFor, archSupported, resolveUrl, summarize, HfError, QUANT_PREF, SPLIT_RE, llamaCpp: ARCHS.llamaCpp };

@@ -72,7 +72,19 @@ if (nodePath) {
 }
 
 let lastUse = Date.now(); let busy = 0; // dùng để tự gỡ mô hình khi rảnh lâu (mức Tiết kiệm)
-for (const k of ['generate', 'chatStep']) { const f = engine[k]; if (typeof f === 'function') engine[k] = (...a) => { lastUse = Date.now(); busy++; const p = Promise.resolve().then(() => f(...a)); p.finally(() => { busy--; lastUse = Date.now(); }).catch(() => {}); return p; }; }
+for (const k of ['generate', 'chatStep']) { const f = engine[k]; if (typeof f === 'function') engine[k] = (...a) => { lastUse = Date.now(); busy++; const p = Promise.resolve().then(() => f(...a)); p.finally(() => { busy--; lastUse = Date.now(); }).catch(() => {}); p.then((r) => noteUsage(r), () => {}); return p; }; }
+// 0.16 Mô hình của tôi: lần dùng cuối + tốc độ đo được thật (token/giây, trung bình trượt) cho mỗi mô hình
+let usageSaveT = null;
+function noteUsage(r, idOverride) {
+  try {
+    if (!settings) return; const st = engine.status(); const id = idOverride || st.id; if (!id) return;
+    const u = settings.data.modelUsage || (settings.data.modelUsage = {}); const e = u[id] || (u[id] = { uses: 0 });
+    e.lastUsed = Date.now(); if (!idOverride) e.uses = (e.uses || 0) + 1;
+    const tps = r && r.usage && Number(r.usage.tokensPerSecond); const n = r && r.usage && Number(r.usage.completion_tokens);
+    if (tps > 0 && n >= 16) e.tps = e.tps ? Math.round((e.tps * 0.7 + tps * 0.3) * 10) / 10 : Math.round(tps * 10) / 10;
+    clearTimeout(usageSaveT); usageSaveT = setTimeout(() => { try { settings.save(); } catch {} }, 3000);
+  } catch {}
+}
 let win = null, tray = null, quitting = false;
 let paths, settings, convos, memory, scheduler, agent;
 let downloader = null;
@@ -151,7 +163,7 @@ function initStores() {
   fs.mkdirSync(paths.models, { recursive: true });
   settings = new JsonStore(path.join(ud, 'settings.json'), {
     systemPrompt: 'Bạn là AIVN, một trợ lý AI thân thiện. Hãy trả lời bằng tiếng Việt, rõ ràng và chính xác.',
-    temperature: 0.7, maxTokens: 1024, contextSize: 0, perfMode: 'auto', apiPort: 1234, apiAutoStart: false, imported: [], lastModel: null, hfToken: '', theme: 'light', themeFx: 'full', rag: true, vision: true,
+    temperature: 0.7, maxTokens: 1024, contextSize: 0, perfMode: 'auto', apiPort: 1234, apiAutoStart: false, apiLan: false, apiCors: false, apiKey: '', apiTtlMin: 0, imported: [], lastModel: null, hfToken: '', theme: 'light', themeFx: 'full', rag: true, vision: true,
     agentFolders: [], agentWeb: false, agentPython: false, agentMemory: true, agentTemperature: 0.2, agentComputer: true, agentScreen: false, agentScreenMode: 'each', agentAutonomy: false, agentScreenBudget: 40, agentAutoReadOnly: false, keepInTray: false, openAtLogin: false,
   });
   if (!settings.data.perfMigrated) { if (settings.data.contextSize === 4096) settings.data.contextSize = 0; settings.data.perfMigrated = 1; settings.save(); } // 4096 là mặc định cũ → chuyển sang Tự động theo mức máy
@@ -208,7 +220,7 @@ function startServices() {
   hw().then(h => LOG.log('app', 'Phần cứng', { gpu: h.gpu || 'không', thietBi: h.devices, vramGB: h.vram ? +(h.vram.total / 1024 ** 3).toFixed(2) : 0, vramTrongGB: h.vram ? +(h.vram.free / 1024 ** 3).toFixed(2) : 0, ramGB: +(h.ram / 1024 ** 3).toFixed(1), chiCPU: !!h.cpuOnly })).catch(e => LOG.log('app', 'Không đọc được phần cứng: ' + e.message));
   applyBackgroundPrefs();
   scheduler.start();
-  if (settings.data.apiAutoStart || process.env.AIVN_API === '1') api.start(settings.data.apiPort).catch(e => log('Lỗi: ' + e.message));
+  if (settings.data.apiAutoStart || process.env.AIVN_API === '1') startApi(settings.data.apiPort).catch(e => log('Lỗi: ' + e.message));
   if (process.env.AIVN_LOAD) loadById(process.env.AIVN_LOAD).catch(e => log('Lỗi nạp: ' + e.message));
 }
 function stopServices() { if (!servicesOn) return; servicesOn = false; abortAll(); scheduler.stop(); api.stop().catch(() => {}); }
@@ -248,7 +260,7 @@ function registerGateIpc(handle) {
 }
 
 // Cài đặt gửi sang giao diện: không bao giờ kèm token
-const publicSettings = () => { const { hfToken, cloudBrain: _cb, ...rest } = settings.data; return { ...rest, hfTokenSet: !!hfToken, cloudBrain: cloudPublic() }; };
+const publicSettings = () => { const { hfToken, cloudBrain: _cb, apiKey, ...rest } = settings.data; return { ...rest, hfTokenSet: !!hfToken, apiKeySet: !!apiKey, cloudBrain: cloudPublic() }; };
 
 const send = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send(ch, data); };
 // Gộp token trong ~16 ms thành một tin IPC (bớt hàng trăm tin/giây khi mô hình nhanh); flush() trước mọi sự kiện khác của cùng lượt
@@ -435,24 +447,46 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
     if (ctxNote) { st = { ...st, notice: [st.notice, ctxNote].filter(Boolean).join(' ') }; LOG.log('load', ctxNote); }
     if (reason) LOG.log('load', 'Lý do nạp lại: ' + reason);
     LOG.log('load', `Đã nạp ${m.file} sau ${Date.now() - tLoad} ms`, { mode: st.mode, ctx: st.contextSize, gpu: st.gpu, gpuLayers: st.gpuLayers, totalLayers: st.totalLayers, toolMode: st.toolMode, fallbackFrom: st.fallbackFrom });
+    noteUsage(null, m.id);
     settings.data.lastModel = m.id; settings.save(); lastUse = Date.now();
     send('model:status', st);
     return st;
   } catch (e) { send('model:status', engine.status()); throw e; }
 }
 
-async function ensureModel(requested) {
+async function ensureModel(requested, { api = false } = {}) {
   const st = engine.status();
   if (requested) {
     const req = String(requested).toLowerCase().replace(/\.gguf$/, '');
     if (st.loaded && (st.id === req || st.id.includes(req))) return;
     const m = listModels().find(x => x.id === req) || listModels().find(x => x.id.includes(req));
-    if (m) return void (await loadById(m.id));
+    if (m) { await loadById(m.id); if (api) { apiJit = { id: m.id, at: Date.now() }; log(`Nạp theo yêu cầu API (JIT): ${m.id}${settings.data.apiTtlMin > 0 ? ` · tự gỡ sau ${settings.data.apiTtlMin} phút không dùng` : ''}`); } return; }
     if (st.loaded) return; // dùng mô hình đang nạp nếu tên không khớp
     throw new Error(`Mô hình "${requested}" chưa có trên máy`);
   }
   if (!st.loaded) throw new Error('Chưa nạp mô hình nào. Hãy nạp mô hình trong AIVN hoặc chỉ định "model".');
 }
+// 0.16 Máy chủ API (như LM Studio): LAN (0.0.0.0, bắt buộc có khoá API), CORS (tắt mặc định), khoá API, TTL tự gỡ mô hình nạp theo yêu cầu API
+let apiJit = null;
+function apiHost() { return settings.data.apiLan ? '0.0.0.0' : '127.0.0.1'; }
+async function startApi(port) {
+  if (settings.data.apiLan && !settings.data.apiKey) throw new Error('Mở cho mạng LAN cần có khoá API (tạo khoá ở mục Máy chủ API) để thiết bị lạ không dùng được mô hình của bạn.');
+  return api.start(port, apiHost());
+}
+function lanUrls(port) {
+  const out = []; const ifs = require('os').networkInterfaces();
+  for (const list of Object.values(ifs)) for (const a of list || []) if (a && a.family === 'IPv4' && !a.internal) out.push(`http://${a.address}:${port}/v1`);
+  return out;
+}
+setInterval(() => { // TTL: chỉ gỡ mô hình do API tự nạp (JIT), khi rảnh đủ lâu và không có lượt nào đang chạy
+  try {
+    const ttl = Number(settings && settings.data.apiTtlMin) || 0; if (!apiJit || ttl <= 0) return;
+    const st = engine.status(); if (!st.loaded || st.id !== apiJit.id) { apiJit = null; return; }
+    if (busy > 0 || Date.now() - lastUse < ttl * 60000) return;
+    log(`TTL: gỡ ${apiJit.id} sau ${ttl} phút không dùng (nạp theo yêu cầu API)`); apiJit = null;
+    engine.unloadModel().then(() => send('model:status', engine.status())).catch(() => {});
+  } catch {}
+}, 30000).unref();
 
 
 // ---------- Hỏi đáp tài liệu (RAG) ----------
@@ -822,7 +856,7 @@ function withParts(orig, text) {
   return [{ type: 'text', text }, ...orig.filter(x => x && x.type === 'image_url')];
 }
 
-const api = createApiServer({ engine, models: listModels, ensureModel, log, isBlocked: () => !activated() ? 'AIVN chưa được kích hoạt trên máy này.' : isLocked() ? 'AIVN đang khoá. Hãy mở khoá ứng dụng để dùng máy chủ API.' : null, embeddings: {
+const api = createApiServer({ engine, models: listModels, ensureModel: (m) => ensureModel(m, { api: true }), log, getOpts: () => ({ cors: !!settings.data.apiCors, apiKey: settings.data.apiKey || null }), isBlocked: () => !activated() ? 'AIVN chưa được kích hoạt trên máy này.' : isLocked() ? 'AIVN đang khoá. Hãy mở khoá ứng dụng để dùng máy chủ API.' : null, embeddings: {
   info: () => embedInfo(),
   async ensure(model) {
     if (model && !String(model).toLowerCase().includes('bge') && String(model).toLowerCase() !== EMBED.id && !/embed/i.test(model)) {
@@ -923,7 +957,7 @@ function registerIpc() {
   ipcMain.handle('cloud:test', async () => { try { return await cloudBrain.test(); } catch (e) { return { ok: false, error: e.message }; } });
   ipcMain.on('ui:log', (_e, msg) => { if (typeof msg === 'string') log(msg.slice(0, 300)); });
   ipcMain.handle('settings:set', (_e, patch = {}) => {
-    const { hfToken, hfTokenSet, cloudBrain: _cloudIgnored, ...rest } = patch; // bộ não đám mây chỉ đổi qua cloud:save (khoá không đi qua đây)
+    const { hfToken, hfTokenSet, cloudBrain: _cloudIgnored, apiKey: _k, apiLan: _l, apiCors: _c, apiTtlMin: _t, ...rest } = patch; // máy chủ API chỉ đổi qua server:config/server:key // bộ não đám mây chỉ đổi qua cloud:save (khoá không đi qua đây)
     Object.assign(settings.data, rest);
     const intOrNull = (v, max) => (Number.isInteger(v) && v >= 0 && v <= max ? v : null);
     if ('agentToolsOff' in rest) settings.data.agentToolsOff = [...new Set((Array.isArray(rest.agentToolsOff) ? rest.agentToolsOff : []).filter(g => Object.prototype.hasOwnProperty.call(TOOL_GROUPS, g)))];
@@ -1024,11 +1058,11 @@ function registerIpc() {
   ipcMain.handle('presets:builtin', () => require('./presets').BUILTIN);
   ipcMain.handle('presets:export', async (_e, p) => {
     const PR = require('./presets'); const body = PR.toExport(p);
-    const r = await dialog.showSaveDialog(win, { title: 'Xuất preset', buttonLabel: 'Lưu', defaultPath: String(p.name || 'preset').replace(/[\\/:*?"<>|]+/g, '-') + '.aivn-preset.json', filters: [{ name: 'Preset AIVN', extensions: ['json'] }] });
+    const r = await dialog.showSaveDialog(win, { title: 'Xuất cấu hình mẫu', buttonLabel: 'Lưu', defaultPath: String(p.name || 'preset').replace(/[\\/:*?"<>|]+/g, '-') + '.aivn-preset.json', filters: [{ name: 'Cấu hình mẫu AIVN', extensions: ['json'] }] });
     if (r.canceled || !r.filePath) return { ok: false }; fs.writeFileSync(r.filePath, body, 'utf8'); return { ok: true, path: r.filePath };
   });
   ipcMain.handle('presets:import', async () => {
-    const r = await dialog.showOpenDialog(win, { title: 'Nhập preset', buttonLabel: 'Mở', properties: ['openFile'], filters: [{ name: 'Preset (AIVN hoặc LM Studio)', extensions: ['json'] }] });
+    const r = await dialog.showOpenDialog(win, { title: 'Nhập cấu hình mẫu', buttonLabel: 'Mở', properties: ['openFile'], filters: [{ name: 'Cấu hình mẫu (AIVN hoặc preset LM Studio)', extensions: ['json'] }] });
     if (r.canceled || !r.filePaths[0]) return { ok: false };
     try { const st = fs.statSync(r.filePaths[0]); if (st.size > 1e6) throw new Error('Tệp quá lớn'); return { ok: true, preset: require('./presets').parseImport(fs.readFileSync(r.filePaths[0], 'utf8')) }; }
     catch (e) { return { ok: false, error: e.message }; }
@@ -1244,12 +1278,31 @@ function registerIpc() {
 
   ipcMain.handle('server:start', async (_e, port) => {
     port = Number(port) || settings.data.apiPort;
-    try { await api.start(port); settings.data.apiPort = port; settings.save(); }
+    try { await startApi(port); settings.data.apiPort = port; settings.save(); }
     catch (e) { log(`Lỗi: ${e.code === 'EADDRINUSE' ? `cổng ${port} đang bị chiếm` : e.message}`); throw new Error(e.code === 'EADDRINUSE' ? `Cổng ${port} đang được dùng bởi ứng dụng khác` : e.message); }
-    return api.status();
+    return serverInfo();
   });
-  ipcMain.handle('server:stop', async () => { await api.stop(); return api.status(); });
-  ipcMain.handle('server:status', () => ({ ...api.status(), log: serverLog }));
+  ipcMain.handle('server:stop', async () => { await api.stop(); return serverInfo(); });
+  const serverInfo = () => { const st = engine.status(); const a = api.status(); const port = a.port || settings.data.apiPort;
+    return { ...a, log: serverLog, lan: !!settings.data.apiLan, cors: !!settings.data.apiCors, keySet: !!settings.data.apiKey, ttlMin: settings.data.apiTtlMin || 0, lanUrls: settings.data.apiLan ? lanUrls(port) : [],
+      loaded: [st.loaded ? { id: st.id, kind: 'chat', jit: !!(apiJit && apiJit.id === st.id), ctx: st.contextSize, vision: !!st.vision } : null, ...(st.grounder ? [{ id: st.grounder.id || String(st.grounder), kind: 'eyes' }] : [])].filter(Boolean) }; };
+  ipcMain.handle('server:status', () => serverInfo());
+  ipcMain.handle('server:key', (_e, action) => { // khoá API: tạo mới / xem (để sao chép) / xoá. Không ghi khoá vào nhật ký
+    if (action === 'generate') { settings.data.apiKey = 'aivn-' + require('crypto').randomBytes(24).toString('base64url'); settings.save(); log('Đã tạo khoá API mới'); return { key: settings.data.apiKey, info: serverInfo() }; }
+    if (action === 'reveal') return { key: settings.data.apiKey || null };
+    if (action === 'clear') { if (settings.data.apiLan && api.status().running) throw new Error('Đang mở cho mạng LAN: hãy tắt LAN trước khi xoá khoá API.'); settings.data.apiKey = ''; settings.save(); log('Đã xoá khoá API'); return { key: null, info: serverInfo() }; }
+    throw new Error('Thao tác không hợp lệ');
+  });
+  ipcMain.handle('server:config', async (_e, p = {}) => {
+    if ('cors' in p) settings.data.apiCors = p.cors === true;
+    if ('ttlMin' in p) settings.data.apiTtlMin = [0, 5, 15, 60, 240].includes(Number(p.ttlMin)) ? Number(p.ttlMin) : 0;
+    if ('lan' in p) {
+      if (p.lan === true && !settings.data.apiKey) throw new Error('Hãy tạo khoá API trước khi mở cho mạng LAN.');
+      const was = !!settings.data.apiLan; settings.data.apiLan = p.lan === true;
+      if (was !== settings.data.apiLan && api.status().running) { const port = api.status().port; await api.stop(); await startApi(port); } // đổi địa chỉ lắng nghe: khởi động lại
+    }
+    settings.save(); return serverInfo();
+  });
   ipcMain.handle('open:external', (_e, url) => { if (/^https?:\/\//.test(url)) shell.openExternal(url); return true; });
 }
 
@@ -1428,7 +1481,8 @@ async function withAgentCheck(list) {
     let mm = 0; try { if (m.mmproj) mm = fs.statSync(m.mmproj).size; } catch {}
     const meta = { id: m.catalog ? m.catalog.id : m.id, params: m.catalog ? m.catalog.params : null, mmprojSize: mm };
     const fit = h ? hf.fitFor(m.size || 0, h, meta) : null;
-    return { ...m, fit, _meta: meta, strength: require('./fit').strength({ ...m, ...meta }) };
+    const u = (settings.data.modelUsage || {})[m.id] || null;
+    return { ...m, fit, _meta: meta, strength: require('./fit').strength({ ...m, ...meta }), quant: hf.parseQuant(m.file) || null, params: m.catalog ? m.catalog.params : null, usage: u ? { lastUsed: u.lastUsed || null, uses: u.uses || 0, tps: u.tps || null } : null };
   });
   const P = agentPlanFor(h, sc, out);
   const res = out.map(({ _meta, ...m }) => { const agentFit = h ? hf.fitFor(m.size || 0, h, { ..._meta, ctx: P.ctx }) : null;
@@ -1581,7 +1635,8 @@ async function qaPar() {
 // QA 0.15.0 giao diện (AIVN_QAUI=thư mục, chỉ khi phát triển): chụp 1280x720 các màn hình mới
 async function qaUI() {
   const dir = process.env.AIVN_QAUI; fs.mkdirSync(dir, { recursive: true });
-  const wc = win.webContents; const js = (c) => wc.executeJavaScript(c);
+  const wc = win.webContents; const js = (c) => wc.executeJavaScript(c).catch((e) => { throw new Error(e.message + ' · đoạn mã: ' + String(c).slice(0, 160)); });
+  wc.on('console-message', (ev) => { const m = ev && ev.message; if (m && /error|lỗi/i.test(m)) console.error('[renderer]', String(m).slice(0, 300)); });
   const until = async (c, ms = 60000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await js(c)) return true; } catch {} await sleep(150); } return false; };
   const out = {}; const shot = async (n) => { await sleep(700); fs.writeFileSync(path.join(dir, n + '.png'), (await wc.capturePage()).toPNG()); out[n] = true; };
   win.setBounds({ x: 0, y: 0, width: 1280, height: 720 });
@@ -1630,6 +1685,36 @@ async function qaUI() {
       out.cloud.fileHasKey = fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf8').includes('sk-qa-SECRET-1');
       await js('document.querySelector("#cloudBlock").scrollIntoView(); 1'); await shot('016-cloud');
       await js('document.querySelector("#cloudClearBtn").click(); 1'); await sleep(600); out.cloudCleared = await js('A.cloudGet()'); srv.close(); }
+    if (process.env.AIVN_QAUI_MM) { // Mô hình của tôi dạng bảng: sắp xếp + lọc
+      await js('show("models"); 1'); await sleep(1500);
+      const rows = () => js('[...document.querySelectorAll("#modelTable .tr[data-id]")].map(r => r.querySelector("b").textContent + " | " + [...r.children].slice(1, 6).map(c => c.innerText.replace(/\\s+/g, " ")).join(" | "))');
+      out.mm = { head: await js('[...document.querySelectorAll("#modelTable .tr.head > *")].map(x => x.textContent)'), rows: await rows() };
+      await shot('016-mymodels');
+      await js('document.querySelector(\'#modelTable [data-sort="size"]\').click(); 1'); out.mm.bySizeDesc = await js('[...document.querySelectorAll("#modelTable .tr[data-id]")].map(r => r.dataset.id)');
+      await js('document.querySelector(\'#modelTable [data-sort="size"]\').click(); 1'); out.mm.bySizeAsc = await js('[...document.querySelectorAll("#modelTable .tr[data-id]")].map(r => r.dataset.id)');
+      out.mm.sizes = await js('Object.fromEntries(state.models.map(m => [m.id, m.size]))');
+      await js('document.querySelector("#mmKind").value = "vision"; document.querySelector("#mmKind").dispatchEvent(new Event("change")); 1'); out.mm.vision = await rows();
+      await js('document.querySelector("#mmKind").value = ""; document.querySelector("#mmFilter").value = "qwen3 0.6"; document.querySelector("#mmFilter").dispatchEvent(new Event("input")); 1'); out.mm.filtered = await rows(); out.mm.count = await js('document.querySelector("#mmCount").textContent');
+    }
+    { // Máy chủ API: CORS, khoá, LAN (hộp xác nhận), TTL — bấm thật trên giao diện, gọi API thật
+      await js('show("server"); 1'); await sleep(900);
+      const sv = () => js('({ lan: document.querySelector("#srvLan").checked, cors: document.querySelector("#srvCors").checked, ttl: document.querySelector("#srvTtl").value, keyState: document.querySelector("#srvKeyState").textContent, keyShown: !document.querySelector("#srvKeyShow").hidden, keyLen: document.querySelector("#srvKeyShow").textContent.length, curl: document.querySelector("#curlEx").textContent, urls: document.querySelector("#srvLanUrls").textContent, loaded: document.querySelector("#srvLoaded").textContent })');
+      out.server = { start: await sv() };
+      await js('document.querySelector("#srvCors").click(); 1'); await sleep(500);
+      await js('document.querySelector("#srvTtl").value = "15"; document.querySelector("#srvTtl").dispatchEvent(new Event("change")); 1'); await sleep(500);
+      await js('document.querySelector("#srvKeyGen").click(); 1'); await sleep(800); out.server.afterKey = await sv();
+      out.server.publicHasKey = await js('A.getSettings().then(s => "apiKey" in s)');
+      await js('A.startServer(Number(document.querySelector("#srvPort").value) || 1234).then(paintServer)'); await sleep(500);
+      await js('document.querySelector("#srvLan").click(); 1'); await sleep(500); out.server.lanModal = await js('!document.querySelector("#confirmModal").hidden && document.querySelector("#cfTitle").textContent');
+      await js('document.querySelector("#cfYes").click(); 1'); await sleep(1500); out.server.afterLan = await sv(); out.server.status = await js('A.serverStatus()');
+      if (out.server.status.running) { const port = out.server.status.port; const k = settings.data.apiKey;
+        out.server.noKey = (await fetch(`http://127.0.0.1:${port}/v1/models`)).status; out.server.withKey = (await fetch(`http://127.0.0.1:${port}/v1/models`, { headers: { authorization: 'Bearer ' + k } })).status;
+        out.server.acao = (await fetch(`http://127.0.0.1:${port}/v1/models`, { headers: { authorization: 'Bearer ' + k } })).headers.get('access-control-allow-origin'); }
+      await js('document.querySelector("#srvLan").scrollIntoView(); 1'); await shot('016-server');
+      await js('document.querySelector("#srvKeyClear").click(); 1'); await sleep(600); out.server.clearWhileLan = await sv();
+      await js('document.querySelector("#srvLan").click(); 1'); await sleep(1500); await js('document.querySelector("#srvKeyClear").click(); 1'); await sleep(600); out.server.end = await sv(); out.server.endStatus = await js('A.serverStatus()');
+      await js('A.stopServer(); 1');
+    }
     out.views = await js('[...document.querySelectorAll(".nav-item[data-view]")].map(b => b.dataset.view)');
     fs.writeFileSync(path.join(dir, 'behav.json'), JSON.stringify(out, null, 2)); app.exit(0); return;
   }

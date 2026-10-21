@@ -42,3 +42,13 @@ test('bộ não đám mây trên giao diện thật: kiểm tra kết nối máy
   assert.match(c.warn, /bộ não đám mây gia-lap/); assert.match(c.warn, /ảnh chụp màn hình thì không/);
   assert.deepStrictEqual([run().cloudCleared.keySet, run().cloudCleared.on], [false, false]);
 });
+test('máy chủ API trên giao diện thật: CORS/TTL/khoá/LAN bấm được, LAN hỏi xác nhận, không khoá → 401, khoá không lộ qua getSettings, không xoá khoá khi LAN đang chạy', { skip: !hasX && 'cần xvfb-run + electron' }, () => {
+  const s = run().server; assert.ok(s, 'không có kết quả');
+  assert.strictEqual(s.start.cors, false, 'CORS mặc định tắt'); assert.strictEqual(s.start.lan, false);
+  assert.strictEqual(s.afterKey.cors, true); assert.strictEqual(s.afterKey.ttl, '15'); assert.ok(s.afterKey.keyShown && s.afterKey.keyLen > 30); assert.match(s.afterKey.curl, /Authorization: Bearer \$AIVN_API_KEY/);
+  assert.strictEqual(s.publicHasKey, false);
+  assert.match(s.lanModal, /LAN/); assert.strictEqual(s.status.host, '0.0.0.0'); assert.ok(s.afterLan.lan); assert.match(s.afterLan.urls, /http:\/\/[\d.]+:\d+\/v1/);
+  assert.strictEqual(s.noKey, 401); assert.strictEqual(s.withKey, 200); assert.strictEqual(s.acao, '*');
+  assert.match(s.clearWhileLan.keyState, /Đã có khoá/, 'không được xoá khoá khi LAN đang mở');
+  assert.strictEqual(s.end.lan, false); assert.match(s.end.keyState, /Chưa có/); assert.strictEqual(s.endStatus.host, '127.0.0.1');
+});
