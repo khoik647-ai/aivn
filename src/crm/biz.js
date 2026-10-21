@@ -3,6 +3,7 @@
 // Dùng chung CSDL SQLite với CRM (src/crm/db.js), lưu trên máy, không gửi đi đâu. Tiền: số nguyên VND.
 const crypto = require('crypto');
 const T = require('./text');
+const UOM = require('./uom'); // đơn vị tính: lưu khoá chuẩn tiếng Việt, hiện theo ngôn ngữ
 const TAX = require('./tax');
 const CO = require('./company');
 const V = require('./vietqr');
@@ -78,7 +79,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
       const pr = product(l.product_id); if (!pr || !pr.active) throw new CrmError('Dòng phiếu kho có sản phẩm không tồn tại hoặc đã lưu trữ.');
       if (pr.type !== 'product' && kind === 'in') throw new CrmError(`“${pr.name}” không phải hàng lưu kho (loại: ${PROD_TYPE[pr.type]}) nên không nhập kho.`);
       const qty = num(l.qty); if (!(qty > 0)) throw new CrmError(`Số lượng của “${pr.name}” phải lớn hơn 0.`);
-      out.push({ product_id: pr.id, qty, unit_cost: kind === 'in' ? Math.max(0, T.parseVnd(l.unit_cost ?? pr.cost)) : pr.cost || 0, so_line_id: l.so_line_id || null });
+      out.push({ product_id: pr.id, qty, unit_cost: kind === 'in' ? Math.max(0, TAX.moneyIn(l.unit_cost, pr.cost || 0)) : pr.cost || 0, so_line_id: l.so_line_id || null });
     }
     if (!out.length) throw new CrmError('Phiếu kho cần ít nhất một dòng sản phẩm.');
     return out;
@@ -277,8 +278,8 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
       const qty = T.parseQty(l.qty); if (l.qty != null && String(l.qty).trim() !== '' && !Number.isFinite(qty)) throw new CrmError(`Số lượng “${l.qty}” không phải là số.`);
       const given = l.vat_pct !== undefined && l.vat_pct !== null && l.vat_pct !== '';
       const vat = given ? vatOf(l.vat_pct) : !docVatGiven && pr && pr.vat_pct != null ? vatOf(pr.vat_pct) : docVat;
-      return { product_id: pr ? pr.id : null, so_line_id: l.so_line_id || null, po_line_id: l.po_line_id || null, name: str(l.name || (pr && pr.name), 300), unit: str(l.unit || (pr && pr.unit), 30) || 'cái', qty: Number.isFinite(qty) ? qty : 0,
-        price: Math.max(0, T.parseVnd(l.price ?? (pr && (side === 'in' ? pr.cost : pr.price)))), discount_pct: Math.max(0, Math.min(100, num(l.discount_pct))), vat_pct: vat, pos: i }; })
+      return { product_id: pr ? pr.id : null, so_line_id: l.so_line_id || null, po_line_id: l.po_line_id || null, name: str(l.name || (pr && pr.name), 300), unit: UOM.canon(str(l.unit || (pr && pr.unit), 30)) || 'cái', qty: Number.isFinite(qty) ? qty : 0,
+        price: Math.max(0, TAX.moneyIn(l.price, (pr && (side === 'in' ? pr.cost : pr.price)) || 0)), discount_pct: TAX.pctIn(l.discount_pct), vat_pct: vat, pos: i }; })
       .filter(l => l.name && Math.abs(l.qty) > EPS);
   }
   function writeLines(invId, lines) { db.run('DELETE FROM invoice_lines WHERE invoice_id = ?', [invId]); for (const l of lines) db.run('INSERT INTO invoice_lines(id, invoice_id, so_line_id, po_line_id, product_id, name, unit, qty, price, discount_pct, vat_pct, pos) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [newId('il'), invId, l.so_line_id || null, l.po_line_id || null, l.product_id, l.name, l.unit, l.qty, l.price, l.discount_pct, l.vat_pct == null ? 10 : l.vat_pct, l.pos]); }
@@ -408,7 +409,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
     const inv = pubInvoice(db.get('SELECT * FROM invoices WHERE id = ?', [invoiceId])); if (!inv) throw new CrmError('Không tìm thấy hoá đơn.');
     if (inv.state !== 'posted') throw new CrmError('Chỉ ghi nhận thanh toán cho hoá đơn đã vào sổ.');
     if (inv.residual <= 0) throw new CrmError('Hoá đơn đã được thanh toán đủ.');
-    const amt = amount == null || amount === '' ? inv.residual : T.parseVnd(amount);
+    const amt = TAX.moneyIn(amount, inv.residual);
     if (!(amt > 0)) throw new CrmError('Số tiền thanh toán phải lớn hơn 0.');
     if (amt > inv.residual) throw new CrmError(PAY_TYPE[inv.kind] === 'outbound' ? `Số tiền (${T.fmtVnd(amt)}) lớn hơn số còn phải trả (${T.fmtVnd(inv.residual)}).` : `Số tiền (${T.fmtVnd(amt)}) lớn hơn số còn phải thu (${T.fmtVnd(inv.residual)}).`);
     const d = isDate(date) ? date : today(); const m = PAY_METHOD[method] ? method : 'bank';

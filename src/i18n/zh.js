@@ -2643,7 +2643,9 @@
     "đơn mua hàng": "采购订单",
     "Ảnh logo quá lớn (tối đa khoảng 300 KB). Hãy chọn ảnh nhỏ hơn.": "标志图片过大（最大约 300 KB）。请选择更小的图片。",
     "“{0}”: lập hoá đơn {1}, {2} {3}": "“{0}”：开账单 {1}，{2} {3}",
-    "“{0}”: nhận {1}, đơn mua cần {2}": "“{0}”：收货 {1}，采购订单需要 {2}"
+    "“{0}”: nhận {1}, đơn mua cần {2}": "“{0}”：收货 {1}，采购订单需要 {2}",
+    "“{0}” không phải là số tiền hợp lệ.": "“{0}” 不是有效的金额。",
+    "Chiết khấu “{0}” không phải là số.": "折扣 “{0}” 不是数字。"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

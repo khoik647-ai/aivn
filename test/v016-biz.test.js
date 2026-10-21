@@ -141,8 +141,8 @@ const { spawnSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 const hasX = spawnSync('which', ['xvfb-run']).status === 0 && fs.existsSync(path.join(ROOT, 'node_modules/.bin/electron'));
 // Tên sản phẩm/khách/đơn vị là dữ liệu người dùng nhập — không dịch.
-const USER_DATA = new Set(['Bàn làm việc gỗ sồi', 'Ghế xoay lưới', 'Lắp đặt tại nhà', 'Nội thất', 'Công ty TNHH Sen Vàng', 'lần', 'cái']);
-const userData = (s) => USER_DATA.has(s) || /^\d+ (cái|lần)$/.test(s);
+const USER_DATA = new Set(['Bàn làm việc gỗ sồi', 'Ghế xoay lưới', 'Lắp đặt tại nhà', 'Nội thất', 'Công ty TNHH Sen Vàng']); // đơn vị tính (cái, lần) nay dịch: Units/件, Times/次
+const userData = (s) => USER_DATA.has(s);
 for (const lang of ['vi', 'en']) {
   test(`Kinh doanh — giao diện thật (${lang}): nhập kho → báo giá → xác nhận → giao một phần (phiếu chờ) → hoá đơn → thu một phần → báo cáo`, { skip: !hasX && 'cần xvfb-run + electron' }, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-qabiz-')); const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-qabiz-ud-'));

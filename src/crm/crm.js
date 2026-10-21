@@ -2,6 +2,7 @@
 // Lưu cục bộ (SQLite), không gửi dữ liệu đi đâu.
 const crypto = require('crypto');
 const T = require('./text');
+const UOM = require('./uom'); // đơn vị tính: lưu khoá chuẩn tiếng Việt, hiện theo ngôn ngữ
 const TAX = require('./tax');
 const { companyOf } = require('./company');
 
@@ -213,12 +214,12 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
   function saveProduct(input = {}) {
     const old = input.id ? db.get('SELECT * FROM products WHERE id = ?', [input.id]) : null;
     const p = { ...(old || {}), ...input }; p.name = str(p.name, 200); if (!p.name) throw new CrmError('Hãy nhập tên sản phẩm.');
-    p.sku = str(p.sku, 60); p.unit = str(p.unit, 30) || 'cái'; p.price = Math.max(0, T.parseVnd(p.price)); p.description = str(p.description, 1000); p.active = p.active === false || p.active === 0 || p.active === '0' ? 0 : 1; p.updated_at = now();
+    p.sku = str(p.sku, 60); p.unit = UOM.canon(str(p.unit, 30)) || 'cái'; p.price = Math.max(0, TAX.moneyIn(p.price)); p.description = str(p.description, 1000); p.active = p.active === false || p.active === 0 || p.active === '0' ? 0 : 1; p.updated_at = now();
     // 0.16 (theo Odoo): loại sản phẩm — product = hàng lưu kho (theo dõi tồn), consu = hàng tiêu dùng (giao nhưng không tính tồn), service = dịch vụ
     p.type = ['product', 'consu', 'service'].includes(p.type) ? p.type : 'product';
     if (old && old.type !== p.type && db.get("SELECT id FROM moves WHERE product_id = ? AND state = 'done' LIMIT 1", [p.id])) throw new CrmError('Sản phẩm đã có dịch chuyển kho: không đổi loại sản phẩm được nữa.');
     p.vat_pct = TAX.vatOf(p.vat_pct, 10); // 0.16: thuế GTGT mặc định của sản phẩm (Odoo: Thuế khách hàng/nhà cung cấp)
-    p.cost = Math.max(0, T.parseVnd(p.cost)); p.barcode = str(p.barcode, 60); p.category = str(p.category, 80); p.min_qty = Math.max(0, Number(String(p.min_qty ?? 0).replace(',', '.')) || 0);
+    p.cost = Math.max(0, TAX.moneyIn(p.cost)); p.barcode = str(p.barcode, 60); p.category = str(p.category, 80); p.min_qty = (() => { const n = T.parseQty(p.min_qty); if (!(p.min_qty == null || String(p.min_qty).trim() === '') && !Number.isFinite(n)) throw new CrmError(`Số lượng “${p.min_qty}” không phải là số.`); return Math.max(0, Number.isFinite(n) ? n : 0); })();
     if (p.sku && db.get('SELECT id FROM products WHERE sku = ? AND id != ? AND active = 1', [p.sku, p.id || ''])) throw new CrmError(`Mã sản phẩm "${p.sku}" đã dùng cho sản phẩm khác.`);
     if (p.barcode && db.get('SELECT id FROM products WHERE barcode = ? AND id != ? AND active = 1', [p.barcode, p.id || ''])) throw new CrmError(`Mã vạch "${p.barcode}" đã dùng cho sản phẩm khác.`);
     const cols = ['name', 'sku', 'unit', 'price', 'description', 'active', 'type', 'cost', 'barcode', 'category', 'min_qty', 'vat_pct', 'updated_at'];
@@ -259,7 +260,7 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
     // thuế của dòng: ghi trên dòng > mức chứng từ người dùng vừa chọn > thuế mặc định của sản phẩm > mức chứng từ
     const docVatGiven = input.vat_pct !== undefined && input.vat_pct !== null && input.vat_pct !== '';
     const lineVat = (l) => { if (l.vat_pct !== undefined && l.vat_pct !== null && l.vat_pct !== '') return TAX.vatOf(l.vat_pct); if (!docVatGiven && l.product_id) { const pr = db.get('SELECT vat_pct FROM products WHERE id = ?', [l.product_id]); if (pr && pr.vat_pct != null) return TAX.vatOf(pr.vat_pct); } return q.vat_pct; };
-    const lines = Array.isArray(input.lines) ? input.lines.map((l, i) => ({ id: newId('ql'), product_id: l.product_id || null, name: str(l.name, 300), unit: str(l.unit, 30) || 'cái', qty: (() => { const n = T.parseQty(l.qty); if (l.qty != null && String(l.qty).trim() !== '' && !Number.isFinite(n)) throw new CrmError(`Số lượng “${l.qty}” không phải là số.`); return Math.max(0, Number.isFinite(n) ? n : 0); })(), price: Math.max(0, T.parseVnd(l.price)), discount_pct: Math.max(0, Math.min(100, Number(l.discount_pct) || 0)), vat_pct: lineVat(l), pos: i })).filter(l => l.name) : null;
+    const lines = Array.isArray(input.lines) ? input.lines.map((l, i) => ({ id: newId('ql'), product_id: l.product_id || null, name: str(l.name, 300), unit: UOM.canon(str(l.unit, 30)) || 'cái', qty: (() => { const n = T.parseQty(l.qty); if (l.qty != null && String(l.qty).trim() !== '' && !Number.isFinite(n)) throw new CrmError(`Số lượng “${l.qty}” không phải là số.`); return Math.max(0, Number.isFinite(n) ? n : 0); })(), price: Math.max(0, TAX.moneyIn(l.price)), discount_pct: TAX.pctIn(l.discount_pct), vat_pct: lineVat(l), pos: i })).filter(l => l.name) : null;
     db.tx(() => {
       if (old) db.run('UPDATE quotes SET contact_id=?, lead_id=?, status=?, date=?, valid_until=?, notes=?, vat_pct=?, owner=?, payment_days=?, commitment_date=?, updated_at=? WHERE id=?', [q.contact_id, q.lead_id, q.status, q.date, q.valid_until, q.notes, q.vat_pct, q.owner, q.payment_days, q.commitment_date, q.updated_at, q.id]);
       else { q.id = newId('q'); q.number = nextQuoteNumber(); db.run('INSERT INTO quotes(id, number, contact_id, lead_id, status, date, valid_until, notes, vat_pct, owner, payment_days, commitment_date, tax_rounding, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [q.id, q.number, q.contact_id, q.lead_id, q.status, q.date, q.valid_until, q.notes, q.vat_pct, q.owner, q.payment_days, q.commitment_date, q.tax_rounding, now(), q.updated_at]); }

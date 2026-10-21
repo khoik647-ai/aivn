@@ -94,6 +94,16 @@ async function qaPurchase({ win, app, VI }) {
     await js(click('[data-biz-act=printInvoice]')); await W(2500);
     await step('23-tong-quan', 'crm.tab = "dash"; BIZ.reset(); renderCrm()', 1400);
     out.overview = await C('overview');
+    // ---- B73 + đơn vị tính: kiểm kê gõ số theo thói quen từng ngôn ngữ; ô điền sẵn không sửa thì giữ đúng số (kể cả 1,125 mơ hồ)
+    const banId = (await C('listStock', {})).rows.find(r => r.name.startsWith('Bàn')).id;
+    const countDlg = async (typed) => { await js('crm.tab = "stock"; BIZ.reset(); BIZ.state.sub.stock = "onhand"; renderCrm()'); await W(800); await js(click(`[data-biz-act=count][data-id="${banId}"]`)); await W(500);
+      const shown = await js(`document.querySelector('#bizForm [name=counted]').value`); if (typed != null) await js(`document.querySelector('#bizForm [name=counted]').value = ${JSON.stringify(typed)}`);
+      await js(`document.querySelector('#bizForm').requestSubmit()`); await W(1000); return { shown, on_hand: (await C('listStock', {})).rows.find(r => r.id === banId).on_hand }; };
+    out.b73 = { typed: await countDlg({ vi: '6,5', en: '6.5', zh: '６.５' }[lang]), same: await countDlg(null) };
+    await C('adjustStock', banId, 1.125); out.b73.three = await countDlg(null);
+    await step('24-kho-don-vi', 'crm.tab = "stock"; BIZ.reset(); BIZ.state.sub.stock = "onhand"; renderCrm()', 900);
+    out.units = await js(`[...document.querySelectorAll('.biz-list tbody tr td:nth-child(3)')].map(td => td.innerText.trim())`);
+    await C('adjustStock', banId, 6);
     out.pdfs = fs.existsSync(process.env.AIVN_QA_PDF_DIR) ? fs.readdirSync(process.env.AIVN_QA_PDF_DIR) : [];
     out.toasts = await js(`[...document.querySelectorAll('.toast-stack .toast-item')].map(t => t.innerText.trim())`);
   } catch (e) { out.error = e.message; }

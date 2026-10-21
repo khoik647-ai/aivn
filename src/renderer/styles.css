@@ -792,7 +792,7 @@ select option.opt-no{color:#8a8a8a}
 .biz-grid input:disabled, .biz-grid select:disabled, .biz-notes textarea:disabled { border-color: transparent; padding-left: 0; opacity: 1; color: var(--text); }
 .biz-ro div { color: var(--text); font-size: 13.5px; padding-top: 4px; }
 .biz-lines input { width: 100%; box-sizing: border-box; } .biz-lines select { max-width: 220px; }
-.biz-lines .biz-num { width: 76px; text-align: right; } .biz-lines .biz-money { width: 120px; text-align: right; } .biz-lines .biz-unit { width: 64px; }
+.biz-lines .biz-num { width: 76px; text-align: right; } .biz-lines .biz-money { width: 120px; text-align: right; } .biz-lines .biz-unit { width: 88px; }
 .biz-totals { margin: 12px 0 12px auto; width: min(440px, 100%); }
 /* 0.16 Kinh doanh P0/P1: thuế theo dòng, VietQR, Cài đặt › Công ty */
 .biz-lines .biz-vat { width: 64px; }

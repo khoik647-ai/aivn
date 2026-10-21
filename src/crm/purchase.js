@@ -4,6 +4,7 @@
 'use strict';
 const crypto = require('crypto');
 const T = require('./text');
+const UOM = require('./uom'); // đơn vị tính: lưu khoá chuẩn tiếng Việt, hiện theo ngôn ngữ
 const TAX = require('./tax');
 const { CrmError } = require('./crm');
 
@@ -80,8 +81,8 @@ function createPurchase({ db, crm, now, today, log = () => {}, h }) {
       const pr = l.product_id ? product(l.product_id) : null; if (l.product_id && (!pr || !pr.active)) throw new CrmError('Dòng đơn mua có sản phẩm không tồn tại hoặc đã lưu trữ.');
       const qty = T.parseQty(l.qty); if (l.qty != null && String(l.qty).trim() !== '' && !Number.isFinite(qty)) throw new CrmError(`Số lượng “${l.qty}” không phải là số.`);
       const given = l.vat_pct !== undefined && l.vat_pct !== null && l.vat_pct !== '';
-      return { id: newId('pol'), product_id: pr ? pr.id : null, name: str(l.name || (pr && pr.name), 300), unit: str(l.unit || (pr && pr.unit), 30) || 'cái', qty: Math.max(0, Number.isFinite(qty) ? qty : 0),
-        price: Math.max(0, T.parseVnd(l.price ?? (pr ? pr.cost : 0))), discount_pct: Math.max(0, Math.min(100, Number(String(l.discount_pct ?? 0).replace(',', '.')) || 0)),
+      return { id: newId('pol'), product_id: pr ? pr.id : null, name: str(l.name || (pr && pr.name), 300), unit: UOM.canon(str(l.unit || (pr && pr.unit), 30)) || 'cái', qty: Math.max(0, Number.isFinite(qty) ? qty : 0),
+        price: Math.max(0, TAX.moneyIn(l.price, pr ? pr.cost || 0 : 0)), discount_pct: TAX.pctIn(l.discount_pct),
         vat_pct: given ? TAX.vatOf(l.vat_pct) : !docVatGiven && pr && pr.vat_pct != null ? TAX.vatOf(pr.vat_pct) : o.vat_pct, pos: i };
     }).filter(l => l.name) : null;
     db.tx(() => {

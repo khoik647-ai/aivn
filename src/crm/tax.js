@@ -5,6 +5,7 @@
 //              nên tổng tiền của dữ liệu cũ không lệch một đồng nào sau khi chuyển sang thuế theo dòng).
 const fail = (m) => { const { CrmError } = require('./crm'); return new CrmError(m); }; // nạp muộn: crm.js cũng dùng tệp này
 const T = require('./text');
+const N = require('./num');
 const VAT_RATES = [0, 5, 8, 10];
 const ROUNDING = ['line', 'global'];
 // B52: mức thuế không hợp lệ (vd. 7%) → báo lỗi, không tự đổi; bỏ trống → mức mặc định
@@ -47,4 +48,8 @@ function splitGross(gross, groups, rounding = 'line') {
   return out.filter(x => x.base > 0);
 }
 const fmtRate = (r) => `${T.round3(r)}%`;
-module.exports = { VAT_RATES, ROUNDING, vatOf, roundingOf, lineSubtotal, lineTax, totals, singleRate, splitGross, fmtRate };
+// B73: ô nhập từ người dùng: bỏ trống → mặc định; có chữ mà không đọc được → báo lỗi rõ ràng (không lặng lẽ thành 0)
+const blank = (v) => v == null || String(v).trim() === '';
+function moneyIn(v, dflt = 0) { if (blank(v)) return dflt; const n = N.parseMoney(v); if (!Number.isFinite(n)) throw fail(`“${String(v).trim()}” không phải là số tiền hợp lệ.`); return n; }
+function pctIn(v, dflt = 0) { if (blank(v)) return dflt; const n = N.parsePct(String(v).replace(/%\s*$/, '')); if (!Number.isFinite(n)) throw fail(`Chiết khấu “${String(v).trim()}” không phải là số.`); return Math.max(0, Math.min(100, N.round3(n))); }
+module.exports = { moneyIn, pctIn, VAT_RATES, ROUNDING, vatOf, roundingOf, lineSubtotal, lineTax, totals, singleRate, splitGross, fmtRate };

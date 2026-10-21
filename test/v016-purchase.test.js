@@ -187,7 +187,7 @@ test('Mẫu in A4: báo giá, hoá đơn (VietQR, thuế theo mức, bằng ch�
 const { spawnSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 const hasX = spawnSync('which', ['xvfb-run']).status === 0 && fs.existsSync(path.join(ROOT, 'node_modules/.bin/electron'));
-const USER_DATA = new Set(['chuyến', 'gói', 'cái']); // đơn vị tính do người dùng nhập — không dịch
+const USER_DATA = new Set([]); // đơn vị tính nay dịch theo ngôn ngữ (cái → Units/件, chuyến → Trips/趟, gói → Packs/包)
 for (const lang of ['vi', 'en', 'zh']) {
   test(`Mua hàng + công ty + VietQR + PDF — giao diện thật (${lang})`, { skip: !hasX && 'cần xvfb-run + electron' }, () => {
     const dir = process.env.AIVN_QA_SHOTS ? path.join(process.env.AIVN_QA_SHOTS) : fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-qapo-'));
@@ -203,7 +203,11 @@ for (const lang of ['vi', 'en', 'zh']) {
     assert.match(d.bill.number, /^BILL\/\d{4}\/\d{2}\/0001$/);
     assert.strictEqual(d.payable.agedTotals.total, 5140000); assert.strictEqual(d.overview.payable, 5140000); assert.strictEqual(d.overview.poToReceive, 1);
     assert.strictEqual(d.inv.qr, true);
-    assert.deepStrictEqual(d.pdfs.sort(), [`${lang}-INV-${d.inv.number.slice(4, 8)}-00001.pdf`, `${lang}-P00001.pdf`, `${lang}-WH-IN-00001.pdf`].sort());
+    // B73: “6,5” (vi) / “6.5” (en) / “６.５” (zh) = 6,5; ô điền sẵn không sửa → không đổi tồn; 1,125 không thành 1125
+    assert.deepStrictEqual([d.b73.typed.on_hand, d.b73.same.on_hand, d.b73.three.on_hand], [6.5, 6.5, 1.125]);
+    assert.strictEqual(d.b73.three.shown, { vi: '1,125', en: '1.125', zh: '1.125' }[lang]);
+    assert.strictEqual(d.units[0], { vi: '1,125 cái', en: '1.125 Units', zh: '1.125 件' }[lang]);
+    assert.deepStrictEqual(d.pdfs.filter(f => f.startsWith(lang + '-')).sort(), [`${lang}-INV-${d.inv.number.slice(4, 8)}-00001.pdf`, `${lang}-P00001.pdf`, `${lang}-WH-IN-00001.pdf`].sort());
     const money = { vi: (s) => s.replace(/,/g, '.'), en: (s) => s, zh: (s) => s }[lang];
     assert.match(d.po.taxes.join(' | '), new RegExp(money('40,000 ₫').replace('.', '\\.'))); assert.match(d.inv.totals.at(-1), new RegExp(money('18,460,000 ₫').replace(/\./g, '\\.')));
     assert.match(d.bill.due.at(-1), new RegExp(money('5,140,000 ₫').replace(/\./g, '\\.')));

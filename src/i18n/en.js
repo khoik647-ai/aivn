@@ -2643,7 +2643,9 @@
     "đơn mua hàng": "purchase order",
     "Ảnh logo quá lớn (tối đa khoảng 300 KB). Hãy chọn ảnh nhỏ hơn.": "The logo image is too large (about 300 KB at most). Choose a smaller image.",
     "“{0}”: lập hoá đơn {1}, {2} {3}": "“{0}”: billed {1}, {2} {3}",
-    "“{0}”: nhận {1}, đơn mua cần {2}": "“{0}”: receiving {1}, the purchase order needs {2}"
+    "“{0}”: nhận {1}, đơn mua cần {2}": "“{0}”: receiving {1}, the purchase order needs {2}",
+    "“{0}” không phải là số tiền hợp lệ.": "“{0}” is not a valid amount.",
+    "Chiết khấu “{0}” không phải là số.": "Discount “{0}” is not a number."
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.en = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

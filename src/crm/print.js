@@ -3,6 +3,7 @@
 // Trả về HTML đầy đủ để tiến trình chính in ra PDF bằng webContents.printToPDF (src/biz-pdf.js). Chữ được dịch theo ngôn ngữ giao diện (vi/en/zh).
 'use strict';
 const T = require('./text');
+const UOM = require('./uom');
 const TAX = require('./tax');
 const V = require('./vietqr');
 const QR = require('./qr');
@@ -61,12 +62,12 @@ function render(doc, { company: c, lang = 'vi', qr = null, generatedAt = new Dat
   let table, totals = '', words = '';
   if (K === 'picking') {
     table = `<table class="lines"><thead><tr><th class="c">${esc(t('STT'))}</th><th>${esc(t('Tên hàng hoá'))}</th><th>${esc(t('Mã'))}</th><th>${esc(t('ĐVT'))}</th><th class="n">${esc(t('Yêu cầu'))}</th><th class="n">${esc(t('Thực tế'))}</th>${doc.kind === 'in' ? `<th class="n">${esc(t('Đơn giá'))}</th><th class="n">${esc(t('Thành tiền'))}</th>` : ''}</tr></thead><tbody>
-      ${doc.lines.map((l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name)}</td><td>${esc(l.sku || '')}</td><td>${esc(l.unit || '')}</td><td class="n">${qty(l.qty)}</td><td class="n">${doc.state === 'done' ? qty(l.qty_done) : ''}</td>${doc.kind === 'in' ? `<td class="n">${money(l.unit_cost)}</td><td class="n">${money(Math.round((doc.state === 'done' ? l.qty_done : l.qty) * (l.unit_cost || 0)))}</td>` : ''}</tr>`).join('')}</tbody>
+      ${doc.lines.map((l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name)}</td><td>${esc(l.sku || '')}</td><td>${esc(UOM.label(l.unit || '', lang, l.qty))}</td><td class="n">${qty(l.qty)}</td><td class="n">${doc.state === 'done' ? qty(l.qty_done) : ''}</td>${doc.kind === 'in' ? `<td class="n">${money(l.unit_cost)}</td><td class="n">${money(Math.round((doc.state === 'done' ? l.qty_done : l.qty) * (l.unit_cost || 0)))}</td>` : ''}</tr>`).join('')}</tbody>
       <tfoot><tr><td></td><td colspan="3"><b>${esc(t('Cộng'))}</b></td><td class="n"><b>${qty(doc.lines.reduce((a, l) => a + (l.qty || 0), 0))}</b></td><td class="n"><b>${doc.state === 'done' ? qty(doc.lines.reduce((a, l) => a + (l.qty_done || 0), 0)) : ''}</b></td>${doc.kind === 'in' ? `<td></td><td class="n"><b>${money(doc.lines.reduce((a, l) => a + Math.round((doc.state === 'done' ? l.qty_done : l.qty) * (l.unit_cost || 0)), 0))}</b></td>` : ''}</tr></tfoot></table>`;
   } else {
     const disc = doc.lines.some(l => l.discount_pct);
     table = `<table class="lines"><thead><tr><th class="c">${esc(t('STT'))}</th><th>${esc(t('Tên hàng hoá, dịch vụ'))}</th><th>${esc(t('ĐVT'))}</th><th class="n">${esc(t('Số lượng'))}</th><th class="n">${esc(t('Đơn giá'))}</th>${disc ? `<th class="n">${esc(t('CK %'))}</th>` : ''}<th class="n">${esc(t('Thuế suất'))}</th><th class="n">${esc(t('Thành tiền'))}</th></tr></thead><tbody>
-      ${doc.lines.map((l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name)}</td><td>${esc(l.unit || '')}</td><td class="n">${qty(l.qty)}</td><td class="n">${money(l.price)}</td>${disc ? `<td class="n">${l.discount_pct ? qty(l.discount_pct) + '%' : ''}</td>` : ''}<td class="n">${TAX.fmtRate(l.vat_pct)}</td><td class="n">${money(TAX.lineSubtotal(l))}</td></tr>`).join('')}</tbody></table>`;
+      ${doc.lines.map((l, i) => `<tr><td class="c">${i + 1}</td><td>${esc(l.name)}</td><td>${esc(UOM.label(l.unit || '', lang, l.qty))}</td><td class="n">${qty(l.qty)}</td><td class="n">${money(l.price)}</td>${disc ? `<td class="n">${l.discount_pct ? qty(l.discount_pct) + '%' : ''}</td>` : ''}<td class="n">${TAX.fmtRate(l.vat_pct)}</td><td class="n">${money(TAX.lineSubtotal(l))}</td></tr>`).join('')}</tbody></table>`;
     const tt = TAX.totals(doc.lines, TAX.roundingOf(doc.tax_rounding));
     const total = doc.amount_total ?? tt.amount_total;
     const taxRows = tt.tax_groups.map(g => `<tr><td>${esc(t(`Thuế GTGT ${TAX.fmtRate(g.rate)}`))} <span class="muted">(${esc(t('trên'))} ${money(g.base)})</span></td><td class="n">${money(g.tax)}</td></tr>`).join('');

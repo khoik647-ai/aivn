@@ -22,29 +22,12 @@ const validEmail = (e) => !e || /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
 const normTax = (t) => String(t ?? '').replace(/[^\d-]/g, '');
 const validTax = (t) => !t || /^\d{10}(-\d{3})?$/.test(t) || /^\d{12}$/.test(t); // MST 10 số, chi nhánh -xxx; cá nhân CCCD 12 số
 
-// "15.000.000", "15,5 triệu", "2 tỷ", "15000000đ" → số nguyên VND
-function parseVnd(v) {
-  if (typeof v === 'number') return Math.round(v);
-  let s = fold(v).replace(/vnd|vnđ|dong|đ|d$/g, '').trim(); if (!s) return 0;
-  let mul = 1;
-  if (/(ty|ti)\b/.test(s)) mul = 1e9; else if (/(trieu|tr)\b/.test(s)) mul = 1e6; else if (/(nghin|ngan|k)\b/.test(s)) mul = 1e3;
-  s = s.replace(/[a-z\s]/g, '');
-  if (mul > 1) s = s.replace(',', '.'); else s = s.replace(/[.,](?=\d{3}(\D|$))/g, '').replace(',', '.');
-  const n = parseFloat(s); return Number.isFinite(n) ? Math.round(n * mul) : 0;
-}
-// B50 (QA lượt 6): số lượng theo kiểu Việt — dấu “.” đứng trước ĐÚNG 3 chữ số là phân cách hàng nghìn (“1.000” = 1000, “1.234,5” = 1234,5),
-// dấu “,” là phần thập phân (“1,5”); “1.5” vẫn là 1,5. Không phải số → NaN. Làm tròn 3 chữ số thập phân (như Odoo) để không trôi số thực.
-const round3 = (n) => Math.round((Number(n) + Number.EPSILON) * 1000) / 1000;
-function parseQty(v) {
-  if (typeof v === 'number') return Number.isFinite(v) ? round3(v) : NaN;
-  const s = String(v ?? '').replace(/[\s\u00a0]/g, ''); if (!s) return NaN;
-  let n;
-  if (/^[-+]?\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(s)) n = Number(s.replace(/\./g, '').replace(',', '.'));
-  else if (/^[-+]?\d+(?:,\d+)?$/.test(s)) n = Number(s.replace(',', '.'));
-  else if (/^[-+]?\d*\.\d+$/.test(s)) n = Number(s);
-  else return NaN;
-  return Number.isFinite(n) ? round3(n) : NaN;
-}
+// B73 (QA lượt 8): đọc số dùng chung src/crm/num.js (cùng tệp với giao diện) — “0.125” = 0,125; “1,000” = 1000; “1.234,5” = “1,234.5” = 1234,5
+const N = require('./num');
+// "15.000.000", "15,5 triệu", "2 tỷ", "15000000đ" → số nguyên VND; không đọc được → 0 (nơi cần chặn chữ dùng N.parseMoney → NaN)
+const parseVnd = (v) => { const n = N.parseMoney(v); return Number.isFinite(n) ? n : 0; };
+const round3 = N.round3;
+const parseQty = N.parseQty;
 const fmtVnd = (n) => (Math.round(Number(n) || 0)).toLocaleString('vi-VN') + ' ₫';
 
 const DIGITS = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín'];
