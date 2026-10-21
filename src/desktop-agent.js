@@ -267,7 +267,8 @@ function createDesktopAgent(deps) {
     let needPoint = ['click', 'double_click', 'right_click'].includes(action) || ((action === 'type_text' || action === 'scroll') && (a.element || a.target || (a.x != null && a.y != null && !(Number(a.x) === 0 && Number(a.y) === 0))));
     let t = needPoint ? resolveTarget(a) : null;
     // gõ vào một nhãn chữ/nút (không phải ô nhập) là sai: gõ vào ô đang được chọn, không bấm vào nhãn
-    if (action === 'type_text' && t && t.el && !t.el.editable) { t = null; needPoint = false; }
+    // trừ chữ gợi ý của ô nhập chỉ thấy qua OCR (Zalo: "Tìm kiếm"): bấm vào đó để chọn ô rồi mới gõ
+    if (action === 'type_text' && t && t.el && !t.el.editable && !U.inputLike(t.el)) { t = null; needPoint = false; }
     if (needPoint && (!t || t.x == null)) {
       const q = t && t.query ? t.query : '';
       if (q && !/^\[?e\d+\]?$/i.test(q)) t = await groundWithVision(q, ctx) || t;
@@ -319,6 +320,7 @@ function createDesktopAgent(deps) {
     }
     await performAt(action, t && t.x != null ? t.x : null, t && t.x != null ? t.y : null, a);
     const prevAction = s.lastAction;
+    if (!['type_text', 'wait', 'scroll'].includes(action)) { s.inSearch = 0; s.foundHit = null; }
     s.lastAction = { action, el: t && t.el, keys: a.keys, at: Date.now(), query: t && t.query ? t.query : String(a.element || a.target || '') };
     deps.log && deps.log('desk', `Thao tác: ${desc}${t && t.via ? ' (định vị bằng ' + t.via + ')' : ''}`);
     ov('target', { box: null });
@@ -335,12 +337,16 @@ function createDesktopAgent(deps) {
       // ô tìm kiếm: chờ kết quả tải, nhìn lại, rồi mới kết luận; gợi ý tìm không dấu / một phần tên
       const el = t && t.el ? t.el : focusedEl;
       const prevTxt = prevAction && Date.now() - prevAction.at < 60000 ? `${prevAction.query || ''} ${prevAction.el ? prevAction.el.name || '' : ''}` : '';
-      const searchy = (/tìm|tim kiem|search|find|kiếm/i.test(`${el ? el.name + ' ' + (el.kind || '') : ''} ${a.element || a.target || ''} ${prevTxt}`) || (prevAction && Date.now() - prevAction.at < 60000 && /^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(prevAction.keys || '').replace(/\s/g, '')))) && !/\n/.test(String(a.text)) && String(a.text).length <= 80;
+      // còn đang ở ô tìm kiếm: lần gõ trước là tìm kiếm và từ đó chưa bấm vào đâu (máy chậm có thể mất vài phút giữa hai lần gõ)
+      const stillSearching = s.inSearch && Date.now() - s.inSearch < 300000;
+      const searchy = (stillSearching || /tìm|tim kiem|search|find|kiếm/i.test(`${el ? el.name + ' ' + (el.kind || '') : ''} ${a.element || a.target || ''} ${prevTxt}`) || (prevAction && Date.now() - prevAction.at < 60000 && /^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(prevAction.keys || '').replace(/\s/g, '')))) && !/\n/.test(String(a.text)) && String(a.text).length <= 80;
       if (searchy && String(a.text).trim()) {
         const q = String(a.text).split('\n')[0].trim(); const fq = U.fold(q);
         const ask = `Ô tìm kiếm vừa được gõ "${q}". Danh sách kết quả tìm kiếm đang hiện những tên nào (ghi đúng chữ)? Dòng đầu tiên trả lời CÓ nếu có kết quả khớp hoặc gần khớp "${q}", KHÔNG nếu không có, ĐANG TẢI nếu chưa hiện xong.`;
-        const judge = (oo) => { const d = U.fold(oo.seen || ''); if (oo.seen) return /^\W*(co|yes)\b/.test(d) ? 'yes' : /^\W*(dang tai|loading)/.test(d) ? 'loading' : 'no';
-          const hits = oo.obs.elements.filter(e => !(e.editable || e.focused) && U.fold(e.name || '').includes(fq)).length; return hits >= (oo.poor ? 2 : 1) ? 'yes' : 'no'; };
+        // kết quả khớp trong danh sách phần tử (OCR thấy cả chữ trong ô tìm kiếm nên ứng dụng cây nghèo cần ≥ 2 chỗ)
+        const matches = (oo) => oo.obs.elements.filter(e => !(e.editable || e.focused) && U.fold(e.name || '').includes(fq));
+        const judge = (oo) => { const hits = matches(oo).length; if (hits >= (oo.poor ? 2 : 1)) return 'yes';
+          const d = U.fold(oo.seen || ''); if (oo.seen) return /^\W*(co|yes)\b/.test(d) ? 'yes' : /^\W*(dang tai|loading)/.test(d) ? 'loading' : 'no'; return 'no'; };
         let verdict = 'no', waited = 0;
         for (let i = 0; i < 3; i++) { // tối đa ~4,5 giây chờ kết quả
           const ms = i === 0 ? 1200 : 1500; await sleep(ms); waited += ms; if (ctx.signal && ctx.signal.aborted) break;
@@ -350,8 +356,15 @@ function createDesktopAgent(deps) {
         s.searches = s.searches || []; s.searches.push({ text: q, found: verdict === 'yes' });
         const tried = new Set(s.searches.map(x => x.text));
         const rest = U.searchVariants(s.searches[0].text).filter(v => !tried.has(v));
-        if (verdict === 'yes') checks.push(`Ô tìm kiếm: đã chờ kết quả và THẤY kết quả khớp "${q}". Bấm đúng kết quả đó (kiểm tra tên) trước khi làm tiếp.`);
-        else checks.push(`Ô tìm kiếm: đã chờ ~${Math.round(waited / 100) / 10} giây và CHƯA thấy kết quả khớp "${q}".` + (rest.length ? ` Trước khi nói "không tìm thấy", BẮT BUỘC thử lần lượt: ${rest.map(v => `gõ lại "${v}" (replace: true)`).join(', rồi ')}; mỗi lần chờ kết quả và kiểm tra.` : ' Đã thử nguyên văn, không dấu và một phần tên — có thể báo người dùng là không tìm thấy (nêu các cách đã thử).'));
+        s.inSearch = Date.now(); s.foundHit = null;
+        if (verdict === 'yes') {
+          // kết quả nằm dưới ô tìm kiếm: chọn phần tử khớp gần ô nhất, tức kết quả đầu tiên (không phải chính chữ trong ô)
+          const boxY = el && el.b ? el.b[1] : (t && t.y != null ? t.y : -1);
+          const m = matches(o2).filter(e => !e.b || e.b[1] > boxY + 4).sort((x, y) => (x.b ? x.b[1] : 0) - (y.b ? y.b[1] : 0))[0];
+          s.foundHit = { id: m ? m.id : null, name: m ? m.name : q, query: q };
+          checks.push(`Ô tìm kiếm: đã chờ kết quả và THẤY kết quả khớp "${q}"${m ? `: [${m.id}] "${m.name}"` : ''}. Bấm vào kết quả đó${m ? ` (screen_act click element "${m.id}")` : ' (kiểm tra đúng tên)'} để mở; KHÔNG gõ lại và không thử tên khác nữa.`);
+        }
+        else checks.push(`Ô tìm kiếm: đã chờ ~${Math.round(waited / 100) / 10} giây và CHƯA thấy kết quả khớp "${q}".` + (rest.length ? ` Bước tiếp theo BẮT BUỘC: gõ lại "${rest[0]}" vào ô tìm kiếm (screen_act type_text, replace: true). Chưa được nói "không tìm thấy"${rest.length > 1 ? `; nếu vẫn không ra thì lần lượt thử ${rest.slice(1).map(v => `"${v}"`).join(', ')}` : ''}.` : ' Đã thử nguyên văn, không dấu và một phần tên — có thể báo người dùng là không tìm thấy (nêu các cách đã thử).'));
       }
     }
     if (beforeDialog && s.dialog === beforeDialog) checks.push(`Hộp thoại “${beforeDialog}” VẪN đang mở — việc trong hộp thoại CHƯA xong. Xác nhận bằng nút của hộp thoại (Save/Lưu/OK/Mở) hoặc hotkey "enter"; đừng báo đã xong.`);
@@ -415,7 +428,9 @@ function createDesktopAgent(deps) {
     const tried = new Set(s.searches.map(x => x.text)); const rest = U.searchVariants(s.searches[0].text).filter(v => !tried.has(v));
     return rest.length ? rest : null;
   }
-  return { searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
+  // kết quả tìm kiếm đã hiện nhưng chưa bấm vào (mô hình nhỏ hay dừng lại hỏi thay vì mở)
+  function searchFound() { const s = session; return s && s.inSearch && s.foundHit ? s.foundHit : null; }
+  return { searchFound, searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
 }
 
 module.exports = { createDesktopAgent };

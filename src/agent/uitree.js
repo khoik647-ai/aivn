@@ -278,9 +278,13 @@ const noDiacritics = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u
 // các cách tìm lần lượt khi ô tìm kiếm không ra kết quả: nguyên văn → không dấu → tên gọi (2 chữ cuối) → tên (chữ cuối)
 function searchVariants(text) {
   const t = String(text || '').trim().replace(/\s+/g, ' '); if (!t) return [];
+  // danh bạ thường lưu tên không dấu: mỗi cách tìm một phần tên đều thử cả bản có dấu và không dấu
   const w = t.split(' '); const out = [t, noDiacritics(t)];
-  if (w.length >= 3) out.push(w.slice(-2).join(' '));
-  if (w.length >= 2) out.push(w[w.length - 1]);
+  if (w.length >= 3) { const two = w.slice(-2).join(' '); out.push(two, noDiacritics(two)); }
+  if (w.length >= 2) { const one = w[w.length - 1]; out.push(one, noDiacritics(one)); }
   const seen = new Set(); return out.filter(x => x && x.length >= 2 && !seen.has(x) && seen.add(x));
 }
-module.exports = { poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };
+// Chữ OCR trông như ô nhập (chữ gợi ý "Tìm kiếm", "Nhập tin nhắn…"): ở ứng dụng không đọc được qua Trợ năng (Zalo…), đó là ô nhập thật
+const INPUT_HINT = /(^|\s)(tìm|tim|search|find|nhập|nhap|soạn|soan|gõ|type|write|enter)(\s|$|…|\.)|tìm kiếm|tim kiem|tin nhắn|tin nhan|message|aa$/i;
+const inputLike = (el) => !!(el && !el.editable && el.ocr && String(el.name || '').trim().length <= 40 && INPUT_HINT.test(String(el.name || '').trim()));
+module.exports = { inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };

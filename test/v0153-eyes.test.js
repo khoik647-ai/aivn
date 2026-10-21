@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const R = require('../src/recommend');
 const U = require('../src/agent/uitree');
 const CAT = require('../src/catalog');
-const { createAgent, NOT_FOUND_RE } = require('../src/agent/agent');
+const { createAgent, NOT_FOUND_RE, OPEN_WANT_RE, openNudge } = require('../src/agent/agent');
 const { createComputerTools } = require('../src/agent/computer-tools');
 const GB = 1024 ** 3;
 const list = (installed = []) => CAT.map(c => ({ ...c, installed: installed.includes(c.id), fit: { level: 'fit' } }));
@@ -39,9 +39,10 @@ test('Zalo/Electron: cây giao diện nghèo → dùng ảnh chụp + mô hình 
   for (const p of ['Zalo.exe', 'Zalo', 'Slack.exe', 'Code.exe', 'Teams', 'ms-teams.exe', 'WhatsApp.exe', 'Discord.exe']) assert.ok(U.poorTreeApp(p), p);
   for (const p of ['notepad.exe', 'EXCEL.EXE', 'explorer.exe', 'soffice.bin', '']) assert.ok(!U.poorTreeApp(p), p);
 });
-test('ô tìm kiếm: các cách thử lần lượt (nguyên văn → không dấu → tên gọi → tên)', () => {
-  assert.deepStrictEqual(U.searchVariants('Trần Quỳnh Anh'), ['Trần Quỳnh Anh', 'Tran Quynh Anh', 'Quỳnh Anh', 'Anh']);
-  assert.deepStrictEqual(U.searchVariants('Đặng Văn Đức'), ['Đặng Văn Đức', 'Dang Van Duc', 'Văn Đức', 'Đức']);
+test('ô tìm kiếm: các cách thử lần lượt (nguyên văn → không dấu → tên gọi có/không dấu → tên có/không dấu)', () => {
+  assert.deepStrictEqual(U.searchVariants('Trần Quỳnh Anh'), ['Trần Quỳnh Anh', 'Tran Quynh Anh', 'Quỳnh Anh', 'Quynh Anh', 'Anh']);
+  assert.deepStrictEqual(U.searchVariants('Đặng Văn Đức'), ['Đặng Văn Đức', 'Dang Van Duc', 'Văn Đức', 'Van Duc', 'Đức', 'Duc']);
+  assert.deepStrictEqual(U.searchVariants('Lê Hoa'), ['Lê Hoa', 'Le Hoa', 'Hoa']);
   assert.deepStrictEqual(U.searchVariants('Lan'), ['Lan']);
   assert.ok(NOT_FOUND_RE.test('Mình không tìm thấy liên hệ Trần Quỳnh Anh trong Zalo.'));
   assert.ok(NOT_FOUND_RE.test('Không có kết quả nào khớp.'));
@@ -65,4 +66,34 @@ test('vòng lặp AIVN AGENT: chưa thử không dấu/một phần tên thì kh
   assert.ok(nudge, 'phải nhắc thử thêm'); assert.match(nudge.content, /Tran Quynh Anh/); assert.match(nudge.content, /Quỳnh Anh/);
   assert.deepStrictEqual(typed, ['Trần Quỳnh Anh', 'Tran Quynh Anh']);
   assert.match(r.text, /Đã tìm thấy/);
+});
+
+test('chữ gợi ý ô nhập chỉ thấy qua OCR (Zalo "Tìm kiếm") được coi là ô nhập để bấm rồi gõ', () => {
+  const U = require('../src/agent/uitree.js');
+  for (const n of ['Tìm kiếm', 'Tim kiem', 'Search', 'Nhập tin nhắn tới Mẹ', 'Type a message']) assert.ok(U.inputLike({ name: n, ocr: true }), n);
+  for (const n of ['Trần Quỳnh Anh', 'Nhóm Lớp K27', 'Cloud của tôi', 'Gửi']) assert.ok(!U.inputLike({ name: n, ocr: true }), n);
+  assert.ok(!U.inputLike({ name: 'Tìm kiếm' }), 'phần tử cây giao diện không phải OCR: giữ quy tắc cũ');
+  assert.ok(!U.inputLike({ name: 'Tìm kiếm', ocr: true, editable: true }), 'ô nhập thật đã được xử lý riêng');
+});
+
+test('đã thấy kết quả tìm kiếm mà dừng lại hỏi: nhắc một lần bấm mở luôn (mở không cần hỏi, gửi tin mới cần)', async () => {
+  const acts = []; let hit = null;
+  const screen = { look: async () => ({ forModel: 'Quan sát: ô tìm kiếm' }), act: async (a) => { acts.push(a); if (a.action === 'type_text') hit = { id: 'e7', name: 'Tran Quynh Anh', query: a.text }; else hit = null; return { forModel: `Đã ${a.action}`, summary: a.action }; }, pending: async () => null, searchTodo: () => null, searchFound: () => hit, active: () => true, end: async () => {} };
+  const ct = createComputerTools({ getSettings: () => ({ agentComputer: true, agentScreen: true }), openPath: async () => '', openExternal: async () => {}, visionReady: () => true, screen });
+  const seen = []; let round = 0;
+  const engine = { status: () => ({ loaded: true, contextSize: 8192, vision: true }), chatStep: async (msgs) => {
+    seen.push(msgs[msgs.length - 1]); round++;
+    if (round === 1) return { text: '', toolCalls: [{ id: 'c1', name: 'screen_act', arguments: { action: 'type_text', element: 'ô Tìm kiếm', text: 'Tran Quynh Anh' } }], finishReason: 'tool_calls', usage: {} };
+    if (round === 2) return { text: 'Đã thấy Tran Quynh Anh. Bạn có muốn mình mở cuộc trò chuyện không?', toolCalls: [], finishReason: 'stop', usage: {} };
+    if (round === 3) return { text: '', toolCalls: [{ id: 'c2', name: 'screen_act', arguments: { action: 'click', element: 'e7' } }], finishReason: 'tool_calls', usage: {} };
+    return { text: 'Đã mở cuộc trò chuyện với Tran Quynh Anh.', toolCalls: [], finishReason: 'stop', usage: {} };
+  } };
+  const ag = createAgent({ engine, getSettings: () => ({ agentComputer: true, agentScreen: true, agentMemory: false }), memory: { count: () => 0 }, scheduler: {}, extractFile: async () => ({}), embedForMemory: async () => ({}), computer: ct });
+  const r = await ag.run({ messages: [{ role: 'user', content: 'Trong Zalo, tìm Trần Quỳnh Anh và mở cuộc trò chuyện' }], confirm: async () => true });
+  const n = seen.find(m => m && m.role === 'user' && /CHƯA bấm vào/.test(m.content));
+  assert.ok(n, 'phải nhắc bấm mở'); assert.match(n.content, /element "e7"/); assert.match(n.content, /không cần hỏi lại/);
+  assert.deepStrictEqual(acts.map(a => a.action), ['type_text', 'click']);
+  assert.match(r.text, /Đã mở/);
+  assert.ok(OPEN_WANT_RE.test('nhắn cho Lan')); assert.ok(!OPEN_WANT_RE.test('đếm số dòng trong tệp'));
+  assert.match(openNudge({ name: 'X' }), /screen_act click\)/);
 });
