@@ -351,6 +351,7 @@
           <h2 class="set-title">Cài đặt</h2>
           <button type="button" role="tab" data-stab="general" class="on" data-testid="settings-tab-general">Chung</button>
           <button type="button" role="tab" data-stab="hardware" data-testid="settings-tab-hardware">Phần cứng &amp; bộ máy</button>
+          <button type="button" role="tab" data-stab="runtime" data-testid="settings-tab-runtime">Runtime (CUDA/Vulkan)</button>
           <button type="button" role="tab" data-stab="perf" data-testid="settings-tab-perf">Hiệu năng</button>
           <button type="button" role="tab" data-stab="docs" data-testid="settings-tab-docs">Tìm trong tài liệu</button>
           <button type="button" role="tab" data-stab="security" data-testid="settings-tab-security">Bảo mật &amp; Quản trị</button>
@@ -389,6 +390,29 @@
         <label>Độ dài ngữ cảnh (áp dụng khi nạp lại)
           <select id="ctxSize" data-testid="ctx-size"><option>4096</option><option>8192</option><option>16384</option><option>32768</option></select>
         </label>
+            </div>
+          </section>
+          <section class="set-pane" data-spane="runtime" role="tabpanel" data-testid="settings-pane-runtime"><h3 class="pane-title">Runtime (CUDA/Vulkan)</h3>
+            <div class="set-card">
+              <p class="small muted">Bộ máy nhìn ảnh và AIVN AGENT chạy bằng llama.cpp (llama-server). Bộ cài có sẵn bản Vulkan (Windows), Metal (Mac) hoặc CPU (Linux). Máy có GPU NVIDIA có thể tải thêm bản CUDA — thường nhanh hơn Vulkan; nếu CUDA lỗi, AIVN tự quay về bản đi kèm. Mở nhanh: Ctrl+Shift+R.</p>
+              <div class="small" id="rtVersions" data-testid="runtime-versions">Đang đọc…</div>
+              <div class="small" id="rtActive" data-testid="runtime-active"></div>
+            </div>
+            <div class="set-card">
+              <label>Runtime cho mô hình nhìn ảnh / mắt nhìn
+                <select id="rtPref" data-testid="runtime-pref"><option value="auto">Tự động (CUDA nếu đã tải và có GPU NVIDIA)</option><option value="cuda">Luôn thử CUDA</option><option value="bundled">Bản đi kèm (Vulkan / Metal / CPU)</option></select>
+              </label>
+              <p class="small muted">Chỉ dùng CPU: tắt “Tăng tốc bằng GPU” ở thẻ Phần cứng &amp; bộ máy. Trò chuyện chữ (không ảnh) luôn dùng bộ máy node-llama-cpp đi kèm.</p>
+            </div>
+            <div class="set-card">
+              <h4>CUDA 12.4 cho GPU NVIDIA</h4>
+              <div class="small" id="rtCuda" data-testid="runtime-cuda">Đang kiểm tra…</div>
+              <progress id="rtProg" max="1" value="0" hidden data-testid="runtime-progress"></progress>
+              <div class="row">
+                <button type="button" class="btn" id="rtInstall" data-testid="runtime-install" hidden>Tải runtime CUDA</button>
+                <button type="button" class="btn" id="rtCancel" data-testid="runtime-cancel" hidden>Huỷ tải</button>
+                <button type="button" class="btn danger" id="rtRemove" data-testid="runtime-remove" hidden>Gỡ runtime CUDA</button>
+              </div>
             </div>
           </section>
           <section class="set-pane" data-spane="perf" role="tabpanel" data-testid="settings-pane-perf"><h3 class="pane-title">Hiệu năng</h3>

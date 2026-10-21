@@ -353,6 +353,18 @@ function listModels() {
 const isInstalled = (x) => (x && typeof x === 'object' ? listModels().some(m => m.catalog && m.catalog.id === x.id) : listModels().some(m => m.file.toLowerCase() === path.basename(x).toLowerCase()));
 
 // Nhật ký lỗi bộ máy (để chẩn đoán): userData/logs/engine.log, tối đa ~1 MB
+// Runtime llama-server (runtimes.js): CUDA tải riêng cho máy NVIDIA; mặc định là bản Vulkan đi kèm. CUDA lỗi → tự quay về Vulkan.
+let RT = null;
+function runtimes() { if (!RT) RT = require('./runtimes').createRuntimes({ dir: () => path.join(app.getPath('userData'), 'runtimes'), log: (m) => LOG.log('runtime', m) }); return RT; }
+async function serverExeFor() {
+  try { const p = await runtimes().pick(settings.data.runtime || 'auto'); if (p.exe || p.why) LOG.log('runtime', `llama-server: ${p.runtime === 'cuda' ? 'CUDA' : 'bản đi kèm'}${p.why ? ' (' + p.why + ')' : ''}`); return p.exe; } catch { return null; }
+}
+function noteRuntime(st, what) {
+  if (!st || !st.runtimeFallback) return;
+  runtimes().markFailed(st.runtimeFallback);
+  const text = `Runtime CUDA không chạy được nên AIVN đã dùng bản Vulkan đi kèm cho ${what}. Lý do: ${st.runtimeFallback}`;
+  LOG.log('runtime', text); send('app:notice', { text, kind: 'warn' });
+}
 function engineLog(title, e, extra = {}) {
   const lines = Object.entries(extra).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(LOG.redact(v))}`);
   if (e) { lines.push('Lỗi: ' + (e.message || e)); if (e.code) lines.push('Mã: ' + e.code); if (Array.isArray(e.attempts)) for (const a of e.attempts) lines.push(`- Thử ${a.mode}: ${a.message}${a.stack ? '\n' + a.stack : ''}`); if (e.hostStack) lines.push('Stack (engine): ' + e.hostStack); if (e.stack) lines.push('Stack: ' + e.stack); }
@@ -454,12 +466,13 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       if (vt > 0 && vt < 6 * 1024 ** 3) { ctxNote = `Đã giới hạn độ dài ngữ cảnh ở 8192 (bạn chọn ${ctxWant}) vì GPU chỉ có ${(vt / 1024 ** 3).toFixed(1)} GB VRAM.`; ctxWant = 8192; }
     }
     const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj, serverArgs: require('./model-launch').launchArgs({ id: m.id, family: SC.groundingFamily(NAMES.isGeneric(m.file) ? m.id : (m.file || m.id)), catalog: m.catalog, load: ml }) } : {}), ...(ml.mmap === false ? { useMmap: false } : {}), ...(ml.mlock ? { useMlock: true } : {}), ...(load ? { reload: true } : {}) };
+    if (opts.mmproj) opts.serverExe = await serverExeFor();
     LOG.log('load', `Bắt đầu nạp ${m.file}`, { size: m.size, ctx: opts.contextSize, gpuLayers: opts.gpuLayers ?? 'tự động', vision: !!opts.mmproj, ...(opts.serverArgs && opts.serverArgs.length ? { args: opts.serverArgs.join(' ') } : {}) });
     const tLoad = Date.now();
     // B38: số đo VRAM thật — VRAM đã dùng lúc chưa nạp mô hình (màn hình, ứng dụng khác) làm mốc
     try { if (!engine.status().loaded) { const h0 = await engine.hardwareInfo(); if (h0 && h0.vram && h0.vram.total > 0 && !h0.vram.integratedOnly) idleVramUsed = h0.vram.total - h0.vram.free; } } catch {}
     try {
-      try { st = await engine.loadModel(m.id, m.path, opts); }
+      try { st = await engine.loadModel(m.id, m.path, opts); noteRuntime(st, 'mô hình ' + m.file); }
       catch (e) {
         // GPU (Vulkan/CUDA/Metal) không nạp được: ghi nhật ký, khởi động lại bộ máy ở chế độ chỉ CPU rồi thử lại một lần
         if (e.code === 'ENGINE_EXIT' && !e.startup && !e.killReason && engine.restart) {
@@ -684,7 +697,9 @@ async function getGrounder(force) {
       if (!plan.ok) { gpu = false; LOG.log('load', 'Cảnh báo bộ nhớ GPU: ' + plan.message); send('app:notice', { text: plan.message, kind: 'warn' }); }
     } catch {}
     const gml = modelLoadFor(m.id); const gpf = await perfProfile().catch(() => ({})); const gth = gml.threads || gpf.threads; const gbs = gml.batchSize || gpf.batchSize; // B26
-    await engine.groundLoad(m.id, m.path, m.mmproj, { contextSize: 4096, gpu, serverArgs: require('./model-launch').launchArgs({ id: m.id, family: SC.groundingFamily(NAMES.isGeneric(m.file) ? m.id : (m.file || m.id)), catalog: m.catalog, load: gml }), ...(gth ? { threads: gth } : {}), ...(gbs ? { batchSize: gbs } : {}) });
+    const gexe = gpu ? await serverExeFor() : null;
+    const gres = await engine.groundLoad(m.id, m.path, m.mmproj, { contextSize: 4096, gpu, serverExe: gexe, serverArgs: require('./model-launch').launchArgs({ id: m.id, family: SC.groundingFamily(NAMES.isGeneric(m.file) ? m.id : (m.file || m.id)), catalog: m.catalog, load: gml }), ...(gth ? { threads: gth } : {}), ...(gbs ? { batchSize: gbs } : {}) });
+    noteRuntime(gres, 'mô hình định vị ' + m.file);
     LOG.log('load', `Đã nạp mô hình định vị sau ${Date.now() - t} ms`);
   }
   return { id: m.path, engine: { generate: (msgs, o) => engine.groundGenerate(msgs, o) } };
@@ -1155,6 +1170,16 @@ function registerIpc() {
   let dirMove = null; // { ac } khi đang chuyển
   const defaultModelsDir = () => path.join(paths.userData, 'models');
   const dirInfo = () => { const MD = require('./models-dir'); const files = MD.listFiles(paths.models); return { dir: paths.models, isDefault: path.resolve(paths.models) === path.resolve(defaultModelsDir()), default: defaultModelsDir(), free: MD.freeBytes(paths.models), drive: MD.driveOf(paths.models), bytes: files.reduce((s, f) => s + f.size, 0), files: files.length, extra: (settings.data.modelDirsExtra || []).filter(d => fs.existsSync(d)), problem: modelsDirProblem, moving: !!dirMove, qaProfile: !!QA_PROFILE }; };
+  // Runtime CUDA/Vulkan (tab Runtime trong Cài đặt)
+  const rtInfo = async () => { const st = engine.status() || {}; return { pref: settings.data.runtime || 'auto', cuda: await runtimes().status(),
+    versions: { llamaServer: require('./runtimes').BUILD, nodeLlamaCpp: (() => { try { return require('node-llama-cpp/package.json').version; } catch { return null; } })(), electron: process.versions.electron },
+    platform: process.platform, arch: process.arch, active: st.loaded && st.vision ? { id: st.id, runtime: st.runtime || 'bundled', fallback: st.runtimeFallback || null } : null, chatGpu: st.gpu || null }; };
+  ipcMain.handle('runtime:status', () => rtInfo());
+  ipcMain.handle('runtime:set', (_e, pref) => { if (!require('./runtimes').PREFS.includes(pref)) return { ok: false }; settings.data.runtime = pref; settings.save(); LOG.log('runtime', 'Chọn runtime: ' + pref); return { ok: true, note: 'Áp dụng từ lần nạp mô hình nhìn ảnh / mắt nhìn tiếp theo.' }; });
+  let rtTick = 0;
+  ipcMain.handle('runtime:install', async () => { const r = await runtimes().install({ onProgress: () => { const n = Date.now(); if (n - rtTick > 300) { rtTick = n; runtimes().status().then(s => send('runtime:progress', s.job)).catch(() => {}); } } }); send('runtime:progress', null); return r; });
+  ipcMain.handle('runtime:cancel', () => runtimes().cancel());
+  ipcMain.handle('runtime:remove', () => { if (engine.status()?.runtime === 'cuda') return { ok: false, error: 'Runtime CUDA đang chạy mô hình — hãy dỡ mô hình trước khi gỡ.' }; return runtimes().remove(); });
   ipcMain.handle('models:dir-info', () => dirInfo());
   ipcMain.handle('models:dir-pick', async () => {
     if (QA_PROFILE) return { ok: false, error: 'Hồ sơ QA dùng chung thư mục mô hình của hồ sơ thật: không đổi được.' };

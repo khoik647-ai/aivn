@@ -1678,6 +1678,7 @@ function paletteCommands() {
     { i: '🧠', t: 'Ghi nhớ', run: () => show('memory') },
     { i: '⚡', t: 'Nhà phát triển (máy chủ API)', k: 'Ctrl+2', run: () => show('server') },
     { i: '⚙', t: 'Cài đặt', k: 'Ctrl+,', run: () => show('settings') },
+    { i: '⚙', t: 'Runtime (CUDA/Vulkan)', k: 'Ctrl+Shift+R', run: () => show('settings', { tab: 'runtime' }) },
     { i: '🔐', t: 'Bảo mật & Quản trị', run: () => show('settings', { tab: 'security' }) },
     { i: '🖥', t: 'Phần cứng & bộ máy', run: () => show('settings', { tab: 'hardware' }) },
     { i: '⇤', t: 'Thu gọn / mở rộng thanh bên', k: 'Ctrl+B', run: () => userToggleRail() },
@@ -1721,6 +1722,7 @@ document.addEventListener('keydown', (e) => {
   else if (mod && (e.key === 'n' || e.key === 'N') && !e.shiftKey) { e.preventDefault(); $('#newChat').click(); }
   else if (mod && !e.shiftKey && !e.altKey && ['1', '2', '3', '4'].includes(e.key)) { e.preventDefault(); show({ 1: 'chat', 2: 'server', 3: 'models', 4: 'discover' }[e.key]); }
   else if (mod && e.key === ',') { e.preventDefault(); show('settings'); }
+  else if (mod && e.shiftKey && (e.key === 'r' || e.key === 'R') && !e.altKey) { e.preventDefault(); show('settings', { tab: 'runtime' }); }
   else if (mod && (e.key === 'l' || e.key === 'L') && !e.shiftKey && !e.altKey) { e.preventDefault(); $('#loader').hidden ? openLoader() : closeLoader(); }
   else if (mod && (e.key === 'b' || e.key === 'B') && !e.shiftKey) { e.preventDefault(); userToggleRail(); }
 });
@@ -2391,6 +2393,41 @@ $('#rail').addEventListener('mouseover', (e) => {
 $('#rail').addEventListener('mouseleave', () => { railTip.hidden = true; });
 $('#rail').addEventListener('focusin', (e) => { const b = e.target.closest('.nav-item'); if (b && document.documentElement.classList.contains('rail-compact')) { const r = b.getBoundingClientRect(); railTip.textContent = b.dataset.tip || ''; railTip.style.top = (r.top + r.height / 2) + 'px'; railTip.style.left = (r.right + 8) + 'px'; railTip.hidden = false; } });
 $('#rail').addEventListener('focusout', () => { railTip.hidden = true; });
+// Thẻ Runtime: phiên bản bộ máy, tải/gỡ CUDA (NVIDIA), chọn runtime cho llama-server
+const rtSize = (b) => (b / 1024 ** 3 >= 1 ? (b / 1024 ** 3).toFixed(2) + ' GB' : Math.round(b / 1024 ** 2) + ' MB');
+async function paintRuntime() {
+  const r = await window.api.runtimeStatus(); const c = r.cuda;
+  $('#rtPref').value = r.pref;
+  const bundled = r.platform === 'win32' ? 'Vulkan' : r.platform === 'darwin' ? 'Metal' : 'CPU';
+  $('#rtVersions').innerHTML = `llama.cpp (llama-server) <b>${esc(r.versions.llamaServer)}</b> — bản đi kèm: ${esc(bundled)}${c.installed ? ' · CUDA 12.4' : ''}<br>node-llama-cpp ${esc(r.versions.nodeLlamaCpp || '?')} (trò chuyện chữ${r.chatGpu ? ', GPU: ' + esc(String(r.chatGpu)) : ''}) · Electron ${esc(r.versions.electron)}`;
+  const actRt = r.active ? (r.active.runtime === 'cuda' ? 'CUDA' : `bản đi kèm (${bundled})`) : '';
+  $('#rtActive').textContent = !r.active ? '' : r.active.fallback ? `Đang chạy: ${r.active.id} — ${actRt}. CUDA lỗi nên đã quay về bản đi kèm: ${r.active.fallback}` : `Đang chạy: ${r.active.id} — ${actRt}`;
+  const gpu = c.gpu ? `${c.gpu.name} · driver ${c.gpu.driver}${c.gpu.vramMiB ? ' · ' + (c.gpu.vramMiB / 1024).toFixed(1) + ' GB VRAM' : ''}` : '';
+  const lines = [];
+  if (gpu) lines.push(esc(gpu));
+  if (c.installed) lines.push(`✓ Đã tải CUDA 12.4 (${esc(c.build)}).`);
+  else if (c.supported) lines.push(`Chưa tải. Dung lượng tải: ${rtSize(c.size)} (sau khi giải nén khoảng 1,2 GB). Cần driver NVIDIA ${esc('528.33')} trở lên.`);
+  if (!c.supported) lines.push(esc(c.why));
+  if (c.failed) lines.push(`⚠ Lần chạy CUDA gần nhất lỗi: ${esc(c.failed)} — đang dùng bản đi kèm cho tới khi mở lại AIVN.`);
+  $('#rtCuda').innerHTML = lines.join('<br>');
+  paintRtJob(c.job);
+  $('#rtInstall').hidden = c.installed || !c.supported || !!c.job;
+  $('#rtRemove').hidden = !c.installed || !!c.job;
+}
+function paintRtJob(j) {
+  $('#rtProg').hidden = !j; $('#rtCancel').hidden = !j;
+  if (j) { $('#rtProg').max = j.total || 1; $('#rtProg').value = j.received || 0; $('#rtProg').title = { download: 'Đang tải', verify: 'Đang kiểm tra SHA-256', extract: 'Đang giải nén' }[j.phase] || ''; }
+}
+window.api.onRuntimeProgress((j) => { paintRtJob(j); if (!j && setTab.cur === 'runtime') paintRuntime().catch(() => {}); });
+$('#rtPref').addEventListener('change', async (e) => { const r = await window.api.runtimeSet(e.target.value); if (r && r.note) toast(r.note); });
+$('#rtInstall').addEventListener('click', async () => {
+  $('#rtInstall').hidden = true; paintRtJob({ received: 0, total: 1, phase: 'download' });
+  const r = await window.api.runtimeInstall();
+  if (r.ok) toast('Đã tải runtime CUDA. Áp dụng từ lần nạp mô hình nhìn ảnh tiếp theo.'); else if (!r.busy) toast(cleanErr(r.error || 'Không tải được runtime CUDA.'), !r.cancelled);
+  paintRuntime().catch(() => {});
+});
+$('#rtCancel').addEventListener('click', () => window.api.runtimeCancel());
+$('#rtRemove').addEventListener('click', async () => { const r = await window.api.runtimeRemove(); if (!r.ok) toast(cleanErr(r.error || 'Không gỡ được runtime CUDA.'), true); paintRuntime().catch(() => {}); });
 // Trang Cài đặt: các thẻ bên trái, phím ↑↓ di chuyển giữa thẻ
 function setTab(tab) {
   if (!document.querySelector(`[data-spane="${tab}"]`)) tab = 'general';
@@ -2399,6 +2436,7 @@ function setTab(tab) {
   $$('#setBody [data-spane]').forEach(p => p.classList.toggle('on', p.dataset.spane === tab));
   $('#setBody').scrollTop = 0;
   if (tab === 'hardware') paintAdvanced();
+  if (tab === 'runtime') paintRuntime().catch(err => toast(cleanErr(err.message), true));
   if (tab === 'security') refreshSecurity().catch(err => toast(cleanErr(err.message), true));
 }
 $('#setNav').addEventListener('click', (e) => { const b = e.target.closest('[data-stab]'); if (b) setTab(b.dataset.stab); });

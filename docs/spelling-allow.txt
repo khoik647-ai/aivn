@@ -2,6 +2,8 @@
 Arcee
 Cmd
 Ctrl
+runtime
+xóa
 Fi
 Qwen
 Redistributable

@@ -55,11 +55,31 @@ class VisionError extends Error { constructor(msg, code) { super(msg); this.code
 function createVisionServer({ log = () => {} } = {}) {
   let proc = null, port = 0, key = '', info = null, tail = [];
 
-  async function start({ id, modelPath, mmprojPath, contextSize = 4096, gpu = true, threads, batchSize, extraArgs }) {
+  // Runtime CUDA tải riêng (runtimes.js): thử trước; lỗi khởi động hoặc không thấy GPU NVIDIA → tự quay về bản đi kèm (Vulkan) và ghi lý do
+  async function start(o) {
+    let fallback = null;
+    if (o.serverExe && o.gpu !== false && fs.existsSync(o.serverExe)) {
+      try {
+        await startOn(o.serverExe, o, 'cuda');
+        if (!cudaSeen) throw new VisionError('runtime CUDA không thấy GPU NVIDIA nào', 'CUDA_NO_DEVICE');
+        return { runtime: 'cuda', runtimeFallback: null };
+      } catch (e) {
+        if (e.code === 'TIMEOUT') throw e;
+        fallback = (e.message || String(e)).slice(0, 300);
+        log(`[vision] runtime CUDA lỗi → quay về bản đi kèm (Vulkan): ${fallback}`);
+        await stop();
+      }
+    }
+    await startOn(findServer(), o, 'bundled');
+    if (fallback && info) info.runtimeFallback = fallback;
+    return { runtime: 'bundled', runtimeFallback: fallback };
+  }
+  let cudaSeen = false;
+  async function startOn(exe, { id, modelPath, mmprojPath, contextSize = 4096, gpu = true, threads, batchSize, extraArgs }, runtime) {
     await stop();
-    const exe = findServer();
     if (!exe) throw new VisionError('Bản AIVN này thiếu bộ máy nhìn ảnh (llama-server). Hãy cài lại AIVN.', 'NO_SERVER');
-    port = await freePort(); key = crypto.randomBytes(18).toString('hex'); tail = [];
+    if (runtime === 'cuda') log(`[vision] dùng runtime CUDA: ${exe}`);
+    port = await freePort(); key = crypto.randomBytes(18).toString('hex'); tail = []; cudaSeen = false;
     const args = ['-m', modelPath, ...(mmprojPath ? ['--mmproj', mmprojPath] : []), ...(process.env.AIVN_TEST_CHAT_TEMPLATE ? ['--chat-template-file', process.env.AIVN_TEST_CHAT_TEMPLATE] : []), '--host', '127.0.0.1', '--port', String(port), '--api-key', key,
       '-c', String(contextSize), '-np', '1', '--no-webui', '--offline', '--jinja'];
     if (!gpu) args.push('-ngl', '0', ...(mmprojPath ? ['--no-mmproj-offload'] : []));
@@ -74,7 +94,7 @@ function createVisionServer({ log = () => {} } = {}) {
     try { if (process.send && proc.pid) { process.send({ type: 'child', pid: proc.pid }); const p0 = proc; p0.once('exit', () => { try { process.send({ type: 'child-exit', pid: p0.pid }); } catch {} }); } } catch {}
     LIVE.add(proc); { const pp = proc; try { HOOKS.spawn && HOOKS.spawn(pp.pid); } catch {} pp.once('exit', () => { LIVE.delete(pp); try { HOOKS.exit && HOOKS.exit(pp.pid); } catch {} }); }
     let layers = null;
-    const onData = (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { tail.push(l); if (tail.length > 40) tail.shift(); const m = l.match(/offloaded (\d+)\/(\d+) layers to GPU/); if (m) { layers = { gpu: +m[1], total: +m[2] }; if (info) Object.assign(info, { gpuLayers: layers.gpu, totalLayers: layers.total }); } } };
+    const onData = (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { tail.push(l); if (/ggml_cuda_init: found [1-9]|using device CUDA\d|\bCUDA0\b/.test(l)) cudaSeen = true; if (tail.length > 40) tail.shift(); const m = l.match(/offloaded (\d+)\/(\d+) layers to GPU/); if (m) { layers = { gpu: +m[1], total: +m[2] }; if (info) Object.assign(info, { gpuLayers: layers.gpu, totalLayers: layers.total }); } } };
     proc.stdout.on('data', onData); proc.stderr.on('data', onData);
     const exited = new Promise((resolve) => proc.once('exit', (code, signal) => resolve({ code, signal })));
     proc.once('exit', (code, signal) => { log(`[vision] llama-server kết thúc code=${code} signal=${signal}`); proc = null; info = null; });
@@ -95,7 +115,7 @@ function createVisionServer({ log = () => {} } = {}) {
     }
     let ctx = contextSize, template = TP.analyzeTemplate('');
     try { const p = await (await fetch(`http://127.0.0.1:${port}/props`, { headers: { authorization: 'Bearer ' + key } })).json(); ctx = p?.default_generation_settings?.n_ctx || ctx; template = TP.analyzeTemplate(p?.chat_template); } catch {}
-    info = { id, path: modelPath, mmproj: mmprojPath, contextSize: ctx, vision: true, loadedAt: Date.now(), template, gpuLayers: layers ? layers.gpu : (gpu ? null : 0), totalLayers: layers ? layers.total : null, textTools: template.strict || (template.known && !template.nativeTools) };
+    info = { id, path: modelPath, mmproj: mmprojPath, contextSize: ctx, vision: true, loadedAt: Date.now(), template, runtime, serverExe: exe, gpuLayers: layers ? layers.gpu : (gpu ? null : 0), totalLayers: layers ? layers.total : null, textTools: template.strict || (template.known && !template.nativeTools) };
     if (info.textTools) log(`[vision] mẫu chat ${template.strict ? 'bắt buộc xen kẽ user/assistant' : 'không hỗ trợ tools'}: dùng giao thức công cụ dạng văn bản của AIVN`);
     log(`[vision] llama-server sẵn sàng (cổng ${port}, ${((Date.now() - t0) / 1000).toFixed(1)} s)`);
     return info;
