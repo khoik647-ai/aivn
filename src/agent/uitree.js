@@ -410,9 +410,11 @@ function resolveIdRef(elements, q, info = null) {
   return null;
 }
 // B37: chữ MỚI sau thao tác, đếm theo số lần xuất hiện (tệp thứ hai cùng tên cũng tính)
+// B37: chỉ tên TỆP mới đếm theo số lần (tệp thứ 2 cùng tên); chữ khác theo tập hợp — OCR đọc trùng “Tìm kiếm” hai lần không phải “chữ mới”
+const FILE_LIKE = /\.[a-z0-9]{2,5}\b/i;
 function newTexts(beforeEls, afterEls, max = 4) {
   const old = new Map(); for (const e of beforeEls || []) { const k = fold(e.name || '').trim(); if (k) old.set(k, (old.get(k) || 0) + 1); }
-  const out = []; for (const e of afterEls || []) { const n = String(e.name || '').trim(); const k = fold(n).trim(); if (!k) continue; const c = old.get(k) || 0; if (c > 0) { old.set(k, c - 1); continue; } if (n.length >= 3 && !out.includes(n)) out.push(n); }
+  const out = []; for (const e of afterEls || []) { const n = String(e.name || '').trim(); const k = fold(n).trim(); if (!k) continue; const c = old.get(k) || 0; if (c > 0) { if (FILE_LIKE.test(n)) old.set(k, c - 1); continue; } if (n.length >= 3 && !out.includes(n)) out.push(n); }
   return out.slice(0, max);
 }
 const isIdRef = (q) => { const r = parseIdRef(q); return !!(r && !r.label); };

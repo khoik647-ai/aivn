@@ -499,8 +499,9 @@ function createDesktopAgent(deps) {
     if (pd) deps.log && deps.log('desk', `So ảnh trước/sau: ${PD.describe(pd)}${a.__moved && a.__moved.calibrated ? ' · chuột đã hiệu chỉnh' : ''}`);
     // B37 (QA lượt 6, Classroom “+ Thêm tệp”): ảnh quanh chỗ bấm gần như không đổi nhưng trên màn hình có CHỮ MỚI (dòng “Bài làm của bạn: tệp.docx”) → thao tác ĐÃ có tác dụng
     // QA lượt 7: đếm theo SỐ LẦN xuất hiện (tệp thứ 2 cùng tên “bai.docx” cũng là chữ mới), không chỉ theo tập hợp
-    const newTexts = before && o.obs ? U.newTexts(before.elements, o.obs.elements) : [];
     const ADDF = /thêm tệp|thêm|tải lên|đính kèm|add file|add or create|attach|upload|添加|上传|附件/iu; const addTarget = `${t && t.el ? t.el.name || '' : ''} ${a.element || ''}`;
+    // chỉ tin “chữ mới” khi bấm nút thêm/tải tệp hoặc chữ mới là tên tệp — OCR ở DPI cao hay đọc lệch (“Nhập tin nhắn” lúc có lúc không), không được coi là “đã có tác dụng”
+    const newTexts = (before && o.obs ? U.newTexts(before.elements, o.obs.elements) : []).filter(n => ADDF.test(addTarget) || /\.[a-z0-9]{2,5}\b/i.test(n));
     if (isClickAct && ADDF.test(addTarget) && s.addedFiles && s.addedFiles.length) checks.push(`Lưu ý: trong việc này đã thêm tệp ${s.addedFiles.slice(-3).map(n => `“${n.slice(0, 40)}”`).join(', ')} rồi — nếu người dùng chỉ cần MỘT tệp thì KHÔNG thêm nữa (sẽ bị trùng).`);
     if (newTexts.length && isClickAct && /\.[a-z0-9]{2,5}\b/i.test(newTexts.join(' '))) { s.addedFiles = [...(s.addedFiles || []), ...newTexts.filter(n => /\.[a-z0-9]{2,5}\b/i.test(n))].slice(-10); }
     const pixChanged = PD.changed(pd) || !!(newTexts.length && isClickAct);

@@ -51,6 +51,7 @@ test('B37 (lượt 7): tệp thứ 2 cùng tên vẫn là chữ MỚI (không b�
   const b = [{ name: 'Bài tập của bạn' }, { name: 'bai.docx' }, { name: '+ Thêm hoặc tạo' }];
   assert.deepStrictEqual(U.newTexts(b, [...b, { name: 'bai.docx' }]), ['bai.docx']);
   assert.deepStrictEqual(U.newTexts(b, b), []);
+  assert.deepStrictEqual(U.newTexts([{ name: 'Tìm kiếm' }], [{ name: 'Tìm kiếm' }, { name: 'Tìm kiếm' }]), [], 'OCR đọc trùng chữ thường không phải chữ mới (DPI @150%: vẫn tự dùng Ctrl+F)');
   assert.deepStrictEqual(U.newTexts([], [{ name: 'ab' }, { name: 'Nộp bài' }]), ['Nộp bài']);
   const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'src/desktop-agent.js'), 'utf8');
   assert.match(src, /U\.newTexts\(before\.elements, o\.obs\.elements\)/); assert.match(src, /đã thêm tệp .* rồi — nếu người dùng chỉ cần MỘT tệp/);
