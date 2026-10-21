@@ -906,6 +906,171 @@ const CATALOG = [
   "computer": true,
   "grounding": "qwen25vl",
   "screenPriority": 4
+ },
+ // 0.16 beta.3 — mô hình agent mới (docs/agent-models.md): “Chờ đo” cho tới khi đạt Bộ đo AIVN AGENT trên máy người dùng (agentCandidate)
+ {
+  "id": "qwen3.5-2b-q4_k_m",
+  "name": "Qwen3.5 2B",
+  "family": "Qwen",
+  "params": "2B",
+  "quant": "Q4_K_M",
+  "repo": "unsloth/Qwen3.5-2B-GGUF",
+  "file": "Qwen3.5-2B-Q4_K_M.gguf",
+  "size": 1280835840,
+  "mmproj": {
+   "file": "mmproj-F16.gguf",
+   "size": 668227264,
+   "url": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/mmproj-F16.gguf"
+  },
+  "ram": "≥ 6 GB RAM",
+  "license": "Apache 2.0",
+  "arch": "qwen35",
+  "desc": "Thế hệ sau Qwen3-VL, nhìn ảnh sẵn, bộ đệm ngữ cảnh rất nhỏ nên nhẹ máy. Chờ đo: dùng cho AIVN AGENT sau khi đạt Bộ đo trên máy bạn.",
+  "url": "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf",
+  "vision": true,
+  "agentCandidate": true,
+  "grounding": "qwen35",
+  "launch": [
+   "--reasoning",
+   "off"
+  ]
+ },
+ {
+  "id": "holo-3.1-4b.iq4_xs",
+  "name": "Holo3.1 4B (H Company)",
+  "family": "Holo",
+  "params": "4B",
+  "quant": "IQ4_XS",
+  "repo": "mradermacher/Holo-3.1-4B-GGUF",
+  "file": "Holo-3.1-4B.IQ4_XS.gguf",
+  "size": 2866747424,
+  "mmproj": {
+   "file": "Holo-3.1-4B.mmproj-Q8_0.gguf",
+   "size": 366895424,
+   "url": "https://huggingface.co/mradermacher/Holo-3.1-4B-GGUF/resolve/main/Holo-3.1-4B.mmproj-Q8_0.gguf"
+  },
+  "ram": "≥ 8 GB RAM",
+  "license": "Apache 2.0",
+  "arch": "qwen35",
+  "desc": "Mô hình chuyên điều khiển máy tính (web, ứng dụng, điện thoại) dựa trên Qwen3.5 4B, gọi công cụ sẵn. Chờ đo.",
+  "url": "https://huggingface.co/mradermacher/Holo-3.1-4B-GGUF/resolve/main/Holo-3.1-4B.IQ4_XS.gguf",
+  "vision": true,
+  "agentCandidate": true,
+  "grounding": "holo3",
+  "launch": [
+   "--reasoning",
+   "off"
+  ]
+ },
+ {
+  "id": "qwen3.5-4b-q4_k_m",
+  "name": "Qwen3.5 4B",
+  "family": "Qwen",
+  "params": "4B",
+  "quant": "Q4_K_M",
+  "repo": "unsloth/Qwen3.5-4B-GGUF",
+  "file": "Qwen3.5-4B-Q4_K_M.gguf",
+  "size": 2740937888,
+  "mmproj": {
+   "file": "mmproj-F16.gguf",
+   "size": 672423616,
+   "url": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/mmproj-F16.gguf"
+  },
+  "ram": "≥ 8 GB RAM",
+  "license": "Apache 2.0",
+  "arch": "qwen35",
+  "desc": "Qwen3.5 cỡ 4B: nhìn ảnh và gọi công cụ, bộ đệm ngữ cảnh nhỏ hơn Qwen3-VL 4B khoảng 4,5 lần. Chờ đo.",
+  "url": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf",
+  "vision": true,
+  "agentCandidate": true,
+  "grounding": "qwen35",
+  "launch": [
+   "--reasoning",
+   "off"
+  ]
+ },
+ {
+  "id": "qwen3.5-9b-q4_k_m",
+  "name": "Qwen3.5 9B",
+  "family": "Qwen",
+  "params": "9B",
+  "quant": "Q4_K_M",
+  "repo": "unsloth/Qwen3.5-9B-GGUF",
+  "file": "Qwen3.5-9B-Q4_K_M.gguf",
+  "size": 5680522464,
+  "mmproj": {
+   "file": "mmproj-F16.gguf",
+   "size": 918166080,
+   "url": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/mmproj-F16.gguf"
+  },
+  "ram": "≥ 12 GB RAM",
+  "license": "Apache 2.0",
+  "arch": "qwen35",
+  "desc": "Thế hệ sau Qwen3-VL 8B: nhìn màn hình và gọi công cụ tốt hơn theo số liệu nhà phát triển, tốn ít VRAM hơn. Chờ đo.",
+  "url": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf",
+  "vision": true,
+  "agentCandidate": true,
+  "grounding": "qwen35",
+  "launch": [
+   "--reasoning",
+   "off"
+  ]
+ },
+ {
+  "id": "holo-3.1-9b.q4_k_m",
+  "name": "Holo3.1 9B (H Company)",
+  "family": "Holo",
+  "params": "9B",
+  "quant": "Q4_K_M",
+  "repo": "mradermacher/Holo-3.1-9B-GGUF",
+  "file": "Holo-3.1-9B.Q4_K_M.gguf",
+  "size": 5629110176,
+  "mmproj": {
+   "file": "Holo-3.1-9B.mmproj-Q8_0.gguf",
+   "size": 624230368,
+   "url": "https://huggingface.co/mradermacher/Holo-3.1-9B-GGUF/resolve/main/Holo-3.1-9B.mmproj-Q8_0.gguf"
+  },
+  "ram": "≥ 12 GB RAM",
+  "license": "Apache 2.0",
+  "arch": "qwen35",
+  "desc": "Mô hình chuyên điều khiển máy tính dựa trên Qwen3.5 9B, gọi công cụ sẵn. Chờ đo.",
+  "url": "https://huggingface.co/mradermacher/Holo-3.1-9B-GGUF/resolve/main/Holo-3.1-9B.Q4_K_M.gguf",
+  "vision": true,
+  "agentCandidate": true,
+  "grounding": "holo3",
+  "launch": [
+   "--reasoning",
+   "off"
+  ]
+ },
+ {
+  "id": "holo4-35b-a3b-q4_k_m",
+  "name": "Holo4 35B-A3B (MoE, H Company)",
+  "family": "Holo",
+  "params": "35B-A3B",
+  "quant": "Q4_K_M",
+  "repo": "Hcompany/Holo4-35B-A3B-GGUF",
+  "file": "q4_k_m.gguf",
+  "size": 21297870912,
+  "mmproj": {
+   "file": "mmproj.f16.gguf",
+   "size": 899282976,
+   "url": "https://huggingface.co/Hcompany/Holo4-35B-A3B-GGUF/resolve/main/mmproj.f16.gguf",
+   "localName": "Holo4-35B-A3B-mmproj.f16.gguf"
+  },
+  "ram": "≥ 32 GB RAM",
+  "license": "Apache 2.0",
+  "arch": "qwen35moe",
+  "desc": "Mô hình MoE chuyên điều khiển máy tính, mạnh nhất nhóm Holo dùng được: VRAM không đủ thì chuyên gia MoE tự chia sang CPU, phần nhìn ảnh vẫn ở GPU; mỗi bước chậm hơn bản 9B. Chờ đo.",
+  "url": "https://huggingface.co/Hcompany/Holo4-35B-A3B-GGUF/resolve/main/q4_k_m.gguf",
+  "vision": true,
+  "agentCandidate": true,
+  "grounding": "holo3",
+  "launch": [
+   "--reasoning",
+   "off"
+  ],
+  "localName": "Holo4-35B-A3B-q4_k_m.gguf"
  }
 ];
 

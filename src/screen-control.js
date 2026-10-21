@@ -69,12 +69,23 @@ function groundingFamily(id) {
   const s = String(id || '').toLowerCase().replace(/_/g, '-');
   if (/ui-?tars/.test(s)) return 'uitars';
   if (/qwen2\.?5-?vl|qwen2-?vl/.test(s)) return 'qwen25vl';
-  if (/qwen3-?vl/.test(s)) return 'qwen3vl';
+  // mục 1: Holo2 (Qwen3-VL) / Holo3.x / Holo4 (Qwen3.5/3.6/3.8) — tài liệu H Company: MỌI mô hình Holo hiện nay trả x,y nguyên trong [0,1000]
+  // theo ảnh gửi vào, gọi tắt suy nghĩ + nhiệt độ 0; câu lệnh như Holo1.5, chỉ khác thang toạ độ. Ảnh chia ô 16×2 = 32.
+  if (/holo-?[2-9]/.test(s)) return 'holo3';
+  if (/qwen3-?vl|gui-?owl|evocua/.test(s)) return 'qwen3vl';
   // Holo1.5 và UI-Venus-Ground dựa trên Qwen2.5-VL (toạ độ điểm ảnh) nhưng được huấn luyện với câu lệnh riêng: dùng đúng câu lệnh của nhà phát triển
   if (/holo/.test(s)) return 'holo';
+  // mục 2: UI-Venus-2 dựa trên Qwen3.5, thẻ mô hình không nêu thang toạ độ → tự nhận (0-1000 hay điểm ảnh) cho tới khi AIVN Bench đo
+  if (/ui-?venus-?2/.test(s)) return 'venus2';
   // UI-Venus: câu lệnh hộp [x1,y1,x2,y2] của nhà phát triển cho 3/10 trên AIVN Bench (hộp lệch ~20 px), câu lệnh điểm kiểu Qwen2.5-VL cho 8/10 → dùng cách đo được tốt hơn
   if (/ui-?venus/.test(s)) return 'qwen25vl';
   if (/showui|os-?atlas|gui-?actor/.test(s)) return 'qwen25vl';
+  // mục 3: họ rõ ràng thay vì 'generic'. Fara1.5 (Qwen3.5): thẻ ghi toạ độ ĐIỂM ẢNH; Fara-7B cũ dựa trên Qwen2.5-VL
+  if (/fara-?1\.?5/.test(s)) return 'fara';
+  if (/fara/.test(s)) return 'qwen25vl';
+  // Qwen3.5 / 3.6 / 3.8 (lai Gated-DeltaNet, nhìn ảnh sẵn): thẻ không nêu thang toạ độ — hỏi thang 0-1000 như Qwen3-VL, tự nhận nếu trả điểm ảnh
+  if (/qwen-?3(?:\.|_)?[5-9](?![\db])/.test(s)) return 'qwen35';
+  if (/gemma-?4/.test(s)) return 'gemma4';
   return 'generic';
 }
 const FAMILY = {
@@ -82,18 +93,27 @@ const FAMILY = {
   uitars: { coords: 'pixel', align: 28 },
   qwen3vl: { coords: 'norm1000', align: 32 },
   holo: { coords: 'pixel', align: 28 },
+  holo3: { coords: 'norm1000', align: 32 },
   venus: { coords: 'pixel', align: 28 },
+  venus2: { coords: 'auto', align: 32 },
+  fara: { coords: 'pixel', align: 32 },
+  qwen35: { coords: 'auto', align: 32 },
+  gemma4: { coords: 'auto', align: 0 },
   generic: { coords: 'auto', align: 0 },
 };
+// mục 4: các họ này bật suy nghĩ mặc định (Qwen3.5 và các bản tinh chỉnh, Gemma 4) → llama-server --reasoning off
+// (llama.cpp #20837: Qwen3.5 suy nghĩ thì hay in lời gọi công cụ trong khối suy nghĩ rồi dừng; #28827 Gemma 4 suy nghĩ thêm rác cuối)
+const THINKS_BY_DEFAULT = new Set(['holo3', 'venus2', 'fara', 'qwen35', 'gemma4']);
 const familyInfo = (id) => FAMILY[groundingFamily(id)];
 const LOCATE_PROMPT = (target, W, H, fam = 'generic') => {
   if (fam === 'qwen25vl') return `Ảnh chụp màn hình rộng ${W}, cao ${H} điểm ảnh. Tìm phần tử giao diện: "${target}". Trả lời đúng MỘT dòng JSON: {"bbox_2d": [x1, y1, x2, y2], "label": "chữ trên phần tử"} với toạ độ điểm ảnh tuyệt đối trên ảnh này. Nếu không thấy: {"found": false, "why": "lý do ngắn"}.`;
   // Holo1.5 (H Company, localization.py / tài liệu "Element localization"): trả {"x": int, "y": int} theo điểm ảnh của ảnh gửi vào
-  if (fam === 'holo') return `Localize an element on the GUI image according to the provided target and output a click position.\n * You must output a valid JSON following the format: {"x": int, "y": int}\n Your target is:\n${target}`;
+  if (fam === 'holo' || fam === 'holo3') return `Localize an element on the GUI image according to the provided target and output a click position.\n * You must output a valid JSON following the format: {"x": int, "y": int}\n Your target is:\n${target}`;
   // UI-Venus-Ground (thẻ mô hình inclusionAI): trả [x1,y1,x2,y2] theo điểm ảnh
   if (fam === 'venus') return `Outline the position corresponding to the instruction: ${target}. The output should be only [x1,y1,x2,y2].`;
   if (fam === 'uitars') return `You are a GUI agent. Screenshot size ${W}x${H}. Task: click on "${target}". Output only one line: click(start_box='(x,y)') using absolute pixel coordinates of the screenshot. If the element is not visible output: not_found`;
-  if (fam === 'qwen3vl') return `Ảnh chụp màn hình máy tính. Tìm phần tử giao diện: "${target}". Trả lời đúng MỘT dòng JSON: {"bbox_2d": [x1, y1, x2, y2], "label": "chữ trên phần tử"} với toạ độ tương đối thang 0-1000 (0,0 góc trên trái; 1000,1000 góc dưới phải). Nếu không thấy: {"found": false, "why": "lý do ngắn"}.`;
+  if (fam === 'fara') return `Ảnh chụp màn hình rộng ${W}, cao ${H} điểm ảnh. Tìm phần tử giao diện: "${target}". Trả lời đúng MỘT dòng JSON: {"x": số, "y": số} là điểm cần bấm, toạ độ điểm ảnh tuyệt đối trên ảnh này. Nếu không thấy: {"found": false, "why": "lý do ngắn"}.`;
+  if (fam === 'qwen3vl' || fam === 'qwen35' || fam === 'venus2') return `Ảnh chụp màn hình máy tính. Tìm phần tử giao diện: "${target}". Trả lời đúng MỘT dòng JSON: {"bbox_2d": [x1, y1, x2, y2], "label": "chữ trên phần tử"} với toạ độ tương đối thang 0-1000 (0,0 góc trên trái; 1000,1000 góc dưới phải). Nếu không thấy: {"found": false, "why": "lý do ngắn"}.`;
   return `Đây là ảnh chụp màn hình máy tính (rộng ${W}, cao ${H} điểm ảnh). Hãy tìm phần tử giao diện sau: "${target}".
 Chỉ trả lời MỘT dòng JSON, không giải thích: {"found": true, "x1": số, "y1": số, "x2": số, "y2": số, "label": "chữ trên phần tử"} với toạ độ khung bao quanh phần tử tính theo thang 0-1000 (0,0 là góc trên trái; 1000,1000 là góc dưới phải). Nếu không thấy: {"found": false, "why": "lý do ngắn"}.`;
 };
@@ -139,7 +159,7 @@ const HOLO_SCHEMA = { type: 'object', properties: { x: { type: 'integer' }, y: {
 async function locate(engine, shot, target, { signal, modelId = '' } = {}) {
   const fam = groundingFamily(modelId); const fi = FAMILY[fam];
   // Holo1.5: nhà phát triển gọi kèm "structured outputs" (lược đồ JSON {x, y}); không ràng buộc thì bản lượng tử Q4 hay bỏ mất khoá "y"
-  const jsonSchema = fam === 'holo' ? HOLO_SCHEMA : null;
+  const jsonSchema = fam === 'holo' || fam === 'holo3' ? HOLO_SCHEMA : null;
   const r = await engine.generate([{ role: 'user', content: [{ type: 'text', text: LOCATE_PROMPT(target, shot.width, shot.height, fam) }, { type: 'image_url', image_url: { url: shot.dataUrl } }] }], { temperature: 0, maxTokens: 160, signal, ...(jsonSchema ? { jsonSchema } : {}) });
   return { box: parseBox(r.text, shot.width, shot.height, { coords: fi.coords }), raw: String(r.text || '').slice(0, 400), family: fam };
 }
@@ -180,4 +200,4 @@ async function perform({ action, nx, ny, text, keys, display, amount }) {
   if (action === 'scroll') { const a = Math.max(-20, Math.min(20, Math.round(Number(amount) || -5))); n.scrollMouse(0, process.platform === 'win32' ? a * 120 : a); await sleep(150); }
 }
 
-module.exports = { geos, cursorPhys, displayInfo, groundingFamily, familyInfo, FAMILY, permissions, PERM_URLS, capture, locate, describe, parseBox, parseKeys, perform, toNut, libnut, LOCATE_PROMPT };
+module.exports = { THINKS_BY_DEFAULT, geos, cursorPhys, displayInfo, groundingFamily, familyInfo, FAMILY, permissions, PERM_URLS, capture, locate, describe, parseBox, parseKeys, perform, toNut, libnut, LOCATE_PROMPT };

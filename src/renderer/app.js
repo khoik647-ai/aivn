@@ -257,11 +257,13 @@ async function ldMeta(id) {
   if (!ld.metas.has(id)) { const g = await A.modelMeta(id).catch(() => null); ld.metas.set(id, g); }
   return ld.metas.get(id);
 }
+// mục 6: mô hình MoE (kiến trúc *moe hoặc tên kiểu 35B-A3B)
+const isMoeModel = (m, g) => /moe/i.test(String((g && g.arch) || '')) || /(?:^|[-_.])a\d+(?:\.\d+)?b(?:[-_.]|$)/i.test(String((m && m.file) || ''));
 function defaultForm(g) {
   const sv = (g && g.saved) || {}; const max = Math.max(4096, (g && g.trainCtx) || 32768);
   const ctx = Math.min(max, Math.max(4096, sv.contextSize || (g && g.global && g.global.contextSize) || 8192));
   const gl = sv.gpuLayers != null ? sv.gpuLayers : (g && g.global && g.global.gpuLayers != null ? g.global.gpuLayers : 'auto');
-  return { contextSize: ctx, gpuLayers: gl, flashAttention: sv.flashAttention == null ? 'auto' : sv.flashAttention ? 'on' : 'off', kvCache: sv.kvCache || 'auto', threads: sv.threads || 0, batchSize: sv.batchSize || 0, mmap: sv.mmap !== false, mlock: !!sv.mlock };
+  return { contextSize: ctx, gpuLayers: gl, flashAttention: sv.flashAttention == null ? 'auto' : sv.flashAttention ? 'on' : 'off', kvCache: sv.kvCache || 'auto', threads: sv.threads || 0, batchSize: sv.batchSize || 0, mmap: sv.mmap !== false, mlock: !!sv.mlock, cpuMoe: sv.cpuMoe != null ? sv.cpuMoe : '' };
 }
 function formToLoad(f) {
   const o = { contextSize: f.contextSize };
@@ -270,6 +272,7 @@ function formToLoad(f) {
   if (f.kvCache !== 'auto') o.kvCache = f.kvCache;
   if (f.threads) o.threads = f.threads; if (f.batchSize) o.batchSize = f.batchSize;
   if (!f.mmap) o.mmap = false; if (f.mlock) o.mlock = true;
+  if (f.cpuMoe !== '' && f.cpuMoe != null) o.cpuMoe = f.cpuMoe;
   return o;
 }
 async function selectLd(id) {
@@ -303,6 +306,7 @@ function renderLdPane(m, g) {
       <label>Bộ đệm K/V<select id="ldKv"><option value="auto">Tự động</option><option value="f16">F16 (chuẩn)</option><option value="q8_0">Q8_0 (tiết kiệm ~½)</option></select></label>
       <label>Số luồng CPU<input type="number" id="ldThr" min="0" max="256" value="${f.threads || ''}" placeholder="Tự động"></label>
       <label>Kích thước lô<input type="number" id="ldBatch" min="32" max="8192" step="32" value="${f.batchSize || ''}" placeholder="Tự động"></label>
+      ${isMoeModel(m, g) ? `<label title="Mô hình MoE lớn hơn VRAM: để chuyên gia của N lớp đầu chạy trên CPU (phần nhìn ảnh vẫn ở GPU). Để trống: tự chia cho vừa VRAM.">Lớp MoE chạy trên CPU<input type="number" id="ldMoe" min="0" max="999" value="${f.cpuMoe === '' ? '' : f.cpuMoe}" placeholder="Tự động"></label>` : ''}
       <label class="ck"><input type="checkbox" id="ldMmap" ${f.mmap ? 'checked' : ''}> Ánh xạ tệp vào bộ nhớ (mmap)</label>
       <label class="ck"><input type="checkbox" id="ldMlock" ${f.mlock ? 'checked' : ''}> Giữ mô hình trong RAM (không cho đẩy ra ổ đĩa)</label>
     </div><button class="linkbtn small" id="ldReset">Khôi phục mặc định</button></details>`;
@@ -317,6 +321,7 @@ function ldRead() {
   f.flashAttention = $('#ldFa').value; f.kvCache = $('#ldKv').value;
   f.threads = Math.max(0, Math.round(Number($('#ldThr').value) || 0)); f.batchSize = Math.round(Number($('#ldBatch').value) || 0);
   f.mmap = $('#ldMmap').checked; f.mlock = $('#ldMlock').checked;
+  const moe = $('#ldMoe'); if (moe) { const v = String(moe.value).trim(); f.cpuMoe = v === '' ? '' : Math.max(0, Math.min(999, Math.round(Number(v) || 0))); }
 }
 async function ldEstimate() {
   const f = ld.form, id = ld.sel; if (!f || !id) return; const seq = ++ld.estSeq; const gm = ld.metas.get(id); if (!gm || gm.error) return;
@@ -491,7 +496,7 @@ function visTag(c) {
 const catCard = (c, agent = false) => `<div class="card" data-id="${esc(c.id)}">
     <div class="card-top"><div class="av">${esc(c.family.slice(0, 2))}</div><div><h4>${esc(c.name)}</h4><div class="sub">${esc(c.params)} tham số · ${esc(c.quant)} · ${fmtBytes(c.size + (c.mmproj ? c.mmproj.size : 0))}</div></div></div>
     <p>${esc(c.desc)}</p>
-    <div class="tags">${c.recommended ? '<span class="tag rec" title="Qwen3 gọi công cụ tốt nhất trong các mô hình vừa máy này">⭐ Gợi ý: trò chuyện &amp; công cụ</span>' : ''}${c.recScreen && agent && c.agentCheck && c.agentCheck.ok ? '<span class="tag rec" title="Một mô hình vừa lập kế hoạch vừa nhìn màn hình, chọn theo VRAM máy này. Nhà phát triển (Qwen) ghi: Visual Agent — Operates PC/mobile GUIs.">⭐ Gợi ý: điều khiển máy (tự nhìn màn hình)</span>' : ''}${c.recGround ? `<span class="tag rec" title="${esc('Mắt nhìn cho mô hình lập kế hoạch Qwen3, chọn theo VRAM máy này.' + (/phi thương mại/i.test(c.license || '') ? ' Lưu ý giấy phép: ' + c.license + '.' : ''))}">⭐ Gợi ý: mắt nhìn (cặp hai mô hình)</span>` : ''}${c.recPairPlanner ? '<span class="tag rec" title="Lập kế hoạch trong cặp hai mô hình — dùng kèm mắt nhìn được gợi ý.">⭐ Gợi ý: lập kế hoạch (cặp)</span>' : ''}${roleTag(c)}${benchTag(c)}${fitBadge(agent === true ? (c.agentFit || c.fit) : c.fit)}${agent === true && c.agentCheck && !c.agentCheck.ok ? `<span class="tag warn" title="${esc(c.agentCheck.reason)}">⛔ ${esc(c.agentCheck.reason.split(' (')[0])}</span>` : agent === true && c.agentCheck && c.agentCheck.slow ? `<span class="tag warn" title="${esc(c.agentCheck.reason)}">⚠ Chạy chậm cho AIVN AGENT</span>` : ''}${c.vision ? visTag(c) : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
+    <div class="tags">${c.recommended ? '<span class="tag rec" title="Qwen3 gọi công cụ tốt nhất trong các mô hình vừa máy này">⭐ Gợi ý: trò chuyện &amp; công cụ</span>' : ''}${c.recScreen && agent && c.agentCheck && c.agentCheck.ok ? '<span class="tag rec" title="Một mô hình vừa lập kế hoạch vừa nhìn màn hình, chọn theo VRAM máy này. Nhà phát triển (Qwen) ghi: Visual Agent — Operates PC/mobile GUIs.">⭐ Gợi ý: điều khiển máy (tự nhìn màn hình)</span>' : ''}${c.recGround ? `<span class="tag rec" title="${esc('Mắt nhìn cho mô hình lập kế hoạch Qwen3, chọn theo VRAM máy này.' + (/phi thương mại/i.test(c.license || '') ? ' Lưu ý giấy phép: ' + c.license + '.' : ''))}">⭐ Gợi ý: mắt nhìn (cặp hai mô hình)</span>` : ''}${c.recPairPlanner ? '<span class="tag rec" title="Lập kế hoạch trong cặp hai mô hình — dùng kèm mắt nhìn được gợi ý.">⭐ Gợi ý: lập kế hoạch (cặp)</span>' : ''}${roleTag(c)}${benchTag(c)}${fitBadge(agent === true ? (c.agentFit || c.fit) : c.fit)}${agent === true && c.agentCheck && c.agentCheck.code === 'pending' ? `<span class="tag pending" title="${esc(c.agentCheck.reason)}">⏳ Chờ đo</span>` : agent === true && c.agentCheck && !c.agentCheck.ok ? `<span class="tag warn" title="${esc(c.agentCheck.reason)}">⛔ ${esc(c.agentCheck.reason.split(' (')[0])}</span>` : agent === true && c.agentCheck && c.agentCheck.slow ? `<span class="tag warn" title="${esc(c.agentCheck.reason)}">⚠ Chạy chậm cho AIVN AGENT</span>` : ''}${c.vision ? visTag(c) : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
     ${claimsRow(c)}
     <div class="card-foot" data-job="${esc(jobIdFor(c.repo, c.file))}">${footHtml({ ...c, size: c.size + (c.mmproj ? c.mmproj.size : 0) }, `data-act="dl-cat" data-id="${esc(c.id)}"`, c.file)}</div>
     <button class="linkish" data-act="open-repo" data-repo="${esc(c.repo)}" title="Bảng mọi bản lượng tử (Q4/Q5/Q6/Q8…) của repo này, mỗi dòng có mức chạy trên máy bạn">Chọn bản lượng tử khác (Q4/Q5/Q8…) · ${esc(c.repo)}</button></div>`;
@@ -581,7 +586,7 @@ $('#view-discover').addEventListener('click', async (e) => {
     if (act === 'open-repo') openRepo(b.dataset.repo);
     if (act === 'open-hf') A.openExternal(b.dataset.url);
     if (act === 'back') { disc.repo = null; $('#repoArea').hidden = true; if (disc.results) $('#hfArea').hidden = false; else { $('#sugArea').hidden = false; renderCatalog(); } }
-    if (act === 'use') { await refreshModels(); const name = b.dataset.file.split('/').pop().toLowerCase(); const m = state.models.find(x => x.file.toLowerCase() === name); show('chat'); if (m) loadModel(m.id); }
+    if (act === 'use') { await refreshModels(); const name = b.dataset.file.split('/').pop().toLowerCase(); const cands = state.models.filter(x => { const f = x.file.toLowerCase(); return f === name || f.endsWith('-' + name); }); /* tên tệp chung (q4_k_m.gguf) lưu kèm tên repo */ const m = cands.find(x => x.repo && disc.repo && x.repo.toLowerCase() === disc.repo.replace(/[^\w.\-/]+/g, '_').toLowerCase()) || cands.find(x => x.file.toLowerCase() === name) || cands[0]; show('chat'); if (m) loadModel(m.id); }
   } catch (err) { toast(cleanErr(err.message), true); }
 });
 
@@ -1859,7 +1864,7 @@ $('#agentWarn').addEventListener('click', async (e) => {
   const ey = e.target.closest('[data-eyes]');
   if (ey) { ey.disabled = true; try { const r = await A.agentEyes(ey.dataset.eyes); if (r.installed) toast(`Đã bật mắt nhìn: ${r.name} ✓`); else { if (r.job) paintJob(r.job); toast(`Đang tải ${r.name}. Tải xong AIVN tự dùng làm mắt nhìn.`); } } catch (err) { toast(cleanErr(err.message), true); ey.disabled = false; } refreshAgent(); return; }
   const b = e.target.closest('[data-rec]'); if (!b) return;
-  if (b.dataset.installed === '1') { const c = state.catalog.find(x => x.id === b.dataset.rec) || (await A.catalog()).find(x => x.id === b.dataset.rec); await refreshModels(); const m = state.models.find(x => c && x.file.toLowerCase() === c.file.toLowerCase()); if (m) loadModel(m.id); }
+  if (b.dataset.installed === '1') { const c = state.catalog.find(x => x.id === b.dataset.rec) || (await A.catalog()).find(x => x.id === b.dataset.rec); await refreshModels(); const m = state.models.find(x => c && x.catalog && x.catalog.id === c.id); if (m) loadModel(m.id); }
   else { show('discover'); try { const j = await A.dlStart({ catalogId: b.dataset.rec }); paintJob(j); toast('Đang tải mô hình cho AIVN AGENT, xem tiến độ ở mục Đang tải'); } catch (err) { toast(cleanErr(err.message), true); } }
 });
 $('#addFolder').addEventListener('click', async () => { state.agent = await A.agentAddFolder(); refreshAgent(); });

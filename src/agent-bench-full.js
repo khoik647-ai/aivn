@@ -11,17 +11,24 @@ const path = require('path');
 const fs = require('fs');
 
 const THRESH = { tools: 0.92, grounding: 7, tasks: 7 }; // ngưỡng hiện hành: gọi công cụ ≥ 23/25 (92 %), định vị ≥ 7/10, Điểm tác vụ ≥ 7/10
-// mô hình Qwen3-VL đã tải (theo catalog hoặc theo tên tệp) — 2B/4B/8B, kể cả tệp nhập tay
+// mô hình đã tải để đo (theo catalog hoặc theo tên tệp, kể cả tệp nhập tay), cần tệp thị giác:
+//  Qwen3-VL 2B/4B/8B (nhãn “2B/4B/8B” như cũ) + mô hình agent mới đang “Chờ đo” (Qwen3.5/3.6/3.8, Holo2/3.1/4, UI-Venus-2, GUI-Owl, EvoCUA)
+const NEW_AGENT_RE = /(qwen3\.?[5-9])[-_ ]?(\d+(?:\.\d+)?)b|(holo-?[2-9](?:\.\d)?)[-_ ]?(\d+)b|(ui-?venus-?2)[-_ ]?(\d+)b|(gui-?owl-?1\.?5)[-_ ]?(\d+)b|(evocua)[-_ ]?(\d+)b/;
 function findQwenVL(models) {
   const out = [];
   for (const m of models || []) {
+    if (m.incomplete || !m.mmproj) continue; // cần tệp thị giác để nhìn màn hình
     const s = `${m.catalog ? m.catalog.id : ''} ${m.file || ''}`.toLowerCase();
-    const k = /qwen3[-_ ]?vl[-_ ]?(2|4|8)b/.exec(s); if (!k || m.incomplete) continue;
-    if (!m.mmproj) continue; // cần tệp thị giác để nhìn màn hình
-    out.push({ id: m.id, size: `${k[1]}B`, file: m.file, quant: (/(q\d_k_[ms]|q\d_0|q\d_k|iq\d_\w+|f16|bf16)/i.exec(m.file || '') || [])[0] || '' });
+    const quant = (/(q\d_k_[ms]|q\d_0|q\d_k|iq\d_\w+|f16|bf16)/i.exec(m.file || '') || [])[0] || '';
+    const k = /qwen3[-_ ]?vl[-_ ]?(2|4|8)b/.exec(s);
+    if (k) { out.push({ id: m.id, size: `${k[1]}B`, b: +k[1], file: m.file, quant }); continue; }
+    const n = NEW_AGENT_RE.exec(s);
+    if (!n && !(m.catalog && m.catalog.agentCandidate)) continue;
+    const fam = n ? (n[1] || n[3] || n[5] || n[7] || n[9]) : ''; const b = n ? +(n[2] || n[4] || n[6] || n[8] || n[10]) : 99;
+    const name = m.catalog ? m.catalog.name : `${fam.replace(/^qwen/, 'Qwen').replace(/^holo-?/, 'Holo')} ${b}B`;
+    out.push({ id: m.id, size: name, b, file: m.file, quant, candidate: true });
   }
-  const ord = { '2B': 0, '4B': 1, '8B': 2 };
-  return out.sort((a, b) => ord[a.size] - ord[b.size]);
+  return out.sort((a, b) => a.b - b.b || !!a.candidate - !!b.candidate);
 }
 
 // ---------- 1) gọi công cụ (không chạy công cụ) ----------

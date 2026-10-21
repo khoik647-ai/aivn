@@ -55,7 +55,7 @@ class VisionError extends Error { constructor(msg, code) { super(msg); this.code
 function createVisionServer({ log = () => {} } = {}) {
   let proc = null, port = 0, key = '', info = null, tail = [];
 
-  async function start({ id, modelPath, mmprojPath, contextSize = 4096, gpu = true, threads, batchSize }) {
+  async function start({ id, modelPath, mmprojPath, contextSize = 4096, gpu = true, threads, batchSize, extraArgs }) {
     await stop();
     const exe = findServer();
     if (!exe) throw new VisionError('Bản AIVN này thiếu bộ máy nhìn ảnh (llama-server). Hãy cài lại AIVN.', 'NO_SERVER');
@@ -65,6 +65,8 @@ function createVisionServer({ log = () => {} } = {}) {
     if (!gpu) args.push('-ngl', '0', ...(mmprojPath ? ['--no-mmproj-offload'] : []));
     if (Number(threads) > 0) args.push('-t', String(Math.round(threads)), '-tb', String(Math.round(threads)));
     if (Number(batchSize) > 0) args.push('-b', String(Math.min(Math.round(batchSize), contextSize)));
+    // mô hình agent mới: --reasoning off, --n-cpu-moe N… (model-launch.js; lọc lại theo danh sách cho phép)
+    const xa = require('./model-launch').sanitize(extraArgs); if (xa.length) { args.push(...xa); log(`[vision] tham số riêng của mô hình: ${xa.join(' ')}`); }
     const t0 = Date.now();
     proc = spawn(exe, args, { cwd: path.dirname(exe), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
       env: { ...process.env, LLAMA_ARG_HOST: '127.0.0.1' } });

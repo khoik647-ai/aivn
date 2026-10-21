@@ -212,7 +212,7 @@ function initStores() {
   admin = createAdmin({ dir: ud, fetchJson, fetchRaw: (u, o) => net.fetch(u, { cache: 'no-store', ...o }), log,
     publicX: !app.isPackaged && process.env.AIVN_TEST_PUBKEY ? process.env.AIVN_TEST_PUBKEY : LIC.PUBLIC_KEY_X });
   media = MEDIA.createMedia({ app, protocol, BrowserWindow, ipcMain, modelsDir: () => paths.models, isTest, log: (k, m, d) => LOG.log(k, m, d), threads: () => Math.max(2, Math.min(8, require('os').cpus().length - 2)) });
-  downloader = createDownloader({ dir: () => paths.models, checkSpace: (d, need) => require('./models-dir').checkSpace(d, need), send: (ch, d) => { send(ch, d); if (ch === 'dl:done' && d && d.catalogId && d.catalogId === settings.data.pendingEyes) setTimeout(() => { const c = catalog.find(x => x.id === d.catalogId); const m = c && listModels().find(x => x.file.toLowerCase() === c.file.toLowerCase() && x.mmproj); if (m) { settings.data.agentGrounder = m.id; settings.data.pendingEyes = null; settings.save(); LOG.log('desk', 'Đã tải xong mắt nhìn ' + m.file + ' — dùng làm mô hình định vị'); send('settings:changed', { agentGrounder: m.id }); send('app:notice', { text: `Đã có mắt nhìn: ${c.name}. AIVN AGENT sẽ tự dùng mô hình này để nhìn màn hình.`, kind: 'ok' }); } }, 300); }, getToken: () => settings.data.hfToken || null, maxConcurrent: 2, log: (m) => isTest && console.log(m) });
+  downloader = createDownloader({ dir: () => paths.models, checkSpace: (d, need) => require('./models-dir').checkSpace(d, need), send: (ch, d) => { send(ch, d); if (ch === 'dl:done' && d && d.catalogId && d.catalogId === settings.data.pendingEyes) setTimeout(() => { const c = catalog.find(x => x.id === d.catalogId); const m = c && listModels().find(x => x.catalog && x.catalog.id === c.id && x.mmproj); if (m) { settings.data.agentGrounder = m.id; settings.data.pendingEyes = null; settings.save(); LOG.log('desk', 'Đã tải xong mắt nhìn ' + m.file + ' — dùng làm mô hình định vị'); send('settings:changed', { agentGrounder: m.id }); send('app:notice', { text: `Đã có mắt nhìn: ${c.name}. AIVN AGENT sẽ tự dùng mô hình này để nhìn màn hình.`, kind: 'ok' }); } }, 300); }, getToken: () => settings.data.hfToken || null, maxConcurrent: 2, log: (m) => isTest && console.log(m) });
 }
 // ---------- Cổng vào: kích hoạt (bắt buộc) + Khoá ứng dụng (tuỳ chọn) ----------
 let computerTools = null, admin = null;
@@ -306,7 +306,8 @@ const log = (msg) => { LOG.log('app', msg); const e = { t: Date.now(), msg }; se
 const SPLIT_RE = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i;
 // Mô hình nhúng (dùng cho tìm kiếm tài liệu), không phải mô hình trò chuyện
 const EMBED_RE = /(^|[-_.])(embed|embedding|bge-m3|bge-small|bge-base|bge-large|multilingual-e5|e5-(small|base|large)|nomic-embed|gte-)/i;
-function modelIdFromFile(f) { const b = path.basename(f); const m = b.match(SPLIT_RE); return (m ? m[1] : b.replace(/\.gguf$/i, '')).toLowerCase(); }
+const NAMES = require('./model-names'); // mục 5: tên tệp chung (q4_k_m.gguf) → id/khớp danh mục kèm tên repo
+function modelIdFromFile(f) { return NAMES.idFor(f, SPLIT_RE); }
 
 // Quét thư mục mô hình (models/<tác giả>/<repo>/<tệp>.gguf và tệp ở gốc). Mô hình chia phần chỉ hiện một dòng.
 function scanDir(dir, depth, out, root = paths.models) {
@@ -329,7 +330,7 @@ function scanDir(dir, depth, out, root = paths.models) {
         }
       }
       const rel = path.relative(root, dir);
-      out.push({ id: modelIdFromFile(e.name), file: e.name, path: full, size, mtime: fs.statSync(full).mtimeMs, source: 'downloaded', parts, incomplete: missing > 0, mmproj, vision: !!mmproj, repo: rel && rel.split(path.sep).length === 2 ? rel.split(path.sep).join('/') : null });
+      out.push({ id: modelIdFromFile(full), file: e.name, path: full, size, mtime: fs.statSync(full).mtimeMs, source: 'downloaded', parts, incomplete: missing > 0, mmproj, vision: !!mmproj, repo: rel && rel.split(path.sep).length === 2 ? rel.split(path.sep).join('/') : null });
     } catch {}
   }
   if (depth > 0) for (const e of ents) if (e.isDirectory()) scanDir(path.join(dir, e.name), depth - 1, out, root);
@@ -347,9 +348,9 @@ function listModels() {
   const st = engine.status();
   const seen = new Set();
   return out.filter(m => !m.incomplete && !seen.has(m.id) && seen.add(m.id))
-    .map(m => ({ ...m, loaded: st.loaded && st.path === m.path, catalog: catalog.find(c => c.file.toLowerCase() === m.file.toLowerCase()) || null }));
+    .map(m => ({ ...m, loaded: st.loaded && st.path === m.path, catalog: NAMES.catalogFor(m, catalog) }));
 }
-const isInstalled = (file) => listModels().some(m => m.file.toLowerCase() === path.basename(file).toLowerCase());
+const isInstalled = (x) => (x && typeof x === 'object' ? listModels().some(m => m.catalog && m.catalog.id === x.id) : listModels().some(m => m.file.toLowerCase() === path.basename(x).toLowerCase()));
 
 // Nhật ký lỗi bộ máy (để chẩn đoán): userData/logs/engine.log, tối đa ~1 MB
 function engineLog(title, e, extra = {}) {
@@ -395,7 +396,7 @@ function startIdleUnload() {
 const cleanChatParams = (p) => require('./chatfit').cleanChatParams(p);
 function fitOverflow(messages, policy, maxTokens) { return require('./chatfit').fitOverflow(messages, policy, maxTokens, engine.status().contextSize || 0, (t) => engine.countTokens(t)); }
 // 0.16: tham số nạp theo từng mô hình (hộp nạp kiểu LM Studio). Lưu ở settings.modelLoad[id].
-const LOAD_KEYS = ['contextSize', 'gpuLayers', 'flashAttention', 'kvCache', 'threads', 'batchSize', 'mmap', 'mlock'];
+const LOAD_KEYS = ['contextSize', 'gpuLayers', 'flashAttention', 'kvCache', 'threads', 'batchSize', 'mmap', 'mlock', 'cpuMoe'];
 function cleanLoad(o) {
   const r = {}; if (!o || typeof o !== 'object') return r;
   const int = (v, lo, hi) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n >= lo && n <= hi ? n : undefined; };
@@ -406,6 +407,7 @@ function cleanLoad(o) {
   if (o.threads != null && o.threads !== 0) r.threads = int(o.threads, 1, 256);
   if (o.batchSize != null) r.batchSize = int(o.batchSize, 32, 8192);
   if (typeof o.mmap === 'boolean') r.mmap = o.mmap; if (typeof o.mlock === 'boolean') r.mlock = o.mlock;
+  if (o.cpuMoe != null && o.cpuMoe !== '') r.cpuMoe = int(o.cpuMoe, 0, 999); // mục 6: --n-cpu-moe N (mô hình MoE), trống = llama-server tự vừa VRAM (--fit)
   for (const k of Object.keys(r)) if (r[k] === undefined) delete r[k];
   return r;
 }
@@ -451,8 +453,8 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       const h = await hw(); const vt = h.gpu && h.gpu !== 'metal' && h.vram && !h.vram.integratedOnly ? h.vram.total : 0;
       if (vt > 0 && vt < 6 * 1024 ** 3) { ctxNote = `Đã giới hạn độ dài ngữ cảnh ở 8192 (bạn chọn ${ctxWant}) vì GPU chỉ có ${(vt / 1024 ** 3).toFixed(1)} GB VRAM.`; ctxWant = 8192; }
     }
-    const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj } : {}), ...(ml.mmap === false ? { useMmap: false } : {}), ...(ml.mlock ? { useMlock: true } : {}), ...(load ? { reload: true } : {}) };
-    LOG.log('load', `Bắt đầu nạp ${m.file}`, { size: m.size, ctx: opts.contextSize, gpuLayers: opts.gpuLayers ?? 'tự động', vision: !!opts.mmproj });
+    const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj, serverArgs: require('./model-launch').launchArgs({ id: m.id, family: SC.groundingFamily(NAMES.isGeneric(m.file) ? m.id : (m.file || m.id)), catalog: m.catalog, load: ml }) } : {}), ...(ml.mmap === false ? { useMmap: false } : {}), ...(ml.mlock ? { useMlock: true } : {}), ...(load ? { reload: true } : {}) };
+    LOG.log('load', `Bắt đầu nạp ${m.file}`, { size: m.size, ctx: opts.contextSize, gpuLayers: opts.gpuLayers ?? 'tự động', vision: !!opts.mmproj, ...(opts.serverArgs && opts.serverArgs.length ? { args: opts.serverArgs.join(' ') } : {}) });
     const tLoad = Date.now();
     // B38: số đo VRAM thật — VRAM đã dùng lúc chưa nạp mô hình (màn hình, ứng dụng khác) làm mốc
     try { if (!engine.status().loaded) { const h0 = await engine.hardwareInfo(); if (h0 && h0.vram && h0.vram.total > 0 && !h0.vram.integratedOnly) idleVramUsed = h0.vram.total - h0.vram.free; } } catch {}
@@ -568,13 +570,13 @@ async function embedForMemory() {
 // Mô hình chỉ đọc chữ KHÔNG nhìn được màn hình. Khi bật Điều khiển màn hình mà mô hình chính không nhìn được ảnh:
 // dùng mô hình định vị đã chọn, không có thì tự dùng mô hình nhìn ảnh đã cài phù hợp nhất (eyesFor), không có thì cảnh báo + nút "Nạp thêm mắt nhìn".
 const vramTotal = () => (hwCache && hwCache.gpu && hwCache.gpu !== 'metal' && hwCache.vram && !hwCache.vram.integratedOnly ? hwCache.vram.total || 0 : 0);
-function catalogLite() { return catalog.map(c => ({ ...c, installed: isInstalled(c.file) })); }
+function catalogLite() { return catalog.map(c => ({ ...c, installed: isInstalled(c) })); }
 function eyesModel() { // mô hình nhìn ảnh đã cài sẽ làm mắt nhìn (id trong listModels) hoặc null
   const ms = listModels().filter(m => m.mmproj);
   if (settings.data.agentGrounder) { const m = ms.find(x => x.id === settings.data.agentGrounder); if (m) return { model: m, auto: false }; }
   if (!ms.length) return null;
   const R = require('./recommend'); const order = [R.eyesFor(catalogLite(), vramTotal())].concat(R.PAIR_GROUNDER.map(x => catalog.find(c => c.id === x.id)), R.VISION_SOLO.map(x => catalog.find(c => c.id === x.id))).filter(Boolean);
-  for (const c of order) { const m = ms.find(x => x.file.toLowerCase() === c.file.toLowerCase()); if (m) return { model: m, auto: true }; }
+  for (const c of order) { const m = ms.find(x => x.catalog && x.catalog.id === c.id); if (m) return { model: m, auto: true }; }
   return { model: ms[0], auto: true };
 }
 function eyesAdvice() {
@@ -590,7 +592,7 @@ function agentAdvice() {
   const m = listModels().find(x => x.path === st.path) || null;
   const p = m && m.catalog && m.catalog.params ? parseFloat(String(m.catalog.params).replace(',', '.')) : null;
   const small = p != null ? p < 3.5 : m ? m.size < 2.2e9 : false;
-  const recommended = catalog.filter(c => require('./recommend').PLANNERS.includes(c.id)).map(c => ({ id: c.id, name: c.name, size: c.size + (c.mmproj ? c.mmproj.size : 0), installed: isInstalled(c.file) }));
+  const recommended = catalog.filter(c => require('./recommend').PLANNERS.includes(c.id)).map(c => ({ id: c.id, name: c.name, size: c.size + (c.mmproj ? c.mmproj.size : 0), installed: isInstalled(c) }));
   const tools = toolSupport({ claims: m && m.catalog ? m.catalog.claims : null, mmproj: m ? m.mmproj || (m.catalog && m.catalog.mmproj) || null : null, toolLevel: m && m.catalog ? m.catalog.toolLevel : null, id: m && m.catalog ? m.catalog.id : '', name: m && m.catalog ? m.catalog.name : (m && m.name) || '', file: m ? m.file : st.id, params: m && m.catalog ? m.catalog.params : null, meta: st.meta, toolMode: st.toolMode, wrapper: st.chatWrapper, size: m ? m.size : 0 });
   return { model: m ? (m.catalog ? m.catalog.name : m.file) : st.id, params: p, small, good: !!(m && m.catalog && m.catalog.agent), planner: !!(m && m.catalog && require('./recommend').PLANNERS.includes(m.catalog.id)), recommended, tools, toolMode: st.toolMode || null, vision: !!st.vision, eyes: eyesAdvice() };
 }
@@ -682,7 +684,7 @@ async function getGrounder(force) {
       if (!plan.ok) { gpu = false; LOG.log('load', 'Cảnh báo bộ nhớ GPU: ' + plan.message); send('app:notice', { text: plan.message, kind: 'warn' }); }
     } catch {}
     const gml = modelLoadFor(m.id); const gpf = await perfProfile().catch(() => ({})); const gth = gml.threads || gpf.threads; const gbs = gml.batchSize || gpf.batchSize; // B26
-    await engine.groundLoad(m.id, m.path, m.mmproj, { contextSize: 4096, gpu, ...(gth ? { threads: gth } : {}), ...(gbs ? { batchSize: gbs } : {}) });
+    await engine.groundLoad(m.id, m.path, m.mmproj, { contextSize: 4096, gpu, serverArgs: require('./model-launch').launchArgs({ id: m.id, family: SC.groundingFamily(NAMES.isGeneric(m.file) ? m.id : (m.file || m.id)), catalog: m.catalog, load: gml }), ...(gth ? { threads: gth } : {}), ...(gbs ? { batchSize: gbs } : {}) });
     LOG.log('load', `Đã nạp mô hình định vị sau ${Date.now() - t} ms`);
   }
   return { id: m.path, engine: { generate: (msgs, o) => engine.groundGenerate(msgs, o) } };
@@ -940,21 +942,21 @@ const safeFile = (f) => typeof f === 'string' && /\.gguf$/i.test(f) && !f.split(
 function annotateGroup(repo, g) {
   const job = downloader.get(`${repo}::${g.files[0].path}`);
   const part = downloader.partialFor(repo, g.files);
-  return { ...g, installed: part.complete || isInstalled(g.files[0].path), partial: part.complete ? 0 : part.received, job };
+  return { ...g, installed: part.complete || isInstalled(NAMES.localNameFor(repo, g.files[0].path)), partial: part.complete ? 0 : part.received, job };
 }
 function catalogList() {
   let H = null;
   return hw().then(h => (H = h, catalog.map(c => {
     const job = downloader.get(`${c.repo}::${c.file}`);
-    const part = downloader.partialFor(c.repo, [{ path: c.file, size: c.size }, ...(c.mmproj ? [{ path: c.mmproj.file, size: c.mmproj.size }] : [])]);
-    return { ...c, installed: part.complete || isInstalled(c.file), partial: part.complete ? 0 : part.received, job, fit: hf.fitFor(c.size, h, fitMetaCat(c)), tools: toolSupport(c) };
+    const part = downloader.partialFor(c.repo, [{ path: c.file, size: c.size, localName: c.localName }, ...(c.mmproj ? [{ path: c.mmproj.file, size: c.mmproj.size, localName: c.mmproj.localName }] : [])]);
+    return { ...c, installed: part.complete || isInstalled(c), partial: part.complete ? 0 : part.received, job, fit: hf.fitFor(c.size, h, fitMetaCat(c)), tools: toolSupport(c) };
   }))).then(list => {
     // B17: một cách tính duy nhất (agent-plan.js) cho ngữ cảnh AIVN AGENT, độ vừa máy của thẻ trong mục Điều khiển máy tính,
     // gợi ý ⭐ điều khiển máy và cổng AIVN AGENT
     const sc = benchScores(); const P = agentPlanFor(H, sc);
     list = list.map(c => ({ ...c, agentFit: catAgentFit(c, H, P.ctx) }));
     return require('./recommend').annotate(list, sc, vramTotal(), AP.elOpts(P)).list.map(c => ({ ...c, strength: require('./fit').strength(c), agentCtx: P.ctx,
-      agentCheck: AE.eligibility({ vision: !!c.mmproj, catalog: c, fit: c.agentFit }, { shipped: sc.shipped[c.id], ...AP.elOpts(P) }) }));
+      agentCheck: AE.eligibility({ vision: !!c.mmproj, catalog: c, fit: c.agentFit }, { shipped: sc.shipped[c.id], local: (sc.local || {})[c.id], ...AP.elOpts(P) }) }));
   });
 }
 
@@ -1054,10 +1056,10 @@ function registerIpc() {
   ipcMain.handle('agent:eyes', async (_e, catalogId) => {
     await hw(); const R = require('./recommend');
     const c = catalog.find(x => x.id === catalogId) || R.eyesFor(catalogLite(), vramTotal()); if (!c || !c.mmproj) throw new Error('Không có mô hình nhìn ảnh phù hợp');
-    const m = listModels().find(x => x.file.toLowerCase() === c.file.toLowerCase() && x.mmproj);
+    const m = listModels().find(x => x.catalog && x.catalog.id === c.id && x.mmproj);
     if (m) { settings.data.agentGrounder = m.id; settings.data.pendingEyes = null; settings.save(); LOG.log('desk', 'Người dùng chọn mắt nhìn ' + m.file); return { ok: true, installed: true, name: c.name }; }
     settings.data.pendingEyes = c.id; settings.save();
-    const files = [{ path: c.file, size: c.size }, { path: c.mmproj.file, size: c.mmproj.size }];
+    const files = [{ path: c.file, size: c.size, localName: c.localName }, { path: c.mmproj.file, size: c.mmproj.size, localName: c.mmproj.localName }];
     const j = downloader.enqueue({ repo: c.repo, files, name: c.name, quant: c.quant, catalogId: c.id, urlFor: hf.resolveUrl });
     return { ok: true, installed: false, job: j, name: c.name };
   });
@@ -1073,8 +1075,8 @@ function registerIpc() {
   ipcMain.handle('dl:start', (_e, spec) => {
     if (spec && spec.catalogId) {
       const c = catalog.find(x => x.id === spec.catalogId); if (!c) throw new Error('Mô hình không có trong danh mục');
-      const files = [{ path: c.file, size: c.size }];
-      if (c.mmproj) files.push({ path: c.mmproj.file, size: c.mmproj.size });
+      const files = [{ path: c.file, size: c.size, localName: c.localName }];
+      if (c.mmproj) files.push({ path: c.mmproj.file, size: c.mmproj.size, localName: c.mmproj.localName });
       return downloader.enqueue({ repo: c.repo, files, name: c.name, quant: c.quant, catalogId: c.id, urlFor: hf.resolveUrl });
     }
     if (!spec || !safeRepo(spec.repo) || !Array.isArray(spec.files) || !spec.files.length || !spec.files.every(f => safeFile(f.path))) throw new Error('Yêu cầu tải không hợp lệ');

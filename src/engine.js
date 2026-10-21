@@ -111,12 +111,12 @@ async function loadModel(id, modelPath, opts = {}) {
       await unloadModel();
       const l = await getLlama().catch(() => null);
       const vpf = opts.perf || {}; const vx = { ...(vpf.threads ? { threads: vpf.threads } : {}), ...(vpf.batchSize ? { batchSize: vpf.batchSize } : {}) }; // B26: số luồng/lô của từng mô hình áp dụng cả cho llama-server
-      try { await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: !!(l && l.gpu), ...vx }); }
+      try { await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: !!(l && l.gpu), extraArgs: opts.serverArgs, ...vx }); }
       catch (e) {
         if (!(l && l.gpu) || ['VCREDIST', 'NO_SERVER'].includes(e.code)) throw e;
         console.warn('[engine] máy chủ nhìn ảnh lỗi với GPU, thử lại bằng CPU: ' + e.message);
         await getVision().stop().catch(() => {});
-        await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: false, ...vx });
+        await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: false, extraArgs: opts.serverArgs, ...vx });
       }
       visionOn = true;
     })();
