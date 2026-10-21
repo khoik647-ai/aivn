@@ -48,8 +48,8 @@ test('MoE: tốc độ tính theo phần hoạt động; E4B tính theo độ m�
   const moe = F.machineFit({ size: 18.6e9, params: '30B (MoE, 3B hoạt động)' }, PC), dense = F.machineFit({ size: 18.6e9, params: '30B' }, PC);
   assert.ok(moe.tps > dense.tps * 3);
 });
-test('laptop 4 GB: Qwen3-VL 2B (nằm trọn VRAM) là mô hình AIVN AGENT, 4B tràn sang RAM; máy không GPU: mô hình nhỏ chạy mượt bằng CPU', () => {
-  const l4 = withFit(LAPTOP, 16384); const r = R.recommend(l4, { shipped }); assert.strictEqual(r.agent, 'qwen3-vl-2b-instruct-q8_0'); assert.strictEqual(l4.find(c => c.id === 'qwen3-vl-4b-instruct-q4_k_m').fit.group, 'slow');
+test('laptop 4 GB: Qwen3-VL 4B (tràn sang RAM, Chạy chậm) là mô hình AIVN AGENT — 2B bị bỏ vì gọi công cụ 13/25; máy không GPU: mô hình nhỏ chạy mượt bằng CPU', () => {
+  const l4 = withFit(LAPTOP, 16384); const r = R.recommend(l4, { shipped }); assert.strictEqual(r.agent, 'qwen3-vl-4b-instruct-q4_k_m'); assert.strictEqual(l4.find(c => c.id === 'qwen3-vl-4b-instruct-q4_k_m').fit.group, 'slow');
   assert.strictEqual(F.machineFit({ size: 0.5e9, params: '0.6B' }, { ram: 8 * G }).group, 'smooth');
 });
 
@@ -69,8 +69,9 @@ test('AIVN AGENT: định vị dưới 6/10 bị khoá; mô hình quá nặng b�
   const tiny = { ram: 4 * G }; const m = asInstalled('qwen3-vl-8b-instruct-q4_k_m', tiny);
   assert.match(elig(m).reason, /^Quá nặng cho máy/);
 });
-test('AIVN AGENT: Qwen3-VL 8B/4B/2B dùng được; mô hình tốt nhất đã cài là mạnh nhất chạy mượt', () => {
-  for (const id of ['qwen3-vl-8b-instruct-q4_k_m', 'qwen3-vl-4b-instruct-q4_k_m', 'qwen3-vl-2b-instruct-q8_0']) assert.ok(elig(asInstalled(id)).ok, id);
+test('AIVN AGENT: Qwen3-VL 8B/4B dùng được, 2B bị khoá “Không gọi công cụ ổn định” (13/25); mô hình tốt nhất đã cài là mạnh nhất chạy mượt', () => {
+  for (const id of ['qwen3-vl-8b-instruct-q4_k_m', 'qwen3-vl-4b-instruct-q4_k_m']) assert.ok(elig(asInstalled(id)).ok, id);
+  assert.strictEqual(elig(asInstalled('qwen3-vl-2b-instruct-q8_0')).reason, 'Không gọi công cụ ổn định');
   const inst = ['qwen_qwen3-8b-q4_k_m', 'qwen3-vl-2b-instruct-q8_0', 'qwen3-vl-8b-instruct-q4_k_m', 'ui-tars-1.5-7b-q4_k_m'].map(id => ({ ...asInstalled(id), installed: true }));
   assert.strictEqual(AE.bestFor(inst, { shipped }).id, 'qwen3-vl-8b-instruct-q4_k_m');
   assert.strictEqual(AE.bestFor([asInstalled('qwen_qwen3-8b-q4_k_m')], { shipped }), null);

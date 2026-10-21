@@ -30,7 +30,7 @@ test('điều khiển màn hình (quy tắc 0.16): luôn một mô hình nhìn �
   const S = (v) => R.screenSetup(list([], v * GB), v * GB, { shipped: require('../src/bench-results.json').models });
   assert.deepStrictEqual(S(11.93).solo, 'qwen3-vl-8b-instruct-q4_k_m');
   assert.strictEqual(S(11.93).pair, null);
-  assert.deepStrictEqual(S(4).solo, 'qwen3-vl-2b-instruct-q8_0'); // 4 GB: Qwen3-VL 4B + ngữ cảnh 16K tràn sang RAM; 2B nằm trọn trong VRAM
+  assert.deepStrictEqual(S(4).solo, 'qwen3-vl-4b-instruct-q4_k_m'); // beta.2: 2B không đạt bài gọi công cụ (13/25, docs/verified.md#v016-goi-cong-cu) → 4 GB dùng 4B (Chạy chậm)
   assert.strictEqual(S(4).pair, null);
   assert.deepStrictEqual(S(0).solo, 'qwen3-vl-4b-instruct-q4_k_m'); // không GPU, 16 GB RAM: 4B vẫn ≥ 10 token/giây ước tính trên CPU
 });

@@ -21,13 +21,16 @@ function plan(entries, fitAt, scores = {}) {
   const smooth = (list) => list.some(m => AE.eligibility({ ...m, fit: m.agentFit }, { shipped: m.catalog && (scores.shipped || {})[m.catalog.id], local: (scores.local || {})[m.id] }).ok);
   if (smooth(at(CTX_FULL))) return { ctx: CTX_FULL, lowered: false, allowSlow: false, maxSpill: 0 };
   if (smooth(at(CTX_LOW))) return { ctx: CTX_LOW, lowered: true, allowSlow: true, maxSpill: SMALL_SPILL };
-  return { ctx: CTX_LOW, lowered: true, allowSlow: true, maxSpill: Infinity };
+  // beta.2: (2B bị bỏ khỏi AIVN AGENT) không có mô hình chạy mượt nhưng có mô hình tràn ít (≤ 1 GB) → vẫn chỉ nhận mô hình tràn ít
+  // (vd. laptop 4 GB: Qwen3-VL 4B “Chạy chậm”, 8B tràn vài GB vẫn là “Quá nặng”); không có cả mô hình tràn ít → mọi mô hình đủ nhanh
+  const low = at(CTX_LOW); const okSmall = low.some(m => AE.eligibility({ ...m, fit: m.agentFit }, { shipped: m.catalog && (scores.shipped || {})[m.catalog.id], local: (scores.local || {})[m.id], allowSlow: true, maxSpill: SMALL_SPILL }).ok);
+  return { ctx: CTX_LOW, lowered: true, allowSlow: true, maxSpill: okSmall ? SMALL_SPILL : Infinity, noSmooth: true };
 }
 const elOpts = (p) => ({ allowSlow: !!(p && p.allowSlow), maxSpill: !p ? 0 : p.maxSpill == null ? Infinity : p.maxSpill });
 // câu giải thích cho giao diện
 function note(p) {
   if (!p || !p.lowered) return '';
-  return p.maxSpill === Infinity
+  return p.maxSpill === Infinity || p.noSmooth
     ? 'Máy này không có mô hình AIVN AGENT nào nằm trọn trong VRAM, nên AIVN dùng ngữ cảnh 12K cho AIVN AGENT và cho phép mô hình “Chạy chậm” (mỗi bước có thể mất 10–30 giây).'
     : 'AIVN AGENT dùng ngữ cảnh 12K trên máy này để mô hình nằm trọn trong VRAM (lịch sử và ảnh màn hình được tự thu gọn). Mô hình tràn ít (dưới 1 GB) vẫn chọn được nhưng chậm hơn.';
 }

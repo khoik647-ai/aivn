@@ -165,6 +165,7 @@ function createDesktopAgent(deps) {
       } catch (e) { deps.log && deps.log('desk', 'OCR lỗi: ' + e.message); }
     }
     const obs = U.normalize(raw, { ocr: ocrLines, max: 160 });
+    s.idReg = s.idReg || {}; U.stabilizeIds(obs.elements, s.idReg); // B55: id ổn định giữa các lần quan sát
     s.obs = obs; s.shot = shot;
     let list = obs.elements;
     if (query) { const fq = U.fold(query); const hit = list.filter(e => U.fold(e.name).includes(fq) || (e.value && U.fold(e.value).includes(fq))); list = hit.length ? [...hit, ...list.filter(e => !hit.includes(e))] : list; }
@@ -219,6 +220,12 @@ function createDesktopAgent(deps) {
     const s = session; const q = String(a.element || a.target || '').trim();
     // bấm theo TÊN đúng kết quả tìm kiếm vừa ghi nhận → dùng đúng phần tử kết quả đó (không phải chữ cùng tên trong ô tìm kiếm)
     if (q && s && s.obs && s.foundHit && s.foundHit.id && !/^\[?e\d+\]?$/i.test(q) && U.fold(q).trim() === U.fold(s.foundHit.name || '').trim()) { const el = s.obs.elements.find(e => e.id === s.foundHit.id); if (el && el.b) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' }; }
+    // B55: “e11 Tiêu đề” / “e11 (Tiêu đề)” — id kèm nhãn: nhãn phải khớp phần tử hiện tại, không thì từ chối (không đoán)
+    { const m = /^\[?(e\d+)\]?\s*[:\-–(“"']*\s*(.+?)\s*[)”"']*$/iu.exec(q);
+      if (m && s && s.obs) { const id = m[1].toLowerCase(); const el = s.obs.elements.find(e => e.id === id); const lab = U.fold(m[2]).trim();
+        if (el && lab && el.name && !U.fold(el.name).includes(lab) && !lab.includes(U.fold(el.name))) return { el: null, query: q, labelChanged: { id, now: el, want: m[2] } };
+        if (el) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' }; } }
+    { const m = /^\[?(e\d+)\]?$/i.exec(q); if (m && s && s.obs && !s.obs.elements.some(e => e.id === m[1].toLowerCase())) { const inf = s.idReg && s.idReg.info ? s.idReg.info.get(m[1].toLowerCase()) : null; if (inf) return { el: null, query: q, goneId: { id: m[1].toLowerCase(), inf } }; } }
     if (q && s && s.obs) { const el = U.findElement(s.obs.elements, q); if (el) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' }; }
     if (Number.isFinite(Number(a.x)) && Number.isFinite(Number(a.y)) && a.x !== '' && a.y !== '' && a.x != null && a.y != null && !(Number(a.x) === 0 && Number(a.y) === 0)) { const p = normToNative(Math.min(1, Math.max(0, a.x / 1000)), Math.min(1, Math.max(0, a.y / 1000))); return { el: null, x: p.x, y: p.y, via: 'toạ độ' }; }
     return q ? { el: null, query: q } : null;
@@ -351,7 +358,13 @@ function createDesktopAgent(deps) {
     // trừ chữ gợi ý của ô nhập chỉ thấy qua OCR (Zalo: "Tìm kiếm"): bấm vào đó để chọn ô rồi mới gõ
     // B21 (QA lượt 3): cụm chữ OCR → BẤM vào toạ độ của nó trước rồi mới gõ (không gõ mù vào ô đang chọn — đó có thể là ô soạn tin của chat sai).
     // Nhãn của cây giao diện (có ô nhập đi kèm đang được chọn) giữ cách cũ: gõ vào ô đang chọn.
-    if (action === 'type_text' && t && t.el && !t.el.editable && !U.inputLike(t.el) && !t.el.ocr) { t = null; needPoint = false; }
+    if (action === 'type_text' && t && t.el && !t.el.editable && !U.inputLike(t.el) && !t.el.ocr && !U.isButtonish(t.el)) { t = null; needPoint = false; }
+    // B55: id kèm nhãn không còn khớp / id đã biến mất / gõ chữ vào NÚT → từ chối, chỉ ra đúng ô nhập
+    { const inputs = (s.obs ? s.obs.elements : []).filter(e => e.editable || U.inputLike(e)).slice(0, 6);
+      const hint = inputs.length ? ' Ô nhập hiện có: ' + inputs.map(e => `ô “${String(e.name || e.placeholder || '(không tên)').slice(0, 30)}” là ${e.id}`).join(', ') + '.' : '';
+      if (t && t.labelChanged) { const L = t.labelChanged; return { refused: true, error: 'id đổi nhãn', forModel: `KHÔNG làm: ${L.id} giờ là ${L.now.kind || 'phần tử'} “${String(L.now.name || '').slice(0, 40)}”, không phải “${String(L.want).slice(0, 40)}”.${hint} Dùng đúng id trong danh sách MỚI NHẤT.`, summary: `${L.id} giờ là “${String(L.now.name || '').slice(0, 30)}” — không làm` }; }
+      if (t && t.goneId) { const G = t.goneId; return { refused: true, error: 'id không còn', forModel: `KHÔNG làm: ${G.id} (${G.inf.kind || 'phần tử'} “${String(G.inf.name || '').slice(0, 40)}”) không còn trên màn hình.${hint} Quan sát lại (screen_look) rồi dùng id trong danh sách mới.`, summary: `${G.id} “${String(G.inf.name || '').slice(0, 30)}” không còn trên màn hình` }; }
+      if (action === 'type_text' && t && t.el && U.isButtonish(t.el)) return { refused: true, error: 'không gõ vào nút', forModel: `KHÔNG gõ: ${t.el.id} là ${t.el.kind || 'nút'} “${String(t.el.name || '').slice(0, 40)}” — không gõ chữ vào nút/nhóm nút.${hint} Gọi lại type_text với element là id của ô nhập đúng.`, summary: `${t.el.id} là nút “${String(t.el.name || '').slice(0, 30)}” — không gõ vào nút` }; }
     // B34: vừa bấm ô Tìm kiếm (≤ 60 giây) mà type_text lại kèm id CŨ nay trỏ vào chữ/nút khác (không phải ô nhập, không phải “Tìm kiếm”) → bỏ id đó, gõ vào ô vừa chọn
     let staleEl = null;
     { const la = s.lastAction; const justSearch = la && Date.now() - la.at < 60000 && ['click', 'double_click'].includes(la.action) && /tìm|tim kiem|search|find/iu.test(`${la.query || ''} ${la.el ? la.el.name || '' : ''}`);
@@ -376,7 +389,7 @@ function createDesktopAgent(deps) {
     if (action === 'type_text' && ctx && ctx.userQuery) {
       const searchField = searchConfirmed(t, focusedEl, a);
       const R = SV.regionsOf(s.obs); const P = SV.parseSeen(s.lastSeen || '');
-      const g = SV.chatGate({ query: ctx.userQuery, text: a.text, searchField, proc: s.obs && s.obs.win ? s.obs.win.proc : (s.target && s.target.proc) || '', title: s.obs && s.obs.win ? s.obs.win.title : '', state: s, header: [...(R ? R.header : []), P.header].filter(Boolean) });
+      const g = SV.chatGate({ query: ctx.userQuery, text: a.text, searchField, submit: !!a.submit, proc: s.obs && s.obs.win ? s.obs.win.proc : (s.target && s.target.proc) || '', title: s.obs && s.obs.win ? s.obs.win.title : '', state: s, header: [...(R ? R.header : []), P.header].filter(Boolean) });
       if (g) {
         // B27: không để lặp vô tận — lần chặn thứ 3 trong lượt: dừng và báo người dùng (nêu những gì thấy trên màn hình)
         s.gateBlocks = (s.gateBlocks || 0) + 1; deps.log && deps.log('desk', `Chặn gõ tin: chưa mở đúng người nhận (lần ${s.gateBlocks})`);
@@ -514,7 +527,13 @@ function createDesktopAgent(deps) {
           let boxY = boxEl ? boxEl.b[1] + Math.max(0, (boxEl.b[3] || 0) - 8) : (t && t.y != null ? t.y : -1);
           // ô tìm kiếm mở bằng phím tắt (Ctrl+F…): không biết chỗ ô → chữ vừa gõ trong ô là dòng khớp NẰM TRÊN CÙNG, kết quả nằm dưới nó
           if (boxY < 0) { const ms = matches(o2).filter(e => e.b && e.ocr).sort((x, y) => x.b[1] - y.b[1]); if (ms.length >= 2 && U.fold(ms[0].name).replace(/[^\p{L}\p{N} ]/gu, '').trim() === fq.replace(/[^\p{L}\p{N} ]/gu, '').trim()) boxY = ms[0].b[1] + Math.max(0, ms[0].b[3] - 8); }
-          const below = matches(o2).filter(e => !e.b || e.b[1] > boxY + 4).sort((x, y) => (x.b ? x.b[1] : 0) - (y.b ? y.b[1] : 0)); const m = below[0];
+          const preEls = before && before.elements ? before.elements : [];
+          // chữ vừa gõ NẰM TRONG ô tìm kiếm (chỗ trước đó là gợi ý “Tìm kiếm…”, OCR có thể kèm con trỏ “|”) — không phải kết quả
+          const inBox = (e) => e.b && (/[|│]\s*$/.test(e.name || '') || preEls.some(p => p.b && (p.editable || U.inputLike(p) || /tìm|tim kiem|search|find/iu.test(p.name || '')) && Math.abs((p.b[1] + p.b[3] / 2) - (e.b[1] + e.b[3] / 2)) <= Math.max(10, p.b[3] / 2) && e.b[0] >= p.b[0] - 12 && e.b[0] <= p.b[0] + p.b[2]));
+          const below0 = matches(o2).filter(e => (!e.b || e.b[1] > boxY + 4) && !inBox(e)).sort((x, y) => (x.b ? x.b[1] : 0) - (y.b ? y.b[1] : 0));
+          // cùng tên, cùng chỗ như TRƯỚC khi gõ = mục có sẵn ở danh sách hội thoại bên trái (cùng một người), không phải kết quả tìm kiếm mới → không tính là trùng tên
+          const fresh = below0.filter(e => !(e.b && preEls.some(p => p.b && U.fold(p.name) === U.fold(e.name) && Math.abs(p.b[0] - e.b[0]) <= 12 && Math.abs(p.b[1] - e.b[1]) <= 12)));
+          const below = fresh.length ? fresh : below0; const m = below[0];
           // B20 / quyết định của Khôi: hai người cùng họ tên (hoặc cùng tên kèm chú thích khác nhau) → HỎI người dùng, không tự chọn
           const rcpQ = ctx && ctx.userQuery ? SV.recipientOf(ctx.userQuery) : null; const distinct = rcpQ ? SV.sameNameCandidates(rcpQ, below.map(e => e.name)) : [];
           const exactDup = rcpQ ? below.filter(e => U.fold(e.name).trim() === U.fold(SV.nameKey(rcpQ))).length >= 2 : false;
@@ -564,7 +583,7 @@ function createDesktopAgent(deps) {
       } catch (e) { deps.log && deps.log('desk', 'Phím tắt tìm kiếm lỗi: ' + e.message); }
     }
     if (pixChanged && !checks.some(c => /Cửa sổ đổi|Đã mở cuộc trò chuyện|Ô tìm kiếm|KIỂM CHỨNG|GỬI NHẦM|phím tắt/.test(c))) checks.push(`Màn hình đã thay đổi sau thao tác (${PD.describe(pd)}) — xem danh sách mới bên dưới để biết đã mở/chọn gì.`);
-    if (!checks.length && clickedInput) checks.push(`Đã đặt con trỏ vào ô “${String((t && t.el && t.el.name) || (t && t.query) || '').slice(0, 40)}” (ô nhập thường không đổi hình khi được chọn). Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.`);
+    if (clickedInput && !checks.some(c => /Cửa sổ đổi|Đã mở cuộc trò chuyện|KIỂM CHỨNG|GỬI NHẦM|phím tắt|Hộp thoại/.test(c))) { const nm = String((t && t.el && (t.el.name || t.el.placeholder)) || (t && t.query && !/^\[?e\d+\]?$/i.test(t.query) ? t.query : '') || '').trim().slice(0, 40); checks.unshift(nm ? `Đã đặt con trỏ vào ô “${nm}”${t && t.el && t.el.id ? ` (${t.el.id})` : ''} — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.` : `Đã đặt con trỏ vào ô nhập${t && t.el && t.el.id ? ` ${t.el.id}` : ''} — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.`); }
     if (!checks.length) checks.push(pd ? `Màn hình không thay đổi rõ ràng (so ảnh trước/sau: ${PD.describe(pd)}) — nếu cần, thử cách khác${ak && ak.search ? `; với ${ak.name} có thể dùng phím tắt ${ak.search} để mở ô tìm kiếm` : ''}.` : 'Màn hình không thay đổi rõ ràng — nếu cần, thử cách khác.');
     return { ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
   }

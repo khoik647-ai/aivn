@@ -135,7 +135,7 @@ const DEFS = {
   read_multiple_files: { label: 'Đọc nhiều tệp', icon: '📚', description: 'Đọc cùng lúc nhiều tệp (tối đa 10) trong thư mục được phép; mỗi tệp trả phần đầu nội dung, tệp lỗi được báo riêng mà không làm hỏng các tệp khác.',
     parameters: O({ paths: { type: 'array', items: { type: 'string' }, description: 'Danh sách đường dẫn tệp' } }, ['paths']) },
   list_allowed_directories: { label: 'Thư mục được phép', icon: '🗂', description: 'Liệt kê các thư mục người dùng cho phép AIVN AGENT đọc/ghi. Ngoài các thư mục này mọi truy cập đều bị từ chối.', parameters: { type: 'object', properties: {} } },
-  read_file: { label: 'Đọc tệp', icon: '📖', description: 'Đọc nội dung chữ của một tệp trong thư mục được phép (TXT, MD, CSV, JSON, mã nguồn, PDF có lớp chữ, Word DOCX/ODT, Excel XLSX/ODS, PowerPoint PPTX/ODP, ZIP; âm thanh/video MP3/WAV/M4A/MP4/WEBM/MOV → bản chép lời có mốc thời gian). Tệp dài trả về từng phần; dùng offset để đọc tiếp.',
+  read_file: { label: 'Đọc tệp', icon: '📖', description: 'Đọc nội dung chữ của một tệp trong thư mục được phép (TXT, MD, CSV, JSON, mã nguồn, PDF có lớp chữ, Word DOCX/ODT, Excel XLSX/ODS, PowerPoint PPTX/ODP, ZIP; âm thanh/video → bản chép lời có mốc thời gian). Tệp dài trả về từng phần; dùng offset để đọc tiếp.',
     parameters: O({ path: S('Đường dẫn tệp'), offset: { type: 'integer', description: 'Vị trí ký tự bắt đầu đọc (mặc định 0)' } }, ['path']) },
   write_file: { label: 'Ghi tệp', icon: '✍️', description: 'Tạo hoặc ghi một tệp văn bản (TXT, MD, CSV, JSON, HTML, mã nguồn…) trong thư mục được phép. Nếu tệp đã tồn tại và mode không phải append, AIVN sẽ hỏi người dùng trước khi ghi đè.',
     parameters: O({ path: S('Đường dẫn tệp cần ghi, ví dụ tom-tat.md'), content: S('Toàn bộ nội dung cần ghi'), mode: { type: 'string', enum: ['create', 'overwrite', 'append'], description: 'create: tạo mới (mặc định); overwrite: ghi đè; append: thêm vào cuối' } }, ['path', 'content']) },
@@ -145,7 +145,7 @@ const DEFS = {
     parameters: O({ query: S('Từ khoá tìm kiếm') }) },
   fetch_url: { label: 'Mở trang web', icon: '🌐', description: 'Tải một trang web công khai (http/https) và trả về phần chữ chính của trang.',
     parameters: O({ url: S('Địa chỉ trang, bắt đầu bằng http:// hoặc https://') }) },
-  run_javascript: { label: 'Chạy JavaScript', icon: '⚙️', description: 'Chạy một đoạn JavaScript ngắn trong hộp cát của AIVN để TÍNH TOÁN/XỬ LÝ DỮ LIỆU (không có require, mạng hay quyền đọc tệp; tối đa 3 giây). KHÔNG chạy trong trang web hay ứng dụng: không có document/window/DOM, không đọc hay bấm được gì trên màn hình — muốn thao tác trang web/ứng dụng thì dùng screen_look/screen_act. Kết quả là giá trị biểu thức cuối cùng và những gì in bằng console.log (nên console.log từng kết quả). Hợp cho tính toán nhiều bước, thống kê, xử lý bảng CSV. Muốn xử lý một tệp trong thư mục được phép, đặt input_file: nội dung chữ của tệp có sẵn trong biến chuỗi INPUT, không cần chép lại dữ liệu.',
+  run_javascript: { label: 'Chạy JavaScript', icon: '⚙️', description: 'Chạy một đoạn JavaScript ngắn trong hộp cát của AIVN để TÍNH TOÁN/XỬ LÝ DỮ LIỆU (không có require, mạng hay quyền đọc tệp; tối đa 3 giây). Không có document/window/DOM: không thao tác được trang web/ứng dụng (dùng screen_look/screen_act). Kết quả là giá trị biểu thức cuối cùng và những gì in bằng console.log (nên console.log từng kết quả). Hợp cho tính toán nhiều bước, thống kê, xử lý bảng CSV. Muốn xử lý một tệp trong thư mục được phép, đặt input_file: nội dung chữ của tệp có sẵn trong biến chuỗi INPUT, không cần chép lại dữ liệu.',
     parameters: O({ code: S('Mã JavaScript'), input_file: S('(Không bắt buộc) tên tệp trong thư mục được phép, vd. du-lieu.csv; nội dung tệp có sẵn trong biến INPUT') }, ['code']) },
   run_python: { label: 'Chạy Python', icon: '🐍', description: 'Chạy một đoạn Python 3 ngắn trên máy (thư mục tạm, không có mạng, tối đa 10 giây). In kết quả bằng print().',
     parameters: O({ code: S('Mã Python') }) },
@@ -720,7 +720,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const look = { same: 0, sig: '', hint: '', blocked: 0 }; // B40
     const honestOf = (reason) => { let rcp = null; try { rcp = require('./send-verify').recipientOf(query); } catch {} const m = /\b(zalo|messenger|telegram|teams|slack|discord|whatsapp|viber)\b/i.exec(String(query || '')); return RT.honestStatus({ query, tracker: retry, steps, reason, recipient: rcp, app: m ? m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() : '' }); };
     (runStore.getStore() || {}).steps = steps;
-    let text = '', finishReason = 'stop', calls = 0, searchNudged = false, openNudged = false, nudged = false, deskNudged = false, forcedTried = false, warning = null, fakeSeen = false, emptyNudged = false, loopRetried = false;
+    let hardStop = null; let text = '', finishReason = 'stop', calls = 0, searchNudged = false, openNudged = false, nudged = false, deskNudged = false, forcedTried = false, warning = null, fakeSeen = false, emptyNudged = false, loopRetried = false;
     const smp = SMP.samplingFor(st.id || '', 'agent', { temperature: typeof s.agentTemperature === 'number' && s.agentTemperature !== 0.2 ? s.agentTemperature : null }); // 0.2 = mặc định cũ (dễ lặp) → tự động theo mô hình
     const turnBudget = Number(s.agentTurnMaxTokens) || 6000;
     const usage = { completion_tokens: 0, seconds: 0 };
@@ -911,9 +911,12 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         logTool(step);
         onStep({ ...step });
         msgs.push({ role: 'tool', tool_call_id: call.id, content: typeof out.forModel === 'string' && out.forModel ? out.forModel : String(out.forModel ?? out.message ?? out.summary ?? JSON.stringify(out)) || '(không có kết quả)' });
+        // B49/B36: công cụ yêu cầu DỪNG (chặn người nhận 3 lần) hoặc tin đã bị GỬI NHẦM → dừng thật, không để mô hình làm tiếp
+        if (out.stop || (out.verify && out.verify.wrongChat)) { hardStop = out.verify && out.verify.wrongChat ? { why: out.verify.why, wrong: true } : { why: String(out.error || out.summary || 'công cụ yêu cầu dừng') }; break; }
         if (signal?.aborted) break;
       }
       if (signal?.aborted) { finishReason = 'abort'; break; }
+      if (hardStop) { text = hardStop.wrong ? `⚠ ${hardStop.why}. AIVN AGENT đã dừng, không gửi thêm gì. Bạn mở cuộc trò chuyện đó để thu hồi/xoá tin giúp mình.` : honestOf(hardStop.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng theo yêu cầu của công cụ: ${hardStop.why}`); break; }
       // B39: cùng một cách đã hỏng mà mô hình cứ quay lại (bị chặn 2–3 lần) → dừng sớm, báo trung thực những gì đã thử
       if (look.blocked >= 2) { text = honestOf('quan sát màn hình nhiều lần liền mà mô hình không làm bước nào'); warning = null; finishReason = 'stop'; deps.log && deps.log('[aivn agent] dừng sớm (B40): quan sát lặp lại'); break; }
       { const gu = retry.giveUp(); if (gu) { text = honestOf(gu.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng sớm (B39): ${gu.why}`); break; } }

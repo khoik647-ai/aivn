@@ -20,7 +20,7 @@ test('B21: tên người nhận chỉ được gõ vào ô tìm kiếm ĐÃ XÁC
 });
 test('B21: desktop-agent bấm vào cụm chữ OCR trước khi gõ (không gõ mù vào ô đang chọn); ô tìm kiếm chỉ “xác nhận” theo tên/gợi ý của chính ô hoặc thao tác ngay trước', () => {
   const src = rd('src/desktop-agent.js');
-  assert.match(src, /!U\.inputLike\(t\.el\) && !t\.el\.ocr\) \{ t = null; needPoint = false; \}/);
+  assert.match(src, /!U\.inputLike\(t\.el\) && !t\.el\.ocr && !U\.isButtonish\(t\.el\)\) \{ t = null; needPoint = false; \}/);
   assert.match(src, /function searchConfirmed\(t, focusedEl, a\)/);
   assert.match(src, /if \(t && t\.el\) return named\(t\.el\);/);
   assert.match(src, /const searchField = searchConfirmed\(t, focusedEl, a\);/);

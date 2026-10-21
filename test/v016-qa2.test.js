@@ -133,12 +133,13 @@ function discover(h) {
   return { P, ann, gateBest };
 }
 const grp = (f) => FIT.groupOf ? FIT.groupOf(f) : (f && (f.group || ({ fit: 'smooth', slow: 'slow', big: 'no' })[f.level]));
-test('B17: laptop RTX 3050 Ti 4 GB — AIVN AGENT dùng 12K, Qwen3-VL 2B nằm trọn VRAM, được ⭐ và qua cổng', () => {
+test('B17 (beta.2): laptop RTX 3050 Ti 4 GB — AIVN AGENT dùng 12K, ⭐ = Qwen3-VL 4B “Chạy chậm” (2B bị bỏ: gọi công cụ 13/25) và qua cổng', () => {
   const { P, ann, gateBest } = discover(MACHINES.LAPTOP);
   assert.strictEqual(P.ctx, 12288); assert.strictEqual(P.lowered, true);
-  const star = ann.filter(c => c.recScreen); assert.strictEqual(star.length, 1); assert.strictEqual(star[0].id, 'qwen3-vl-2b-instruct-q8_0');
-  assert.strictEqual(star[0].agentFit.level, 'fit', 'nhãn và nhóm của thẻ ⭐ đều là Chạy mượt');
-  assert.strictEqual(star[0].agentCheck.ok, true); assert.strictEqual(star[0].agentCheck.code, 'ok');
+  const star = ann.filter(c => c.recScreen); assert.strictEqual(star.length, 1); assert.strictEqual(star[0].id, 'qwen3-vl-4b-instruct-q4_k_m');
+  assert.strictEqual(star[0].agentFit.level, 'slow', 'không có mô hình đạt nào chạy mượt → ⭐ là Chạy chậm');
+  assert.strictEqual(star[0].agentCheck.ok, true); assert.strictEqual(star[0].agentCheck.code, 'slow');
+  assert.strictEqual(ann.find(c => c.id === 'qwen3-vl-2b-instruct-q8_0').agentCheck.code, 'tools');
   assert.strictEqual(gateBest.id, star[0].id, 'gợi ý ⭐ và cổng AIVN AGENT chọn cùng một mô hình');
   // tràn ít (≤ 1 GB): vẫn chọn được, nhóm Chạy chậm + cảnh báo; tràn nhiều: Quá nặng
   const four = ann.find(c => c.id === 'qwen3-vl-4b-instruct-q4_k_m'); assert.strictEqual(four.agentFit.level, 'slow'); assert.ok(four.agentCheck.ok && four.agentCheck.slow, JSON.stringify(four.agentCheck));
@@ -197,7 +198,7 @@ test('B19: nhãn 🛠 Hỗ trợ công cụ không mâu thuẫn với ✓/⚠ G�
     if (tc.some(x => x.k === 'v')) assert.notStrictEqual(t.level, 'none', c.id);
     if (AE.eligibility({ vision: !!c.mmproj, catalog: c, fit: null }, { shipped: shipped[c.id] }).ok) assert.strictEqual(t.level, 'good', `${c.id}: ${t.label}`);
   }
-  assert.strictEqual(toolSupport(catalog.find(c => c.id === 'qwen3-vl-2b-instruct-q8_0')).label, 'Tốt');
+  assert.strictEqual(toolSupport(catalog.find(c => c.id === 'qwen3-vl-2b-instruct-q8_0')).label, 'Hạn chế'); // beta.2: 13/25 với câu lệnh thật
 });
 test('B19: “Đa ngôn ngữ” ghi rõ khi nhà phát triển không nêu tiếng Việt; mô tả không tự nhận tiếng Việt/độ vừa máy', () => {
   const llama = catalog.find(c => c.id === 'llama-3.2-3b-instruct-q4_k_m').claims.find(x => x.t === 'multilingual');

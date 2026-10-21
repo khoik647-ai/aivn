@@ -198,6 +198,36 @@ function normalize(raw, { max = 150, ocr = [] } = {}) {
   return { win, elements: pick };
 }
 
+// B55 (QA lượt 6): id eN GIỮ NGUYÊN giữa các lần quan sát — khoá theo vai trò + nhãn + vị trí. Trước đây đánh số lại mỗi lần,
+// mô hình dùng id cũ “e11 = Tiêu đề” trong khi e11 mới là nút “Gửi | Huỷ thư” → gõ tiêu đề vào nút.
+// reg = { byKey: Map, info: Map(id → {role,name,b}), next } sống theo phiên (một việc).
+const stableKey = (e) => `${e.role}|${fold(e.name).slice(0, 60)}|${Math.round((e.b[0] + e.b[2] / 2) / 48)}|${Math.round((e.b[1] + e.b[3] / 2) / 48)}`;
+function stabilizeIds(elements, reg) {
+  if (!reg) return elements;
+  reg.byKey = reg.byKey || new Map(); reg.info = reg.info || new Map(); reg.next = reg.next || 1;
+  const used = new Set(); const pending = [];
+  const cx = (b) => b[0] + b[2] / 2, cy = (b) => b[1] + b[3] / 2;
+  for (const e of elements) {
+    const id = reg.byKey.get(stableKey(e));
+    if (id && !used.has(id)) { e.id = id; used.add(id); } else pending.push(e);
+  }
+  for (const e of pending) {
+    // cùng vai trò + cùng nhãn, dịch chuyển ít (cuộn nhẹ, cửa sổ đổi cỡ) → vẫn là phần tử cũ
+    let best = null;
+    for (const [id, inf] of reg.info) {
+      if (used.has(id) || inf.role !== e.role || fold(inf.name) !== fold(e.name)) continue;
+      const d = Math.hypot(cx(inf.b) - cx(e.b), cy(inf.b) - cy(e.b));
+      if (d <= 120 && (!best || d < best.d)) best = { id, d };
+    }
+    const id = best ? best.id : (() => { let n = reg.next; while (used.has('e' + n) || reg.info.has('e' + n)) n++; reg.next = n + 1; return 'e' + n; })();
+    e.id = id; used.add(id);
+  }
+  for (const e of elements) { reg.byKey.set(stableKey(e), e.id); reg.info.set(e.id, { role: e.role, kind: e.kind, name: e.name, b: e.b }); }
+  return elements;
+}
+const BUTTONISH = /^(Button|SplitButton|MenuItem|TabItem|Hyperlink|CheckBox|RadioButton|AXButton|AXMenuItem|AXMenuBarItem|AXMenuButton|AXPopUpButton|AXLink|AXCheckBox|AXRadioButton|AXTab|AXRadioGroup|AXDisclosureTriangle)$/;
+const isButtonish = (e) => !!e && BUTTONISH.test(e.role || '') && !e.editable;
+
 // toạ độ gốc → thang 0..1000 của màn hình (để mô hình hình dung vị trí; khớp tham số x,y của screen_act)
 // B40: phần tử có khả năng là BƯỚC TIẾP THEO của việc (Outlook “Thư mới”, Zalo “Tìm kiếm”…), theo câu lệnh của người dùng
 const TASK_TARGETS = [
@@ -340,4 +370,4 @@ function searchVariants(text) {
 // Chữ OCR trông như ô nhập (chữ gợi ý "Tìm kiếm", "Nhập tin nhắn…"): ở ứng dụng không đọc được qua Trợ năng (Zalo…), đó là ô nhập thật
 const INPUT_HINT = /(^|\s)(tìm|tim|search|find|nhập|nhap|soạn|soan|gõ|type|write|enter)(\s|$|…|\.)|tìm kiếm|tim kiem|tin nhắn|tin nhan|message|aa$/i;
 const inputLike = (el) => !!(el && !el.editable && el.ocr && String(el.name || '').trim().length <= 40 && INPUT_HINT.test(String(el.name || '').trim()));
-module.exports = { taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };
+module.exports = { stabilizeIds, isButtonish, taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };
