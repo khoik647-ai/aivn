@@ -51,3 +51,18 @@ test('chạy thật (Xvfb): bấm ở mọi độ trễ, mọi tổ hợp phím,
   assert.strictEqual(j.helper.ok, false); assert.match(j.helper.reason, /Windows/);
   assert.ok(j.displays.length && j.displays[0].scaleFactor && j.window.bounds);
 });
+// B91 (máy thật beta.2.1): lần bấm đầu tiên rơi vào Zalo — nay hỏi WindowFromPoint trước MỖI lần bấm; không phải AIVN → đưa lên trước + thử lại, 3 lần vẫn không → bỏ qua
+test('B91 (Xvfb, WindowFromPoint giả): điểm bấm thuộc cửa sổ khác → thử lại rồi bấm; 3 lần vẫn khác → BỎ QUA (không bấm), báo rõ', { skip: !hasX && 'cần xvfb + electron', timeout: 300e3 }, () => {
+  const d = tmp(); const out = path.join(d, 'diag.json');
+  spawnSync('timeout', ['240', 'nice', '-n', '19', 'xvfb-run', '-a', '-s', '-screen 0 1280x800x24', path.join(root, 'node_modules/.bin/electron'), '.', '--no-sandbox', '--qa-input-diag', '--out', out, '--profile', path.join(d, 'p')],
+    { cwd: root, encoding: 'utf8', env: { ...process.env, AIVN_SKIP_ACTIVATION: '1', AIVN_QA_MODE: '1', AIVN_QA_DIAG_FAKEWFP: 'FFF FFO' } });
+  const j = JSON.parse(fs.readFileSync(out, 'utf8'));
+  const [c1, c2] = j.clicks;
+  assert.strictEqual(c1.target, 'b1'); assert.strictEqual(c1.skipped, true); assert.strictEqual(c1.ok, false); assert.ok(!c1.received, 'không bấm khi điểm bấm không thuộc AIVN');
+  assert.strictEqual(c1.windowFromPoint.root.process, 'Zalo');
+  assert.strictEqual(c2.target, 'b5'); assert.ok(c2.ok, JSON.stringify(c2)); assert.strictEqual(c2.pointIsOurWindow, true, 'chỉ bấm sau khi xác nhận điểm bấm là AIVN');
+  assert.strictEqual(j.guard.retries, 5); assert.strictEqual(j.guard.skipped.length, 1); assert.strictEqual(j.summary.skipped, 1);
+  assert.ok(j.clicks.slice(1).every(c => !c.skipped)); assert.strictEqual(j.status, 'failed'); assert.match(j.reason, /BỎ QUA/);
+  const src = fs.readFileSync(path.join(root, 'src/qa-input-diag.js'), 'utf8'); assert.match(src, /setAlwaysOnTop\(true/);
+  assert.strictEqual((src.match(/mouseClick\(/g) || []).length, 2, 'mọi lần bấm đi qua safeClick/ours (chỉ còn 2 chỗ gọi mouseClick: safeClick và vòng bấm đã kiểm)');
+});

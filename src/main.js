@@ -2981,7 +2981,7 @@ async function qaRun(req) {
   if (qaBusy) { const r = { schema: 1, runId, status: 'failed', reason: 'AIVN đang chạy một việc QA khác', exitCode: 2 }; try { QAR.writeJson(args.out, r); } catch {} return r; }
   qaBusy = true; LOG.log('qa', `QA runner bắt đầu (${req.kind || 'agent-task'}): ${String(args.task || args.script || args.out || '').slice(0, 200)}`);
   try {
-    if (req.kind === 'input-diag') return await require('./qa-input-diag').run(args, { LOG, version: app.getVersion(), commit: qaCommit() }, { runId });
+    if (req.kind === 'input-diag') { const D = require('./qa-input-diag'); return await D.run(args, { LOG, version: app.getVersion(), commit: qaCommit(), helper: !app.isPackaged && process.env.AIVN_QA_DIAG_FAKEWFP ? D.fakeHelper(process.env.AIVN_QA_DIAG_FAKEWFP) : null }, { runId }); }
     if (req.kind === 'qa-ui') { const U = require('./qa-ui'); return await U.run(args, { win: () => win, LOG, version: app.getVersion(), commit: qaCommit(), displays: qaDisplays, profile: QA_PROFILE, engine, listModels, loadById,
       hookDialogs: (h) => U.hookDialogs(dialog, h), setMainClock: U.setMainClock, notifyModel: () => send('model:status', engine.status()), hw: () => engine.hardwareInfo(),
       metrics: () => ({ appMemMB: Math.round(app.getAppMetrics().reduce((s, x) => s + (x.memory ? x.memory.workingSetSize : 0), 0) / 1024) }) }, { runId }); }

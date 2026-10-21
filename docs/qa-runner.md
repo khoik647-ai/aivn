@@ -257,6 +257,9 @@ $env:AIVN_QA_MODE = "1"
 echo $LASTEXITCODE   # 0 = mọi bước đạt · 2 = có bước hỏng (xem summary)
 ```
 
+- **B91 (beta.2.2)**: cửa sổ kiểm tra luôn ở trên cùng trong lúc chạy; **trước mỗi lần bấm** hỏi WindowFromPoint — nếu điểm bấm không thuộc cửa sổ AIVN
+  (vd. Zalo che) thì đưa cửa sổ kiểm tra lên trước và thử lại (tối đa 3 lần), vẫn không được thì **bỏ qua** lần bấm đó (`skipped: true`, không bao giờ bấm vào ứng dụng khác).
+  `guard` ghi số lần thử lại và các lần bỏ qua; có lần bỏ qua → `status: "failed"` kèm `reason`.
 - Cùng cổng bật như trên (biến môi trường **và** cờ). Không mở cổng mạng/CDP. Có thể thêm `--profile <thư mục>` (không bắt buộc — lệnh này không đọc/ghi dữ liệu người dùng).
 - AIVN mở **cửa sổ kiểm tra riêng** (6 nút, 1 ô một dòng, 1 ô nhiều dòng) rồi **bấm/gõ thật** bằng đúng đường AIVN AGENT dùng (libnut + quy đổi DPI `toNut`). Lệnh này **có giành tiêu điểm và di chuột thật** (giống `--agent-task`): **đừng dùng chuột/bàn phím trong ~30 giây**. `win+s` sẽ mở ô tìm kiếm của Windows và `alt+tab` sẽ chuyển cửa sổ — AIVN tự bấm Esc / bấm lại vào cửa sổ kiểm tra.
 - Các phép thử:

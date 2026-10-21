@@ -72,6 +72,13 @@ while ($true) { $l = [Console]::In.ReadLine(); if ($l -eq $null -or $l -eq 'quit
   catch { [AivnDiag]::Emit('{"id":' + $p[0] + ',"error":' + (ConvertTo-Json ([string]$_.Exception.Message)) + '}') } }`;
 
 // trình phụ Windows: trả { ok, call(cmd, args) → Promise<json>, hooks[], stop() }
+// chỉ để kiểm thử khi phát triển (main.js chỉ dùng khi chưa đóng gói + AIVN_QA_DIAG_FAKEWFP): WindowFromPoint giả theo chuỗi F (cửa sổ khác) / O (AIVN)
+function fakeHelper(seq = '') {
+  const q = String(seq).toUpperCase().replace(/[^FO]/g, '').split(''); const me = { pid: process.pid, process: 'AIVN', title: 'AIVN · Kiểm tra chuột & phím' };
+  return { ok: true, reason: 'giả lập (kiểm thử)', hooks: [], stop() {}, calls: 0,
+    async call(name) { if (name === 'fg') return { foreground: me }; if (name !== 'wfp') return null; this.calls++;
+      return (q.shift() || 'O') === 'F' ? { root: { pid: 999999, process: 'Zalo', title: 'Zalo' }, window: { pid: 999999, process: 'Zalo' } } : { root: me, window: me }; } };
+}
 async function startHelper(log) {
   if (process.platform !== 'win32') return { ok: false, reason: 'chỉ có trên Windows', call: async () => null, hooks: [], stop() {} };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-diag-')); const cs = path.join(dir, 'diag.cs'), ps = path.join(dir, 'diag.ps1');
@@ -97,9 +104,9 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
   const res = { schema: 1, runId, kind: 'input-diag', version: deps.version || null, commit: deps.commit || null, platform: process.platform, arch: process.arch, osRelease: os.release(),
     status: null, helper: null, elevation: {}, displays: null, window: null, clicks: [], keys: [], typing: [], focusChanges: [], summary: {}, timings: { startedAt: new Date(t0).toISOString() } };
   const log = (m) => deps.LOG && deps.LOG.log('qa', 'Kiểm tra chuột/phím: ' + m);
-  const helper = await startHelper(log); res.helper = { ok: helper.ok, reason: helper.reason };
+  const helper = deps.helper || await startHelper(log); res.helper = { ok: helper.ok, reason: helper.reason };
   const w = new BrowserWindow({ width: 900, height: 620, x: 80, y: 60, title: 'AIVN · Kiểm tra chuột & phím', autoHideMenuBar: true, show: false, backgroundColor: '#ffffff', webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false } });
-  w.setMenu(null); await w.loadFile(path.join(__dirname, 'renderer', 'input-diag.html')); w.show(); w.focus(); await sleep(800);
+  w.setMenu(null); await w.loadFile(path.join(__dirname, 'renderer', 'input-diag.html')); w.show(); try { w.setAlwaysOnTop(true, 'screen-saver'); } catch {} w.moveTop(); w.focus(); await sleep(800);
   const js = (c) => w.webContents.executeJavaScript(c, true);
   const pageLog = async (from) => (await js('window.__diag')).slice(from); const mark = async () => (await js('window.__diag.length'));
   const rectOf = async (id) => { const r = await js(`(() => { const r = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`); const cb = w.getContentBounds(); return { x: cb.x + r.x + r.w / 2, y: cb.y + r.y + r.h / 2, rect: r }; };
@@ -107,7 +114,25 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
   const physOf = (p) => { const d = disp(); const g = SC.geos().find(x => String(x.id) === String(d.id)); const nx = (p.x - d.bounds.x) / d.bounds.width, ny = (p.y - d.bounds.y) / d.bounds.height; return { nx, ny, phys: SC.toNut(nx, ny, g || null), geo: g || null }; };
   const ourPids = new Set([process.pid, w.webContents.getOSProcessId()]);
   const fg = async () => (await helper.call('fg')) || null;
-  const refocus = async () => { if (w.isDestroyed()) return; w.show(); w.focus(); w.moveTop(); await sleep(300); const f = await fg(); if (f && f.foreground && !ourPids.has(f.foreground.pid)) { const p = physOf(await rectOf('st')); const n = SC.libnut(); n.moveMouse(p.phys.x, p.phys.y); await sleep(80); n.mouseClick('left', false); await sleep(300); } };
+  // B91 (máy thật beta.2.1): lần bấm đầu tiên rơi vào Zalo (cửa sổ kiểm tra chưa ở trên cùng). Nay: cửa sổ kiểm tra luôn ở trên cùng trong lúc chạy;
+  // TRƯỚC MỖI lần bấm hỏi WindowFromPoint — không phải cửa sổ AIVN → đưa lên trước rồi thử lại (3 lần), vẫn không → BỎ QUA lần bấm đó (không bao giờ bấm vào ứng dụng khác)
+  const raise = async () => { if (w.isDestroyed()) return; if (w.isMinimized()) w.restore(); w.show(); try { w.setAlwaysOnTop(true, 'screen-saver'); } catch {} w.moveTop(); w.focus(); await sleep(300); };
+  const guard = { skipped: [], retries: 0 };
+  const ours = async (P, label) => {
+    if (!helper.ok) return { ok: true, verified: false, wfp: null };
+    let wfp = null;
+    for (let i = 0; i < 3; i++) {
+      wfp = await helper.call('wfp', Math.round(P.phys.x), Math.round(P.phys.y));
+      if (wfp && wfp.root && ourPids.has(wfp.root.pid)) return { ok: true, verified: true, wfp, tries: i + 1 };
+      guard.retries++; log(`trước khi bấm ${label}: dưới con trỏ là “${wfp && wfp.root ? `${wfp.root.process || '?'} · ${wfp.root.title || ''}` : '?'}”, không phải AIVN — đưa cửa sổ kiểm tra lên trước rồi thử lại (${i + 1}/3)`);
+      await raise();
+    }
+    guard.skipped.push({ label, windowFromPoint: wfp }); log(`BỎ QUA bấm ${label}: dưới con trỏ vẫn không phải cửa sổ AIVN`);
+    return { ok: false, verified: true, wfp };
+  };
+  // bấm an toàn (chỉ khi điểm bấm thuộc cửa sổ AIVN); trả false nếu đã bỏ qua
+  const safeClick = async (P, label, pre = 60) => { const g = await ours(P, label); if (!g.ok) return false; const n = SC.libnut(); n.moveMouse(P.phys.x, P.phys.y); await sleep(pre); n.mouseClick('left', false); return true; };
+  const refocus = async () => { if (w.isDestroyed()) return; await raise(); const f = await fg(); if (f && f.foreground && !ourPids.has(f.foreground.pid)) { const p = physOf(await rectOf('st')); if (await safeClick(p, 'thanh trạng thái (lấy tiêu điểm)', 80)) await sleep(300); } };
   try {
     // ---- màn hình & DPI ----
     res.displays = screen.getAllDisplays().map(d => ({ id: d.id, label: d.label || null, primary: d.id === screen.getPrimaryDisplay().id, bounds: d.bounds, workArea: d.workArea, scaleFactor: d.scaleFactor, electronDpi: Math.round(96 * d.scaleFactor), rotation: d.rotation, internal: d.internal }));
@@ -119,8 +144,10 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
     // ---- bấm chuột: di chuyển → chờ (0/50/120/300 ms) → bấm; WindowFromPoint TRƯỚC khi bấm ----
     const n = SC.libnut(); let bi = 0;
     for (const delay of CLICK_DELAYS) for (const id of ['b1', 'b5']) {
-      await refocus(); bi++; const tgt = await rectOf(id); const P = physOf(tgt); const m0 = await mark(); const h0 = Date.now();
-      const wfp = await helper.call('wfp', Math.round(P.phys.x), Math.round(P.phys.y)); const fgB = await fg();
+      await refocus(); bi++; const tgt = await rectOf(id); const P = physOf(tgt);
+      const g = await ours(P, `${id} (chờ ${delay} ms)`); const wfp = g.wfp; const fgB = await fg();
+      if (!g.ok) { res.clicks.push({ n: bi, target: id, delayMs: delay, phys: P.phys, windowFromPoint: wfp, foregroundBefore: fgB && fgB.foreground, skipped: true, ok: false, pointIsOurWindow: false, error: 'bỏ qua: điểm bấm không thuộc cửa sổ AIVN (đã thử đưa lên trước 3 lần)' }); continue; }
+      const m0 = await mark(); const h0 = Date.now();
       let err = null; try { n.moveMouse(P.phys.x, P.phys.y); if (delay) await sleep(delay); n.mouseClick('left', false); } catch (e) { err = e.message; }
       await sleep(350); const cur = SC.cursorPhys(); const ev = (await pageLog(m0)).filter(e => /mouse|click/.test(e.type));
       const clk = ev.find(e => e.type === 'click' && e.target === id);
@@ -130,11 +157,14 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
       res.clicks.push(c); log(`bấm ${id} chờ ${delay} ms: ${c.ok ? 'NHẬN' : 'KHÔNG nhận'}${err ? ' — ' + err : ''}`);
     }
     // cùng đường perform() của AIVN AGENT (di chuyển → 120 ms → bấm)
-    { await refocus(); const tgt = await rectOf('b3'); const P = physOf(tgt); const m0 = await mark(); let err = null; try { await SC.perform({ action: 'click', nx: P.nx, ny: P.ny, display: P.geo }); } catch (e) { err = e.message; } await sleep(300);
-      const ev = await pageLog(m0); res.clicks.push({ n: ++bi, target: 'b3', via: 'screen-control.perform', error: err, phys: P.phys, received: ev.filter(e => /click/.test(e.type)).slice(0, 4), ok: ev.some(e => e.type === 'click' && e.target === 'b3') && !err }); }
+    { await refocus(); const tgt = await rectOf('b3'); const P = physOf(tgt); const g = await ours(P, 'b3 (perform)');
+      if (!g.ok) res.clicks.push({ n: ++bi, target: 'b3', via: 'screen-control.perform', phys: P.phys, windowFromPoint: g.wfp, skipped: true, ok: false, error: 'bỏ qua: điểm bấm không thuộc cửa sổ AIVN' });
+      else { const m0 = await mark(); let err = null; try { await SC.perform({ action: 'click', nx: P.nx, ny: P.ny, display: P.geo }); } catch (e) { err = e.message; } await sleep(300);
+        const ev = await pageLog(m0); res.clicks.push({ n: ++bi, target: 'b3', via: 'screen-control.perform', error: err, phys: P.phys, windowFromPoint: g.wfp, received: ev.filter(e => /click/.test(e.type)).slice(0, 4), ok: ev.some(e => e.type === 'click' && e.target === 'b3') && !err }); } }
     // ---- phím tắt ----
     for (const combo of COMBOS) {
-      await refocus(); const f = physOf(await rectOf('field')); n.moveMouse(f.phys.x, f.phys.y); await sleep(60); n.mouseClick('left', false); await sleep(200);
+      await refocus(); const f = physOf(await rectOf('field'));
+      if (!(await safeClick(f, `ô nhập (phím “${combo}”)`))) { res.keys.push({ combo, skipped: true, ok: false, error: 'bỏ qua: ô nhập không thuộc cửa sổ AIVN dưới con trỏ' }); continue; } await sleep(200);
       const m0 = await mark(); const h0 = Date.now(); let k = null, err = null, diag = null;
       try { k = K.parse(combo, process.platform); diag = K.diag(k, process.platform); if (k.mods.length) n.keyTap(k.key, k.mods); else n.keyTap(k.key); } catch (e) { err = e.message; }
       await sleep(/win|alt\+tab/.test(combo.replace(/\s/g, '')) ? 900 : 300);
@@ -151,25 +181,28 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
     }
     // ---- gõ chữ: dán (đường AIVN AGENT dùng) và typeString của libnut ----
     for (const { lang, text } of TEXTS) for (const method of ['paste', 'typeString']) {
-      await refocus(); await js('document.getElementById("area").value = ""'); const a = physOf(await rectOf('area')); n.moveMouse(a.phys.x, a.phys.y); await sleep(60); n.mouseClick('left', false); await sleep(200);
+      await refocus(); await js('document.getElementById("area").value = ""'); const a = physOf(await rectOf('area'));
+      if (!(await safeClick(a, `vùng gõ (${lang}/${method})`))) { res.typing.push({ lang, method, text, skipped: true, ok: false, error: 'bỏ qua: vùng gõ không thuộc cửa sổ AIVN dưới con trỏ' }); continue; } await sleep(200);
       let err = null; const h0 = Date.now();
       try { if (method === 'paste') await SC.perform({ action: 'type', text }); else n.typeString(text); } catch (e) { err = e.message; }
       await sleep(method === 'paste' ? 600 : 300 + text.length * 30); const got = await js('document.getElementById("area").value');
       res.typing.push({ lang, method, text, got, error: err, ok: got === text, ...(method === 'typeString' ? { informational: 'chỉ để so sánh — AIVN AGENT gõ bằng dán' } : {}), hookKeys: keyHooks(helper.hooks, h0, Date.now()).length }); log(`gõ ${lang} (${method}): ${got === text ? 'đúng' : 'SAI'}`);
     }
     res.elevation.foregroundAtEnd = await fg();
+    res.guard = { verifiedBeforeClick: !!helper.ok, retries: guard.retries, skipped: guard.skipped };
     Object.assign(res.helper, { hooks: helper.hookState || null, dpiAwareness: helper.dpiAwareness || null, hookEvents: helper.hooks.length });
   } catch (e) { res.error = e.stack || e.message; }
   finally { helper.stop(); try { if (!w.isDestroyed()) w.destroy(); } catch {} }
   res.summary = { clicks: `${res.clicks.filter(c => c.ok).length}/${res.clicks.length}`, keys: `${res.keys.filter(k => k.ok).length}/${res.keys.length}`, typing: `${res.typing.filter(t => t.ok).length}/${res.typing.length}`,
-    failedKeys: res.keys.filter(k => !k.ok).map(k => k.combo), failedClicks: res.clicks.filter(c => !c.ok).map(c => `${c.target}@${c.delayMs ?? c.via}`), failedTyping: res.typing.filter(t => !t.ok && t.method === 'paste').map(t => `${t.lang}/${t.method}`),
+    skipped: guard.skipped.length, failedKeys: res.keys.filter(k => !k.ok).map(k => k.combo), failedClicks: res.clicks.filter(c => !c.ok).map(c => `${c.target}@${c.delayMs ?? c.via}`), failedTyping: res.typing.filter(t => !t.ok && t.method === 'paste').map(t => `${t.lang}/${t.method}`),
     typeStringCompare: res.typing.filter(t => t.method === 'typeString').map(t => `${t.lang}: ${t.ok ? 'đúng' : 'sai'}`).join(', ') };
   // typeString chỉ để so sánh (AIVN AGENT gõ bằng dán) → không tính vào kết quả đạt/hỏng
   const must = [...res.clicks, ...res.keys, ...res.typing.filter(t => t.method === 'paste')];
   res.status = !res.error && must.every(x => x.ok) ? 'done' : 'failed'; res.exitCode = res.status === 'done' ? 0 : 2;
+  if (guard.skipped.length) res.reason = `${guard.skipped.length} lần bấm bị BỎ QUA vì điểm bấm không thuộc cửa sổ AIVN (cửa sổ khác che) — không bấm vào ứng dụng khác`;
   res.timings.totalMs = Date.now() - t0; res.timings.finishedAt = new Date().toISOString();
   writeJson(args.out, res); log(`xong: ${res.status} — bấm ${res.summary.clicks}, phím ${res.summary.keys}, gõ ${res.summary.typing} → ${args.out}`);
   return res;
 }
 function validate(a, { cwd = process.cwd() } = {}) { if (!a || a.inputDiag == null) return { ok: false, error: 'không có cờ --qa-input-diag' }; if (!a.out) return { ok: false, error: 'thiếu --out <diag.json>' }; return { ok: true, args: { out: path.resolve(cwd, a.out), profile: a.profile ? path.resolve(cwd, a.profile) : null } }; }
-module.exports = { run, validate, COMBOS, CLICK_DELAYS, TEXTS, flagNames, CS, PS };
+module.exports = { fakeHelper, run, validate, COMBOS, CLICK_DELAYS, TEXTS, flagNames, CS, PS };
