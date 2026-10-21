@@ -172,7 +172,7 @@ function createDesktopAgent(deps) {
     s.asking = true; registerEsc(false);
     if (overlay && !overlay.isDestroyed()) { overlay.setIgnoreMouseEvents(false); overlay.setFocusable(true); overlay.showInactive(); overlay.focus(); }
     const r = await new Promise((resolve) => {
-      const t = setTimeout(() => { asks.delete(id); resolve({ ok: false, reason: 'hết thời gian chờ (3 phút)' }); }, 3 * 60e3);
+      const t = setTimeout(() => { asks.delete(id); resolve({ ok: false, timeout: true, reason: '' }); }, 3 * 60e3);
       asks.set(id, (x) => { clearTimeout(t); asks.delete(id); resolve(x || { ok: false }); });
       ov('ask', { id, ...req });
       if (benchAnswer) { const fn = benchAnswer; setTimeout(() => { const f = asks.get(id); if (f) f(fn(req)); }, 300); }
@@ -248,6 +248,19 @@ function createDesktopAgent(deps) {
     return `${(ACT_LABEL[action] || action).toLowerCase()} ${who}`.trim();
   }
 
+  // B21: ô sắp nhận chữ có CHẮC là ô tìm kiếm không. Chỉ tin: (1) phần tử đích/đang chọn mang tên/gợi ý “Tìm kiếm/Search”;
+  // (2) không đọc được ô đang chọn, nhưng thao tác NGAY TRƯỚC (≤ 60 giây) là bấm vào ô/chữ “Tìm kiếm” hoặc Ctrl+F/K, hoặc đang gõ tìm dở (chưa bấm chỗ khác).
+  // Ô đang chọn đọc được mà là ô nhập KHÁC (ô soạn tin) → không phải ô tìm kiếm, dù trước đó có bấm “Tìm kiếm”.
+  function searchConfirmed(t, focusedEl, a) {
+    const s = session; const SEARCHY = /tìm|tim kiem|search|find/iu;
+    const named = (el) => !!el && SEARCHY.test(`${el.name || ''} ${el.autoId || ''} ${el.placeholder || ''}`);
+    if (t && t.el) return named(t.el);
+    if (t && t.x != null) return SEARCHY.test(String(a.element || a.target || '')) && !/^\[?e\d+\]?$/i.test(String(a.element || a.target || ''));
+    if (focusedEl && (focusedEl.editable || focusedEl.focused) && !focusedEl.ocr) return named(focusedEl);
+    const la = s && s.lastAction; const recent = la && Date.now() - la.at < 60000;
+    if (recent && (/^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(la.keys || '').replace(/\s/g, '')) || (['click', 'double_click'].includes(la.action) && SEARCHY.test(`${la.query || ''} ${la.el ? la.el.name || '' : ''}`)))) return true;
+    return !!(s && s.inSearch && Date.now() - s.inSearch < 300000 && la && la.action === 'type_text');
+  }
   async function act(a, ctx) {
     let action = String(a.action || '').toLowerCase(); action = ALIASES[action] || action;
     if (!ACT_LABEL[action]) throw new Error('action không hợp lệ: ' + a.action + '. Dùng: ' + Object.keys(ACT_LABEL).join(', '));
@@ -276,7 +289,9 @@ function createDesktopAgent(deps) {
     let t = needPoint ? resolveTarget(a) : null;
     // gõ vào một nhãn chữ/nút (không phải ô nhập) là sai: gõ vào ô đang được chọn, không bấm vào nhãn
     // trừ chữ gợi ý của ô nhập chỉ thấy qua OCR (Zalo: "Tìm kiếm"): bấm vào đó để chọn ô rồi mới gõ
-    if (action === 'type_text' && t && t.el && !t.el.editable && !U.inputLike(t.el)) { t = null; needPoint = false; }
+    // B21 (QA lượt 3): cụm chữ OCR → BẤM vào toạ độ của nó trước rồi mới gõ (không gõ mù vào ô đang chọn — đó có thể là ô soạn tin của chat sai).
+    // Nhãn của cây giao diện (có ô nhập đi kèm đang được chọn) giữ cách cũ: gõ vào ô đang chọn.
+    if (action === 'type_text' && t && t.el && !t.el.editable && !U.inputLike(t.el) && !t.el.ocr) { t = null; needPoint = false; }
     if (needPoint && (!t || t.x == null)) {
       const q = t && t.query ? t.query : '';
       if (q && !/^\[?e\d+\]?$/i.test(q)) t = await groundWithVision(q, ctx) || t;
@@ -295,14 +310,15 @@ function createDesktopAgent(deps) {
     }
     // gửi tin trong ứng dụng chat: bắt buộc đã tìm và mở đúng người nhận trong lượt này (không gõ vào chat đang mở sẵn)
     if (action === 'type_text' && ctx && ctx.userQuery) {
-      const tel = t && t.el ? t.el : focusedEl;
-      const searchField = !!((tel && /tìm|tim kiem|search|find/iu.test(`${tel.name || ''} ${tel.autoId || ''}`)) || /tìm|search|find/iu.test(String(a.element || a.target || '')) || (s.lastAction && Date.now() - s.lastAction.at < 60000 && (/^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(s.lastAction.keys || '').replace(/\s/g, '')) || /tìm|search|find/iu.test(`${s.lastAction.query || ''} ${s.lastAction.el ? s.lastAction.el.name || '' : ''}`))));
+      const searchField = searchConfirmed(t, focusedEl, a);
       const R = SV.regionsOf(s.obs); const P = SV.parseSeen(s.lastSeen || '');
       const g = SV.chatGate({ query: ctx.userQuery, text: a.text, searchField, proc: s.obs && s.obs.win ? s.obs.win.proc : (s.target && s.target.proc) || '', title: s.obs && s.obs.win ? s.obs.win.title : '', state: s, header: [...(R ? R.header : []), P.header].filter(Boolean) });
       if (g) { deps.log && deps.log('desk', 'Chặn gõ tin: chưa mở đúng người nhận'); return { error: 'chưa mở đúng người nhận', forModel: g, summary: 'chưa mở đúng người nhận — tìm người nhận trước' }; }
     }
+    // B24: gõ tên/từ khoá (+ Enter) vào ô tìm kiếm ĐÃ XÁC NHẬN là TÌM, không phải gửi — không coi là bước rủi ro, kể cả chế độ “chỉ soạn, đừng gửi”
+    const searchTyping = action === 'type_text' && !/\n/.test(String(a.text)) && String(a.text).length <= 80 && searchConfirmed(t, focusedEl, a);
     const desc = describeAct(action, a, t);
-    const risk = riskOf(action, { el: t && t.el, query: t && t.query, text: action === 'type_text' && a.submit ? a.text + '\n' : a.text, keys: a.keys, lastAction: s.lastAction });
+    const risk = searchTyping ? null : riskOf(action, { el: t && t.el, query: t && t.query, text: action === 'type_text' && a.submit ? a.text + '\n' : a.text, keys: a.keys, lastAction: s.lastAction });
     const mode = S().agentScreenMode === 'important' ? 'important' : 'each';
     const box = t && t.x != null ? (t.el ? rectNorm(t.el.b) : t.box || (() => { const n = nativeToNorm(t.x, t.y); return { x1: n.nx - 0.012, y1: n.ny - 0.012, x2: n.nx + 0.012, y2: n.ny + 0.012 }; })()) : null;
     if (box) ov('target', { box, label: desc });
@@ -324,6 +340,10 @@ function createDesktopAgent(deps) {
       const crop = s.shot ? thumbOf(s.shot).src : null;
       const r = await ask({ action, title: risk ? '⚠ Bước quan trọng — kiểm tra kỹ' : 'AIVN AGENT muốn làm bước này', desc: desc.charAt(0).toUpperCase() + desc.slice(1), risk, text: action === 'type_text' ? String(a.text) : null,
         window: s.obs && s.obs.win ? s.obs.win.title : '', image: s.shot ? s.shot.dataUrl : crop, box, via: t ? t.via : null, mode });
+      if (!r.ok && r.timeout) { // B25: không ai trả lời thẻ ≠ người dùng từ chối
+        ov('target', { box: null }); s.lastAction = null;
+        return { refused: true, timeout: true, forModel: `Không ai trả lời thẻ xin phép trong 3 phút (HẾT THỜI GIAN CHỜ) nên bước “${desc}” CHƯA được làm. Người dùng KHÔNG từ chối — có thể họ đang không ở máy. Dừng lại và báo: bước này chưa làm vì chưa được duyệt kịp; người dùng có thể giao lại việc khi sẵn sàng. Không được nói là người dùng không đồng ý.`, summary: 'hết thời gian chờ duyệt' };
+      }
       if (!r.ok) {
         ov('target', { box: null });
         const reason = String(r.reason || '').trim();
@@ -402,10 +422,19 @@ function createDesktopAgent(deps) {
         s.inSearch = Date.now(); s.foundHit = null;
         if (verdict === 'yes') {
           // kết quả nằm dưới ô tìm kiếm: chọn phần tử khớp gần ô nhất, tức kết quả đầu tiên (không phải chính chữ trong ô)
-          const boxY = el && el.b ? el.b[1] : (t && t.y != null ? t.y : -1);
-          const m = matches(o2).filter(e => !e.b || e.b[1] > boxY + 4).sort((x, y) => (x.b ? x.b[1] : 0) - (y.b ? y.b[1] : 0))[0];
+          const boxEl = el && el.b ? el : prevAction && prevAction.el && prevAction.el.b && Date.now() - prevAction.at < 300000 ? prevAction.el : null; // ô tìm kiếm = ô đang chọn, hoặc chỗ vừa bấm (gợi ý “Tìm kiếm…” chỉ thấy qua OCR)
+          const boxY = boxEl ? boxEl.b[1] + Math.max(0, (boxEl.b[3] || 0) - 8) : (t && t.y != null ? t.y : -1);
+          const below = matches(o2).filter(e => !e.b || e.b[1] > boxY + 4).sort((x, y) => (x.b ? x.b[1] : 0) - (y.b ? y.b[1] : 0)); const m = below[0];
+          // B20 / quyết định của Khôi: hai người cùng họ tên (hoặc cùng tên kèm chú thích khác nhau) → HỎI người dùng, không tự chọn
+          const rcpQ = ctx && ctx.userQuery ? SV.recipientOf(ctx.userQuery) : null; const distinct = rcpQ ? SV.sameNameCandidates(rcpQ, below.map(e => e.name)) : [];
+          const exactDup = rcpQ ? below.filter(e => U.fold(e.name).trim() === U.fold(SV.nameKey(rcpQ))).length >= 2 : false;
+          if (rcpQ && (distinct.length >= 2 || exactDup)) {
+            s.foundHit = null; s.ambiguous = distinct.length >= 2 ? distinct : below.map(e => e.name);
+            checks.push(`Ô tìm kiếm: có NHIỀU người cùng tên “${rcpQ}”: ${s.ambiguous.slice(0, 5).map(x => `“${x}”`).join(', ')}. KHÔNG tự chọn. Dừng lại và HỎI người dùng muốn nhắn cho người nào (nêu các lựa chọn), chưa gõ tin.`);
+          } else {
           s.foundHit = { id: m ? m.id : null, name: m ? m.name : q, query: q };
           checks.push(`Ô tìm kiếm: đã chờ kết quả và THẤY kết quả khớp "${q}"${m ? `: [${m.id}] "${m.name}"` : ''}. Bấm vào kết quả đó${m ? ` (screen_act click element "${m.id}")` : ' (kiểm tra đúng tên)'} để mở; KHÔNG gõ lại và không thử tên khác nữa.`);
+          }
         }
         else checks.push(`Ô tìm kiếm: đã chờ ~${Math.round(waited / 100) / 10} giây và CHƯA thấy kết quả khớp "${q}".` + (rest.length ? ` Bước tiếp theo BẮT BUỘC: gõ lại "${rest[0]}" vào ô tìm kiếm (screen_act type_text, replace: true). Chưa được nói "không tìm thấy"${rest.length > 1 ? `; nếu vẫn không ra thì lần lượt thử ${rest.slice(1).map(v => `"${v}"`).join(', ')}` : ''}.` : ' Đã thử nguyên văn, không dấu và một phần tên — có thể báo người dùng là không tìm thấy (nêu các cách đã thử).'));
       }
@@ -422,7 +451,8 @@ function createDesktopAgent(deps) {
       o2 = await observe(ctx, { question: (o.poor || deps.engine.status().vision) ? SV.SEEN_QUESTION : '' });
       verify = SV.verifySend({ msg, recipient, regions: SV.regionsOf(o2.obs), screenText: o2.text, seen: o2.seen, winTitle: o2.obs.win ? o2.obs.win.title : '' });
       verify.ocr = !!(o2.src && /OCR/.test(o2.src));
-      checks.push(verify.sent ? `ĐÃ KIỂM CHỨNG trên màn hình: tiêu đề cuộc trò chuyện là “${recipient || '(không nêu tên)'}”, ô soạn đã trống, thấy bong bóng tin “${String(msg).slice(0, 40)}”.` : `CHƯA kiểm chứng được là đã gửi: ${verify.why}. Không được báo “đã gửi”; hãy screen_look để kiểm tra rồi làm lại cho đúng.`);
+      if (verify.wrongChat) deps.log && deps.log('desk', `GỬI NHẦM: ${verify.why}`);
+      checks.push(verify.wrongChat ? `⚠ GỬI NHẦM: ${verify.why}. KHÔNG được gửi thêm gì. Dừng lại và BÁO NGAY cho người dùng là tin đã bị gửi nhầm vào “${verify.wrongTo || 'cuộc trò chuyện khác'}” để họ thu hồi/xoá tin đó.` : verify.sent ? `ĐÃ KIỂM CHỨNG trên màn hình: tiêu đề cuộc trò chuyện là “${recipient || '(không nêu tên)'}”, ô soạn đã trống, thấy bong bóng tin “${String(msg).slice(0, 40)}”.` : `CHƯA kiểm chứng được là đã gửi: ${verify.why}. Không được báo “đã gửi”; hãy screen_look để kiểm tra rồi làm lại cho đúng.`);
       s.lastTyped = null;
     }
     if (beforeDialog && s.dialog === beforeDialog) checks.push(`Hộp thoại “${beforeDialog}” VẪN đang mở — việc trong hộp thoại CHƯA xong. Xác nhận bằng nút của hộp thoại (Save/Lưu/OK/Mở) hoặc hotkey "enter"; đừng báo đã xong.`);

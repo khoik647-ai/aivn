@@ -37,7 +37,7 @@ class VisionError extends Error { constructor(msg, code) { super(msg); this.code
 function createVisionServer({ log = () => {} } = {}) {
   let proc = null, port = 0, key = '', info = null, tail = [];
 
-  async function start({ id, modelPath, mmprojPath, contextSize = 4096, gpu = true, threads }) {
+  async function start({ id, modelPath, mmprojPath, contextSize = 4096, gpu = true, threads, batchSize }) {
     await stop();
     const exe = findServer();
     if (!exe) throw new VisionError('Bản AIVN này thiếu bộ máy nhìn ảnh (llama-server). Hãy cài lại AIVN.', 'NO_SERVER');
@@ -45,7 +45,8 @@ function createVisionServer({ log = () => {} } = {}) {
     const args = ['-m', modelPath, ...(mmprojPath ? ['--mmproj', mmprojPath] : []), ...(process.env.AIVN_TEST_CHAT_TEMPLATE ? ['--chat-template-file', process.env.AIVN_TEST_CHAT_TEMPLATE] : []), '--host', '127.0.0.1', '--port', String(port), '--api-key', key,
       '-c', String(contextSize), '-np', '1', '--no-webui', '--offline', '--jinja'];
     if (!gpu) args.push('-ngl', '0', ...(mmprojPath ? ['--no-mmproj-offload'] : []));
-    if (threads) args.push('-t', String(threads));
+    if (Number(threads) > 0) args.push('-t', String(Math.round(threads)), '-tb', String(Math.round(threads)));
+    if (Number(batchSize) > 0) args.push('-b', String(Math.min(Math.round(batchSize), contextSize)));
     const t0 = Date.now();
     proc = spawn(exe, args, { cwd: path.dirname(exe), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
       env: { ...process.env, LLAMA_ARG_HOST: '127.0.0.1' } });

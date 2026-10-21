@@ -67,9 +67,11 @@ test('Chat: không được gõ tin vào cuộc trò chuyện đang mở sẵn k
   assert.match(g, /TÌM và MỞ/); assert.match(g, /Nhóm Lớp K27/);
   // dù tiêu đề đang đúng người, vẫn phải tìm và mở trong lượt này
   assert.ok(SV.chatGate({ query: q, text: 'Mai 8h họp nhóm nhé', proc: 'Messenger', state: {}, header: ['Trần Quỳnh Anh'] }));
-  // gõ tên vào ô tìm kiếm thì được (kể cả không dấu / một phần)
-  assert.strictEqual(SV.chatGate({ query: q, text: 'Tran Quynh Anh', proc: 'Messenger', state: {} }), null);
-  assert.strictEqual(SV.chatGate({ query: q, text: 'Quỳnh Anh', proc: 'Messenger', state: {} }), null);
+  // gõ tên vào ô tìm kiếm ĐÃ XÁC NHẬN thì được (kể cả không dấu / một phần)
+  assert.strictEqual(SV.chatGate({ query: q, text: 'Tran Quynh Anh', searchField: true, proc: 'Messenger', state: {} }), null);
+  assert.strictEqual(SV.chatGate({ query: q, text: 'Quỳnh Anh', searchField: true, proc: 'Messenger', state: {} }), null);
+  // B21 (QA lượt 3): ô chưa xác nhận là ô tìm kiếm → KHÔNG được gõ tên người nhận (đã gửi nhầm tên vào Nhóm Lớp K27)
+  assert.match(SV.chatGate({ query: q, text: 'Tran Quynh Anh', proc: 'Messenger', state: {}, header: ['Nhóm Lớp K27'] }), /CHƯA được xác nhận là ô Tìm kiếm/);
   assert.strictEqual(SV.chatGate({ query: q, text: 'abc', searchField: true, proc: 'Messenger', state: {} }), null);
   // đã tìm và mở đúng người → được gõ
   const st = { chatOpen: SV.nameKey('Trần Quỳnh Anh') };
@@ -81,7 +83,7 @@ test('Chat: không được gõ tin vào cuộc trò chuyện đang mở sẵn k
 });
 test('Chat: desktop-agent nối chatGate trước khi gõ và đánh dấu đã mở sau khi bấm kết quả tìm kiếm', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src/desktop-agent.js'), 'utf8');
-  assert.ok(src.indexOf('SV.chatGate(') > 0 && src.indexOf('SV.chatGate(') < src.indexOf('const risk = riskOf('), 'chặn trước khi hỏi/gõ');
+  assert.ok(src.indexOf('SV.chatGate(') > 0 && src.indexOf('SV.chatGate(') < src.indexOf('const risk = searchTyping ? null : riskOf('), 'chặn trước khi hỏi/gõ');
   assert.match(src, /s\.chatOpen = SV\.nameKey\(rcp\)/);
   assert.match(src, /SV\.SEEN_QUESTION/); assert.match(src, /regions: SV\.regionsOf\(o2\.obs\)/);
 });

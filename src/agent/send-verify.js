@@ -34,13 +34,33 @@ function recipientOf(query) {
 function nameKey(name) { const p = fold(name).split(' ').filter(Boolean); while (p.length > 1 && HONOR.test(p[0])) p.shift(); return p.join(' '); }
 // tên nằm nguyên vẹn (theo ranh giới từ) trong một dòng tiêu đề
 const hasWords = (hay, needle) => !!needle && new RegExp(`(?:^| )${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?: |$)`).test(fold(hay));
-// tiêu đề có đúng người nhận không: tên đầy đủ có trong tiêu đề, và tiêu đề không phải tên người khác dài hơn (“Lê Quỳnh Anh”)
+// B20 (QA lượt 3): chú thích trong ngoặc ở tiêu đề (“Lê Văn Hùng (SV K26)”, “Trần Quỳnh Anh (Cựu SV)”) là dấu hiệu một NGƯỜI KHÁC
+// trùng tên → không khớp, trừ khi người dùng nêu đúng chú thích đó. Danh xưng người dùng nêu (“thầy”) mà tiêu đề có danh xưng KHÁC → không khớp.
+const parenNotes = (s) => (String(s || '').match(/[(（\[]([^)）\]]{1,40})[)）\]]/g) || []).map(x => fold(x)).filter(Boolean);
+const titleOf = (name) => { const p = fold(name).split(' ').filter(Boolean); const out = []; while (p.length > 1 && HONOR.test(p[0])) out.push(p.shift()); return out.join(' '); };
+// tiêu đề có đúng người nhận không: tên đầy đủ có trong tiêu đề (theo ranh giới từ), không có chú thích trong ngoặc mà người dùng không nêu
 function headerMatches(name, header) {
   const k = nameKey(name); if (!k) return true;
-  const h = fold(header); if (!h) return false;
+  const raw = String(header || ''); const h = fold(raw); if (!h) return false;
   if (!hasWords(h, k)) return false;
-  // người dùng nêu đủ họ tên (≥ 3 chữ) thì tiêu đề phải chứa đủ; nêu tên ngắn (“Quỳnh Anh”) thì chấp nhận tiêu đề dài hơn
+  // chú thích trong ngoặc NGAY SAU tên (cùng một đoạn tiêu đề) mà người dùng không nêu → người khác trùng tên
+  const userNotes = parenNotes(name); const seg = raw.split(/\s+[-–|·]\s+|\s*\|\s*/).find(x => hasWords(fold(x), k)) || raw;
+  const notes = parenNotes(seg).filter(n => !/^\d+$/.test(n) && !userNotes.includes(n));
+  const utl = titleOf(name); const titled = utl && hasWords(fold(seg), `${utl} ${k}`); // “thầy Lê Văn Hùng” có cả danh xưng trong tiêu đề → đúng người
+  if (notes.length && !titled) return false;
+  // danh xưng: người dùng nói “thầy Lê Văn Hùng” mà tiêu đề ghi danh xưng khác ngay trước tên (“cô Lê Văn Hùng”) → không khớp
+  const ut = titleOf(name); if (ut) { const before = fold(seg).split(k)[0].trim().split(' ').pop() || ''; if (before && HONOR.test(before) && before !== ut.split(' ').pop()) return false; }
   return true;
+}
+// B20: nhiều người cùng họ tên trong danh sách/kết quả → phải hỏi người dùng chọn ai (trả về các tên khớp khác nhau)
+function sameNameCandidates(name, lines) {
+  const k = nameKey(name); if (!k) return [];
+  const seen = new Map();
+  for (const l of lines || []) {
+    const bare = nameKey(String(l).replace(/[(（\[][^)）\]]*[)）\]]/g, ' ')); // dòng phải CHỈ là tên (± danh xưng, ± chú thích trong ngoặc), không phải đoạn tin có nhắc tên
+    if (bare !== k) continue; const key = fold(l); if (!seen.has(key)) seen.set(key, String(l).trim());
+  }
+  return [...seen.values()];
 }
 // tương thích cũ: có thấy tên ở đâu đó (CHỈ dùng làm gợi ý, không dùng để kết luận đã gửi)
 function nameSeen(name, text) { return hasWords(text, nameKey(name)); }
@@ -73,7 +93,7 @@ function verifySend({ msg, recipient, regions = null, seen = '', winTitle = '', 
   const msgLines = [...S.messages, ...(R.messages || [])];
   // 1) người nhận ở tiêu đề
   // tiêu đề cửa sổ dạng “Ứng dụng - Tên” là nguồn chắc nhất: nếu nó nêu một cuộc trò chuyện khác thì chắc chắn sai người
-  const titleChat = String(winTitle || '').split(/\s+[-–|·]\s+/).map(x => x.trim()).filter(x => x && !/^(zalo|messenger|facebook|telegram|microsoft teams|teams|discord|gmail|signal|whatsapp|skype|line|viber|google chrome|chrome|microsoft edge|firefox|mozilla firefox)$/i.test(x) && !/^\(?\d+\)?$/.test(x));
+  const titleChat = String(winTitle || '').split(/\s+[-–|·]\s+/).map(x => x.trim()).filter(x => x && !/^(zalo|messenger|facebook|telegram|microsoft teams|teams|discord|gmail|signal|whatsapp|skype|line|viber|google chrome|chrome|microsoft edge|firefox|mozilla firefox|outlook|microsoft outlook|trò chuyện|tro chuyen|chat|thư|thu|mail|inbox|hộp thư đến|hop thu den|tin nhắn|messages?)$/i.test(x) && !/^\(?\d+\)?$/.test(x));
   const titleWrong = !!(recipient && titleChat.length && !titleChat.some(x => headerMatches(recipient, x)) && String(winTitle).split(/\s+[-–|·]\s+/).length > 1);
   const recipientSeen = !recipient || (!titleWrong && headerLines.some(h => headerMatches(recipient, h)));
   const otherHeader = titleWrong ? titleChat[0] : (headerLines.find(h => fold(h) && !/^(messenger|zalo|telegram|teams|discord|gmail)$/.test(fold(h))) || '');
@@ -87,11 +107,13 @@ function verifySend({ msg, recipient, regions = null, seen = '', winTitle = '', 
     const all = fold(`${screenText}`); const n = all.split(m).length - 1; msgSeen = n > (composerHas ? 1 : 0);
   }
   const sent = !!msg && recipientSeen && msgSeen && !composerHas;
+  // B25: tin ĐÃ rời ô soạn và hiện thành bong bóng, nhưng ở cuộc trò chuyện KHÁC → đã gửi nhầm chỗ (phải báo người dùng, không phải “chưa có tác dụng”)
+  const wrongChat = !!(msg && recipient && msgSeen && !composerHas && !recipientSeen);
   const why = !msg ? 'không biết nội dung vừa gửi'
     : composerHas ? `tin “${String(msg).split('\n')[0].slice(0, 40)}” vẫn còn trong ô soạn — CHƯA gửi`
     : !recipientSeen ? `tiêu đề cuộc trò chuyện đang mở không phải “${recipient}”${otherHeader ? ` (đang là “${String(otherHeader).slice(0, 40)}”)` : ''} — có thể đang ở sai cuộc trò chuyện`
     : !msgSeen ? `không thấy bong bóng tin “${String(msg).split('\n')[0].slice(0, 40)}” trong khung tin nhắn sau khi gửi` : '';
-  return { sent, msgSeen, recipientSeen, composerEmpty: !composerHas, recipient: recipient || null, why };
+  return { sent, wrongChat, wrongTo: wrongChat ? String(otherHeader || '').slice(0, 60) : null, msgSeen, recipientSeen, composerEmpty: !composerHas, recipient: recipient || null, why: wrongChat ? `tin “${String(msg).split('\n')[0].slice(0, 40)}” ĐÃ được gửi vào cuộc trò chuyện “${String(otherHeader || '(không rõ)').slice(0, 40)}”, KHÔNG phải “${recipient}”` : why };
 }
 // tách chữ trên cửa sổ chat theo vị trí: danh sách bên trái (≈30 % chiều rộng), tiêu đề (≈16 % trên cùng của khung phải),
 // ô soạn (phần tử nhập liệu, hoặc ≈10 % dưới cùng), còn lại là khung tin nhắn. obs = { win: {b}, elements: [{name,value,b,editable,focused}] }
@@ -124,12 +146,20 @@ function typingName(text, recipient) {
   const t = fold(text); const k = nameKey(recipient); if (!t || !k) return false;
   return t.length <= 60 && (k.includes(t) || t.includes(k));
 }
+// chữ gõ vào CHỈ là tên người nhận (hoặc một phần tên) — không phải một tin nhắn có nhắc tên
+function onlyName(text, recipient) {
+  const t = fold(text); const k = nameKey(recipient); if (!t || !k) return false;
+  return t === k || (k.includes(t) && t.length >= 2) || fold(recipient) === t;
+}
 const relates = (q, recipient) => { const a = fold(q), k = nameKey(recipient); return !!a && !!k && (k.includes(a) || a.includes(k)); };
 // trả về lời nhắc (chặn) hoặc null (cho gõ). st = { chatOpen, searchTyping }
+// searchField = ô nhận chữ ĐÃ ĐƯỢC XÁC NHẬN là ô tìm kiếm (B21: không còn cho qua chỉ vì chữ gõ là tên người nhận)
 function chatGate({ query, text, searchField = false, proc = '', title = '', state = {}, header = [] }) {
   const recipient = recipientOf(query);
   if (!recipient || !isChatContext(query, proc, title)) return null;
-  if (searchField || typingName(text, recipient)) return null; // đang gõ tên vào ô tìm kiếm
+  if (searchField) return null; // gõ vào ô tìm kiếm đã xác nhận (tên, một phần tên, không dấu…) — đây là TÌM, không phải gửi
+  // B21 (QA lượt 3): KHÔNG BAO GIỜ gõ tên người nhận vào ô soạn tin / ô chưa xác nhận là ô tìm kiếm (đã gửi nhầm “Trần Quỳnh Anh” vào Nhóm Lớp K27)
+  if (onlyName(text, recipient) || typingName(text, recipient) && fold(text).length <= fold(recipient).length + 4) return `KHÔNG gõ “${String(text).slice(0, 40)}”: ô đang nhận chữ CHƯA được xác nhận là ô Tìm kiếm (có thể là ô soạn tin của cuộc trò chuyện đang mở${header.filter(Boolean).length ? ` “${String(header.filter(Boolean)[0]).slice(0, 40)}”` : ''} — gõ tên + Enter ở đó sẽ GỬI tên thành tin nhắn). Làm lần lượt: 1) screen_act click vào ô/chữ “Tìm kiếm” của ứng dụng; 2) type_text "${recipient}" với element là CHÍNH ô tìm kiếm đó; 3) bấm vào kết quả đúng tên “${recipient}”. Nếu tên “${recipient}” đã hiện sẵn trong danh sách bên trái, bấm thẳng vào tên đó thay vì gõ.`;
   const k = nameKey(recipient);
   const hdr = header.filter(Boolean);
   if (state.chatOpen === k) {
@@ -140,4 +170,4 @@ function chatGate({ query, text, searchField = false, proc = '', title = '', sta
   return `CHƯA gõ tin: AIVN AGENT phải TÌM và MỞ cuộc trò chuyện với “${recipient}” trước, không gõ vào cuộc trò chuyện đang mở sẵn${hdr.length ? ` (đang mở: “${String(hdr[0]).slice(0, 40)}”)` : ''}. Làm lần lượt: 1) screen_act click vào ô Tìm kiếm của ứng dụng; 2) type_text "${recipient}"; 3) click vào kết quả đúng tên “${recipient}”; 4) rồi mới gõ tin nhắn.`;
 }
 const SEEN_QUESTION = 'Trả lời đúng định dạng, chép đúng chữ trên màn hình:\nTÊN: <tên người/nhóm ở đầu khung trò chuyện đang mở>\nÔ SOẠN: <chữ còn trong ô soạn tin, hoặc TRỐNG>\nTIN: <tin nhắn cuối cùng trong khung trò chuyện>\nTIN: <tin nhắn trước đó>';
-module.exports = { chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };
+module.exports = { sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };

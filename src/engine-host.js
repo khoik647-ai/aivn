@@ -40,8 +40,8 @@ process.on('message', async (msg) => {
       }
       // Chế độ hai mô hình: mô hình định vị (Holo, UI-TARS, Qwen-VL) chạy riêng trong llama-server thứ hai, mô hình lập kế hoạch vẫn là mô hình chữ
       case 'groundLoad': { grounder ||= require('./vision-server').createVisionServer({ log: (m) => console.log('[grounder] ' + m) }); const [gid, gpath, gmm, gopts = {}] = args;
-        try { result = await grounder.start({ id: gid, modelPath: gpath, mmprojPath: gmm, contextSize: gopts.contextSize || 4096, gpu: gopts.gpu !== false }); }
-        catch (e) { if (gopts.gpu === false) throw e; console.log('[grounder] GPU lỗi, thử CPU: ' + e.message); result = await grounder.start({ id: gid, modelPath: gpath, mmprojPath: gmm, contextSize: gopts.contextSize || 4096, gpu: false }); }
+        try { result = await grounder.start({ id: gid, modelPath: gpath, mmprojPath: gmm, contextSize: gopts.contextSize || 4096, gpu: gopts.gpu !== false, threads: gopts.threads, batchSize: gopts.batchSize }); }
+        catch (e) { if (gopts.gpu === false) throw e; console.log('[grounder] GPU lỗi, thử CPU: ' + e.message); result = await grounder.start({ id: gid, modelPath: gpath, mmprojPath: gmm, contextSize: gopts.contextSize || 4096, gpu: false, threads: gopts.threads, batchSize: gopts.batchSize }); }
         result = { id: result.id, path: result.path, contextSize: result.contextSize }; break; }
       case 'groundUnload': if (grounder) await grounder.stop(); result = { loaded: false }; break;
       case 'groundStatus': { const st = grounder && grounder.status(); result = st ? { loaded: true, id: st.id, path: st.path } : { loaded: false }; break; }

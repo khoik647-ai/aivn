@@ -110,12 +110,13 @@ async function loadModel(id, modelPath, opts = {}) {
     loading = (async () => {
       await unloadModel();
       const l = await getLlama().catch(() => null);
-      try { await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: !!(l && l.gpu) }); }
+      const vpf = opts.perf || {}; const vx = { ...(vpf.threads ? { threads: vpf.threads } : {}), ...(vpf.batchSize ? { batchSize: vpf.batchSize } : {}) }; // B26: số luồng/lô của từng mô hình áp dụng cả cho llama-server
+      try { await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: !!(l && l.gpu), ...vx }); }
       catch (e) {
         if (!(l && l.gpu) || ['VCREDIST', 'NO_SERVER'].includes(e.code)) throw e;
         console.warn('[engine] máy chủ nhìn ảnh lỗi với GPU, thử lại bằng CPU: ' + e.message);
         await getVision().stop().catch(() => {});
-        await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: false });
+        await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: false, ...vx });
       }
       visionOn = true;
     })();

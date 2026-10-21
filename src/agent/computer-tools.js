@@ -148,6 +148,15 @@ function createComputerTools(deps) {
   }
   const macOpenApp = (nameOrPath) => new Promise(res => require('child_process').execFile('open', ['-a', nameOrPath], { timeout: 15000 }, (e) => res(!e)));
 
+  // B23 (QA lượt 3): ứng dụng/trang web đã có cửa sổ ĐANG MỞ (Outlook, Gmail, Docs…) → chuyển tới cửa sổ đó, không mở bản mới (outlook.live.com…)
+  const WEB_KEYS = [[/outlook\.(live|office)\.com|outlook\.com/i, 'outlook'], [/mail\.google\.com/i, 'gmail'], [/docs\.google\.com/i, 'google docs'], [/classroom\.google\.com/i, 'classroom'], [/teams\.(microsoft|live)\.com/i, 'teams'], [/messenger\.com|facebook\.com\/messages/i, 'messenger'], [/chat\.zalo\.me|zalo\.me/i, 'zalo'], [/web\.telegram\.org/i, 'telegram']];
+  async function openWindowFor(q) {
+    if (!q || !deps.listWindows) return null; // chỉ khi main.js cấp danh sách cửa sổ (kiểm thử đơn vị không đụng cửa sổ thật)
+    try { const U = require('./uitree'); const list = (await deps.listWindows()).filter(w => w && w.title && !/^aivn\b/i.test(w.title));
+      const words = (x) => ' ' + C.fold(x).replace(/[^\p{L}\p{N}]+/gu, ' ').trim() + ' '; const fq = words(q);
+      const w = list.find(x => words(x.title).includes(fq) || words(x.proc || '') === fq) || null;
+      if (!w) return null; try { await (deps.focusWindow ? deps.focusWindow(w) : U.focus(w)); } catch {} return w; } catch { return null; }
+  }
   async function exec(name, a, ctx) {
     const s = st();
     switch (name) {
@@ -159,6 +168,7 @@ function createComputerTools(deps) {
       }
       case 'open_app': {
         const q = String(a.name || '').trim(); if (!q) throw new CompError('Thiếu tên ứng dụng');
+        if (a.new_window !== true) { const w = await openWindowFor(q); if (w) { if (ctx) ctx.lastOpenedApp = q; return { forModel: `“${q}” ĐÃ có cửa sổ đang mở: “${w.title}”. Đã chuyển tới cửa sổ đó (không mở thêm). Dùng screen_look để xem rồi thao tác trên cửa sổ này.`, summary: `Dùng cửa sổ đang mở “${w.title}”` }; } }
         const all = await apps();
         let hit = C.findApp(q, all);
         if (!hit && process.platform === 'darwin') hit = C.findApp(q, await C.macSpotlight(q));
@@ -196,6 +206,8 @@ function createComputerTools(deps) {
         let u = String(a.url || '').trim(); if (/^www\./i.test(u)) u = 'https://' + u;
         let url; try { url = new URL(u); } catch { throw new CompError('Địa chỉ không hợp lệ: ' + u); }
         if (!/^(https?:|mailto:)$/.test(url.protocol)) throw new CompError('Chỉ mở được địa chỉ http, https hoặc mailto.');
+        const wk = (WEB_KEYS.find(([re]) => re.test(url.href)) || [])[1];
+        if (wk && a.new_window !== true) { const w = await openWindowFor(wk); if (w) return { forModel: `${wk} ĐÃ có cửa sổ đang mở: “${w.title}”. Đã chuyển tới cửa sổ đó thay vì mở ${url.hostname}. Dùng screen_look để thao tác trên cửa sổ này.`, summary: `Dùng cửa sổ đang mở “${w.title}”` }; }
         await deps.openExternal(url.href);
         return { forModel: `Đã mở ${url.href} trong trình duyệt của người dùng. (Bạn không đọc được nội dung trang qua công cụ này.)`, summary: `Đã mở ${url.href}`, urls: [{ url: url.href, kind: 'opened' }] };
       }

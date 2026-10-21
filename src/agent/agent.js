@@ -449,6 +449,7 @@ function createAgent(deps) {
         const mode = a.mode === 'append' ? 'append' : a.mode === 'overwrite' ? 'overwrite' : 'create';
         if (exists && mode !== 'append') {
           const ok = await ctx.confirm({ kind: 'overwrite', title: 'Ghi đè tệp?', message: `AIVN AGENT muốn ghi đè tệp “${shown(r)}”. Nội dung hiện tại (${fmtSize(fs.statSync(r.full).size)}) sẽ bị thay bằng nội dung mới (${fmtSize(Buffer.byteLength(content))}).`, path: r.full, preview: content.slice(0, 600), okLabel: 'Ghi đè' });
+          if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai trả lời hộp xác nhận trong 5 phút (HẾT THỜI GIAN). Người dùng KHÔNG từ chối; tệp giữ nguyên. Báo người dùng là bước này chưa làm vì chưa được xác nhận kịp.', summary: 'Hết thời gian chờ xác nhận · tệp giữ nguyên' };
           if (!ok) return { refused: true, forModel: `Người dùng KHÔNG đồng ý ghi đè "${shown(r)}". Tệp giữ nguyên. Đừng thử lại; hãy hỏi người dùng có muốn lưu với tên khác không.`, summary: `Người dùng từ chối ghi đè ${shown(r)}` };
         }
         fs.mkdirSync(path.dirname(r.full), { recursive: true });
@@ -462,6 +463,7 @@ function createAgent(deps) {
         if (st.isDirectory()) throw new ToolError('AIVN AGENT chỉ xoá từng tệp, không xoá thư mục.');
         if (!r.rel) throw new ToolError('Không xoá thư mục được phép.');
         const ok = await ctx.confirm({ kind: 'delete', title: 'Xoá tệp?', message: `AIVN AGENT muốn xoá tệp “${shown(r)}” (${fmtSize(st.size)}). Tệp sẽ được chuyển vào Thùng rác.`, path: r.full, okLabel: 'Xoá' });
+if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai trả lời hộp xác nhận trong 5 phút (HẾT THỜI GIAN). Người dùng KHÔNG từ chối; tệp giữ nguyên. Báo người dùng là bước này chưa làm vì chưa được xác nhận kịp.', summary: 'Hết thời gian chờ xác nhận · tệp giữ nguyên' };
         if (!ok) return { refused: true, forModel: `Người dùng KHÔNG đồng ý xoá "${shown(r)}". Tệp vẫn còn nguyên. Không được thử xoá lại bằng cách khác.`, summary: `Người dùng từ chối xoá ${shown(r)} · tệp giữ nguyên` };
         await deps.trash(r.full);
         return { forModel: `Đã chuyển ${shown(r)} vào Thùng rác.`, summary: `Đã chuyển ${shown(r)} vào Thùng rác` };
@@ -538,9 +540,10 @@ function createAgent(deps) {
       fs_.length ? `Thư mục được phép làm việc (đường dẫn tương đối tính từ thư mục đầu tiên):\n${fs_.map((f, i) => `${i + 1}. ${path.basename(f)} → ${f}`).join('\n')}`
         : 'Chưa có thư mục nào được cho phép, nên bạn không đọc/ghi tệp được. Nếu người dùng cần, hãy hướng dẫn họ bấm "Thêm thư mục" trong phần Cài đặt AIVN AGENT.',
       s.agentWeb ? 'Truy cập mạng: ĐANG BẬT. Dùng web_search rồi fetch_url khi cần thông tin mới; ghi rõ địa chỉ nguồn trong câu trả lời.'
-        : 'Truy cập mạng: ĐANG TẮT. Bạn không tìm kiếm hay mở trang web được; nếu cần thông tin mới, hãy nói người dùng bật "Cho phép truy cập mạng" trong Cài đặt AIVN AGENT.',
+        : 'web_search/fetch_url: ĐANG TẮT (CHỈ hai công cụ này). Bạn VẪN thao tác các cửa sổ đang mở (Gmail, Docs, Outlook…) bằng screen_look/screen_act. Cần tra cứu trên mạng thì nhờ người dùng bật "Cho phép truy cập mạng" trong Cài đặt.',
     ];
     if (names.includes('open_app')) lines.push('Máy tính: bạn mở được ứng dụng (open_app, list_apps), tệp/thư mục (open_path), trang web (open_url), xem/đóng ứng dụng đang mở, chạy lệnh terminal (run_command, người dùng duyệt từng lệnh) và thao tác hệ thống (system_action). Hệ điều hành: ' + ({ win32: 'Windows (lệnh chạy bằng PowerShell)', darwin: 'macOS (lệnh chạy bằng zsh)' }[process.platform] || 'Linux') + '. Ưu tiên công cụ chuyên dụng (open_app, open_url…) thay vì run_command. "Mở máy tính" nghĩa là mở ứng dụng Máy tính (Calculator) bằng open_app; Không bao giờ khẳng định một ứng dụng "không có" hay "chưa cài" trên máy; nếu open_app báo không tìm thấy: thử list_apps với từ khoá ngắn (vd. "zalo"), rồi (nếu có điều khiển màn hình) bấm nút Start, gõ tên ứng dụng và Enter; cuối cùng mới nói là chưa tìm/mở được và hỏi tên chính xác. KHÔNG tự mở trang web hay tìm trên mạng để thay cho ứng dụng (vd. mở zalo.me thay cho Zalo) khi người dùng chưa đồng ý — hãy hỏi trước. khi người dùng nhờ mở/chạy ứng dụng, hãy GỌI open_app ngay thay vì nói không làm được. Không bao giờ chạy lệnh xoá hàng loạt, tải mã từ mạng về chạy, hay đổi cài đặt bảo mật.');
+    if (names.includes('open_app')) lines.push('open_app/open_url tự chuyển tới cửa sổ ĐANG MỞ (Outlook, Gmail, Zalo…) thay vì mở mới; đừng mở outlook.live.com khi đã có cửa sổ Outlook.');
     else lines.push('Máy tính: các công cụ mở ứng dụng/chạy lệnh đang TẮT (Cài đặt AIVN AGENT → Truy cập máy tính).');
     if (deps.computer && !names.includes('screen_act') && deps.computer.names({ headless: false }).includes('screen_act')) lines.push('Điều khiển màn hình (bấm, gõ trong ứng dụng như Zalo) đang BỊ CHẶN vì mô hình hiện tại không nhìn được màn hình. Nếu người dùng nhờ thao tác trong ứng dụng, nói rõ là chưa làm được và nhờ họ chọn mô hình được đánh dấu dùng được cho AIVN AGENT; không giả vờ đã làm.');
     lines.push(`Công cụ ĐANG BẬT trong lượt này (gọi được ngay): ${names.join(', ') || '(không có)'}. Tuyệt đối không bảo người dùng "bật" hay "cho phép" một công cụ đã có trong danh sách này — cứ gọi nó. Chỉ khi công cụ cần thiết KHÔNG có trong danh sách mới nói người dùng bật trong Cài đặt AIVN AGENT.`);
@@ -762,7 +765,8 @@ function createAgent(deps) {
               const card = AP.buildCard(call.name, args, { label: step.label, icon: step.icon, resolvePath: (p, o) => resolvePath(p, o) });
               step.status = 'asking'; onStep({ ...step }); onStatus({ stage: 'ask', round, tool: call.name });
               const ans = await approve(card);
-              if (!ans || !ans.ok) refusedOut = { refused: true, forModel: AP.refusalText(card, ans && ans.reason), summary: 'Bạn từ chối' + (ans && ans.reason ? `: “${String(ans.reason).slice(0, 80)}”` : '') };
+              if (ans && ans.timeout) refusedOut = { refused: true, timeout: true, forModel: `Không ai trả lời thẻ xin phép “${card.title}” trong thời gian chờ (HẾT THỜI GIAN). Người dùng KHÔNG từ chối — có thể họ không ở máy. Không làm bước này; báo người dùng là bước chưa làm vì chưa được duyệt kịp, đừng nói là họ không đồng ý.`, summary: 'Hết thời gian chờ duyệt' };
+              else if (!ans || !ans.ok) refusedOut = { refused: true, forModel: AP.refusalText(card, ans && ans.reason), summary: 'Bạn từ chối' + (ans && ans.reason ? `: “${String(ans.reason).slice(0, 80)}”` : '') };
               else {
                 if (ans.always && card.allowAlways && deps.allowAlways) deps.allowAlways(call.name);
                 ctxRun = { ...ctx, confirm: async () => true, preApproved: true };
@@ -803,6 +807,9 @@ function createAgent(deps) {
     }
     if (fakeSeen && !warning && finishReason !== 'abort' && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) warning = noActionWarn(steps);
     if (finishReason !== 'abort') { const g = guardClaims(text, steps); text = tidyAnswer(g.text, steps); if (g.warning) warning = warning || g.warning; }
+    // B25: tin đã bị gửi NHẦM chỗ → luôn báo rõ cho người dùng (dù mô hình có nói hay không)
+    const wrong = steps.filter(x => x.verify && x.verify.wrongChat);
+    if (wrong.length) { const w = wrong[wrong.length - 1].verify; const note = `⚠ Tin nhắn đã bị GỬI NHẦM: ${w.why}. Hãy mở cuộc trò chuyện “${w.wrongTo || 'đó'}” để thu hồi/xoá tin nếu cần.`; if (!String(text).includes('GỬI NHẦM')) text = `${note}\n\n${text}`.trim(); warning = note; }
     if (finishReason !== 'abort') { const fc = RT.finalCheck(text, retry); if (fc) warning = warning || fc; }
     usage.seconds = (Date.now() - t0) / 1000;
     usage.tokensPerSecond = usage.seconds ? usage.completion_tokens / usage.seconds : 0;

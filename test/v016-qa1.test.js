@@ -36,7 +36,7 @@ test('B2: nhận ra người nhận trong câu yêu cầu', () => {
 });
 test('B2/B15: gõ vào ô đang chọn rồi Enter mà tiêu đề không phải người nhận → CHƯA gửi (kể cả khi tên nằm trong tin)', () => {
   const v = SV.verifySend({ msg: 'Chúc buổi sáng, Trần Quỳnh Anh!', recipient: 'trần quỳnh anh', screenText: 'Zalo\n[e3] ô "Tìm kiếm"\nNhóm Lớp K27\nChúc buổi sáng, Trần Quỳnh Anh!', seen: 'TÊN: Nhóm Lớp K27\nÔ SOẠN: TRỐNG\nTIN: Chúc buổi sáng, Trần Quỳnh Anh!' });
-  assert.strictEqual(v.sent, false, 'tên nằm trong chính tin nhắn KHÔNG được tính (đây là lỗi trong video t128)'); assert.match(v.why, /tiêu đề cuộc trò chuyện/);
+  assert.strictEqual(v.sent, false, 'tên nằm trong chính tin nhắn KHÔNG được tính (đây là lỗi trong video t128)'); assert.ok(v.wrongChat, 'B25: tin đã rời ô soạn và hiện ở chat khác → báo GỬI NHẦM'); assert.match(v.why, /ĐÃ được gửi vào cuộc trò chuyện “Nhóm Lớp K27”/);
   const v3 = SV.verifySend({ msg: 'Chúc buổi sáng nhé!', recipient: 'trần quỳnh anh', seen: 'TÊN: Trần Quỳnh Anh\nÔ SOẠN: TRỐNG\nTIN: Vừa truy cập' });
   assert.strictEqual(v3.sent, false); assert.match(v3.why, /không thấy bong bóng tin/);
   const ok = SV.verifySend({ msg: 'Chúc buổi sáng nhé!', recipient: 'trần quỳnh anh', seen: 'TÊN: Tran Quynh Anh\nÔ SOẠN: TRỐNG\nTIN: Chúc buổi sáng nhé!' });
