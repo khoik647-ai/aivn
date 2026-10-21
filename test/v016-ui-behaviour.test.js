@@ -35,3 +35,10 @@ test('B12: tiêu đề câu trả lời hiện tên hiển thị của mô hình
   const w = run().b12; assert.strictEqual(w[0], 'AIVN · Qwen3-VL 2B Instruct');
   assert.strictEqual(w[1], 'AIVN · khong-co-trong-danh-sach'); for (const x of w) assert.ok(!/\.gguf/i.test(x), x);
 });
+test('bộ não đám mây trên giao diện thật: kiểm tra kết nối máy chủ giả, khoá không quay lại giao diện/settings.json, thanh AIVN AGENT báo rõ dữ liệu gửi đi', { skip: !hasX && 'cần xvfb-run + electron' }, () => {
+  const c = run().cloud; assert.ok(c, 'không có kết quả');
+  assert.match(c.msg, /Kết nối được/); assert.match(c.msg, /gọi công cụ được/);
+  assert.strictEqual(c.keyField, ''); assert.strictEqual(c.settingsHasKey, false); assert.strictEqual(c.fileHasKey, false);
+  assert.match(c.warn, /bộ não đám mây gia-lap/); assert.match(c.warn, /ảnh chụp màn hình thì không/);
+  assert.deepStrictEqual([run().cloudCleared.keySet, run().cloudCleared.on], [false, false]);
+});

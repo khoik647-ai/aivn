@@ -37,8 +37,8 @@ const IDENTITY = [
   'Không bao giờ nói mình là sản phẩm khác hay do công ty AI nào tạo ra. Nếu được hỏi về mô hình bên dưới, nói rằng bạn là AIVN AGENT chạy trên mô hình mã nguồn mở mà người dùng đã chọn nạp trong AIVN.',
 ].join('\n');
 // B17 (QA lượt 2): lời chào chỉ kể việc mô hình ĐANG NẠP làm được — mô hình chỉ đọc chữ thì không hứa đọc ảnh hay điều khiển màn hình
-function welcomeFor({ loaded = true, vision = true, agentOk = true } = {}) {
-  const lines = ['- Trò chuyện, giải thích, viết và dịch bằng mô hình AI chạy trên máy'];
+function welcomeFor({ loaded = true, vision = true, agentOk = true, cloud = null } = {}) {
+  const lines = [cloud ? `- Trò chuyện, giải thích, viết và dịch bằng mô hình ${cloud.model} trên máy chủ ${cloud.host} (bộ não đám mây bạn đã bật)` : '- Trò chuyện, giải thích, viết và dịch bằng mô hình AI chạy trên máy'];
   lines.push(vision ? '- Đọc ảnh bạn dán và tìm trong tài liệu của bạn' : '- Tìm trong tài liệu của bạn');
   lines.push('- Dùng công cụ: máy tính, đọc/ghi tệp trong thư mục bạn cho phép, tìm trên web, chạy mã', '- Ghi nhớ điều bạn dặn và tạo lịch nhắc tự động',
     '- Mở ứng dụng, tệp, trang web và chạy lệnh trên máy, nhưng chỉ khi bạn đồng ý trên thẻ duyệt');
@@ -46,7 +46,8 @@ function welcomeFor({ loaded = true, vision = true, agentOk = true } = {}) {
   const note = !loaded ? '\n\nHãy chọn một mô hình ở thanh phía trên để bắt đầu.'
     : !vision ? '\n\nMô hình đang nạp chỉ đọc chữ: mình **chưa nhìn được ảnh hay màn hình**. Muốn mình bấm/gõ trong ứng dụng (Zalo, Messenger…), hãy chọn mô hình có 👁 được đánh dấu dùng được cho AIVN AGENT.'
     : !agentOk ? '\n\nMô hình đang nạp chưa dùng được cho AIVN AGENT (xem thanh cảnh báo phía trên), nên mình chưa điều khiển màn hình.' : '';
-  return 'Xin chào! Mình là **AIVN AGENT**, trợ lý có sẵn trong AIVN, chạy ngay trên máy tính của bạn, không gửi dữ liệu đi đâu cả.\n\nMình có thể:\n' + lines.join('\n') + note + '\n\nCha đỡ đầu của mình là **anh Nguyễn Ngọc Khôi**, sinh viên Văn Lang University. Bạn muốn mình giúp gì nào?';
+  const intro = cloud ? `Xin chào! Mình là **AIVN AGENT**, trợ lý có sẵn trong AIVN. Bạn đang bật **bộ não đám mây** (${cloud.model}): yêu cầu của bạn, kết quả công cụ và chữ đọc được trên màn hình được gửi tới ${cloud.host}; ảnh chụp màn hình thì không.` : 'Xin chào! Mình là **AIVN AGENT**, trợ lý có sẵn trong AIVN, chạy ngay trên máy tính của bạn, không gửi dữ liệu đi đâu cả.';
+  return intro + '\n\nMình có thể:\n' + lines.join('\n') + note + '\n\nCha đỡ đầu của mình là **anh Nguyễn Ngọc Khôi**, sinh viên Văn Lang University. Bạn muốn mình giúp gì nào?';
 }
 const WELCOME = welcomeFor();
 

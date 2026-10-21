@@ -755,3 +755,5 @@ select option:disabled{color:#888}
 select option.opt-no{color:#8a8a8a}
 
 .s-auto{font-size:11px;padding:0 6px;border-radius:999px;background:color-mix(in srgb,var(--accent,#c8102e) 14%,transparent);color:var(--accent-ink,#c8102e);margin-left:6px}
+.ok-ink{color:#15803d}:root[data-theme=dark] .ok-ink{color:#4ade80}
+.cloud-block .field{display:flex;flex-direction:column;gap:3px;margin:6px 0}.cloud-block .field input,.cloud-block .field select{width:100%}

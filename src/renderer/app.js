@@ -1305,7 +1305,8 @@ async function agentAttachments(atts, text) {
   return { atts, content: imgs.length ? [{ type: 'text', text: full }, ...imgs.map(url => ({ type: 'image_url', image_url: { url } }))] : full, files: atts.filter(a => a.path).map(a => ({ path: a.path, name: a.name })) };
 }
 async function sendAgent(text) {
-  if (!state.status.loaded && !(await ensureLoaded())) return;
+  const cloudOn = !!(state.settings && state.settings.cloudBrain && state.settings.cloudBrain.on);
+  if (!state.status.loaded && !cloudOn && !(await ensureLoaded())) return;
   if (!(await agentGateOk())) return; // mô hình không dùng được cho AIVN AGENT: chặn, giữ nguyên tệp đính kèm và chữ đã nhập
   let atts = pending.filter(a => a.ok); pending = []; renderChips();
   if (!text && atts.length) text = atts.every(a => a.kind === 'image') ? 'Hãy xem ảnh đính kèm và cho biết nội dung.' : 'Hãy đọc tệp đính kèm và tóm tắt ý chính.';
@@ -1695,6 +1696,7 @@ function paintAgentWarn(adv) {
   const recBtns = rec.map(r => `<button class="btn sm" data-rec="${esc(r.id)}" data-installed="${r.installed ? 1 : 0}">${r.installed ? 'Nạp' : 'Tải'} ${esc(r.name)}</button>`).join(' ');
   const g = state.agent && state.agent.gate;
   if (g && !g.cloud && !g.ok) { w.innerHTML = agentGateHtml(g); w.hidden = false; return; }
+  if (g && g.cloud && g.cloudInfo) { const c = g.cloudInfo; w.innerHTML = `<span>☁️ AIVN AGENT đang dùng bộ não đám mây <b>${esc(c.model)}</b> (${esc(c.host)}). Yêu cầu, kết quả công cụ và chữ đọc được trên màn hình được gửi tới máy chủ này; ảnh chụp màn hình thì không. ${c.eyes ? 'Mắt nhìn màn hình: mô hình trên máy.' : 'Chưa nạp mô hình nhìn ảnh trên máy nên AIVN AGENT chưa điều khiển màn hình được.'}</span>`; w.hidden = false; return; }
   if (!state.status.loaded) { const r0 = g && (g.best || (g.recommended || [])[0]); w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN AGENT cần mô hình nhìn được màn hình và gọi công cụ ổn định${r0 ? `, gợi ý cho máy này: <b>${esc(r0.name)}</b>` : ''}.</span>`; w.hidden = false; return; }
   if (g && g.ok && !g.cloud && (g.slow || g.spill)) { w.innerHTML = agentSlowHtml(g); w.hidden = false; return; }
   if (g && g.ok) { w.hidden = true; return; } // mô hình đã qua kiểm tra AIVN AGENT: không cần các cảnh báo cũ
@@ -1819,7 +1821,7 @@ $('#memOn').addEventListener('change', async (e) => { state.settings = await A.s
 // ---------- Truy cập máy tính (Cài đặt AIVN AGENT) ----------
 function paintComputer(c) {
   if (!c) return;
-  paintAuto(!!c.autonomy);
+  paintAuto(!!c.autonomy); A.cloudGet().then(paintCloud).catch(() => {});
   $('#agComp').checked = c.enabled; $('#agAutoRO').checked = c.autoReadOnly; $('#agAutoRO').disabled = !c.enabled;
   $('#agScreen').checked = c.screen;
   $('#agScreenNote').innerHTML = `AIVN AGENT tự mở ứng dụng và thao tác như bạn: đọc danh sách nút/ô của cửa sổ (Trợ năng của hệ điều hành) và chữ trên màn hình, bấm/gõ từng bước rồi kiểm tra lại. Cần <b>nhìn được màn hình</b>: dùng mô hình nhìn ảnh (Qwen3-VL) làm mô hình chính, hoặc mô hình chữ + mắt nhìn (AIVN tự nạp mô hình nhìn ảnh đã cài). Luôn hỏi trước khi gửi tin nhắn, thanh toán, xoá, nộp biểu mẫu; không bao giờ gõ mật khẩu. Dừng: <b>Esc</b>, <b>${esc(c.stopKey)}</b> hoặc nút “Dừng ngay”.`;
@@ -1860,6 +1862,35 @@ $('#benchStop').addEventListener('click', () => A.benchStop());
 $('#alwaysList').addEventListener('click', async (e) => { const b = e.target.closest('[data-revoke]'); if (!b) return; await A.agentAlwaysRevoke(b.dataset.revoke); toast('AIVN AGENT sẽ hỏi lại trước khi dùng công cụ này.'); refreshAgent(); });
 A.onBenchProgress((p) => { if ($('#benchModel').dataset.busy) $('#benchRes').textContent = `Đang đo ${p.i}/${p.n}: ${p.label}…`; });
 $('#agComp').addEventListener('change', (e) => saveAgentSetting({ agentComputer: e.target.checked }));
+// 0.16 bộ não đám mây: khoá API chỉ đi một chiều (giao diện → main), không bao giờ hiện lại
+function paintCloud(c) {
+  if (!c) return;
+  if (document.activeElement !== $('#cloudUrl')) $('#cloudUrl').value = c.baseUrl || '';
+  if (document.activeElement !== $('#cloudModel')) $('#cloudModel').value = c.model || '';
+  $('#cloudCtx').value = String(c.ctx || 32768); $('#cloudOn').checked = !!c.on;
+  $('#cloudKey').placeholder = c.keySet ? '•••••••• (đã lưu — dán khoá mới để thay)' : 'Dán khoá API';
+  $('#cloudKeyNote').textContent = c.keySecure ? 'Khoá được mã hoá bằng kho khoá của hệ điều hành và không bao giờ hiện lại hay ghi vào nhật ký.' : 'Máy này không có kho khoá an toàn của hệ điều hành: khoá chỉ giữ trong bộ nhớ đến khi thoát AIVN (không ghi ra đĩa).';
+  $('#cloudSum').textContent = c.on ? `· đang dùng ${c.model}` : c.keySet ? '· đã có khoá, đang tắt' : '';
+}
+async function cloudSave(extra = {}) {
+  const key = $('#cloudKey').value; $('#cloudKey').value = '';
+  const r = await A.cloudSave({ baseUrl: $('#cloudUrl').value, model: $('#cloudModel').value, ctx: Number($('#cloudCtx').value), ...(key ? { key } : {}), ...extra });
+  paintCloud(r.cloud); $('#cloudMsg').textContent = r.ok ? (r.keyPersisted === false ? 'Đã lưu (khoá chỉ giữ trong phiên này).' : 'Đã lưu.') : r.error; $('#cloudMsg').className = 'small ' + (r.ok ? 'ok-ink' : 'warn-ink');
+  refreshAgent(); return r;
+}
+$('#cloudSaveBtn').addEventListener('click', () => cloudSave());
+$('#cloudOn').addEventListener('change', async (e) => {
+  if (e.target.checked && !(await modalAsk({ icon: '☁️', title: 'Dùng bộ não đám mây?', message: `Yêu cầu của bạn, kết quả công cụ, nội dung tệp AIVN AGENT đọc và chữ đọc được trên màn hình sẽ được gửi tới ${$('#cloudUrl').value || 'máy chủ đã nhập'}. Ảnh chụp màn hình không gửi đi. Chi phí (nếu có) tính vào tài khoản của bạn ở nhà cung cấp đó.`, okLabel: 'Dùng', noLabel: 'Huỷ' }))) { e.target.checked = false; return; }
+  const r = await cloudSave({ enabled: e.target.checked }); if (!r.ok) e.target.checked = false;
+});
+$('#cloudTestBtn').addEventListener('click', async () => {
+  if ($('#cloudKey').value || $('#cloudUrl').value !== ((state.settings.cloudBrain || {}).baseUrl || '')) { const r0 = await cloudSave(); if (!r0.ok) return; }
+  $('#cloudMsg').textContent = 'Đang kiểm tra…'; $('#cloudMsg').className = 'small';
+  const r = await A.cloudTest();
+  $('#cloudMsg').textContent = r.ok ? `Kết nối được (${(r.ms / 1000).toFixed(1).replace('.', ',')} giây). ${r.tools ? 'Mô hình gọi công cụ được ✓' : 'Mô hình KHÔNG gọi công cụ trong lần thử: AIVN AGENT có thể không làm được việc.'}` : r.error;
+  $('#cloudMsg').className = 'small ' + (r.ok && r.tools ? 'ok-ink' : 'warn-ink');
+});
+$('#cloudClearBtn').addEventListener('click', async () => { paintCloud(await A.cloudClearKey()); $('#cloudMsg').textContent = 'Đã xoá khoá API và tắt bộ não đám mây.'; refreshAgent(); });
 // 0.16 “Tự làm không hỏi”: công tắc ở Cài đặt AIVN AGENT + nút trên thanh AIVN AGENT, luôn khớp nhau
 function paintAuto(on) { $('#agAuto').checked = on; $('#autoPill').setAttribute('aria-pressed', String(on)); $('#autoPillState').textContent = on ? 'bật' : 'tắt'; }
 async function setAuto(on) {

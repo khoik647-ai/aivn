@@ -98,7 +98,7 @@ function ctxSmallError(have, want) {
 async function withCtxGrow(fn, { minCtx = MIN_CTX_CHAT, maxCtx = 0, onGrow } = {}) {
   try { return await fn(); }
   catch (e) {
-    if (!isCtxErr(e)) throw e;
+    if (!isCtxErr(e) || cloudBrainOn()) throw e;
     const st = engine.status(); const have = st.contextSize || 0;
     if (e.stepsDone) { engineLog('Hết ngữ cảnh giữa lượt (đã chạy ' + e.stepsDone + ' bước công cụ) — không tự chạy lại để tránh lặp thao tác', e, { have }); throw ctxSmallError(have, null); }
     const train = (st.meta && st.meta.trainCtx) || 32768;
@@ -163,7 +163,7 @@ function initStores() {
   computerTools = createComputerTools({ getSettings: () => settings.data, openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => LOG.block('apps', 'Quét ứng dụng đã cài (AIVN AGENT)', [`nguồn: ${JSON.stringify(d.sources)}`, `lỗi: ${d.errors.length ? d.errors.join('; ') : 'không'}`, `thư mục Desktop: ${d.dirs ? d.dirs.desktop.join(' | ') : '—'}`, `thư mục Start Menu: ${d.dirs ? d.dirs.start.join(' | ') : '—'}`, `thời gian tìm sâu: ${d.ms ?? '?'} ms`]),
     keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: (a, ctx) => deskWrap(getDesk().look, a, ctx), act: (a, ctx) => deskWrap(getDesk().act, a, ctx), readText: (a, ctx) => deskWrap(getDesk().readText, a, ctx), pending: () => (desk && desk.active() ? desk.pending() : null), searchTodo: () => (desk && desk.active() ? desk.searchTodo() : null), searchFound: () => (desk && desk.active() ? desk.searchFound() : null) } });
   mcp = require('./mcp').createMcpManager({ dir: app.getPath('userData'), log: (sc, m) => LOG.log(sc, m), onChange: () => send('mcp:changed', mcp.status()) });
-  agent = createAgent({ engine, mcp, getSettings: () => settings.data, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: docsPool.extractFile, embedForMemory, log, computer: computerTools,
+  agent = createAgent({ engine: agentEngine, mcp, getSettings: () => settings.data, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: docsPool.extractFile, embedForMemory, log, computer: computerTools,
     logTool: (x) => LOG.log('tool', `${x.auto ? '(tự động) ' : ''}${x.name} → ${x.status} sau ${x.ms ?? '?'} ms`, { args: Object.fromEntries(Object.entries(x.args || {}).map(([k, v]) => [k, typeof v === 'string' && v.length > 200 ? v.slice(0, 200) + '…' : v])), ketQua: String(x.summary || '').slice(0, 300) }),
     trash: async (p) => { try { await shell.trashItem(p); } catch (e) { throw new Error('Không chuyển được tệp vào Thùng rác (' + e.message + '). Tệp vẫn còn nguyên.'); } } });
   lic = createLicenseState({ file: path.join(ud, 'license.json'), isPackaged: app.isPackaged, log: (m) => { log(m); if (isTest) console.log(m); }, fetchJson });
@@ -248,7 +248,7 @@ function registerGateIpc(handle) {
 }
 
 // Cài đặt gửi sang giao diện: không bao giờ kèm token
-const publicSettings = () => { const { hfToken, ...rest } = settings.data; return { ...rest, hfTokenSet: !!hfToken }; };
+const publicSettings = () => { const { hfToken, cloudBrain: _cb, ...rest } = settings.data; return { ...rest, hfTokenSet: !!hfToken, cloudBrain: cloudPublic() }; };
 
 const send = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send(ch, data); };
 // Gộp token trong ~16 ms thành một tin IPC (bớt hàng trăm tin/giây khi mô hình nhanh); flush() trước mọi sự kiện khác của cùng lượt
@@ -517,7 +517,7 @@ function agentInfo() {
   const py = sandbox.findPython();
   return { folders: (settings.data.agentFolders || []).map(f => ({ path: f, name: path.basename(f), exists: (() => { try { return fs.statSync(f).isDirectory(); } catch { return false; } })() })),
     web: !!settings.data.agentWeb, python: { enabled: !!settings.data.agentPython, available: !!py, version: py ? py.version : null }, memory: { enabled: settings.data.agentMemory !== false, count: memory.count(), semantic: ragActive() },
-    tools: agent.activeTools().map(n => ({ name: n, label: agent.defs[n].label, icon: agent.defs[n].icon })), computer: computerInfo(), toolsOff: settings.data.agentToolsOff || [], alwaysAllow: (settings.data.agentAlwaysAllow || []).map(n => ({ name: n, label: (agent.defs[n] && agent.defs[n].label) || n })), welcome: (() => { const st = engine.status(); return welcomeFor({ loaded: !!st.loaded, vision: !!st.vision, agentOk: lastGateOk !== false }); })(), advice: agentAdvice(), keepInTray: !!settings.data.keepInTray, openAtLogin: !!settings.data.openAtLogin };
+    tools: agent.activeTools().map(n => ({ name: n, label: agent.defs[n].label, icon: agent.defs[n].icon })), computer: computerInfo(), toolsOff: settings.data.agentToolsOff || [], alwaysAllow: (settings.data.agentAlwaysAllow || []).map(n => ({ name: n, label: (agent.defs[n] && agent.defs[n].label) || n })), welcome: (() => { const st = engine.status(); return welcomeFor({ loaded: !!st.loaded || cloudBrainOn(), vision: !!st.vision, agentOk: lastGateOk !== false, cloud: cloudBrainOn() ? { model: cloudCfg().model, host: (() => { try { return new URL(cloudCfg().baseUrl).host; } catch { return ''; } })() } : null }); })(), advice: agentAdvice(), keepInTray: !!settings.data.keepInTray, openAtLogin: !!settings.data.openAtLogin };
 }
 // Xác nhận xoá/ghi đè: hộp thoại tiếng Việt trong cửa sổ AIVN; không trả lời trong 5 phút = từ chối
 const confirms = new Map();
@@ -548,7 +548,7 @@ function askApproval(card) {
 }
 const slimStep = (x) => ({ id: x.id, name: x.name, label: x.label, icon: x.icon, args: x.args, status: x.status, summary: x.summary, detail: typeof x.detail === 'string' ? x.detail.slice(0, 4000) : x.detail, urls: x.urls, ms: x.ms, pre: x.pre, thumb: x.thumb && typeof x.thumb.src === 'string' && x.thumb.src.length < 120000 ? x.thumb : undefined });
 async function runAgentTurn({ reqId, convoId, messages, headless = false, signal, attachments = [], gate = true }) {
-  if (!engine.status().loaded) {
+  if (!engine.status().loaded && !cloudBrainOn()) {
     if (headless && settings.data.lastModel) await loadById(settings.data.lastModel);
     else throw new Error('Chưa nạp mô hình nào. Hãy chọn mô hình ở thanh phía trên (trong chế độ AIVN AGENT, bộ chọn chỉ cho chọn mô hình dùng được cho AIVN AGENT).');
   }
@@ -904,9 +904,26 @@ function registerIpc() {
   ipcMain.handle('license:check', async () => { const r = await licenseCheck(); return { ok: !!(r && r.ok), error: r && r.error, info: lic.publicInfo() }; });
   ipcMain.handle('app:info', async () => ({ version: app.getVersion(), paths, hardware: await hw(), llamaCpp: hf.llamaCpp }));
   ipcMain.handle('settings:get', () => publicSettings());
+  ipcMain.handle('cloud:get', () => cloudPublic());
+  ipcMain.handle('cloud:save', (_e, p = {}) => {
+    try {
+      const c = { ...cloudCfg() };
+      if ('baseUrl' in p) c.baseUrl = p.baseUrl ? CB.normalizeBase(p.baseUrl) : '';
+      if ('model' in p) c.model = String(p.model || '').trim().slice(0, 200);
+      if ('ctx' in p) c.ctx = [8192, 16384, 32768, 65536, 131072].includes(Number(p.ctx)) ? Number(p.ctx) : 32768;
+      if ('enabled' in p) c.enabled = p.enabled === true;
+      settings.data.cloudBrain = c; settings.save();
+      let keyNote = null; if (typeof p.key === 'string' && p.key.trim()) keyNote = cloudKeys.save(p.key);
+      if (c.enabled && !cloudBrainOn()) { c.enabled = false; settings.data.cloudBrain = c; settings.save(); return { ok: false, error: 'Cần đủ địa chỉ máy chủ, tên mô hình và khoá API trước khi bật.', cloud: cloudPublic() }; }
+      LOG.log('agent', `Bộ não đám mây: ${c.enabled ? 'bật' : 'tắt'} · ${c.baseUrl ? new URL(c.baseUrl).host : '—'} · ${c.model || '—'}${keyNote ? (keyNote.persisted ? ' · đã lưu khoá (mã hoá bởi hệ điều hành)' : ' · khoá chỉ giữ trong phiên này') : ''}`);
+      return { ok: true, keyPersisted: keyNote ? keyNote.persisted : undefined, cloud: cloudPublic() };
+    } catch (e) { return { ok: false, error: e.message, cloud: cloudPublic() }; }
+  });
+  ipcMain.handle('cloud:clearKey', () => { cloudKeys.clear(); const c = { ...cloudCfg(), enabled: false }; settings.data.cloudBrain = c; settings.save(); LOG.log('agent', 'Bộ não đám mây: đã xoá khoá API'); return cloudPublic(); });
+  ipcMain.handle('cloud:test', async () => { try { return await cloudBrain.test(); } catch (e) { return { ok: false, error: e.message }; } });
   ipcMain.on('ui:log', (_e, msg) => { if (typeof msg === 'string') log(msg.slice(0, 300)); });
   ipcMain.handle('settings:set', (_e, patch = {}) => {
-    const { hfToken, hfTokenSet, ...rest } = patch;
+    const { hfToken, hfTokenSet, cloudBrain: _cloudIgnored, ...rest } = patch; // bộ não đám mây chỉ đổi qua cloud:save (khoá không đi qua đây)
     Object.assign(settings.data, rest);
     const intOrNull = (v, max) => (Number.isInteger(v) && v >= 0 && v <= max ? v : null);
     if ('agentToolsOff' in rest) settings.data.agentToolsOff = [...new Set((Array.isArray(rest.agentToolsOff) ? rest.agentToolsOff : []).filter(g => Object.prototype.hasOwnProperty.call(TOOL_GROUPS, g)))];
@@ -1437,11 +1454,27 @@ async function agentModelGate() {
   const cloud = cloudBrainOn();
   const e = !st.loaded ? { ok: false, code: 'none', reason: 'Chưa nạp mô hình' } : cur ? cur.agent : { ok: false, code: 'unknown', reason: AE.REASONS.unknown };
   lastGateOk = !!(cloud || e.ok);
-  return { ok: cloud || e.ok, cloud, code: e.code, reason: e.reason, modelName: cur ? (cur.catalog ? cur.catalog.name : cur.file) : (st.id || null),
+  return { ok: cloud || e.ok, cloud, cloudInfo: cloud ? { model: cloudCfg().model, host: (() => { try { return new URL(cloudCfg().baseUrl).host; } catch { return ''; } })(), eyes: !!st.vision } : null, code: e.code, reason: e.reason, modelName: cur ? (cur.catalog ? cur.catalog.name : cur.file) : (st.id || null),
     best: best && (!cur || best.id !== cur.id) ? { id: best.id, name: best.catalog ? best.catalog.name : best.file, slow: !!(best.agentFit && best.agentFit.level === 'slow') } : null, recommended: recOut,
     slow: !!(e && e.slow), slowReason: e && e.slow ? e.reason : null, allowSlow, spill, ctx: P.ctx, planNote: AP.note(P) };
 }
-const cloudBrainOn = () => { const c = settings.data.cloudBrain; return !!(c && c.enabled && c.key && c.model); };
+// ---------- 0.16: bộ não đám mây (tuỳ chọn) cho AIVN AGENT — xem cloud-brain.js ----------
+const CB = require('./cloud-brain');
+const cloudCfg = () => settings.data.cloudBrain || {};
+const cloudKeys = CB.createKeyStore({ safeStorage: require('electron').safeStorage, get: () => cloudCfg().keyEnc || null,
+  set: (v) => { const c = { ...cloudCfg() }; if (v) c.keyEnc = v; else delete c.keyEnc; settings.data.cloudBrain = c; settings.save(); } });
+const cloudBrain = CB.createCloudBrain({ getConfig: cloudCfg, getKey: () => cloudKeys.get() });
+const cloudBrainOn = () => { const c = cloudCfg(); return !!(c.enabled && c.model && c.baseUrl && cloudKeys.has()); };
+const cloudPublic = () => { const c = cloudCfg(); return { enabled: !!c.enabled, baseUrl: c.baseUrl || '', model: c.model || '', ctx: c.ctx || 32768, keySet: cloudKeys.has(), keySecure: cloudKeys.secure(), on: cloudBrainOn() }; };
+// AIVN AGENT thấy “bộ máy” này: khi bật bộ não đám mây thì lập kế hoạch/gọi công cụ đi qua máy chủ đó; mắt nhìn (vision) vẫn là mô hình trên máy
+const agentEngine = new Proxy({}, { get(_t, k) {
+  if (cloudBrainOn()) {
+    if (k === 'chatStep') return (m, o) => cloudBrain.chatStep(m, o);
+    if (k === 'status') return () => { const s0 = engine.status() || {}; const c = cloudCfg(); return { ...s0, loaded: true, id: 'cloud:' + c.model, contextSize: c.ctx || 32768, cloud: true, vision: !!s0.vision }; };
+    if (k === 'countTokens') return (x) => Math.ceil(String(x || '').length / 3);
+  }
+  const v = engine[k]; return typeof v === 'function' ? v.bind(engine) : v;
+} });
 function benchScores() {
   let local = {}; try { local = JSON.parse(fs.readFileSync(BENCH_FILE(), 'utf8')).models || {}; } catch {}
   let shipped = {}; try { shipped = require('./bench-results.json').models || {}; } catch {}
@@ -1586,6 +1619,17 @@ async function qaUI() {
       out.b11.hits.push(...await js(`(() => { const h = []; const re = /Kho m\\u00f4 h\\u00ecnh/i; const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) if (re.test(n.nodeValue)) h.push(${JSON.stringify(v)} + ': ' + n.nodeValue.trim().slice(0, 80));
         for (const e of document.querySelectorAll('[title],[aria-label],[data-tip],[placeholder]')) for (const k of ['title', 'aria-label', 'data-tip', 'placeholder']) { const x = e.getAttribute(k); if (x && re.test(x)) h.push(${JSON.stringify(v)} + ' @' + k + ': ' + x.slice(0, 80)); } return h; })()`));
     }
+
+    // bộ não đám mây: máy chủ giả trên máy; khoá không quay lại giao diện; thanh AIVN AGENT báo đang dùng đám mây
+    { const srv = require('http').createServer((q, r) => { r.writeHead(200, { 'content-type': 'application/json' }); r.end(JSON.stringify({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ id: '1', type: 'function', function: { name: 'get_time', arguments: '{"tz":"Asia/Ho_Chi_Minh"}' } }] } }] })); });
+      await new Promise(r => srv.listen(0, '127.0.0.1', r)); const u = `http://127.0.0.1:${srv.address().port}/v1`;
+      await js('show("chat"); typeof setMode === "function" ? setMode("agent") : show("agent"); 1'); await sleep(800);
+      await js(`(async () => { document.querySelector('#cloudBlock').open = true; document.querySelector('#cloudUrl').value = ${JSON.stringify(u)}; document.querySelector('#cloudModel').value = 'gia-lap'; document.querySelector('#cloudKey').value = 'sk-qa-SECRET-1'; await cloudSave({ enabled: true }); document.querySelector('#cloudTestBtn').click(); })()`);
+      await sleep(1500); await js('refreshAgent && refreshAgent(); 1'); await sleep(1200);
+      out.cloud = await js(`(async () => ({ msg: document.querySelector('#cloudMsg').textContent, keyNote: document.querySelector('#cloudKeyNote').textContent, keyField: document.querySelector('#cloudKey').value, placeholder: document.querySelector('#cloudKey').placeholder, warn: (w => w && !w.hidden ? w.innerText : null)(document.querySelector('#agentWarn')), settingsHasKey: JSON.stringify(await A.getSettings ? await A.getSettings() : state.settings).includes('sk-qa-SECRET-1') }))()`);
+      out.cloud.fileHasKey = fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf8').includes('sk-qa-SECRET-1');
+      await js('document.querySelector("#cloudBlock").scrollIntoView(); 1'); await shot('016-cloud');
+      await js('document.querySelector("#cloudClearBtn").click(); 1'); await sleep(600); out.cloudCleared = await js('A.cloudGet()'); srv.close(); }
     out.views = await js('[...document.querySelectorAll(".nav-item[data-view]")].map(b => b.dataset.view)');
     fs.writeFileSync(path.join(dir, 'behav.json'), JSON.stringify(out, null, 2)); app.exit(0); return;
   }
