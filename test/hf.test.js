@@ -40,7 +40,7 @@ test('nhận lượng tử từ tên tệp', () => {
 
 test('ước lượng mức vừa máy', () => {
   assert.strictEqual(hf.fitFor(0.5 * GB, { ram: 8 * GB }).level, 'fit');
-  assert.strictEqual(hf.fitFor(5 * GB, { ram: 8 * GB }).level, 'slow');
+  assert.strictEqual(hf.fitFor(4 * GB, { ram: 16 * GB }).level, 'slow'); // không GPU: vừa RAM nhưng chậm (<10 token/giây)
   assert.strictEqual(hf.fitFor(12 * GB, { ram: 8 * GB }).level, 'big');
   assert.strictEqual(hf.fitFor(7 * GB, { ram: 8 * GB, gpu: 'cuda', vram: { total: 12 * GB } }).level, 'fit');
 });

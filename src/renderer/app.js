@@ -68,17 +68,30 @@ function setMode(mode) {
   $('#attachBtn').hidden = false;
   $('#newChat').textContent = mode === 'agent' ? '＋ Việc mới cho AIVN AGENT' : '＋ Cuộc trò chuyện mới';
   renderConvos(); renderMessages();
+  if (state.models) $('#modelSelect').innerHTML = modelOptionsHtml(state.models, state.status.loaded ? state.status.id : '', mode === 'agent');
   if (mode === 'agent') refreshAgent();
 }
 const convoMode = (c) => c.mode === 'agent' ? 'agent' : 'chat';
 
 // ---------- Mô hình ----------
+// Bộ chọn mô hình: xếp theo mức chạy trên máy này (Chạy mượt → Chạy chậm → Không chạy được, mạnh trước).
+// Chế độ AIVN AGENT: chỉ chọn được mô hình làm được việc agent; mô hình khác bị khoá kèm lý do ngắn.
+function modelOptionsHtml(models, cur, agentMode) {
+  const name = (m) => (m.vision ? '👁 ' : '') + (m.catalog ? m.catalog.name : m.file);
+  const fitOf = (m) => agentMode ? (m.agentFit || m.fit) : m.fit;
+  const opt = (m, dis, why) => `<option value="${esc(m.id)}" class="${fitGroupOf(fitOf(m)) === 'no' ? 'opt-no' : ''}" ${m.id === cur ? 'selected' : ''} ${dis ? 'disabled' : ''} title="${esc(why || (fitOf(m) ? fitOf(m).hint : ''))}">${esc(name(m))}${fitOf(m) && fitOf(m).text ? ' · ' + esc(fitOf(m).text) : ' · ' + fmtBytes(m.size)}${why ? ' — ' + esc(why) : ''}</option>`;
+  const head = `<option value="">${models.length ? (agentMode ? '— Chọn mô hình cho AIVN AGENT —' : '— Chọn mô hình để nạp —') : '— Chưa có mô hình, hãy vào Kho mô hình —'}</option>`;
+  const ok = agentMode ? models.filter(m => m.agent && m.agent.ok) : models;
+  const bad = agentMode ? models.filter(m => !(m.agent && m.agent.ok)) : [];
+  const groups = FIT_GROUPS.map(([k, label]) => { const items = sortFit(ok, fitOf).filter(m => fitGroupOf(fitOf(m)) === k); return items.length ? `<optgroup label="${esc(label)}">${items.map(m => opt(m, k === 'no' && agentMode, k === 'no' && agentMode ? 'Quá nặng cho máy' : '')).join('')}</optgroup>` : ''; }).join('');
+  const blocked = bad.length ? `<optgroup label="Không dùng được cho AIVN AGENT">${sortFit(bad, fitOf).map(m => opt(m, true, (m.agent && m.agent.reason) || 'Chưa được AIVN kiểm chứng')).join('')}</optgroup>` : '';
+  return head + groups + blocked;
+}
 async function refreshModels() {
   state.models = await A.models();
   const sel = $('#modelSelect');
   const cur = state.status.loaded ? state.status.id : '';
-  sel.innerHTML = `<option value="">${state.models.length ? '— Chọn mô hình để nạp —' : '— Chưa có mô hình, hãy vào Kho mô hình —'}</option>` +
-    state.models.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${m.vision ? '👁 ' : ''}${esc(m.catalog ? m.catalog.name : m.file)} · ${fmtBytes(m.size)}</option>`).join('');
+  sel.innerHTML = modelOptionsHtml(state.models, cur, isAgent());
   const t = $('#modelTable');
   if (!state.models.length) { t.innerHTML = `<div class="tr"><span class="muted">Chưa có mô hình nào. Hãy tải ở mục Kho mô hình hoặc nhập tệp GGUF có sẵn.</span></div>`; return; }
   t.innerHTML = `<div class="tr head"><span>Tên</span><span>Dung lượng</span><span>Nguồn</span><span>Đường dẫn</span><span>Thao tác</span></div>` +
@@ -124,7 +137,11 @@ async function ensureLoaded() {
   if (state.status.loading) { toast('Mô hình đang được nạp, chờ một chút rồi gửi lại', true); return false; }
   if (!state.models || !state.models.length) await refreshModels();
   const list = state.models || [];
-  const pick = list.find(m => m.id === $('#modelSelect').value) || list.find(m => state.settings && m.id === state.settings.lastModel) || list[0];
+  // AIVN AGENT: chỉ tự nạp mô hình dùng được cho agent (mạnh nhất chạy mượt)
+  const agentList = sortFit(list.filter(m => m.agent && m.agent.ok), (m) => m.agentFit || m.fit);
+  if (isAgent() && !agentList.length && list.length) { await refreshAgent(); toast('Chưa có mô hình nào trên máy dùng được cho AIVN AGENT — xem gợi ý ở biểu ngữ phía trên', true); return false; }
+  const pool = isAgent() ? agentList : list;
+  const pick = pool.find(m => m.id === $('#modelSelect').value) || pool.find(m => state.settings && m.id === state.settings.lastModel) || pool[0];
   if (!pick) {
     const go = await modalAsk({ icon: '📦', title: 'Chưa có mô hình nào', message: 'Bạn cần tải một mô hình trước khi trò chuyện. Mở Kho mô hình để tải (gợi ý: Qwen3 4B Instruct 2507, hoặc Qwen3 8B nếu máy mạnh)?', okLabel: 'Mở Kho mô hình', noLabel: 'Để sau' });
     if (go) show('discover'); return false;
@@ -340,7 +357,19 @@ const fmtEta = (s) => s == null ? '' : s < 60 ? Math.ceil(s) + ' giây' : s < 36
 const fmtAgo = (iso) => { if (!iso) return ''; const d = (Date.now() - new Date(iso)) / 864e5; return d < 1 ? 'hôm nay' : d < 30 ? Math.floor(d) + ' ngày trước' : d < 365 ? Math.floor(d / 30) + ' tháng trước' : Math.floor(d / 365) + ' năm trước'; };
 const fmtParams = (n) => !n ? '' : n >= 1e9 ? (n / 1e9).toFixed(n >= 1e10 ? 0 : 1).replace('.', ',') + 'B tham số' : Math.round(n / 1e6) + 'M tham số';
 const cleanErr = (m) => String(m).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
-const fitBadge = (f) => f ? `<span class="fit ${f.level}" title="${esc(f.hint)}">${esc(f.label)}</span>` : '';
+// Mức chạy trên máy này (src/fit.js): Chạy mượt (trọn trong VRAM) · Chạy chậm (tràn sang RAM) · Không chạy được — kèm tốc độ và bộ nhớ ước tính
+const fitBadge = (f) => f ? `<span class="fit ${f.level}" title="${esc(f.hint + (f.ctx ? ` · tính với ngữ cảnh ${Number(f.ctx).toLocaleString('vi-VN')} token` : '') + ' · số liệu ước tính')}">${esc(f.label)}${f.text ? ` <small>· ${esc(f.text)}</small>` : ''}</span>` : '';
+const FIT_GROUPS = [['smooth', 'Chạy mượt', 'nằm trọn trong VRAM, mạnh trước'], ['slow', 'Chạy chậm', 'tràn sang RAM, mạnh trước'], ['no', 'Không chạy được', 'lớn hơn VRAM + RAM của máy này']];
+const fitGroupOf = (f) => (f && (f.group || ({ fit: 'smooth', slow: 'slow', big: 'no' })[f.level])) || 'slow';
+// xếp: Chạy mượt → Chạy chậm → Không chạy được, trong mỗi nhóm mạnh trước
+function sortFit(list, fitOf = (c) => c.fit) {
+  const o = { smooth: 0, slow: 1, no: 2 };
+  return [...list].sort((a, b) => o[fitGroupOf(fitOf(a))] - o[fitGroupOf(fitOf(b))] || (b.strength || 0) - (a.strength || 0) || (a.size || 0) - (b.size || 0));
+}
+function fitSections(list, card, fitOf = (c) => c.fit) {
+  const sorted = sortFit(list, fitOf);
+  return FIT_GROUPS.map(([k, label, sub]) => { const items = sorted.filter(c => fitGroupOf(fitOf(c)) === k); return items.length ? `<div class="fit-group fit-group-${k}"><h4 class="fit-head">${esc(label)} <span class="muted small">· ${esc(sub)} · ${items.length}</span></h4><div class="cards">${items.map(card).join('')}</div></div>` : ''; }).join('');
+}
 const jobIdFor = (repo, file) => `${repo}::${file}`;
 
 function progressHtml(j) {
@@ -369,11 +398,11 @@ async function renderCatalog() {
   const fams = ['all', ...new Set(state.catalog.map(c => c.family))];
   $('#famFilter').innerHTML = fams.map(f => `<button class="chip-btn ${disc.fam === f ? 'on' : ''}" data-fam="${esc(f)}">${f === 'all' ? 'Tất cả' : esc(f)}</button>`).join('');
   const list = state.catalog.filter(c => disc.fam === 'all' || c.family === disc.fam);
-  const roleOrd = (c) => (c.recScreen ? 0 : c.recGround ? 1 : c.role === 'planner' ? 2 : 3);
-  const comp = state.catalog.filter(c => c.role && (disc.fam === 'all' || c.family === disc.fam)).sort((x, y) => (roleOrd(x) - roleOrd(y)) || ((y.bench ? y.bench.score : -1) - (x.bench ? x.bench.score : -1)) || ((y.screenPriority || 0) - (x.screenPriority || 0)));
+  // Điều khiển máy tính: chỉ mô hình AIVN AGENT dùng được (nhìn màn hình + gọi công cụ đã kiểm chứng + định vị đạt), xếp theo mức chạy với ngữ cảnh agent
+  const comp = list.filter(c => c.agentCheck && c.agentCheck.code !== 'text' && c.agentCheck.code !== 'tools' && c.agentCheck.code !== 'ground' && c.agentCheck.code !== 'unknown');
   $('#screenArea').hidden = !comp.length;
-  $('#screenCards').innerHTML = comp.map(catCard).join('');
-  $('#catalog').innerHTML = list.filter(c => !c.role).map(catCard).join('');
+  $('#screenCards').innerHTML = fitSections(comp, catCard, (c) => c.agentFit || c.fit);
+  $('#catalog').innerHTML = fitSections(list.filter(c => !comp.includes(c)), catCard);
 }
 const roleTag = (c) => c.role === 'planner' ? '<span class="tag comp" title="Bộ lập kế hoạch: chọn bước tiếp theo. Mô hình này KHÔNG nhìn được màn hình — để điều khiển máy cần đi kèm một mô hình nhìn ảnh (mắt nhìn), AIVN tự nạp khi cần.">🧠 Lập kế hoạch · cần mắt nhìn</span>' : c.role === 'grounder' ? '<span class="tag comp" title="Nhìn được ảnh chụp màn hình: đọc màn hình và chỉ ra toạ độ cần bấm, kể cả với Zalo/ứng dụng Electron không cho đọc nút/ô.">🎯 Nhìn màn hình</span>' : '';
 function benchTag(c) {
@@ -1265,6 +1294,7 @@ async function agentAttachments(atts, text) {
 }
 async function sendAgent(text) {
   if (!state.status.loaded && !(await ensureLoaded())) return;
+  if (!(await agentGateOk())) return; // mô hình không dùng được cho AIVN AGENT: chặn, giữ nguyên tệp đính kèm và chữ đã nhập
   let atts = pending.filter(a => a.ok); pending = []; renderChips();
   if (!text && atts.length) text = atts.every(a => a.kind === 'image') ? 'Hãy xem ảnh đính kèm và cho biết nội dung.' : 'Hãy đọc tệp đính kèm và tóm tắt ý chính.';
   if (!text) return;
@@ -1307,6 +1337,7 @@ async function sendAgent(text) {
   });
   try {
     const r = await A.agentRun({ reqId, convoId: conv.id, messages: [...agentHistory(conv), { role: 'user', content: pack.content }], attachments: pack.files });
+    if (r.blocked) { reply.content = `⛔ ${r.gate.modelName || 'Mô hình này'} chưa dùng được cho AIVN AGENT: ${r.gate.reason}. Hãy chuyển sang mô hình phù hợp ở thanh phía trên.`; reply.warning = 'blocked'; r.text = reply.content; r.usage = { completion_tokens: 0, seconds: 0 }; refreshAgent(); }
     Object.assign(reply, { content: r.text || (r.finishReason === 'abort' ? '' : r.warning ? '' : '(AIVN AGENT không trả lời)'), warning: r.warning || null, steps: r.steps, urls: r.urls, memories: r.memories, model: r.model || reply.model });
     const tools = r.steps.length;
     $('#genStats').textContent = `${tools ? tools + ' bước dùng công cụ · ' : ''}${r.usage.completion_tokens} token · ${r.usage.seconds.toFixed(1)} giây${r.finishReason === 'abort' ? ' · đã dừng' : r.finishReason === 'length' ? ' · chạm giới hạn token' : ''}`;
@@ -1623,11 +1654,28 @@ async function refreshAgent() {
   $('#alwaysList').innerHTML = al.map(t => `<span class="chip">${esc(t.label)}<button type="button" data-revoke="${esc(t.name)}" title="Bỏ Luôn cho phép" aria-label="Bỏ Luôn cho phép ${esc(t.label)}">×</button></span>`).join('');
   if (isAgent() && (!state.current || !state.current.messages.length) && !state.generating) renderMessages();
 }
+async function agentGateOk() {
+  state.agent = await A.agentInfo(); const g = state.agent.gate;
+  if (!g || g.ok || g.cloud) return true;
+  if (g.code === 'none' && !g.best && !(g.recommended || []).length) return true; // để luồng nạp mô hình cũ chỉ đường
+  paintAgentWarn(state.agent.advice); toast(g.code === 'none' ? 'Hãy chọn một mô hình dùng được cho AIVN AGENT' : `${g.modelName || 'Mô hình này'} chưa dùng được cho AIVN AGENT: ${g.reason}`, true);
+  return false;
+}
+// Mô hình đang nạp không dùng được cho AIVN AGENT → chặn chạy, đưa nút chuyển một chạm sang mô hình tốt nhất
+function agentGateHtml(g) {
+  const sw = g.best ? `<button class="btn sm primary" data-switch="${esc(g.best.id)}">⇄ Chuyển sang ${esc(g.best.name)}</button>` : '';
+  const recs = g.best ? '' : (g.recommended || []).map(r => `<button class="btn sm primary" data-rec="${esc(r.id)}" data-installed="${r.installed ? 1 : 0}">${r.installed ? 'Nạp' : '⬇ Tải'} ${esc(r.name)}${r.installed ? '' : ' (' + fmtBytes(r.size) + ')'}</button>`).join(' ');
+  const what = g.code === 'none' ? '🤖 Chưa nạp mô hình cho AIVN AGENT.' : `⛔ <b>${esc(g.modelName || 'Mô hình này')}</b> chưa dùng được cho AIVN AGENT: <b>${esc(g.reason)}</b>.`;
+  return `<span class="agent-gate">${what} AIVN AGENT cần mô hình nhìn được màn hình, gọi công cụ ổn định và vừa máy. ${g.best ? 'Mô hình phù hợp nhất đã có trên máy:' : (g.recommended || []).length ? 'Gợi ý cho máy này:' : 'Chưa có mô hình phù hợp vừa máy này.'}</span> ${sw}${recs}`;
+}
 function paintAgentWarn(adv) {
   const w = $('#agentWarn');
   const rec = (adv && adv.recommended) || [];
   const recBtns = rec.map(r => `<button class="btn sm" data-rec="${esc(r.id)}" data-installed="${r.installed ? 1 : 0}">${r.installed ? 'Nạp' : 'Tải'} ${esc(r.name)}</button>`).join(' ');
-  if (!state.status.loaded) { w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN AGENT chạy tốt nhất với <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b>.</span>`; w.hidden = false; return; }
+  const g = state.agent && state.agent.gate;
+  if (g && !g.cloud && !g.ok) { w.innerHTML = agentGateHtml(g); w.hidden = false; return; }
+  if (!state.status.loaded) { w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN AGENT cần mô hình nhìn được màn hình và gọi công cụ ổn định, vd. <b>Qwen3-VL 8B</b> hoặc <b>Qwen3-VL 4B</b>.</span>`; w.hidden = false; return; }
+  if (g && g.ok) { w.hidden = true; return; } // mô hình đã qua kiểm tra AIVN AGENT: không cần các cảnh báo cũ
   if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN AGENT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để gọi công cụ (mở ứng dụng, đọc tệp) đáng tin cậy, hãy dùng <b>Qwen3 4B/8B</b>; điều khiển màn hình còn cần mô hình nhìn ảnh (Qwen3-VL).</span> ${recBtns}`; w.hidden = false; return; }
   if (adv && adv.small) { w.innerHTML = `<span>⚠ <b>${esc(adv.model)}</b>${adv.params ? ` (khoảng ${String(adv.params).replace('.', ',')} tỉ tham số)` : ''} khá nhỏ cho AIVN AGENT: có thể gọi sai công cụ, bỏ bước hoặc nói đã làm khi chưa làm. Nên dùng <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b>.</span> ${recBtns}`; w.hidden = false; return; }
   if (adv && adv.eyes && adv.eyes.needed) {
@@ -1638,6 +1686,8 @@ function paintAgentWarn(adv) {
   w.hidden = true;
 }
 $('#agentWarn').addEventListener('click', async (e) => {
+  const sw = e.target.closest('[data-switch]');
+  if (sw) { sw.disabled = true; sw.textContent = 'Đang chuyển…'; if (state.status.loaded) await A.unloadModel(); await loadModel(sw.dataset.switch); await refreshAgent(); return; }
   const ey = e.target.closest('[data-eyes]');
   if (ey) { ey.disabled = true; try { const r = await A.agentEyes(ey.dataset.eyes); if (r.installed) toast(`Đã bật mắt nhìn: ${r.name} ✓`); else { if (r.job) paintJob(r.job); toast(`Đang tải ${r.name}. Tải xong AIVN tự dùng làm mắt nhìn.`); } } catch (err) { toast(cleanErr(err.message), true); ey.disabled = false; } refreshAgent(); return; }
   const b = e.target.closest('[data-rec]'); if (!b) return;

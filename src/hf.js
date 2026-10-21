@@ -95,19 +95,10 @@ function screenFit(size, hw) {
   if (vram) return need <= vram * 0.98;
   return size <= 3.0e9 && need <= hw.ram * 0.5;
 }
-function fitFor(size, hw) {
+// Mức chạy được trên máy này: xem fit.js (nhóm Chạy mượt / Chạy chậm / Không chạy được, kèm tốc độ và bộ nhớ ước tính)
+function fitFor(size, hw, meta = {}) {
   if (!size || !hw || !hw.ram) return null;
-  const need = size * 1.1 + 0.4 * GBy; // trọng số + ngữ cảnh/bộ đệm
-  const vram = hw.gpu && hw.vram && hw.vram.total ? hw.vram.total : 0;
-  const unified = hw.gpu === 'metal'; // Mac Apple Silicon: RAM chung
-  if (vram && !unified && need <= vram * 0.9) return { level: 'fit', label: 'Chạy tốt', hint: 'Vừa hết trong bộ nhớ GPU' };
-  if (unified && need <= hw.ram * 0.65) return { level: 'fit', label: 'Chạy tốt', hint: 'Vừa bộ nhớ hợp nhất của Mac' };
-  if (need <= hw.ram * 0.6 + vram * 0.9) {
-    const fast = size < 2.6 * GBy || (vram && need <= vram * 1.6);
-    return fast ? { level: 'fit', label: 'Chạy tốt', hint: vram ? 'Một phần trên GPU, phần còn lại trên CPU' : 'Vừa RAM, chạy bằng CPU' } : { level: 'slow', label: 'Chạy chậm', hint: vram ? 'Phần lớn chạy bằng CPU vì GPU không đủ bộ nhớ' : 'Chạy bằng CPU, khá chậm' };
-  }
-  if (need <= hw.ram * 0.85 + vram * 0.9) return { level: 'slow', label: 'Chạy chậm', hint: 'Gần hết bộ nhớ, máy có thể chậm và giật' };
-  return { level: 'big', label: 'Không đủ bộ nhớ', hint: 'Lớn hơn bộ nhớ của máy, hãy chọn bản nhỏ hơn' };
+  return require('./fit').machineFit({ size, ...meta }, hw, { ctx: meta.ctx });
 }
 
 // Gom tệp .gguf: các phần -00001-of-0000N thành một mô hình

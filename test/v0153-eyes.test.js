@@ -8,7 +8,10 @@ const CAT = require('../src/catalog');
 const { createAgent, NOT_FOUND_RE, OPEN_WANT_RE, openNudge } = require('../src/agent/agent');
 const { createComputerTools } = require('../src/agent/computer-tools');
 const GB = 1024 ** 3;
-const list = (installed = []) => CAT.map(c => ({ ...c, installed: installed.includes(c.id), fit: { level: 'fit' } }));
+const hf = require('../src/hf');
+// vram (byte) → mức chạy thật trên máy có GPU đó (ngữ cảnh 16K của AIVN AGENT); không truyền → coi như mọi mô hình vừa máy
+const list = (installed = [], vram = null) => CAT.map(c => ({ ...c, installed: installed.includes(c.id),
+  fit: vram == null ? { level: 'fit' } : hf.fitFor(c.size, vram ? { ram: 16 * GB, gpu: 'cuda', vram: { total: vram } } : { ram: 16 * GB }, { id: c.id, params: c.params, mmprojSize: c.mmproj ? c.mmproj.size : 0, ctx: 16384 }) }));
 const vision = (id) => { const c = CAT.find(x => x.id === id); return !!(c && c.mmproj); };
 
 test('quy tắc: điều khiển máy KHÔNG BAO GIỜ gợi ý một mô hình chỉ đọc chữ đứng một mình (mọi mức VRAM)', () => {
@@ -23,16 +26,17 @@ test('quy tắc: điều khiển máy KHÔNG BAO GIỜ gợi ý một mô hình 
     const e = R.eyesFor(list(), g * GB); assert.ok(e && vision(e.id));
   }
 });
-test('chọn theo VRAM: PC 12 GB → Qwen3-VL 8B hoặc Qwen3 8B + UI-TARS; laptop 4 GB → Qwen3-VL 4B hoặc Qwen3 4B 2507 + Holo1.5 3B; không GPU → Qwen3-VL 2B', () => {
-  assert.deepStrictEqual(R.screenSetup(list(), 11.93 * GB).solo, 'qwen3-vl-8b-instruct-q4_k_m');
-  assert.deepStrictEqual(R.screenSetup(list(), 11.93 * GB).pair, { planner: 'qwen_qwen3-8b-q4_k_m', grounder: 'ui-tars-1.5-7b-q4_k_m' });
-  assert.deepStrictEqual(R.screenSetup(list(), 4 * GB).solo, 'qwen3-vl-4b-instruct-q4_k_m');
-  assert.deepStrictEqual(R.screenSetup(list(), 4 * GB).pair, { planner: 'qwen3-4b-instruct-2507-q4_k_m', grounder: 'holo1.5-3b-q4_k_m' });
-  assert.deepStrictEqual(R.screenSetup(list(), 0).solo, 'qwen3-vl-2b-instruct-q8_0');
+test('điều khiển màn hình (quy tắc 0.16): luôn một mô hình nhìn ảnh, không gợi ý cặp có mô hình chỉ đọc chữ', () => {
+  const S = (v) => R.screenSetup(list([], v * GB), v * GB, { shipped: require('../src/bench-results.json').models });
+  assert.deepStrictEqual(S(11.93).solo, 'qwen3-vl-8b-instruct-q4_k_m');
+  assert.strictEqual(S(11.93).pair, null);
+  assert.deepStrictEqual(S(4).solo, 'qwen3-vl-2b-instruct-q8_0'); // 4 GB: Qwen3-VL 4B + ngữ cảnh 16K tràn sang RAM; 2B nằm trọn trong VRAM
+  assert.strictEqual(S(4).pair, null);
+  assert.deepStrictEqual(S(0).solo, 'qwen3-vl-4b-instruct-q4_k_m'); // không GPU, 16 GB RAM: 4B vẫn ≥ 10 token/giây ước tính trên CPU
 });
 test('mắt nhìn: ưu tiên mô hình nhìn ảnh đã cài', () => {
   assert.equal(R.eyesFor(list(['qwen3-vl-4b-instruct-q4_k_m']), 12 * GB).id, 'qwen3-vl-4b-instruct-q4_k_m');
-  assert.equal(R.eyesFor(list(), 12 * GB).id, 'ui-tars-1.5-7b-q4_k_m');
+  assert.equal(R.eyesFor(list(), 12 * GB).id, 'qwen3-vl-8b-instruct-q4_k_m');
   assert.ok(!R.isVision({ id: 'qwen_qwen3-8b-q4_k_m' })); assert.ok(R.isVision({ id: 'x', mmproj: { file: 'm.gguf' } }));
 });
 test('Zalo/Electron: cây giao diện nghèo → dùng ảnh chụp + mô hình nhìn ảnh', () => {

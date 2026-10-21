@@ -28,25 +28,40 @@ function pickBench(id, scores, file) {
 }
 const fitRank = (f) => (!f ? 0 : f.level === 'fit' ? 3 : f.level === 'slow' ? 1 : 0);
 
+const FIT = require('./fit');
+const AE = require('./agent-eligibility');
+const GROUND_ONLY = /ui-tars|holo1\.5|ui-venus/i; // mô hình chuyên định vị, không dùng để trò chuyện
+const grp = (c) => (c && c.fit && c.fit.group) || (c && c.fit && ({ fit: 'smooth', slow: 'slow', big: 'no' })[c.fit.level]) || null;
+// Quy tắc 0.16: gợi ý hàng đầu luôn là mô hình MẠNH NHẤT CHẠY MƯỢT trên máy này (nằm trọn trong VRAM cùng ngữ cảnh cần dùng).
+// Không có mô hình nào chạy mượt thì lấy mô hình mạnh nhất chạy chậm.
+function strongestSmooth(cands) {
+  const sorted = FIT.sortByFit(cands, (c) => c.fit ? { group: grp(c) } : null);
+  // không có mô hình chạy mượt: chọn mô hình chạy chậm NHANH nhất (tốc độ ước tính cao nhất) để vẫn dùng được
+  const slow = sorted.filter(c => grp(c) === 'slow').sort((a, b) => ((b.fit && b.fit.tps) || 0) - ((a.fit && a.fit.tps) || 0));
+  return sorted.find(c => grp(c) === 'smooth') || slow[0] || null;
+}
 // list: mục Kho mô hình (đã có fit, size, mmproj, installed); scores: { local, shipped }
 function recommend(list, scores = {}) {
-  const by = (id) => list.find(c => c.id === id);
-  const planners = PLANNERS.map(by).filter(Boolean);
-  const chat = planners.find(c => fitRank(c.fit) >= 3) || planners[planners.length - 1] || null;
-  // bộ lập kế hoạch cho điều khiển máy: mô hình chữ đạt bài đo (ưu tiên mô hình chat đã gợi ý)
-  const plannerOk = [chat, ...planners].filter(Boolean).find(c => passes(pickBench(c.id, scores, c.file))) || null;
-  const grounders = GROUNDERS.map(by).filter(Boolean);
+  const chatC = strongestSmooth(list.filter(c => !GROUND_ONLY.test(c.id) && (!c.tools || c.tools.level !== 'none')));
+  const agentC = agentPick(list, scores);
+  const planners = PLANNERS.map(id => list.find(c => c.id === id)).filter(Boolean);
+  const plannerOk = [chatC, ...planners].filter(Boolean).find(c => passes(pickBench(c.id, scores, c.file))) || null;
+  const grounders = GROUNDERS.map(id => list.find(c => c.id === id)).filter(Boolean);
   const grounder = grounders.find(c => fitRank(c.fit) >= 3 && gPasses(pickBench(c.id, scores, c.file))) || null;
-  return { chat: chat && chat.id, planner: plannerOk && plannerOk.id, grounder: grounder && grounder.id, plannerCandidate: chat && chat.id };
+  return { chat: chatC && chatC.id, agent: agentC && agentC.id, planner: plannerOk && plannerOk.id, grounder: grounder && grounder.id, plannerCandidate: chatC && chatC.id };
 }
-// Điều khiển màn hình: một mô hình nhìn ảnh (solo) hoặc cặp lập kế hoạch + mắt nhìn, chọn theo VRAM (byte).
-// Không bao giờ trả về một mô hình chỉ đọc chữ đứng một mình.
-function screenSetup(list, vramBytes = 0) {
+// AIVN AGENT: mạnh nhất chạy mượt trong số mô hình dùng được cho agent (agent-eligibility.js, bỏ qua điều kiện vừa máy để xếp nhóm riêng)
+function agentPick(list, scores = {}) {
+  const ok = list.filter(c => AE.eligibility({ vision: isVision(c), catalog: c, fit: null }, { shipped: (scores.shipped || {})[c.id], local: (scores.local || {})[c.id] }).ok);
+  return strongestSmooth(ok);
+}
+// Điều khiển màn hình: luôn một mô hình nhìn ảnh tự lập kế hoạch và tự nhìn (quy tắc 0.16: AIVN AGENT không nhận mô hình chỉ đọc chữ).
+// list có fit → mạnh nhất chạy mượt; không có fit → theo VRAM (byte). pair giữ lại để tương thích nhưng luôn null.
+function screenSetup(list, vramBytes = 0, scores = {}) {
   const GB = 1024 ** 3, v = (vramBytes || 0) / GB; const by = (id) => list.find(c => c.id === id);
-  const soloC = VISION_SOLO.filter(x => v >= x.vram && by(x.id)); const solo = soloC[0] ? by(soloC[0].id) : by(VISION_SOLO[VISION_SOLO.length - 1].id) || null;
-  const planner = by(v >= 7.5 ? PLANNERS[0] : PLANNERS[1]) || by(PLANNERS[1]) || null;
-  const gC = PAIR_GROUNDER.filter(x => v >= x.vram && by(x.id)); const grounder = gC[0] ? by(gC[0].id) : null;
-  return { solo: solo ? solo.id : null, pair: planner && grounder ? { planner: planner.id, grounder: grounder.id } : null, vramGB: Math.round(v * 10) / 10 };
+  let solo = list.some(c => c.fit) ? agentPick(list, scores) : null;
+  if (!solo) { const soloC = VISION_SOLO.filter(x => v >= x.vram && by(x.id)); solo = soloC[0] ? by(soloC[0].id) : by(VISION_SOLO[VISION_SOLO.length - 1].id) || null; }
+  return { solo: solo ? solo.id : null, pair: null, vramGB: Math.round(v * 10) / 10 };
 }
 // mô hình có nhìn được ảnh không (tệp mmproj hoặc trạng thái bộ máy)
 const isVision = (c) => !!(c && (c.vision || c.mmproj || VISION_IDS.has(c.id)));
@@ -58,7 +73,7 @@ function eyesFor(list, vramBytes = 0) {
 }
 // gắn nhãn lên từng thẻ
 function annotate(list, scores = {}, vramBytes = 0) {
-  const r = recommend(list, scores); const ss = screenSetup(list, vramBytes); r.screen = ss;
+  const r = recommend(list, scores); const ss = screenSetup(list, vramBytes, scores); r.screen = ss;
   return { rec: r, list: list.map(c => {
     const b = pickBench(c.id, scores, c.file);
     const o = { ...c, bench: b ? { score: b.score, done: b.done, safety: b.safety, where: b.where, date: b.date, seconds: b.seconds, grounding: b.grounding || null } : null };
@@ -86,4 +101,4 @@ function pairPlan({ vram = 0, main = 0, grounder = 0, mainVision = false } = {})
     (mainVision ? '; mô hình chính hiện là mô hình nhìn ảnh lớn — không cần nếu đã có mô hình định vị.' : '.');
   return { ok: false, grounderGpu: false, message: msg, needBytes: need };
 }
-module.exports = { screenSetup, eyesFor, isVision, VISION_SOLO, PAIR_GROUNDER, pairPlan, recommend, annotate, sentence, passes, gPasses, PLANNERS, GROUNDERS, pickBench };
+module.exports = { strongestSmooth, agentPick, screenSetup, eyesFor, isVision, VISION_SOLO, PAIR_GROUNDER, pairPlan, recommend, annotate, sentence, passes, gPasses, PLANNERS, GROUNDERS, pickBench };

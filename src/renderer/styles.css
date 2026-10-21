@@ -742,3 +742,11 @@ button.tag{font:inherit;font-size:11px;background:none;cursor:pointer}
 .tag.claim-x{border-color:var(--warm-line);color:var(--warm)}
 .tag.claim:hover,.tag.vis.claim-v:hover,.tag.vis.claim-d:hover{text-decoration:underline}
 .claim-legend b{font-weight:700}
+/* 0.16: nhóm theo mức chạy trên máy này */
+.fit-group{margin:6px 0 18px}
+.fit-head{margin:4px 0 10px;font-size:13.5px}
+.fit-group-no .card{opacity:.5;filter:grayscale(.6)}
+.fit-group-no .card:hover{opacity:.8}
+.fit small{font-weight:400;opacity:.85}
+select option:disabled{color:#888}
+select option.opt-no{color:#8a8a8a}

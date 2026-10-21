@@ -82,6 +82,7 @@ async function ensureAfterCrash() {
 }
 // 0.15.2: ngữ cảnh tối thiểu. Lời nhắc hệ thống + mô tả công cụ của AIVN AGENT ~2–4 nghìn token, nên AGENT cần ≥ 8192.
 const MIN_CTX_CHAT = 4096, MIN_CTX_AGENT = 8192;
+const AGENT_CTX = 16384; // ngữ cảnh AIVN AGENT thường cần (ảnh chụp màn hình + lịch sử) — dùng khi xét “chạy mượt” cho agent
 // Lỗi "ngữ cảnh không đủ" của node-llama-cpp / llama-server (tiếng Anh) → nhận ra để tự tăng ngữ cảnh hoặc báo tiếng Việt
 const CTX_ERR_RE = /compress chat history|context shift|too long prompt|context size|exceeds? the (available )?context|input is too long|prompt is too long|n_ctx|context length/i;
 const isCtxErr = (e) => !!e && (e.code === 'CTX_SMALL' || CTX_ERR_RE.test(String(e.message || e)));
@@ -835,10 +836,12 @@ function catalogList() {
   return hw().then(h => (H = h, catalog.map(c => {
     const job = downloader.get(`${c.repo}::${c.file}`);
     const part = downloader.partialFor(c.repo, [{ path: c.file, size: c.size }, ...(c.mmproj ? [{ path: c.mmproj.file, size: c.mmproj.size }] : [])]);
-    return { ...c, installed: part.complete || isInstalled(c.file), partial: part.complete ? 0 : part.received, job, fit: hf.fitFor(c.size + (c.mmproj ? c.mmproj.size : 0), h), tools: toolSupport(c) };
+    return { ...c, installed: part.complete || isInstalled(c.file), partial: part.complete ? 0 : part.received, job, fit: hf.fitFor(c.size, h, { id: c.id, params: c.params, mmprojSize: c.mmproj ? c.mmproj.size : 0 }), agentFit: hf.fitFor(c.size, h, { id: c.id, params: c.params, mmprojSize: c.mmproj ? c.mmproj.size : 0, ctx: AGENT_CTX }), tools: toolSupport(c) };
   }))).then(list => {
     // Một bộ gợi ý duy nhất (src/recommend.js): Qwen3 cho trò chuyện/công cụ; điều khiển máy: mô hình nhìn ảnh hoặc cặp lập kế hoạch + mắt nhìn theo VRAM
-    return require('./recommend').annotate(list, benchScores(), vramTotal()).list;
+    const sc = benchScores();
+    return require('./recommend').annotate(list, sc, vramTotal()).list.map(c => ({ ...c, strength: require('./fit').strength(c),
+      agentCheck: AE.eligibility({ vision: !!c.mmproj, catalog: c, fit: c.agentFit }, { shipped: sc.shipped[c.id] }) }));
   });
 }
 
@@ -975,7 +978,7 @@ function registerIpc() {
   ipcMain.handle('perf:runs', () => settings.data.perfRuns || []);
   ipcMain.handle('perf:info', async () => { const h = await hw(); return { profile: await perfProfile(), hw: { ram: h.ram, cpus: h.cpus, mathCores: h.mathCores, gpu: h.gpu, vram: h.vram, cpu: h.cpu } }; });
 
-  ipcMain.handle('models:list', () => listModels());
+  ipcMain.handle('models:list', async () => withAgentCheck(listModels()));
   ipcMain.handle('models:import', async () => {
     const r = await dialog.showOpenDialog(win, { buttonLabel: 'Mở', title: 'Chọn tệp mô hình GGUF', filters: [{ name: 'Mô hình GGUF', extensions: ['gguf'] }], properties: ['openFile', 'multiSelections'] });
     if (r.canceled) return listModels();
@@ -1169,10 +1172,11 @@ function registerIpc() {
   ipcMain.handle('vision:vcredist', () => shell.openExternal(VCREDIST_URL));
 
   // --- AIVN AGENT ---
-  ipcMain.handle('agent:info', () => agentInfo());
+  ipcMain.handle('agent:info', async () => ({ ...agentInfo(), gate: await agentModelGate().catch(() => null) }));
   ipcMain.handle('agent:run', async (_e, { reqId, convoId, messages, attachments }) => {
     const ac = new AbortController(); generations.set(reqId, ac);
-    try { await ensureAfterCrash(); const r = await withCtxGrow(() => withEngineRecovery(() => runAgentTurn({ reqId, convoId, messages, attachments, signal: ac.signal }), { minCtx: MIN_CTX_AGENT, onRetry: (ctx) => send('agent:status', { reqId, stage: 'recover', ctx }) }), { minCtx: MIN_CTX_AGENT, onGrow: (ctx) => send('agent:status', { reqId, stage: 'recover', ctx, grow: true }) }); return { ...r, steps: r.steps.map(slimStep), model: engine.status().id, stoppedBy: r.finishReason === 'abort' ? (stopReasons.get(reqId) || 'không rõ') : null }; }
+    try { await ensureAfterCrash(); const gate = await agentModelGate(); if (!gate.ok && engine.status().loaded) return { blocked: true, gate, steps: [] };
+      const r = await withCtxGrow(() => withEngineRecovery(() => runAgentTurn({ reqId, convoId, messages, attachments, signal: ac.signal }), { minCtx: MIN_CTX_AGENT, onRetry: (ctx) => send('agent:status', { reqId, stage: 'recover', ctx }) }), { minCtx: MIN_CTX_AGENT, onGrow: (ctx) => send('agent:status', { reqId, stage: 'recover', ctx, grow: true }) }); return { ...r, steps: r.steps.map(slimStep), model: engine.status().id, stoppedBy: r.finishReason === 'abort' ? (stopReasons.get(reqId) || 'không rõ') : null }; }
     finally { generations.delete(reqId); stopReasons.delete(reqId); }
   });
   ipcMain.handle('agent:screen-reply', (_e, { id, ok, nx, ny }) => { const f = screenConfirms.get(id); if (f) f({ ok: ok === true, nx: Number.isFinite(nx) ? Math.min(1, Math.max(0, nx)) : null, ny: Number.isFinite(ny) ? Math.min(1, Math.max(0, ny)) : null }); return !!f; });
@@ -1373,6 +1377,32 @@ async function selfTestUi() {
 
 // ---------- Điểm tác vụ: bài đo 10 việc điều khiển máy (chạy thật, chấm bằng trạng thái cửa sổ AIVN Bench) ----------
 const BENCH_FILE = () => path.join(app.getPath('userData'), 'agent-bench.json');
+// AIVN AGENT chỉ nhận mô hình làm được việc (xem agent-eligibility.js); Trò chuyện thường thì mô hình nào cũng được
+const AE = require('./agent-eligibility');
+async function withAgentCheck(list) {
+  const h = await hw().catch(() => null); const sc = benchScores();
+  return list.map(m => {
+    let mm = 0; try { if (m.mmproj) mm = fs.statSync(m.mmproj).size; } catch {}
+    const meta = { id: m.catalog ? m.catalog.id : m.id, params: m.catalog ? m.catalog.params : null, mmprojSize: mm };
+    const fit = h ? hf.fitFor(m.size || 0, h, meta) : null; const agentFit = h ? hf.fitFor(m.size || 0, h, { ...meta, ctx: AGENT_CTX }) : null;
+    return { ...m, fit, agentFit, strength: require('./fit').strength({ ...m, ...meta }), agent: AE.eligibility({ ...m, fit: agentFit }, { shipped: m.catalog && sc.shipped[m.catalog.id], local: sc.local[m.id] }) };
+  });
+}
+// Trạng thái “mô hình cho AIVN AGENT”: mô hình đang nạp có dùng được không, mô hình đã cài tốt nhất, và gợi ý tải nếu chưa có
+async function agentModelGate() {
+  const st = engine.status(); const sc = benchScores(); const h = await hw().catch(() => null);
+  const list = await withAgentCheck(listModels()); const cur = st.loaded ? list.find(m => m.path === st.path) : null;
+  const best = AE.bestFor(list.map(m => ({ ...m, installed: true })), sc);
+  const recommended = catalog.map(c => ({ c, fit: h ? hf.fitFor(c.size || 0, h, { id: c.id, params: c.params, mmprojSize: (c.mmproj && c.mmproj.size) || 0, ctx: AGENT_CTX }) : null }))
+    .filter(x => AE.eligibility({ vision: !!x.c.mmproj, catalog: x.c, fit: x.fit }, { shipped: sc.shipped[x.c.id] }).ok)
+    .sort((x, y) => ((sc.shipped[y.c.id] || {}).grounding || { score: 0 }).score - ((sc.shipped[x.c.id] || {}).grounding || { score: 0 }).score || x.c.size - y.c.size)
+    .slice(0, 2).map(x => ({ id: x.c.id, name: x.c.name, size: x.c.size, installed: list.some(m => m.catalog && m.catalog.id === x.c.id) }));
+  const cloud = cloudBrainOn();
+  const e = !st.loaded ? { ok: false, code: 'none', reason: 'Chưa nạp mô hình' } : cur ? cur.agent : { ok: false, code: 'unknown', reason: AE.REASONS.unknown };
+  return { ok: cloud || e.ok, cloud, code: e.code, reason: e.reason, modelName: cur ? (cur.catalog ? cur.catalog.name : cur.file) : (st.id || null),
+    best: best && (!cur || best.id !== cur.id) ? { id: best.id, name: best.catalog ? best.catalog.name : best.file } : null, recommended };
+}
+const cloudBrainOn = () => { const c = settings.data.cloudBrain; return !!(c && c.enabled && c.key && c.model); };
 function benchScores() {
   let local = {}; try { local = JSON.parse(fs.readFileSync(BENCH_FILE(), 'utf8')).models || {}; } catch {}
   let shipped = {}; try { shipped = require('./bench-results.json').models || {}; } catch {}

@@ -1,1 +1,69 @@
-{"models":{}}
+{
+ "note": "Điểm định vị đo trên máy thử của AIVN (Linux, 8 luồng CPU, không GPU), bài AIVN Bench 10 nút; xem docs/verified.md#v016-dinh-vi",
+ "models": {
+  "qwen3-vl-2b-instruct-q8_0": {
+   "grounding": {
+    "score": 6,
+    "total": 10,
+    "seconds": 85,
+    "date": "2026-10-21T07:07:29.090Z"
+   }
+  },
+  "qwen2.5-vl-3b-instruct-q4_k_m": {
+   "grounding": {
+    "score": 2,
+    "total": 10,
+    "seconds": 142,
+    "date": "2026-10-21T07:09:09.566Z"
+   }
+  },
+  "holo1.5-3b-q4_k_m": {
+   "grounding": {
+    "score": 4,
+    "total": 10,
+    "seconds": 131,
+    "date": "2026-10-21T07:42:44.715Z"
+   }
+  },
+  "qwen3-vl-4b-instruct-q4_k_m": {
+   "grounding": {
+    "score": 8,
+    "total": 10,
+    "seconds": 106,
+    "date": "2026-10-21T07:18:43.415Z"
+   }
+  },
+  "holo1.5-7b-q4_k_m": {
+   "grounding": {
+    "score": 1,
+    "total": 10,
+    "seconds": 173,
+    "date": "2026-10-21T07:39:43.614Z"
+   }
+  },
+  "ui-venus-ground-7b-q4_k_m": {
+   "grounding": {
+    "score": 8,
+    "total": 10,
+    "seconds": 419,
+    "date": "2026-10-21T07:24:02.894Z"
+   }
+  },
+  "ui-tars-1.5-7b-q4_k_m": {
+   "grounding": {
+    "score": 9,
+    "total": 10,
+    "seconds": 171,
+    "date": "2026-10-21T07:31:31.168Z"
+   }
+  },
+  "qwen3-vl-8b-instruct-q4_k_m": {
+   "grounding": {
+    "score": 9,
+    "total": 10,
+    "seconds": 258,
+    "date": "2026-10-21T07:34:50.418Z"
+   }
+  }
+ }
+}
