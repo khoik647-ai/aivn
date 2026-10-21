@@ -85,7 +85,7 @@ function machineFit(m, hw, o = {}) {
       group = 'slow'; vramUse = vramBudget; ramUse = need - vramBudget;
       const onGpu = Math.max(0, Math.min(1, (vramBudget - kv - computeBuf(ctx)) / Math.max(1, weights)));
       const t = perTok * onGpu / (gpuBandwidth(hw) * EFF_GPU * GB) + perTok * (1 - onGpu) / (cpuBandwidth(hw) * EFF_CPU * GB);
-      tps = t ? 1 / t : 0; hint = `Tràn ${(ramUse / GB).toFixed(1).replace('.', ',')} GB sang RAM, phần đó chạy bằng CPU`;
+      tps = t ? 1 / t : 0; hint = `Tràn ${(ramUse / 1024 ** 3).toFixed(1).replace('.', ',')} GB sang RAM, phần đó chạy bằng CPU`;
     } else { group = 'no'; hint = 'Lớn hơn VRAM + RAM của máy'; tps = 0; ramUse = need; }
   } else {
     // máy không có GPU rời: “mượt” khi vừa RAM và ước tính ≥ 10 token/giây trên CPU

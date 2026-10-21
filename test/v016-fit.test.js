@@ -87,3 +87,31 @@ test('giao diện: bộ chọn AIVN AGENT khoá mô hình không đạt, chặn 
   const i = app.indexOf('async function sendAgent'); const body = app.slice(i, i + 600);
   assert.ok(body.indexOf('agentGateOk') < body.indexOf('pending = []'));
 });
+
+test('Khám phá không còn nhãn cặp hai mô hình / "Lập kế hoạch · cần mắt nhìn" (AIVN AGENT chỉ dùng mô hình tự nhìn được)', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '../src/renderer/app.js'), 'utf8');
+  const role = src.slice(src.indexOf('const roleTag'), src.indexOf('function benchTag'));
+  assert.ok(!/cần mắt nhìn/.test(role)); assert.ok(/Chỉ dùng cho Trò chuyện/.test(role));
+  assert.ok(!/Điểm tác vụ: chưa đo/.test(src));
+  const R = require('../src/recommend');
+  const list = [{ id: 'qwen3-vl-4b-instruct-q4_k_m', name: 'Qwen3-VL 4B', fit: { level: 'fit', group: 'smooth' }, vision: true }, { id: 'holo1.5-3b-q4_k_m', name: 'Holo', fit: { level: 'fit', group: 'smooth' }, vision: true }];
+  const { list: out } = R.annotate(list, { local: { 'holo1.5-3b-q4_k_m': { grounding: { score: 9, total: 10 } } } }, 12 * 1024 ** 3);
+  assert.ok(out.every(c => !c.recGround && !c.recPairPlanner));
+});
+
+test('bestFor xét độ vừa máy theo ngữ cảnh AIVN AGENT (agentFit), không theo ngữ cảnh trò chuyện', () => {
+  const AE = require('../src/agent-eligibility');
+  const cat = { id: 'qwen3-vl-2b', claims: [{ t: 'tools', k: 'v' }, { t: 'gui', k: 'v' }] };
+  const m = { id: 'a', vision: true, catalog: cat, installed: true, fit: { level: 'fit' }, agentFit: { level: 'slow', hint: 'Tràn 0,1 GB sang RAM, phần đó chạy bằng CPU' } };
+  assert.equal(AE.bestFor([m], {}), null, 'tràn RAM ở 16K ngữ cảnh → không gợi ý chuyển');
+  assert.ok(AE.bestFor([{ ...m, agentFit: { level: 'fit' } }], {}));
+  const e = AE.eligibility({ ...m, fit: m.agentFit });
+  assert.equal(e.code, 'heavy'); assert.match(e.reason, /tràn 0,1 GB sang RAM, phần đó chạy bằng CPU/);
+});
+
+test('lời giải thích "Tràn … sang RAM" cùng đơn vị (GiB) với phần hiển thị bộ nhớ', () => {
+  const F = require('../src/fit');
+  const f = F.machineFit({ id: 'qwen3-vl-8b', size: 5.38 * 1024 ** 3, mmprojSize: 0.7 * 1024 ** 3, params: 8 }, { gpu: 'cuda', vram: { total: 4 * 1024 ** 3 }, ram: 8 * 1024 ** 3, cpus: 8 }, { ctx: 16384 });
+  assert.equal(f.group, 'slow');
+  const spill = f.hint.match(/Tràn ([\d,]+) GB/)[1]; assert.ok(f.text.includes(spill + ' GB RAM'), f.hint + ' | ' + f.text);
+});

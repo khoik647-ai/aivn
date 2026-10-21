@@ -77,7 +77,7 @@ function annotate(list, scores = {}, vramBytes = 0) {
   return { rec: r, list: list.map(c => {
     const b = pickBench(c.id, scores, c.file);
     const o = { ...c, bench: b ? { score: b.score, done: b.done, safety: b.safety, where: b.where, date: b.date, seconds: b.seconds, grounding: b.grounding || null } : null };
-    o.recommended = c.id === r.chat; o.recScreen = c.id === ss.solo; o.recGround = c.id === r.grounder || !!(ss.pair && c.id === ss.pair.grounder); o.recPairPlanner = !!(ss.pair && c.id === ss.pair.planner);
+    o.recommended = c.id === r.chat; o.recScreen = c.id === ss.solo; o.recGround = !!(ss.pair && c.id === ss.pair.grounder); // 0.16: không còn cặp hai mô hình — AIVN AGENT chỉ dùng mô hình tự nhìn được màn hình o.recPairPlanner = !!(ss.pair && c.id === ss.pair.planner);
     o.role = PLANNERS.includes(c.id) ? 'planner' : VISION_IDS.has(c.id) ? 'grounder' : null;
     return o;
   }) };

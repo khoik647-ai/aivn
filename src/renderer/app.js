@@ -415,12 +415,11 @@ async function renderCatalog() {
   $('#screenCards').innerHTML = fitSections(comp, catCard, (c) => c.agentFit || c.fit);
   $('#catalog').innerHTML = fitSections(list.filter(c => !comp.includes(c)), catCard);
 }
-const roleTag = (c) => c.role === 'planner' ? '<span class="tag comp" title="Bộ lập kế hoạch: chọn bước tiếp theo. Mô hình này KHÔNG nhìn được màn hình — để điều khiển máy cần đi kèm một mô hình nhìn ảnh (mắt nhìn), AIVN tự nạp khi cần.">🧠 Lập kế hoạch · cần mắt nhìn</span>' : c.role === 'grounder' ? '<span class="tag comp" title="Nhìn được ảnh chụp màn hình: đọc màn hình và chỉ ra toạ độ cần bấm, kể cả với Zalo/ứng dụng Electron không cho đọc nút/ô.">🎯 Nhìn màn hình</span>' : '';
+const roleTag = (c) => c.role === 'planner' ? '<span class="tag" title="Mô hình này chỉ đọc chữ, không nhìn được màn hình nên không dùng được cho AIVN AGENT. Dùng tốt trong Trò chuyện.">Chỉ dùng cho Trò chuyện</span>': c.role === 'grounder' ? '<span class="tag comp" title="Nhìn được ảnh chụp màn hình: đọc màn hình và chỉ ra toạ độ cần bấm, kể cả với Zalo/ứng dụng Electron không cho đọc nút/ô.">🎯 Nhìn màn hình</span>' : '';
 function benchTag(c) {
   const b = c.bench; if (!c.role && !b) return '';
   const out = [];
   if (b && b.done === 10) out.push(`<span class="tag bench ${b.score >= 7 ? 'good' : 'low'}" title="${esc(`Đo trên ${b.where}${b.date ? ' ngày ' + new Date(b.date).toLocaleDateString('vi-VN') : ''}: 10 việc có kịch bản (mở ứng dụng, bấm nút có tên, gõ tiếng Việt, đọc chữ, nhấp đúp…). An toàn (hỏi trước khi gửi): ${b.safety === null ? 'chưa đo' : b.safety ? 'đạt' : 'KHÔNG đạt'}. ${b.seconds ? 'Tổng ' + Math.round(b.seconds / 60) + ' phút.' : ''}`)}">Điểm tác vụ: ${b.score}/10</span>`);
-  else if (c.role === 'planner') out.push('<span class="tag bench" title="Chưa có lần đo nào. Mở Cài đặt AIVN AGENT → Điều khiển màn hình → Đo Điểm tác vụ để đo trên máy bạn.">Điểm tác vụ: chưa đo</span>');
   if (b && b.grounding) out.push(`<span class="tag bench ${b.grounding.score >= 7 ? 'good' : 'low'}" title="${esc(`Bài đo định vị: chỉ đúng ${b.grounding.score}/10 nút trên ảnh chụp cửa sổ AIVN Bench (đo trên ${b.where}).`)}">Điểm định vị: ${b.grounding.score}/10</span>`);
   else if (c.role === 'grounder') out.push('<span class="tag bench" title="Chưa đo trên máy nào; chưa được gắn nhãn Gợi ý.">Điểm định vị: chưa đo</span>');
   return out.join('');
@@ -1677,7 +1676,7 @@ function agentGateHtml(g) {
   const sw = g.best ? `<button class="btn sm primary" data-switch="${esc(g.best.id)}">⇄ Chuyển sang ${esc(g.best.name)}</button>` : '';
   const recs = g.best ? '' : (g.recommended || []).map(r => `<button class="btn sm primary" data-rec="${esc(r.id)}" data-installed="${r.installed ? 1 : 0}">${r.installed ? 'Nạp' : '⬇ Tải'} ${esc(r.name)}${r.installed ? '' : ' (' + fmtBytes(r.size) + ')'}</button>`).join(' ');
   const what = g.code === 'none' ? '🤖 Chưa nạp mô hình cho AIVN AGENT.' : `⛔ <b>${esc(g.modelName || 'Mô hình này')}</b> chưa dùng được cho AIVN AGENT: <b>${esc(g.reason)}</b>.`;
-  return `<span class="agent-gate">${what} AIVN AGENT cần mô hình nhìn được màn hình, gọi công cụ ổn định và vừa máy. ${g.best ? 'Mô hình phù hợp nhất đã có trên máy:' : (g.recommended || []).length ? 'Gợi ý cho máy này:' : 'Chưa có mô hình phù hợp vừa máy này.'}</span> ${sw}${recs}`;
+  return `<span class="agent-gate">${what} AIVN AGENT cần mô hình nhìn được màn hình, gọi công cụ ổn định và vừa máy. ${g.best ? 'Mô hình phù hợp nhất đã có trên máy:' : (g.recommended || []).length ? 'Gợi ý cho máy này:' : 'Chưa có mô hình nào làm được việc này mà vừa máy này — bạn vẫn dùng Trò chuyện bình thường.'}</span> ${sw}${recs}`;
 }
 function paintAgentWarn(adv) {
   const w = $('#agentWarn');

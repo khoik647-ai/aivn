@@ -35,7 +35,7 @@ test('bộ định vị chỉ gợi ý khi có Điểm định vị ≥7/10 và 
   assert.equal(R.recommend(base(slow, slow), sc).grounder, null);
   const { list } = R.annotate(base(slow, fit), sc);
   const holo = list.find(c => c.id === 'holo1.5-3b-q4_k_m');
-  assert.equal(holo.role, 'grounder'); assert.equal(holo.recGround, true); assert.equal(holo.bench.grounding.score, 9);
+  assert.equal(holo.role, 'grounder'); assert.equal(holo.recGround, false, '0.16: không gợi ý cặp mắt nhìn'); assert.equal(holo.bench.grounding.score, 9);
   assert.equal(list.filter(c => c.recommended).length, 1);
   assert.equal(list.find(c => c.id === 'gemma-3-4b-it-q4_k_m').role, null);
 });

@@ -134,7 +134,7 @@ function engineEnv() {
   const lim = Number(d.vramLimitGB) > 0 ? String(Math.round(Number(d.vramLimitGB) * 1024 ** 3)) : '';
   return { AIVN_GPU: d.gpu === false ? 'off' : '', GGML_VK_VISIBLE_DEVICES: dev, AIVN_VRAM_LIMIT: lim };
 }
-const hw = async () => (hwCache ||= await engine.hardwareInfo().catch(() => ({ ram: require('os').totalmem() })));
+const hw = async () => (hwCache ||= await engine.hardwareInfo().catch(() => ({ ram: require('os').totalmem() })).then(h => (process.env.AIVN_QA_FAKEHW && !app.isPackaged ? { ...h, ...JSON.parse(process.env.AIVN_QA_FAKEHW) } : h)));
 const generations = new Map(); // reqId -> AbortController
 const stopReasons = new Map(); // reqId -> lý do dừng (ghi nhật ký + hiện cho người dùng)
 function abortGen(reqId, ac, reason) { if (!ac || ac.signal.aborted) return; stopReasons.set(reqId, reason); LOG.log('app', `Dừng lượt ${reqId}: ${reason}`); try { ac.abort(); } catch {} }
@@ -1516,6 +1516,21 @@ async function qaUI() {
   await until('typeof show === "function" && !!state.settings', 60000);
   const step = async (n, code) => { try { if (code) await js(code); await shot(n); } catch (e) { out[n] = 'lỗi: ' + e.message; } };
   if (process.env.AIVN_QAUI_ONBOARD) await step('00-onboarding', 'startOnboard(true)');
+  if (process.env.AIVN_QAUI_016FIT) { // QA 0.16: nhóm theo mức chạy + bộ chọn mô hình AIVN AGENT
+    await js('show("discover")'); await until('document.querySelectorAll("#catalog .fit-group").length > 0', 30000);
+    await shot('016-discover-top'); await js('(document.querySelector("#screenArea:not([hidden])") || document.body).scrollIntoView(), 1'); await shot('016-discover-agent');
+    await js('document.querySelector("#catalog").scrollIntoView(), 1'); await shot('016-discover-groups');
+    await js('(document.querySelector(".fit-group-no") || document.body).scrollIntoView(), 1'); await shot('016-discover-cannot');
+    out.discover = await js(`[...document.querySelectorAll("#screenCards .fit-head, #catalog .fit-head")].map(h => h.textContent)`);
+    out.discoverFirst = await js(`[...document.querySelectorAll("#catalog .fit-group")].map(g => [g.querySelector(".fit-head").textContent, [...g.querySelectorAll(".card h4, .card b")].slice(0, 3).map(x => x.textContent), [...g.querySelectorAll(".fit")].slice(0, 3).map(x => x.textContent)])`);
+    await js('show("chat"); 1'); await sleep(500);
+    out.chatPicker = await js(`[...document.querySelectorAll("#modelSelect optgroup")].map(g => ({ g: g.label, o: [...g.querySelectorAll("option")].map(o => (o.disabled ? "[khoá] " : "") + o.textContent) }))`);
+    await js('typeof setMode === "function" ? setMode("agent") : show("agent"); 1'); await sleep(2000);
+    out.agentPicker = await js(`[...document.querySelectorAll("#modelSelect optgroup")].map(g => ({ g: g.label, o: [...g.querySelectorAll("option")].map(o => (o.disabled ? "[khoá] " : "") + o.textContent) }))`);
+    out.agentWarn = await js('(w => w && !w.hidden ? w.innerText : null)(document.querySelector("#agentWarn"))');
+    await shot('016-agent-gate');
+    fs.writeFileSync(path.join(dir, 'qa016fit.json'), JSON.stringify(out, null, 2)); app.exit(0); return;
+  }
   if (process.env.AIVN_QAUI_151) { // QA 0.15.1: điều hướng, thông báo, biểu mẫu
     await js('document.querySelectorAll(".modal-back").forEach(m => m.hidden = true)');
     const st = async (n) => { await shot(n); out[n] = await js(`({ toasts: [...document.querySelectorAll(".toast-stack .toast-item")].map(t => (t.classList.contains("err") ? "ERR " : "") + t.textContent.replace("×", "").trim()), crmNav: [...document.querySelectorAll("[data-crm-nav]")].map(e => getComputedStyle(e).display), active: document.querySelector(".view.active")?.id })`); };

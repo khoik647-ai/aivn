@@ -23,13 +23,13 @@ function eligibility(m, { shipped = null, local = null } = {}) {
   if (claims.some(x => x.t === 'gui' && x.k === 'x')) return { ok: false, code: 'ground', reason: REASONS.ground };
   if (g && g.score < MIN_GROUND) return { ok: false, code: 'ground', reason: `${REASONS.ground} (điểm định vị ${g.score}/10)` };
   if (!g && !claims.some(x => x.t === 'gui' && x.k === 'v')) return { ok: false, code: 'ground', reason: REASONS.ground + ' (chưa đo)' };
-  if (m.fit && m.fit.level !== 'fit') return { ok: false, code: 'heavy', reason: REASONS.heavy + (m.fit.hint ? ` (${m.fit.hint.toLowerCase()})` : '') };
+  if (m.fit && m.fit.level !== 'fit') return { ok: false, code: 'heavy', reason: REASONS.heavy + (m.fit.hint ? ` (${m.fit.hint.charAt(0).toLowerCase() + m.fit.hint.slice(1)})` : '') };
   return { ok: true, code: 'ok', reason: g ? `Nhìn màn hình, gọi công cụ đã kiểm chứng, điểm định vị ${g.score}/10` : 'Nhìn màn hình, gọi công cụ và định vị đã kiểm chứng' };
 }
-// mô hình tốt nhất cho AIVN AGENT trong danh sách (đã cài trước, rồi điểm định vị cao, rồi nhỏ)
+// mô hình tốt nhất cho AIVN AGENT trong danh sách (độ vừa máy tính theo ngữ cảnh của AIVN AGENT: agentFit nếu có) (đã cài trước, rồi điểm định vị cao, rồi nhỏ)
 function bestFor(list, scores = {}) {
   const sc = (m) => { const c = m.catalog; const id = c && c.id; const s = (scores.shipped || {})[id]; const l = (scores.local || {})[m.id] || (scores.local || {})[id]; const g = (l && l.grounding) || (s && s.grounding); return g ? g.score : 7; };
-  return list.map(m => ({ m, e: eligibility(m, { shipped: m.catalog && (scores.shipped || {})[m.catalog.id], local: (scores.local || {})[m.id] }) })).filter(x => x.e.ok)
+  return list.map(m => ({ m, e: eligibility({ ...m, fit: m.agentFit || m.fit }, { shipped: m.catalog && (scores.shipped || {})[m.catalog.id], local: (scores.local || {})[m.id] }) })).filter(x => x.e.ok)
     .sort((a, b) => (!!b.m.installed - !!a.m.installed) || (sc(b.m) - sc(a.m)) || ((a.m.size || 0) - (b.m.size || 0))).map(x => x.m)[0] || null;
 }
 module.exports = { eligibility, bestFor, REASONS, MIN_GROUND };
