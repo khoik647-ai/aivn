@@ -97,6 +97,7 @@ function winDirs({ home, env, extraDirs = {} }) {
   const uniq = (a) => { const seen = new Set(); return a.filter(d => { const k = d.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }); };
   return { desk: uniq(desk), start: uniq(start) };
 }
+const APPDATA_SKIP = /^(microsoft|packages|temp|google|mozilla|programs|npm|npm-cache|pip|nuget|d3dscache|crashdumps|connecteddevicesplatform|comms|publishers|virtualstore|history|ms-playwright|electron|node-gyp|cache|caches)$/i;
 const SKIP_LNK = /^(uninstall|gỡ|readme|help|website|license|release notes)\b|\buninstall\b/i;
 function listApps({ platform = process.platform, home = os.homedir(), env = process.env, extraDirs = {}, diag = null } = {}) {
   const out = [];
@@ -121,6 +122,22 @@ function listApps({ platform = process.platform, home = os.homedir(), env = proc
       if (exe) { out.push({ name: d.name, path: path.join(progs, d.name, exe), source: 'localappdata' }); nLocal++; }
     }
     count('localappdata', nLocal);
+    // 0.16: ứng dụng ghim trên thanh tác vụ (lối tắt riêng, có khi không có trong Start Menu)
+    const appData = env.APPDATA || path.join(env.USERPROFILE || home, 'AppData', 'Roaming');
+    const pinned = path.join(appData, 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar');
+    { const files = []; walk(pinned, 0, files, (e) => e.isFile() && /\.lnk$/i.test(e.name)); count('taskbar', files.filter(f => add(f, 'taskbar')).length); }
+    // 0.16: ứng dụng tự cài thẳng vào AppData (vd. %APPDATA%\Telegram Desktop\Telegram.exe, %LOCALAPPDATA%\<Tên>\<Tên>.exe)
+    let nApp = 0;
+    for (const root of [env.LOCALAPPDATA || path.join(env.USERPROFILE || home, 'AppData', 'Local'), appData]) {
+      let ds = []; try { ds = fs.readdirSync(root, { withFileTypes: true }).filter(e => e.isDirectory() && !APPDATA_SKIP.test(e.name)); } catch {}
+      for (const d of ds) {
+        let exes = []; try { exes = fs.readdirSync(path.join(root, d.name)).filter(f => /\.exe$/i.test(f) && !/unins|update|setup|crash|helper|install|squirrel/i.test(f)); } catch {}
+        const k = fold(d.name).replace(/\s+/g, '');
+        const exe = exes.find(f => fold(f.replace(/\.exe$/i, '')).replace(/\s+/g, '') === k) || exes.find(f => { const e = fold(f.replace(/\.exe$/i, '')).replace(/\s+/g, ''); return e.length >= 3 && k.startsWith(e); });
+        if (exe) { out.push({ name: d.name, path: path.join(root, d.name, exe), source: 'appdata' }); nApp++; }
+      }
+    }
+    count('appdata', nApp);
   } else if (platform === 'darwin') {
     const files = []; for (const r of ['/Applications', '/System/Applications', '/System/Applications/Utilities', '/Applications/Utilities', path.join(home, 'Applications')]) walk(r, 1, files, (e) => e.name.endsWith('.app'));
     for (const f of files) out.push({ name: path.basename(f, '.app'), path: f });

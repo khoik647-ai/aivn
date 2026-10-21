@@ -53,6 +53,8 @@ function createComputerTools(deps) {
     }
     return C.mergeApps(quick(), deepCache);
   };
+  // mọi mục (chưa gộp theo tên) — để thử lần lượt nhiều cách mở cùng một ứng dụng
+  const rawApps = () => [...(quick() || []), ...(deepCache || [])];
   const failedNote = () => lastDiag && lastDiag.errors.length ? ` LƯU Ý: một số nguồn tìm bị lỗi (${lastDiag.errors.join('; ')}), nên KHÔNG được nói với người dùng là ứng dụng chưa cài.` : '';
   // Windows: thử mở theo tên qua Get-StartApps (shell:AppsFolder) rồi Start-Process (App Paths, PATH); không hiện hộp thoại lỗi
   const winLaunchByName = (q) => new Promise(res => {
@@ -64,6 +66,50 @@ function createComputerTools(deps) {
   });
   const SOURCES = process.platform === 'win32' ? 'lối tắt Start Menu (của bạn và mọi người dùng), Desktop, %LOCALAPPDATA%\\Programs, sổ đăng ký (Uninstall, App Paths) và ứng dụng Store (Get-StartApps)'
     : process.platform === 'darwin' ? '/Applications, ~/Applications, /System/Applications, Spotlight và "open -a"' : 'các tệp .desktop';
+
+  const isWin = () => (deps.platform ? deps.platform === 'win32' : process.platform === 'win32' || !!deps.psRun); // psRun: giả lập Windows trong test
+  // ---- 0.16: chuỗi cách mở ứng dụng trên Windows, có kiểm tra cửa sổ ----
+  const SRC_ORDER = ['startmenu', 'desktop', 'taskbar', 'localappdata', 'appdata', 'apppath', 'start', 'uninstall'];
+  const SRC_LABEL = { startmenu: 'lối tắt Start Menu', desktop: 'lối tắt Desktop', taskbar: 'lối tắt ghim trên thanh tác vụ', localappdata: 'tệp chạy trong %LOCALAPPDATA%\\Programs', appdata: 'tệp chạy trong AppData', apppath: 'App Paths (sổ đăng ký)', start: 'shell:AppsFolder', uninstall: 'thư mục cài đặt (sổ đăng ký)' };
+  const listWindows = () => (deps.windows ? deps.windows() : require('./uitree').windows());
+  const matchWin = (list, names) => { const U = require('./uitree'); for (const n of names) { const w = U.matchWindow(list, n); if (w) return w; } return null; };
+  const procMatch = (w, names) => { const p = C.fold(w.proc || ''); return !!p && names.some(n => { const f = C.fold(n).replace(/\s+/g, ''); return f.length >= 3 && (p.replace(/\s+/g, '').includes(f) || f.includes(p.replace(/\s+/g, ''))); }); };
+  // cửa sổ của ứng dụng: tiến trình trùng tên, hoặc cửa sổ MỚI (chưa có trước khi mở) có tiêu đề khớp — tránh nhận nhầm tab trình duyệt "Zalo Web"
+  async function waitWindow(names, before, ms) {
+    const sleep = deps.sleep || ((t) => new Promise(r => setTimeout(r, t)));
+    const old = new Set((before || []).map(w => String(w.hwnd)));
+    for (let t = 0; t <= ms; t += 700) {
+      let list = []; try { list = await listWindows(); } catch { return { unknown: true }; }
+      const w = list.find(x => procMatch(x, names)) || (() => { const m = matchWin(list.filter(x => !old.has(String(x.hwnd))), names); return m; })();
+      if (w) return { w };
+      if (t + 700 <= ms) await sleep(700);
+    }
+    return { w: null };
+  }
+  async function launchChain(q, hit) {
+    const names = [...new Set([q, hit && hit.name].filter(Boolean))];
+    const tried = [];
+    let before = []; let canCheck = true; try { before = await listWindows(); } catch { canCheck = false; }
+    // đang mở sẵn (kể cả thu nhỏ): đưa lên trước
+    const open = before.find(x => procMatch(x, names));
+    if (open) { try { await (deps.focusWindow ? deps.focusWindow(open) : require('./uitree').focus(open)); } catch {} return { ok: true, name: hit ? hit.name : q, how: 'đang mở sẵn — đã đưa cửa sổ lên trước', window: open, tried }; }
+    const raw = rawApps().map(x => ({ ...x, s: C.score(q, x.name) })).filter(x => x.s >= 60 || (hit && C.fold(x.name) === C.fold(hit.name)));
+    const cands = [...(hit ? [hit] : []), ...raw].filter(x => x.path || x.appId)
+      .sort((x, y) => (y === hit) - (x === hit) || y.s - x.s || SRC_ORDER.indexOf(x.source) - SRC_ORDER.indexOf(y.source));
+    const seen = new Set(); const steps = [];
+    for (const c of cands) { const k = (c.appId || c.path || '').toLowerCase(); if (!k || seen.has(k)) continue; seen.add(k); steps.push({ how: SRC_LABEL[c.source] || 'lối tắt', name: c.name, run: () => (deps.openAppOverride ? deps.openAppOverride(c) : openApp(c)) }); }
+    steps.push({ how: 'shell:AppsFolder (Get-StartApps)', name: q, run: async () => { const got = await winLaunchByName(q); if (!got) throw new Error('không có trong danh sách ứng dụng của Windows'); } });
+    for (const [i, st_] of steps.slice(0, 6).entries()) {
+      try { await st_.run(); } catch (e) { tried.push(`${st_.how}: ${String(e.message || e).slice(0, 80)}`); deps.log && deps.log(`[ứng dụng] mở "${q}" qua ${st_.how} lỗi: ${e.message}`); continue; }
+      if (!canCheck) return { ok: true, name: st_.name, how: st_.how, window: null, tried };
+      const r = await waitWindow([...names, st_.name], before, i === 0 ? 9000 : 6000);
+      if (r.unknown) return { ok: true, name: st_.name, how: st_.how, window: null, tried };
+      if (r.w) { try { await (deps.focusWindow ? deps.focusWindow(r.w) : require('./uitree').focus(r.w)); } catch {} return { ok: true, name: st_.name, how: st_.how, window: r.w, tried }; }
+      tried.push(`${st_.how}: đã chạy nhưng chưa thấy cửa sổ`);
+      deps.log && deps.log(`[ứng dụng] mở "${q}" qua ${st_.how}: chưa thấy cửa sổ — thử cách khác`);
+    }
+    return { ok: false, tried };
+  }
 
   function names({ headless = false } = {}) {
     if (headless) return []; // chạy theo lịch: không có ai để duyệt
@@ -117,12 +163,21 @@ function createComputerTools(deps) {
         // macOS: tên gần đúng (điểm thấp) → thử "open -a <tên>" trước, vì LaunchServices biết cả ứng dụng ngoài /Applications (vd. Zalo cài từ App Store)
         if (process.platform === 'darwin' && (!hit || hit.s < 60) && await macOpenApp(q)) return { forModel: `Đã mở ứng dụng "${q}".`, summary: `Đã mở ${q}` };
         if (ctx) ctx.lastOpenedApp = q;
-        if (hit) { await openApp(hit); if (ctx) ctx.lastOpenedApp = hit.name; return { forModel: `Đã mở ứng dụng "${hit.name}".`, summary: `Đã mở ${hit.name}` }; }
-        if (process.platform === 'win32') { const b = C.WIN_BUILTIN[q.toLowerCase()]; if (b) { if (b.endsWith(':')) await deps.openExternal(b); else { const { spawn } = require('child_process'); spawn(b, [], { detached: true, stdio: 'ignore' }).unref(); } return { forModel: `Đã mở "${q}".`, summary: `Đã mở ${q}` }; } }
-        if (process.platform === 'darwin') { const r = await new Promise(res => require('child_process').execFile('open', ['-a', q], (e) => res(!e))); if (r) return { forModel: `Đã mở ứng dụng "${q}".`, summary: `Đã mở ${q}` }; }
-        if (process.platform === 'win32' || deps.psRun) { const got = await winLaunchByName(q); if (got) return { forModel: `Đã mở ứng dụng "${got}".`, summary: `Đã mở ${got}` }; }
+        if (isWin()) {
+          // 0.16: Windows — thử lần lượt nhiều cách, mỗi cách đều KIỂM TRA cửa sổ đã hiện (không báo "đã mở" khi chưa thấy)
+          if (!hit) { const b = C.WIN_BUILTIN[q.toLowerCase()]; if (b) { if (b.endsWith(':')) await deps.openExternal(b); else { const { spawn } = require('child_process'); spawn(b, [], { detached: true, stdio: 'ignore' }).unref(); } return { forModel: `Đã mở "${q}".`, summary: `Đã mở ${q}` }; } }
+          const r = await launchChain(q, hit);
+          if (r.ok) { if (ctx) ctx.lastOpenedApp = r.name; return { forModel: `Đã mở ứng dụng "${r.name}" (${r.how}${r.window ? `; đã thấy cửa sổ “${r.window.title}”` : ''}).${r.tried.length ? ` Các cách trước không được: ${r.tried.join('; ')}.` : ''}`, summary: `Đã mở ${r.name}${r.window ? ' · đã thấy cửa sổ' : ''} (${r.how})`, launch: r }; }
+          if (r.tried.length) {
+            const near = all.map(x => ({ n: x.name, s: C.score(q.split(/\s+/)[0], x.name) })).filter(x => x.s > 0).sort((x, y) => y.s - x.s).slice(0, 8).map(x => x.n);
+            throw new CompError(`Chưa mở được "${q}". Đã thử: ${r.tried.join('; ')}.${near.length ? ' Gần giống: ' + near.join(', ') + '.' : ''} Bước tiếp: nếu đã bật điều khiển màn hình, bấm nút Start rồi gõ tên ứng dụng và Enter (screen_act); nếu không, hỏi người dùng tên chính xác; đừng khẳng định ứng dụng không có trên máy.${failedNote()}`);
+          }
+        } else {
+          if (hit) { await openApp(hit); if (ctx) ctx.lastOpenedApp = hit.name; return { forModel: `Đã mở ứng dụng "${hit.name}".`, summary: `Đã mở ${hit.name}` }; }
+          if (process.platform === 'darwin') { const r = await new Promise(res => require('child_process').execFile('open', ['-a', q], (e) => res(!e))); if (r) return { forModel: `Đã mở ứng dụng "${q}".`, summary: `Đã mở ${q}` }; }
+        }
         const near = all.map(x => ({ n: x.name, s: C.score(q.split(/\s+/)[0], x.name) })).filter(x => x.s > 0).sort((x, y) => y.s - x.s).slice(0, 8).map(x => x.n);
-        throw new CompError(`Không tìm thấy ứng dụng "${q}" sau khi đã kiểm tra ${SOURCES}.${near.length ? ' Gần giống: ' + near.join(', ') + '.' : ''} Bước tiếp: thử list_apps với từ khoá ngắn${process.platform === 'win32' ? `, rồi run_command \`cmd /c start "" "${q.replace(/["`$]/g, '')}"\`` : ''}; nếu vẫn không được, hỏi người dùng tên chính xác. Không mở trang web thay thế khi chưa hỏi người dùng; đừng khẳng định ứng dụng không có trên máy.${failedNote()}`);
+        throw new CompError(`Không tìm thấy ứng dụng "${q}" sau khi đã kiểm tra ${SOURCES}.${near.length ? ' Gần giống: ' + near.join(', ') + '.' : ''} Bước tiếp: thử list_apps với từ khoá ngắn${isWin() ? '; nếu đã bật điều khiển màn hình, bấm nút Start rồi gõ tên ứng dụng và Enter' : ''}; nếu vẫn không được, hỏi người dùng tên chính xác. Không mở trang web thay thế khi chưa hỏi người dùng; đừng khẳng định ứng dụng không có trên máy.${failedNote()}`);
       }
       case 'open_path': {
         const p = C.expandPath(a.path);

@@ -88,7 +88,7 @@ test('PowerShell lỗi/quá giờ: công cụ ghi rõ nguồn lỗi, không đư
   const logs = []; let scan = null; const ps = [];
   const tools = CT.createComputerTools({ getSettings: () => ({ agentComputer: true }), visionReady: () => false, openPath: async () => '', log: (m) => logs.push(m), logScan: (d) => { scan = d; },
     deepApps: async () => Object.assign([], { diag: { sources: {}, errors: ['PowerShell quá thời gian 25 giây'] } }),
-    psRun: async (script) => { ps.push(script); return /UngDungLa/.test(script) ? 'fail' : 'ok:Zalo'; } });
+    psRun: async (script) => { ps.push(script); return /UngDungLa/.test(script) ? 'fail' : 'ok:Zalo'; }, windows: async () => { throw new Error('không đọc được cửa sổ'); } });
   const r = await tools.exec('open_app', { name: 'Zalo' }, {});
   assert.match(r.forModel, /Đã mở ứng dụng "Zalo"/); assert.match(ps[0], /Get-StartApps[\s\S]*App Paths/);
   await assert.rejects(tools.exec('open_app', { name: 'UngDungLa' }, {}), (e) => /KHÔNG được nói với người dùng là ứng dụng chưa cài/.test(e.message) && /quá thời gian/.test(e.message) && /đừng khẳng định/.test(e.message));
