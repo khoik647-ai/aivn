@@ -59,6 +59,7 @@
         <div class="agent-bar only-agent" id="agentBar">
           <div class="agent-title"><b>🤖 AIVN AGENT</b><span class="muted small">Tự dùng công cụ ngay trên máy bạn · mỗi bước đều hiện bên dưới</span></div>
           <div class="tool-chips" id="toolChips"></div>
+          <button type="button" class="auto-pill" id="autoPill" aria-pressed="false" title="Bật: AIVN AGENT tự làm các bước thường mà không hỏi. Vẫn hỏi khi gửi nội dung khác lời bạn, xoá, thanh toán, chạy lệnh.">⚡ Tự làm không hỏi: <span id="autoPillState">tắt</span></button>
         </div>
         <div class="doc-warn agent-warn only-agent" id="agentWarn" hidden></div>
         <div class="dropzone" id="dropzone"><div><b>Thả tệp vào đây</b><span>PDF (kể cả bản scan, đọc bằng OCR) · Word DOCX/ODT · Excel XLSX/ODS · PowerPoint PPTX/ODP · ZIP · TXT/MD/CSV/JSON · mã nguồn · ảnh PNG/JPG/WEBP/GIF/BMP (đọc chữ bằng OCR) · tối đa 20 MB</span></div></div>
@@ -116,6 +117,7 @@
               <small class="muted">Dạng: {"mcpServers": {"tên": {"command": "npx", "args": ["-y", "gói"], "env": {}}}} hoặc {"tên": {"url": "https://…/mcp"}} (thêm "type": "sse" cho SSE). Máy không có Node thì AIVN dùng Node đi kèm để chạy npx.</small>
             </details>
             <div class="always-box small" id="alwaysBox" hidden><b>✅ Luôn cho phép (không hỏi lại):</b> <span class="muted">bấm × để AIVN AGENT hỏi lại trước khi dùng.</span><div class="always-list" id="alwaysList"></div></div>
+            <label class="check toggle"><input type="checkbox" id="agAuto"> <span><b>⚡ Tự làm không hỏi</b><small>AIVN AGENT tự bấm, gõ, ghi tệp mà không hỏi từng bước. Vẫn LUÔN hỏi khi: gửi tin có nội dung khác với lời bạn đã nêu, xoá thứ bạn chưa nêu tên, thanh toán/nộp, chạy lệnh terminal, mở tệp chạy được, thao tác hệ thống bạn không yêu cầu. Chỉ trong một lượt: viết “không cần hỏi lại” trong yêu cầu. Muốn duyệt trước khi gửi: viết “hỏi trước khi gửi”.</small></span></label>
             <label class="check toggle"><input type="checkbox" id="agComp"> <span><b>💻 Truy cập máy tính</b><small>Mở ứng dụng, tệp, thư mục, trang web; xem/đóng ứng dụng; chạy lệnh terminal; khoá màn hình, âm lượng… Chạy lệnh, đóng ứng dụng, tắt máy luôn hỏi bạn trước. Lệnh nguy hiểm (xoá hàng loạt, định dạng ổ đĩa, tải mã về chạy, quyền quản trị) bị chặn.</small></span></label>
             <label class="check toggle sub"><input type="checkbox" id="agAutoRO"> <span><b>Không hỏi lại với lệnh chỉ đọc</b><small>Ví dụ dir, ls, ipconfig, git status. Mặc định tắt: mọi lệnh đều hiện thẻ duyệt.</small></span></label>
             <label class="check toggle"><input type="checkbox" id="agScreen"> <span><b>🖱 Điều khiển màn hình <em class="beta">Thử nghiệm</em></b><small id="agScreenNote">AIVN AGENT tự mở ứng dụng và bấm/gõ từng bước như bạn. Dừng: Esc hoặc Ctrl+Alt+Q.</small></span></label>

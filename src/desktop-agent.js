@@ -10,6 +10,7 @@ const U = require('./agent/uitree');
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const { riskOf, RISKY_NAME, ACT_LABEL, ALIASES } = require('./agent/desk-policy');
+const AU = require('./agent/autonomy');
 
 function createDesktopAgent(deps) {
   // deps: { engine, getSettings, setSettings, log, getMainWindow, preload, isTest, fakeScreen }
@@ -305,7 +306,20 @@ function createDesktopAgent(deps) {
     const mode = S().agentScreenMode === 'important' ? 'important' : 'each';
     const box = t && t.x != null ? (t.el ? rectNorm(t.el.b) : t.box || (() => { const n = nativeToNorm(t.x, t.y); return { x1: n.nx - 0.012, y1: n.ny - 0.012, x2: n.nx + 0.012, y2: n.ny + 0.012 }; })()) : null;
     if (box) ov('target', { box, label: desc });
-    if (mode === 'each' || risk) {
+    // 0.16 “Tự làm không hỏi”: bước thường không hỏi; GỬI chỉ không hỏi khi nội dung đúng là tin người dùng đã nêu; xoá chỉ khi nêu đích danh
+    const auto = ctx && ctx.auto;
+    let autoGo = false;
+    if (auto && auto.on) {
+      if (!risk) autoGo = AU.skipAsk(auto, 'desk-step');
+      else {
+        const elName = String((t && t.el && t.el.name) || (t && t.query) || '');
+        const sendText = action === 'type_text' ? String(a.text || '').replace(/\n+$/, '') : s.lastTyped || '';
+        const isSend = (action === 'type_text' && (a.submit || /\n/.test(String(a.text || '')))) || (action === 'hotkey' && /(enter|return)$/i.test(String(a.keys || '').replace(/\s+/g, ''))) || (['click', 'double_click'].includes(action) && /g[uửứ]i|send|sent/iu.test(elName));
+        autoGo = isSend ? AU.skipAsk(auto, 'desk-send', { text: sendText }) : AU.skipAsk(auto, 'desk-risk', { what: risk + ' ' + elName, named: elName });
+      }
+      if (autoGo) deps.log && deps.log('desk', `Tự làm không hỏi (${auto.why}): ${desc}`);
+    }
+    if (!autoGo && (mode === 'each' || risk)) {
       status(risk ? 'Cần bạn cho phép bước quan trọng' : 'Chờ bạn cho phép');
       const crop = s.shot ? thumbOf(s.shot).src : null;
       const r = await ask({ action, title: risk ? '⚠ Bước quan trọng — kiểm tra kỹ' : 'AIVN AGENT muốn làm bước này', desc: desc.charAt(0).toUpperCase() + desc.slice(1), risk, text: action === 'type_text' ? String(a.text) : null,
@@ -341,6 +355,7 @@ function createDesktopAgent(deps) {
     if (['click', 'double_click'].includes(action) && rcp && !openPending && s.chatOpen) s.chatOpen = null; // bấm chỗ khác: có thể đã đổi cuộc trò chuyện
     if (!['type_text', 'wait', 'scroll'].includes(action)) { s.inSearch = 0; s.foundHit = null; }
     s.lastAction = { action, el: t && t.el, keys: a.keys, at: Date.now(), query: t && t.query ? t.query : String(a.element || a.target || '') };
+    if (action === 'type_text') s.lastTyped = String(a.text || '').replace(/\n+$/, '');
     deps.log && deps.log('desk', `Thao tác: ${desc}${t && t.via ? ' (định vị bằng ' + t.via + ')' : ''}`);
     ov('target', { box: null });
     await sleep(action === 'type_text' ? 500 : 700);
@@ -415,7 +430,7 @@ function createDesktopAgent(deps) {
     const foc = o.obs.elements.find(e => e.focused); if (foc) checks.push(`Đang chọn: [${foc.id}] ${foc.kind} "${foc.name}".`);
     if (before && o.obs.elements.length && Math.abs(o.obs.elements.length - before.elements.length) > 3) checks.push(`Số phần tử: ${before.elements.length} → ${o.obs.elements.length}.`);
     if (!checks.length) checks.push('Màn hình không thay đổi rõ ràng — nếu cần, thử cách khác.');
-    return { forModel: `Đã ${desc}.\nKiểm tra: ${checks.join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
+    return { ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
   }
 
   async function look(a, ctx) {

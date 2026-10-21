@@ -152,7 +152,7 @@ function initStores() {
   settings = new JsonStore(path.join(ud, 'settings.json'), {
     systemPrompt: 'Bạn là AIVN, một trợ lý AI thân thiện. Hãy trả lời bằng tiếng Việt, rõ ràng và chính xác.',
     temperature: 0.7, maxTokens: 1024, contextSize: 0, perfMode: 'auto', apiPort: 1234, apiAutoStart: false, imported: [], lastModel: null, hfToken: '', theme: 'light', themeFx: 'full', rag: true, vision: true,
-    agentFolders: [], agentWeb: false, agentPython: false, agentMemory: true, agentTemperature: 0.2, agentComputer: true, agentScreen: false, agentScreenMode: 'each', agentScreenBudget: 40, agentAutoReadOnly: false, keepInTray: false, openAtLogin: false,
+    agentFolders: [], agentWeb: false, agentPython: false, agentMemory: true, agentTemperature: 0.2, agentComputer: true, agentScreen: false, agentScreenMode: 'each', agentAutonomy: false, agentScreenBudget: 40, agentAutoReadOnly: false, keepInTray: false, openAtLogin: false,
   });
   if (!settings.data.perfMigrated) { if (settings.data.contextSize === 4096) settings.data.contextSize = 0; settings.data.perfMigrated = 1; settings.save(); } // 4096 là mặc định cũ → chuyển sang Tự động theo mức máy
   Object.assign(process.env, Object.fromEntries(Object.entries(engineEnv()).filter(([k, v]) => v && !process.env[k]))); // bộ máy (tiến trình riêng) kế thừa các biến này khi khởi động
@@ -701,7 +701,7 @@ function askScreen(req) {
 }
 function computerInfo() {
   const p = SC.permissions();
-  return { enabled: settings.data.agentComputer !== false, screen: !!settings.data.agentScreen, screenMode: settings.data.agentScreenMode || 'each', grounder: settings.data.agentGrounder || null, grounders: listModels().filter(m => m.mmproj).map(m => ({ id: m.id, name: m.catalog ? m.catalog.name : m.file })), screenBudget: settings.data.agentScreenBudget || 40, autoReadOnly: settings.data.agentAutoReadOnly === true, vision: !!engine.status().vision, platform: process.platform, perms: p, stopKey: process.platform === 'darwin' ? '⌘⌥Q' : 'Ctrl+Alt+Q' };
+  return { enabled: settings.data.agentComputer !== false, screen: !!settings.data.agentScreen, screenMode: settings.data.agentScreenMode || 'each', autonomy: settings.data.agentAutonomy === true, grounder: settings.data.agentGrounder || null, grounders: listModels().filter(m => m.mmproj).map(m => ({ id: m.id, name: m.catalog ? m.catalog.name : m.file })), screenBudget: settings.data.agentScreenBudget || 40, autoReadOnly: settings.data.agentAutoReadOnly === true, vision: !!engine.status().vision, platform: process.platform, perms: p, stopKey: process.platform === 'darwin' ? '⌘⌥Q' : 'Ctrl+Alt+Q' };
 }
 
 
@@ -915,6 +915,7 @@ function registerIpc() {
     if ('vramLimitGB' in rest) settings.data.vramLimitGB = Number(rest.vramLimitGB) > 0 ? Math.min(256, Number(rest.vramLimitGB)) : null;
     if ('agentGrounder' in rest) { settings.data.agentGrounder = typeof rest.agentGrounder === 'string' && rest.agentGrounder ? rest.agentGrounder : null; if (!settings.data.agentGrounder && engine.groundUnload) engine.groundUnload().catch(() => {}); }
     if ('agentScreenMode' in rest) settings.data.agentScreenMode = rest.agentScreenMode === 'important' ? 'important' : 'each';
+    if ('agentAutonomy' in rest) settings.data.agentAutonomy = rest.agentAutonomy === true;
     if ('agentScreenBudget' in rest) settings.data.agentScreenBudget = Math.max(5, Math.min(100, Math.round(Number(rest.agentScreenBudget) || 40)));
     if (typeof hfToken === 'string') settings.data.hfToken = hfToken.trim().slice(0, 300);
     if ('perfMode' in rest) { settings.data.perfMode = PERF.MODE_VI[rest.perfMode] ? rest.perfMode : 'auto'; perfProfile().then(p => send('perf:changed', p)).catch(() => {}); }
@@ -1679,6 +1680,14 @@ async function qaDesk016() {
     const long = 'Chào cả nhà, tuần này họp nhóm lúc 19 giờ thứ Năm ở thư viện tầng 3. Nhớ mang báo cáo tiến độ, ảnh chụp màn hình và câu hỏi cho thầy hướng dẫn nhé!';
     const t0 = Date.now(); const r4 = await d.act({ action: 'type_text', text: long }, ctx);
     out.long = { ms: Date.now() - t0, exact: (await t.webContents.executeJavaScript('document.querySelector("#i").value')) === long, value: await t.webContents.executeJavaScript('document.querySelector("#i").value'), summary: r4.summary };
+    // 0.16 “Tự làm không hỏi” (bật bằng câu trong yêu cầu): gõ thường không hỏi; gửi đúng tin người dùng nêu không hỏi; gửi chữ khác vẫn hỏi
+    const actx = { ...ctx, userQuery: 'nhắn "xin chào Lan" cho Lan, không cần hỏi lại', auto: require('./agent/autonomy').forTurn({ setting: false, query: 'nhắn "xin chào Lan" cho Lan, không cần hỏi lại' }) };
+    await t.webContents.executeJavaScript('document.querySelector("#i").value = ""; document.querySelector("#log").textContent = ""'); await focusIn(); qaAsks.length = 0;
+    const a1 = await d.act({ action: 'type_text', text: 'gõ thử' }, actx); out.autoPlain = { asks: qaAsks.length, auto: a1.auto || null };
+    await t.webContents.executeJavaScript('document.querySelector("#i").value = ""'); await focusIn(); qaAsks.length = 0;
+    const a2 = await d.act({ action: 'type_text', text: 'xin chào Lan', submit: true }, actx); await sleep(500); out.autoSendNamed = { asks: qaAsks.length, log: await logOf(), auto: a2.auto || null };
+    await focusIn(); qaAsks.length = 0;
+    await d.act({ action: 'type_text', text: 'chào Lan, mai đi chơi không?', submit: true }, actx); await sleep(500); out.autoSendOther = { asks: qaAsks.length, risk: qaAsks[0] ? qaAsks[0].risk : null, log: await logOf() };
   } catch (e) { out.error = e.stack || String(e); }
   try { d.end('qa'); } catch {}
   save(); app.exit(0);

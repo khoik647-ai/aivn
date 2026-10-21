@@ -1263,7 +1263,7 @@ const fmtMs = (ms) => ms == null ? '' : ms < 1000 ? ms + ' ms' : (ms / 1000).toF
 function argPreview(st) { const a = st.args || {}; const v = a.path || a.expression || a.query || a.url || a.fact || a.title || a.code || ''; return String(v).split('\n')[0].slice(0, 90); }
 function stepHtml(st, open) {
   const args = Object.keys(st.args || {}).length ? JSON.stringify(st.args, null, 2) : '(không có)';
-  return `<details class="step st-${esc(st.status)}" data-step="${esc(st.id)}"${open ? ' open' : ''}><summary><span aria-hidden="true">${esc(st.icon || '🔧')}</span><span class="s-name">${esc(st.label)}</span><span class="s-sum">${esc(st.summary || argPreview(st))}</span>${st.ms != null ? `<span class="s-ms">${fmtMs(st.ms)}</span>` : ''}<span class="s-st">${STATUS_VI[st.status] || esc(st.status)}</span></summary>
+  return `<details class="step st-${esc(st.status)}" data-step="${esc(st.id)}"${open ? ' open' : ''}><summary><span aria-hidden="true">${esc(st.icon || '🔧')}</span><span class="s-name">${esc(st.label)}</span>${st.auto ? `<span class="s-auto" title="${st.auto === 'phrase' ? 'Tự làm không hỏi (theo câu trong yêu cầu của bạn)' : 'Tự làm không hỏi (đang bật)'}">⚡ tự làm</span>` : ''}<span class="s-sum">${esc(st.summary || argPreview(st))}</span>${st.ms != null ? `<span class="s-ms">${fmtMs(st.ms)}</span>` : ''}<span class="s-st">${STATUS_VI[st.status] || esc(st.status)}</span></summary>
     ${st.thumb && st.thumb.src ? `<img class="s-thumb" src="${esc(st.thumb.src)}" alt="Màn hình sau bước này" loading="lazy">` : ''}<div class="s-body"><h5>Công cụ</h5><div><code>${esc(st.name)}</code></div><h5>Đầu vào</h5><pre>${esc(args)}</pre>${st.status !== 'running' ? `<h5>Kết quả</h5><pre>${esc(st.detail ?? st.summary ?? '')}</pre>` : ''}</div></details>`;
 }
 function stepsHtml(m, openIds = new Set()) {
@@ -1819,6 +1819,7 @@ $('#memOn').addEventListener('change', async (e) => { state.settings = await A.s
 // ---------- Truy cập máy tính (Cài đặt AIVN AGENT) ----------
 function paintComputer(c) {
   if (!c) return;
+  paintAuto(!!c.autonomy);
   $('#agComp').checked = c.enabled; $('#agAutoRO').checked = c.autoReadOnly; $('#agAutoRO').disabled = !c.enabled;
   $('#agScreen').checked = c.screen;
   $('#agScreenNote').innerHTML = `AIVN AGENT tự mở ứng dụng và thao tác như bạn: đọc danh sách nút/ô của cửa sổ (Trợ năng của hệ điều hành) và chữ trên màn hình, bấm/gõ từng bước rồi kiểm tra lại. Cần <b>nhìn được màn hình</b>: dùng mô hình nhìn ảnh (Qwen3-VL) làm mô hình chính, hoặc mô hình chữ + mắt nhìn (AIVN tự nạp mô hình nhìn ảnh đã cài). Luôn hỏi trước khi gửi tin nhắn, thanh toán, xoá, nộp biểu mẫu; không bao giờ gõ mật khẩu. Dừng: <b>Esc</b>, <b>${esc(c.stopKey)}</b> hoặc nút “Dừng ngay”.`;
@@ -1859,6 +1860,15 @@ $('#benchStop').addEventListener('click', () => A.benchStop());
 $('#alwaysList').addEventListener('click', async (e) => { const b = e.target.closest('[data-revoke]'); if (!b) return; await A.agentAlwaysRevoke(b.dataset.revoke); toast('AIVN AGENT sẽ hỏi lại trước khi dùng công cụ này.'); refreshAgent(); });
 A.onBenchProgress((p) => { if ($('#benchModel').dataset.busy) $('#benchRes').textContent = `Đang đo ${p.i}/${p.n}: ${p.label}…`; });
 $('#agComp').addEventListener('change', (e) => saveAgentSetting({ agentComputer: e.target.checked }));
+// 0.16 “Tự làm không hỏi”: công tắc ở Cài đặt AIVN AGENT + nút trên thanh AIVN AGENT, luôn khớp nhau
+function paintAuto(on) { $('#agAuto').checked = on; $('#autoPill').setAttribute('aria-pressed', String(on)); $('#autoPillState').textContent = on ? 'bật' : 'tắt'; }
+async function setAuto(on) {
+  if (on && !(await modalAsk({ icon: '⚡', title: 'Bật “Tự làm không hỏi”?', message: 'AIVN AGENT sẽ tự bấm, gõ, ghi tệp mà không hỏi từng bước (vẫn hiện khung đỏ trước mỗi thao tác; dừng bằng Esc hoặc Ctrl+Alt+Q).\n\nVẫn LUÔN hỏi khi: gửi tin có nội dung khác lời bạn đã nêu, xoá thứ bạn chưa nêu tên, thanh toán/nộp, chạy lệnh terminal, mở tệp chạy được, thao tác hệ thống bạn không yêu cầu.', okLabel: 'Bật', noLabel: 'Huỷ' }))) { paintAuto(false); return; }
+  paintAuto(on); if (state.agent && state.agent.computer) state.agent.computer.autonomy = on;
+  await saveAgentSetting({ agentAutonomy: on }); toast(on ? 'Đã bật Tự làm không hỏi' : 'AIVN AGENT sẽ hỏi lại từng bước');
+}
+$('#agAuto').addEventListener('change', (e) => setAuto(e.target.checked));
+$('#autoPill').addEventListener('click', () => setAuto($('#autoPill').getAttribute('aria-pressed') !== 'true'));
 $('#agAutoRO').addEventListener('change', (e) => saveAgentSetting({ agentAutoReadOnly: e.target.checked }));
 $('#agScreenMode').addEventListener('change', async (e) => {
   if (e.target.value === 'important' && !(await modalAsk({ icon: '⚠️', title: 'Chỉ hỏi bước quan trọng?', message: 'AIVN AGENT sẽ tự bấm/gõ các bước thường mà không hỏi bạn (vẫn hiện khung đỏ trước mỗi thao tác). Gửi tin nhắn, thanh toán, xoá, nộp biểu mẫu vẫn LUÔN hỏi. Mô hình có thể bấm nhầm — chỉ chọn khi bạn đang theo dõi màn hình. Dừng bất cứ lúc nào bằng Esc.', okLabel: 'Chỉ hỏi bước quan trọng', noLabel: 'Giữ hỏi từng bước' }))) { e.target.value = 'each'; return; }

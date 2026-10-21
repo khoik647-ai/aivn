@@ -4,6 +4,7 @@ const SMP = require('./sampling');
 const RG = require('./repeat');
 const fs = require('fs');
 const AP = require('./approval');
+const AU = require('./autonomy');
 const { AsyncLocalStorage } = require('async_hooks');
 const runStore = new AsyncLocalStorage(); // dữ liệu riêng của từng lượt chạy (tệp đính kèm được phép đọc)
 // Nhóm công cụ mà người dùng bật/tắt bằng các nút trên đầu AIVN AGENT (tắt = không gửi cho mô hình)
@@ -620,7 +621,9 @@ function createAgent(deps) {
       deps.log && deps.log(`[aivn agent] lời nhắc + ${tools.length} công cụ + lịch sử ~${r.tokens} token / ngân sách ${r.budget === Infinity ? '?' : r.budget} (ngữ cảnh ${st.contextSize || '?'})`);
       // chỉ khi riêng lời nhắc hệ thống + công cụ + yêu cầu hiện tại đã không vừa: báo cần ngữ cảnh lớn hơn (bên ngoài tự tăng ngữ cảnh)
       if (!r.fits && st.contextSize) { const need = r.tokens + toolTokOf(tools) + reserveOf(); const e = new Error(`Lời nhắc cần khoảng ${need} token nhưng ngữ cảnh chỉ có ${st.contextSize}.`); e.code = 'CTX_SMALL'; e.need = need; e.have = st.contextSize; throw e; } }
-    const ctx = { signal, convoId, userQuery: query, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
+    // 0.16: “Tự làm không hỏi” — công tắc (giữ qua các lượt) hoặc câu trong yêu cầu (chỉ lượt này); xem autonomy.js
+    const auto = AU.forTurn({ setting: !headless && S_().agentAutonomy === true, query });
+    const ctx = { signal, convoId, userQuery: query, auto, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
     const steps = [], seen = new Map(); const retry = RT.createRetryTracker();
     (runStore.getStore() || {}).steps = steps;
     let text = '', finishReason = 'stop', calls = 0, searchNudged = false, openNudged = false, nudged = false, deskNudged = false, forcedTried = false, warning = null, fakeSeen = false, emptyNudged = false, loopRetried = false;
@@ -752,7 +755,9 @@ function createAgent(deps) {
           else {
             // Thẻ xin phép chung: công cụ có tác động (ghi/xoá tệp, chạy mã/lệnh, MCP…) — trừ khi người dùng đã chọn "Luôn cho phép"
             let ctxRun = ctx; let refusedOut = null;
-            if (approve && !headless && AP.needsApproval(call.name) && !(AP.policy(call.name).allowAlways && (S_().agentAlwaysAllow || []).includes(call.name))) {
+            const autoSkip = !headless && AP.needsApproval(call.name) && AU.skipAsk(auto, 'tool', { tool: call.name, path: args.path });
+            if (autoSkip) { step.auto = auto.why; ctxRun = { ...ctx, confirm: async () => true, preApproved: true }; deps.log && deps.log(`[aivn agent] tự làm không hỏi (${auto.why}): ${call.name}`); }
+            else if (approve && !headless && AP.needsApproval(call.name) && !(AP.policy(call.name).allowAlways && (S_().agentAlwaysAllow || []).includes(call.name))) {
               const card = AP.buildCard(call.name, args, { label: step.label, icon: step.icon, resolvePath: (p, o) => resolvePath(p, o) });
               step.status = 'asking'; onStep({ ...step }); onStatus({ stage: 'ask', round, tool: call.name });
               const ans = await approve(card);
@@ -766,7 +771,7 @@ function createAgent(deps) {
             const pre = !refusedOut && call.name === 'screen_act' ? retry.before(args) : null;
             if (refusedOut) out = refusedOut;
             else if (pre) { out = pre; deps.log && deps.log(`[aivn agent] chặn làm lại cách đã hỏng 2 lần: ${RT.describe(args)}`); }
-            else { out = await exec(call.name, args, ctxRun); seen.set(sig, out); }
+            else { out = await exec(call.name, args, ctxRun); seen.set(sig, out); if (out && out.auto) step.auto = out.auto; }
             // 0.16: kiểm tra sau mỗi thao tác màn hình; chưa có tác dụng → gợi ý đổi cách (lần 3 cùng cách thì không làm)
             if (call.name === 'screen_act' && !pre && !refusedOut) { const rr = retry.after(args, out); if (rr.bad) { out = { ...out, forModel: String(out.forModel || out.summary || '') + rr.hint, summary: String(out.summary || '') + ' · chưa có tác dụng' }; step.check = rr.bad; } }
           }

@@ -119,6 +119,8 @@ function createComputerTools(deps) {
     return out;
   }
   async function confirmOrRefuse(ctx, req, refusedMsg) {
+    // “Tự làm không hỏi”: chỉ bỏ hỏi khi đóng đúng ứng dụng người dùng nêu tên; lệnh/tệp chạy được/thao tác hệ thống vẫn hỏi
+    if (ctx.auto && req.kind === 'close-app' && require('./autonomy').skipAsk(ctx.auto, 'close-app', { name: req.name })) return null;
     const ok = await ctx.confirm({ ...req, fromAgent: true });
     if (!ok) return { refused: true, forModel: refusedMsg, summary: 'Người dùng từ chối: ' + (req.short || req.title) };
     return null;
@@ -207,7 +209,7 @@ function createComputerTools(deps) {
         const hit = C.matchRunning(q, await C.runningApps());
         if (!hit) throw new CompError(`Không thấy ứng dụng "${q}" đang mở. Dùng running_apps để xem.`);
         if (C.PROTECTED.test(hit.name)) throw new CompError(`Không đóng "${hit.name}": tiến trình hệ thống hoặc của AIVN.`);
-        const r = await confirmOrRefuse(ctx, { kind: 'close-app', icon: '✖', title: 'Đóng ứng dụng?', short: 'đóng ' + hit.name, message: `AIVN AGENT muốn đóng “${hit.name}”${hit.title ? ` (${hit.title})` : ''}. Dữ liệu chưa lưu trong ứng dụng này có thể bị mất.`, okLabel: 'Đóng ứng dụng', noLabel: 'Không' }, `Người dùng KHÔNG đồng ý đóng "${hit.name}". Đừng thử lại.`);
+        const r = await confirmOrRefuse(ctx, { kind: 'close-app', name: hit.name, icon: '✖', title: 'Đóng ứng dụng?', short: 'đóng ' + hit.name, message: `AIVN AGENT muốn đóng “${hit.name}”${hit.title ? ` (${hit.title})` : ''}. Dữ liệu chưa lưu trong ứng dụng này có thể bị mất.`, okLabel: 'Đóng ứng dụng', noLabel: 'Không' }, `Người dùng KHÔNG đồng ý đóng "${hit.name}". Đừng thử lại.`);
         if (r) return r;
         await C.closeApp(hit.name);
         return { forModel: `Đã gửi lệnh đóng "${hit.name}".`, summary: `Đã đóng ${hit.name}` };
