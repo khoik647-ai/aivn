@@ -2171,7 +2171,7 @@ list(''); open('Nhóm Lớp K27');
   const ctx = { signal: new AbortController().signal, userQuery: q, confirm: async () => true, auto: require('./agent/autonomy').forTurn({ setting: false, query: q }) };
   const d = getDesk();
   const step = async (name, a) => { qaAsks.length = 0; let r; try { r = await d.act(a, ctx); } catch (e) { r = { error: String(e.message || e) }; } await sleep(700);
-    const s = await st(); out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 500), asks: qaAsks.slice(), state: s }); save(); return { r, s }; };
+    const s = await st(); out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 2500), asks: qaAsks.slice(), state: s }); save(); return { r, s }; };
   try {
     if (process.env.AIVN_QA_B21_MODE === 'k1') { // B34 (QA lượt 5, k1): bấm ô Tìm kiếm → type_text kèm id CŨ nay là chữ “Nhóm Lớp K27” → vẫn phải gõ vào ô tìm kiếm
       const l0 = String((await d.look({ window: 'Messenger' }, ctx)).forModel || ''); out.look0 = l0.slice(0, 1500);

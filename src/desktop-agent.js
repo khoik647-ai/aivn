@@ -243,6 +243,12 @@ function createDesktopAgent(deps) {
     if (s && s.obs) { const R = U.resolveIdRef(s.obs.elements, q, s.idReg && s.idReg.info);
       if (R && R.el) return { el: R.el, x: R.el.b[0] + R.el.b[2] / 2, y: R.el.b[1] + R.el.b[3] / 2, via: R.el.ocr ? 'OCR' : 'cây giao diện' };
       if (R) return { el: null, query: q, ...R }; }
+    // B27: bấm theo TÊN ngay sau khi gõ tìm → ưu tiên dòng trong danh sách kết quả, không bấm vào chữ vừa gõ trong ô tìm kiếm
+    if (q && s && s.obs && s.searchEcho && Date.now() - s.searchEcho.at < SEARCH_MS() && !U.isIdRef(q) && U.fold(q).trim() === U.fold(s.searchEcho.name || '').trim()) {
+      const E = s.searchEcho.b; const inEcho = (e) => e.b && Math.abs((e.b[1] + e.b[3] / 2) - (E[1] + E[3] / 2)) <= Math.max(10, E[3] / 2) && e.b[0] < E[0] + E[2] && e.b[0] + e.b[2] > E[0];
+      const el = s.obs.elements.filter(e => e.b && U.fold(e.name || '').trim() === U.fold(q).trim() && !inEcho(e)).sort((x, y) => x.b[1] - y.b[1])[0];
+      if (el) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' };
+    }
     if (q && s && s.obs) { const el = U.findElementAny(s.obs.elements, q); if (el) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' }; }
     if (Number.isFinite(Number(a.x)) && Number.isFinite(Number(a.y)) && a.x !== '' && a.y !== '' && a.x != null && a.y != null && !(Number(a.x) === 0 && Number(a.y) === 0)) { const p = normToNative(Math.min(1, Math.max(0, a.x / 1000)), Math.min(1, Math.max(0, a.y / 1000))); return { el: null, x: p.x, y: p.y, via: 'toạ độ' }; }
     return q ? { el: null, query: q } : null;
@@ -546,7 +552,7 @@ function createDesktopAgent(deps) {
         s.searches = s.searches || []; s.searches.push({ text: q, found: verdict === 'yes' });
         const tried = new Set(s.searches.map(x => x.text));
         const rest = U.searchVariants(s.searches[0].text).filter(v => !tried.has(v));
-        s.inSearch = Date.now(); s.foundHit = null; s.lastSearch = { q, at: Date.now() }; s.gateBlocks = 0;
+        s.inSearch = Date.now(); s.foundHit = null; s.searchEcho = null; s.lastSearch = { q, at: Date.now() }; s.gateBlocks = 0;
         if (verdict === 'yes') {
           // kết quả nằm dưới ô tìm kiếm: chọn phần tử khớp gần ô nhất, tức kết quả đầu tiên (không phải chính chữ trong ô)
           const boxEl = el && el.b ? el : prevAction && prevAction.el && prevAction.el.b && Date.now() - prevAction.at < SEARCH_MS() ? prevAction.el : null; // ô tìm kiếm = ô đang chọn, hoặc chỗ vừa bấm (gợi ý “Tìm kiếm…” chỉ thấy qua OCR)
@@ -556,7 +562,16 @@ function createDesktopAgent(deps) {
           const preEls = before && before.elements ? before.elements : [];
           // chữ vừa gõ NẰM TRONG ô tìm kiếm (chỗ trước đó là gợi ý “Tìm kiếm…”, OCR có thể kèm con trỏ “|”) — không phải kết quả
           const inBox = (e) => e.b && (/[|│]\s*$/.test(e.name || '') || preEls.some(p => p.b && (p.editable || U.inputLike(p) || /tìm|tim kiem|search|find/iu.test(p.name || '')) && Math.abs((p.b[1] + p.b[3] / 2) - (e.b[1] + e.b[3] / 2)) <= Math.max(10, p.b[3] / 2) && e.b[0] >= p.b[0] - 12 && e.b[0] <= p.b[0] + p.b[2]));
-          const below0 = matches(o2).filter(e => (!e.b || e.b[1] > boxY + 4) && !inBox(e)).sort((x, y) => (x.b ? x.b[1] : 0) - (y.b ? y.b[1] : 0));
+          // B27 (QA, Telegram): ô nhập nằm DƯỚI nhãn “Tìm kiếm” vừa bấm — chữ vừa gõ hiện trong ô, ngay dưới nhãn, ở chỗ TRƯỚC ĐÓ không có chữ nào → là chữ trong ô, không phải kết quả
+          const sameRow = (a1, b1) => Math.abs((a1[1] + a1[3] / 2) - (b1[1] + b1[3] / 2)) <= Math.max(10, b1[3] / 2) && a1[0] < b1[0] + b1[2] && a1[0] + a1[2] > b1[0];
+          const fqk = U.fold(q).replace(/[^\p{L}\p{N} ]/gu, '').trim();
+          const isEcho = (e) => e.b && boxY >= 0 && U.fold(e.name || '').replace(/[^\p{L}\p{N} ]/gu, '').trim() === fqk && e.b[1] >= boxY - 4 && e.b[1] - boxY <= 70
+            && !preEls.some(p => p.b && p.name && Math.abs((p.b[1] + p.b[3] / 2) - (e.b[1] + e.b[3] / 2)) <= Math.max(10, e.b[3] / 2) && p.b[0] < e.b[0] + e.b[2] && p.b[0] + p.b[2] > e.b[0] && !(s.lastEchoB && sameRow(p.b, s.lastEchoB))); // chữ cũ ở đúng chỗ chữ-trong-ô lần trước (gõ lại, replace) vẫn là chữ trong ô
+          // chỉ khi CÒN kết quả khớp khác bên dưới: một dòng khớp duy nhất thì có thể chính là kết quả (Zalo: Ctrl+F, kết quả ngay dưới chỗ bấm)
+          const ms0 = matches(o2).filter(e => e.b).sort((x, y) => x.b[1] - y.b[1]);
+          const echo = ms0.length >= 2 && isEcho(ms0[0]) ? ms0[0] : null;
+          s.searchEcho = echo ? { b: echo.b.slice(), name: echo.name, at: Date.now() } : null; if (echo) s.lastEchoB = echo.b.slice();
+          const below0 = matches(o2).filter(e => (!e.b || e.b[1] > boxY + 4) && !inBox(e) && e !== echo).sort((x, y) => (x.b ? x.b[1] : 0) - (y.b ? y.b[1] : 0));
           // cùng tên, cùng chỗ như TRƯỚC khi gõ = mục có sẵn ở danh sách hội thoại bên trái (cùng một người), không phải kết quả tìm kiếm mới → không tính là trùng tên
           const fresh = below0.filter(e => !(e.b && preEls.some(p => p.b && U.fold(p.name) === U.fold(e.name) && Math.abs(p.b[0] - e.b[0]) <= 12 && Math.abs(p.b[1] - e.b[1]) <= 12)));
           const below = fresh.length ? fresh : below0; const m = below[0];

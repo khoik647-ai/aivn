@@ -109,6 +109,8 @@ test('B27 thật (Telegram giả, “Trần Quỳnh Như” mở sẵn): tìm + 
   const by = Object.fromEntries(d.steps.map(s => [s.name, s]));
   assert.ok(by['tg-before-open'].blocked); assert.ok(by['tg-send-trap'].blocked, 'chat sai vẫn bị chặn'); assert.deepStrictEqual(d.afterBad.sent, []);
   assert.deepStrictEqual(by['tg-type-search'].state.searches, ['Trần Quỳnh Anh']);
+  // chữ vừa gõ trong ô (ngay dưới nhãn “Tìm kiếm”) không bị đếm là người thứ hai cùng tên, và bấm theo tên trúng dòng kết quả
+  assert.match(by['tg-type-search-2'].forModel, /THẤY kết quả khớp/); assert.ok(!/NHIỀU người cùng tên/.test(by['tg-type-search-2'].forModel));
   assert.strictEqual(by['tg-click-result'].state.cur, 'Trần Quỳnh Anh'); assert.match(by['tg-click-result'].forModel, /Đã mở cuộc trò chuyện với “Trần Quỳnh Anh”/);
   assert.ok(!by['tg-send'].blocked, by['tg-send'].forModel);
   assert.deepStrictEqual(d.final.sent, [{ to: 'Trần Quỳnh Anh', text: 'Gửi mình file slide nhé' }]);
