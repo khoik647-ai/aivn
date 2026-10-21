@@ -97,3 +97,22 @@ test('đã thấy kết quả tìm kiếm mà dừng lại hỏi: nhắc một l
   assert.ok(OPEN_WANT_RE.test('nhắn cho Lan')); assert.ok(!OPEN_WANT_RE.test('đếm số dòng trong tệp'));
   assert.match(openNudge({ name: 'X' }), /screen_act click\)/);
 });
+
+test('read_file gõ sai một vài ký tự tên tệp: lỗi gợi ý tên gần đúng để mô hình gọi lại', async () => {
+  const fs = require('fs'); const os = require('os'); const path = require('path');
+  const { editDist } = require('../src/agent/agent');
+  const { createMemoryStore } = require('../src/agent/memory');
+  assert.equal(editDist('chii-tieu-thang-9.csv', 'chi-tieu-thang-9.csv'), 1); assert.equal(editDist('abc', 'abc'), 0);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-near-')); const sub = path.join(dir, 'agdir'); fs.mkdirSync(sub);
+  fs.writeFileSync(path.join(sub, 'chi-tieu-thang-9.csv'), 'ngay,so tien\n1/9,50000\n'); fs.writeFileSync(path.join(sub, 'ghi-chu.txt'), 'x');
+  const replies = [
+    () => ({ text: '', toolCalls: [{ id: 'a', name: 'read_file', arguments: { path: 'agdir/chii-tieu-thang-9.csv' } }], finishReason: 'tool_calls', usage: {} }),
+    () => ({ text: '', toolCalls: [{ id: 'b', name: 'read_file', arguments: { path: 'agdir/hoa-don-xyz.csv' } }], finishReason: 'tool_calls', usage: {} }),
+    () => ({ text: 'Xong.', toolCalls: [], finishReason: 'stop', usage: {} }),
+  ];
+  const engine = { status: () => ({ loaded: true, contextSize: 8192 }), chatStep: async () => replies.shift()() };
+  const agent = createAgent({ engine, getSettings: () => ({ agentFolders: [sub], agentMemory: false }), memory: createMemoryStore(path.join(dir, 'm.json')), scheduler: {}, trash: async () => {}, extractFile: async (p) => ({ kind: 'text', text: fs.readFileSync(p, 'utf8') }), embedForMemory: async () => ({}) });
+  const r = await agent.run({ messages: [{ role: 'user', content: 'Đọc tệp chi-tieu-thang-9.csv' }], confirm: async () => true });
+  assert.equal(r.steps[0].status, 'error'); assert.match(r.steps[0].summary + ' ' + (r.steps[0].detail || ''), /gần giống: "agdir\/chi-tieu-thang-9\.csv"/);
+  assert.equal(r.steps[1].status, 'error'); assert.doesNotMatch(r.steps[1].summary + ' ' + (r.steps[1].detail || ''), /gần giống/, 'tên khác hẳn thì không gợi ý bừa');
+});

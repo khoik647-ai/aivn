@@ -1939,11 +1939,12 @@ async function selfTestV13() {
   const stage = async (k, fn) => { if (!want(k)) return; const t0 = Date.now(); console.log('[v13] ' + k); try { out.stages[k] = { ...(await fn()), ms: Date.now() - t0 }; } catch (e) { out.stages[k] = { error: e.stack || String(e), ms: Date.now() - t0 }; } save(); };
   const lastMsg = () => js('(() => { const m = [...document.querySelectorAll("#messages .msg.assistant")].pop(); const i = Number(m.dataset.i); const d = state.current.messages[i] || {}; return { body: m.querySelector(".body").innerText, steps: (d.steps || []).map(s => ({ name: s.name, status: s.status, args: s.args, summary: s.summary })), urls: d.urls || [], memories: d.memories || [], stats: document.querySelector("#genStats").innerText, cards: m.querySelectorAll("details.step").length }; })()');
   const ask = async (q, { onBusy } = {}) => {
-    const n = await js('document.querySelectorAll("#messages .msg.assistant").length');
+    // đếm theo dữ liệu cuộc trò chuyện (lời chào của cuộc mới không phải tin nhắn thật nên đếm thẻ trên màn hình bị lệch)
+    const n = await js('(state.current && state.current.messages.length) || 0');
     await js(`document.querySelector("#input").value = ${JSON.stringify(q)}; document.querySelector("#composer").requestSubmit();`);
     await sleep(400);
     if (onBusy) await onBusy();
-    await until(`!document.querySelector("#sendBtn").hidden && document.querySelectorAll("#messages .msg.assistant").length > ${n}`, 900000);
+    await until(`!state.generating && !document.querySelector("#sendBtn").hidden && !!state.current && state.current.messages.filter(m => m.role === "assistant").length > 0 && state.current.messages.length >= ${n} + 2`, 900000);
     await sleep(300);
     return lastMsg();
   };

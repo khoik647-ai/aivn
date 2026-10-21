@@ -191,6 +191,13 @@ function sanitizeHistory(messages, { act = false } = {}) {
   });
   return { messages: out, hidden: n, guides };
 }
+// khoảng cách Levenshtein (dùng để gợi ý tên tệp gõ sai)
+function editDist(a, b) {
+  if (Math.abs(a.length - b.length) > 3) return 99;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) { const cur = [i]; for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; }
+  return prev[b.length];
+}
 function fakeActionCheck(text, steps, names, query = '') {
   const t = String(text || '');
   if (!t.trim()) return null;
@@ -266,13 +273,23 @@ function createAgent(deps) {
     let firstErr = null;
     for (const c of cands) {
       const real = realOrNull(c) || (allowMissing ? realForNew(path.resolve(c)) : null);
-      if (!real) { firstErr ||= new ToolError(`Không tìm thấy "${p}" trong thư mục được phép.`); continue; }
+      if (!real) { firstErr ||= new ToolError(`Không tìm thấy "${p}" trong thư mục được phép.${nearName(c, p)}`); continue; }
       const root = roots.find(r => inside(r.real, real));
       if (!root) { firstErr = new ToolError(`Từ chối truy cập (Access denied): "${p}" nằm ngoài các thư mục người dùng cho phép. AIVN AGENT chỉ được làm việc trong: ${roots.map(r => r.shown).join('; ')}. Gọi list_allowed_directories để xem danh sách.`); continue; }
       if (!realOrNull(c) && !allowMissing) continue;
       return { root, full: real, rel: path.relative(root.real, real) };
     }
     throw firstErr || new ToolError(`Không tìm thấy "${p}".`);
+  }
+  // mô hình nhỏ hay gõ sai một hai ký tự tên tệp ("chii-tieu…"): gợi ý tên gần nhất có trong cùng thư mục
+  function nearName(cand, asked) {
+    try {
+      const want = path.basename(cand).toLowerCase(); if (want.length < 4) return '';
+      const best = fs.readdirSync(path.dirname(cand)).map(f => ({ f, d: editDist(f.toLowerCase(), want) })).filter(x => x.d <= Math.max(1, Math.min(3, Math.floor(want.length / 6)))).sort((a, b) => a.d - b.d)[0];
+      if (!best) return '';
+      const fixed = String(asked).replace(/[^\\/]+$/, () => best.f);
+      return ` Có tệp tên gần giống: "${fixed}" — nếu đúng là tệp này thì gọi lại với đúng tên đó.`;
+    } catch { return ''; }
   }
   // tên hiển thị: một thư mục được phép → đường dẫn tương đối; nhiều thư mục → kèm tên thư mục
   const shown = (r) => (folders().length > 1 ? path.join(path.basename(r.root.shown), r.rel || '') : (r.rel || '.')).replace(/\\/g, '/');
@@ -699,4 +716,4 @@ function createAgent(deps) {
   return { run, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck };
 }
 
-module.exports = { openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN };
+module.exports = { editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN };
