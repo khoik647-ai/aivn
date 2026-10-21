@@ -10,8 +10,6 @@ for (const k of ['showOpenDialog', 'showSaveDialog', 'showMessageBox', 'showOpen
 }
 { const ebox = dialog.showErrorBox.bind(dialog); dialog.showErrorBox = (t, c) => ebox(T(t), T(c)); }
 { const bft = Menu.buildFromTemplate.bind(Menu); Menu.buildFromTemplate = (tpl) => bft(TO(tpl)); }
-// Giao diện tiếng Việt: ô ngày/giờ và hộp thoại mặc định của Chromium theo vi-VN
-app.commandLine.appendSwitch('lang', 'vi');
 const path = require('path');
 const fs = require('fs');
 const catalog = require('./catalog');
@@ -52,6 +50,11 @@ const QA_PROFILE = (() => { try { const q = require('./qa-runner').fromArgv(proc
   fs.mkdirSync(dir, { recursive: true }); app.setPath('userData', dir);
   try { const lf = path.join(real, 'license.json'); if (fs.existsSync(lf)) { fs.copyFileSync(lf, path.join(dir, 'license.json')); } } catch {}
   return { dir, real, models: path.join(real, 'models'), agentFrom: q.args.agentFrom || null }; } catch { return null; } })();
+// B81: ô ngày/giờ và hộp thoại mặc định của Chromium theo NGÔN NGỮ GIAO DIỆN đã lưu (trước: luôn ép vi → ngày zh/en vẫn dd/mm/yyyy).
+// Phải đặt trước khi app sẵn sàng nên đọc thẳng settings.json; đổi ngôn ngữ giữa chừng thì ô ngày theo từ lần mở sau
+const CHROMIUM_LANG = { vi: 'vi', en: 'en-US', zh: 'zh-CN' };
+const startLang = (() => { try { const l = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf8')).uiLang; return CHROMIUM_LANG[l] ? l : 'vi'; } catch { return 'vi'; } })();
+app.commandLine.appendSwitch('lang', CHROMIUM_LANG[startLang]);
 const LOG = require('./logger');
 LOG.init(path.join(app.getPath('userData'), 'logs'), app.getVersion()); // B88: nâng cấp → tệp nhật ký mới có BOM
 { const os_ = require('os'); const bi_ = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'build-info.json'), 'utf8')); } catch { return null; } })(); LOG.block('app', `Khởi động AIVN ${app.getVersion()}${bi_ && bi_.commit ? ` · commit ${bi_.commit}${bi_.dirty ? '+' : ''}` : ''}${app.isPackaged ? '' : ' (mã nguồn)'}`, [`Hệ điều hành: ${process.platform} ${process.arch} ${os_.release()}${process.getSystemVersion ? ' (' + process.getSystemVersion() + ')' : ''}`, `CPU: ${(os_.cpus()[0] || {}).model || '?'} · ${os_.cpus().length} luồng`, `RAM: ${(os_.totalmem() / 1024 ** 3).toFixed(1)} GB (trống ${(os_.freemem() / 1024 ** 3).toFixed(1)} GB)`, `Electron ${process.versions.electron} · thư mục dữ liệu: ${app.getPath('userData')}`]); }

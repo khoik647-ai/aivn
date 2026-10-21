@@ -126,7 +126,7 @@ const MM_COLS = [
   ['tps', 'Đo được', (m) => (m.usage && m.usage.tps) || 0],
   ['lastUsed', 'Dùng lần cuối', (m) => (m.usage && m.usage.lastUsed) || (m.mtime || 0) / 1e6],
 ];
-const fmtUsedAgo = (t) => { if (!t) return '—'; const d = (Date.now() - t) / 1000; return d < 90 ? 'vừa xong' : d < 3600 ? Math.round(d / 60) + ' phút trước' : d < 86400 ? Math.round(d / 3600) + ' giờ trước' : d < 86400 * 30 ? Math.round(d / 86400) + ' ngày trước' : new Date(t).toLocaleDateString(LOC()); };
+const fmtUsedAgo = (t) => { if (!t) return '—'; const d = (Date.now() - t) / 1000; return d < 90 ? 'vừa xong' : d < 3600 ? `${Math.round(d / 60)} phút trước` : d < 86400 ? `${Math.round(d / 3600)} giờ trước` : d < 86400 * 30 ? `${Math.round(d / 86400)} ngày trước` : new Date(t).toLocaleDateString(LOC()); }; // B81: “{0} phút trước” có bản dịch
 function mmVisible() {
   const q = foldVi($('#mmFilter').value.trim()); const k = $('#mmKind').value;
   return (state.models || []).filter(m => {
@@ -287,7 +287,7 @@ function renderLdPane(m, g) {
   const st = state.status; const cur = m.loaded && st.loaded ? `<div class="ld-cur small">Đang chạy với ngữ cảnh <b>${fmtTok(st.contextSize)}</b> · ${st.gpu ? `GPU <b>${st.gpuLayers ?? '?'}/${st.totalLayers ?? '?'}</b> lớp` : '<b>chỉ CPU</b>'}${st.perf && st.perf.kv ? ` · bộ đệm K/V ${esc(st.perf.kv)}` : ''}</div>` : '';
   $('#ldPane').innerHTML = `
     <div class="ld-title"><h4 title="${esc(m.file)}">${esc(mName(m))}</h4>
-      <div class="ld-chips">${[g && g.arch, g && g.sizeLabel && g.sizeLabel + ' tham số', g && g.quant, fmtBytes(m.size), g && g.trainCtx && 'tối đa ' + fmtTok(g.trainCtx) + ' token', m.vision && '👁 nhìn ảnh', g && g.templateTools && 'gọi công cụ'].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('')}</div>
+      <div class="ld-chips">${[g && g.arch, g && g.sizeLabel && `${g.sizeLabel} tham số`, g && g.quant, fmtBytes(m.size), g && g.trainCtx && 'tối đa ' + fmtTok(g.trainCtx) + ' token', m.vision && '👁 nhìn ảnh', g && g.templateTools && 'gọi công cụ'].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('')}</div>
       <div class="small muted ld-file" title="${esc(m.path)}">${esc(m.file)}</div>${cur}</div>
     ${bad ? `<div class="ld-warn" role="alert">⚠ Không đọc được thông tin tệp mô hình (${esc((g && g.error) || 'không tìm thấy tệp hoặc tệp bị hỏng')}). AIVN vẫn có thể thử nạp với tham số tự động.</div>` : ''}
     <section class="ld-sec"><div class="ld-row"><label for="ldCtx">Độ dài ngữ cảnh</label><span class="ld-val"><input type="number" id="ldCtxN" min="4096" max="${max}" step="1024" value="${f.contextSize}" aria-label="Độ dài ngữ cảnh (token)"> token</span></div>
@@ -406,10 +406,11 @@ A.onModelStatus(st => { setStatus(st); if (!st.loading) { refreshModels(); refre
 
 const jobs = new Map(); // id -> snapshot
 const disc = { fam: 'all', results: null, repo: null, lastQuery: null };
-const fmtNum = (n) => n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', DEC()) + (UIL() === 'vi' ? ' Tr' : 'M') : n >= 1e3 ? (n / 1e3).toFixed(1).replace('.', DEC()) + (UIL() === 'vi' ? ' N' : 'K') : String(n || 0);
+// B81: luôn viết dạng Việt (“307,0 N”, “1,2 Tr”) — bộ dịch DOM đổi sang “307.0K”/“1.2M” ở en/zh, kể cả khi đổi ngôn ngữ sau khi thẻ đã vẽ (trước: “307,0 N downloads”)
+const fmtNum = (n) => n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' Tr' : n >= 1e3 ? (n / 1e3).toFixed(1).replace('.', ',') + ' N' : String(n || 0);
 const fmtEta = (s) => s == null ? '' : s < 60 ? Math.ceil(s) + ' giây' : s < 3600 ? Math.ceil(s / 60) + ' phút' : Math.floor(s / 3600) + ' giờ ' + Math.round((s % 3600) / 60) + ' phút';
-const fmtAgo = (iso) => { if (!iso) return ''; const d = (Date.now() - new Date(iso)) / 864e5; return d < 1 ? 'hôm nay' : d < 30 ? Math.floor(d) + ' ngày trước' : d < 365 ? Math.floor(d / 30) + ' tháng trước' : Math.floor(d / 365) + ' năm trước'; };
-const fmtParams = (n) => !n ? '' : n >= 1e9 ? (n / 1e9).toFixed(n >= 1e10 ? 0 : 1).replace('.', DEC()) + 'B tham số' : Math.round(n / 1e6) + 'M tham số';
+const fmtAgo = (iso) => { if (!iso) return ''; const d = (Date.now() - new Date(iso)) / 864e5; return d < 1 ? 'hôm nay' : d < 30 ? `${Math.floor(d)} ngày trước` : d < 365 ? `${Math.floor(d / 30)} tháng trước` : `${Math.floor(d / 365)} năm trước`; }; // B81: mẫu “{0} năm trước” có bản dịch
+const fmtParams = (n) => !n ? '' : n >= 1e9 ? `${(n / 1e9).toFixed(n >= 1e10 ? 0 : 1).replace('.', ',')}B tham số` : `${Math.round(n / 1e6)}M tham số`;
 const cleanErr = (m) => String(m).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 // Mức chạy trên máy này (src/fit.js): Chạy mượt (trọn trong VRAM) · Chạy chậm (tràn sang RAM) · Không chạy được — kèm tốc độ và bộ nhớ ước tính
 const fitBadge = (f) => f ? `<span class="fit ${f.level}" title="${esc(f.hint + (f.ctx ? ` · tính với ngữ cảnh ${Number(f.ctx).toLocaleString(LOC())} token` : '') + (f.measured || f.tpsMeasured ? ' · theo số đo thật trên máy này' : ' · số liệu ước tính') + (f.detail ? '\n' + f.detail : ''))}">${esc(f.label)}${f.text ? ` <small>· ${esc(f.text)}${f.measured || f.tpsMeasured ? ` · ${esc('đo thật')}` : ''}</small>` : ''}</span>` : ''; // B38: cùng một cách tính cho Khám phá và Mô hình của tôi
@@ -551,7 +552,7 @@ async function openRepo(repo, quiet) {
   ].filter(Boolean);
   area.innerHTML = `<div class="repo-head"><button class="btn sm" data-act="back">← Quay lại</button>
       <div class="grow"><h3>${esc(r.name)} <span class="muted">· ${esc(r.author)}</span></h3>
-      <div class="meta muted">⬇ ${fmtNum(r.downloads)} lượt tải · ♥ ${fmtNum(r.likes)} · cập nhật ${fmtAgo(r.lastModified)}${r.license ? ' · giấy phép ' + esc(r.license) : ''}${r.arch ? ' · kiến trúc ' + esc(r.arch) : ''}${r.params ? ' · ' + fmtParams(r.params) : ''}${r.contextLength ? ' · ngữ cảnh tối đa ' + fmtNum(r.contextLength) : ''}</div></div>
+      <div class="meta muted">⬇ ${fmtNum(r.downloads)} lượt tải · ♥ ${fmtNum(r.likes)} · cập nhật ${fmtAgo(r.lastModified)}${[r.license && `giấy phép ${esc(r.license)}`, r.arch && `kiến trúc ${esc(r.arch)}`, r.params && fmtParams(r.params), r.contextLength && `ngữ cảnh tối đa ${fmtNum(r.contextLength)}`].filter(Boolean).map(x => ' · ' + x).join('')}</div></div>
       <button class="btn sm" data-act="open-hf" data-url="${esc(r.url)}">Mở trên Hugging Face ↗</button></div>
     ${notes.map(n => `<div class="note">${n}</div>`).join('')}
     <div class="qtable">${chat.length ? `<div class="qr head"><span>Tệp mô hình</span><span>Lượng tử</span><span>Dung lượng</span><span>Máy bạn</span><span></span></div>` + chat.map(g => `<div class="qr${g.recommended ? ' rec' : ''}">
