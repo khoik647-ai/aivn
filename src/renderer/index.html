@@ -286,7 +286,8 @@
             <ul class="endpoints">
               <li><code>GET</code> /v1/models</li>
               <li><code>POST</code> /v1/chat/completions <span class="muted">(hỗ trợ "stream", "tools"/"tool_choice", "response_format" json_schema)</span></li>
-              <li><code>POST</code> /v1/embeddings <span class="muted">(cần BGE-M3)</span></li>
+              <li><code>POST</code> /v1/completions <span class="muted">(kiểu cũ theo đoạn văn; mỗi đoạn chạy như một tin nhắn)</span></li>
+              <li><code>POST</code> /v1/embeddings <span class="muted">(cần BGE-M3; tên mô hình nhúng kiểu OpenAI cũng dùng BGE-M3)</span></li>
             </ul>
             <h4>Ví dụ</h4>
             <pre class="code" id="curlEx"></pre>

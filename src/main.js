@@ -915,8 +915,10 @@ function withParts(orig, text) {
 const api = createApiServer({ engine, models: listModels, ensureModel: (m) => ensureModel(m, { api: true }), log, getOpts: () => ({ cors: !!settings.data.apiCors, apiKey: settings.data.apiKey || null }), isBlocked: () => !activated() ? 'AIVN chưa được kích hoạt trên máy này.' : isLocked() ? 'AIVN đang khoá. Hãy mở khoá ứng dụng để dùng máy chủ API.' : null, embeddings: {
   info: () => embedInfo(),
   async ensure(model) {
-    if (model && !String(model).toLowerCase().includes('bge') && String(model).toLowerCase() !== EMBED.id && !/embed/i.test(model)) {
-      const e = new Error(`Mô hình nhúng "${model}" không có. AIVN dùng "${EMBED.id}".`); e.status = 404; throw e;
+    // B80: tên mô hình nhúng kiểu OpenAI/LangChain (text-embedding-3-small, nomic-embed…) → dùng mô hình nhúng đã cài (như LM Studio);
+    // chỉ báo lỗi khi tên là một mô hình TRÒ CHUYỆN đã cài (gọi nhầm endpoint).
+    if (model && String(model).toLowerCase() !== EMBED.id && listModels().some(m => m.id === model)) {
+      const e = new Error(`"${model}" là mô hình trò chuyện, không tạo embeddings được. Dùng "${EMBED.id}" (hoặc bỏ trường "model").`); e.status = 400; throw e;
     }
     if (!embedInfo().installed) { const e = new Error(`Chưa tải mô hình nhúng "${EMBED.id}". Hãy mở AIVN → Cài đặt → Tìm kiếm tài liệu để tải.`); e.status = 400; throw e; }
     await ensureEmbedder();

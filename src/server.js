@@ -41,7 +41,8 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
     res.end(JSON.stringify(obj));
   };
   const cors = () => (getOpts().cors ? { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' } : {});
-  const err = (res, code, message, type = 'invalid_request_error') => send(res, code, { error: { message, type, code } });
+  // B80: mọi phản hồi lỗi đều vào nhật ký kèm mã (trước đây 404 chỉ thấy “POST /v1/completions”, không thấy mã)
+  const err = (res, code, message, type = 'invalid_request_error') => { if (code !== 401) log(`  → ${code} ${String(message).slice(0, 200)}`); return send(res, code, { error: { message, type, code } }); };
 
   const readBody = (req) => new Promise((resolve, reject) => {
     let size = 0; const chunks = [];
@@ -149,6 +150,50 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
         });
       } catch (e) { return err(res, 500, e.message, 'server_error'); }
     }
+    // B80: /v1/completions (kiểu cũ, theo “prompt”) — như LM Studio. Bộ máy chỉ chạy theo mẫu trò chuyện của mô hình nên
+    // mỗi prompt được gửi như MỘT tin của người dùng; phản hồi đúng dạng OpenAI text_completion (cả stream, n prompt, echo, stop).
+    if (req.method === 'POST' && (p === '/v1/completions' || p === '/completions')) {
+      let body;
+      try { body = JSON.parse(await readBody(req) || '{}'); } catch { return err(res, 400, 'JSON không hợp lệ'); }
+      let prompts = body.prompt;
+      if (typeof prompts === 'string') prompts = [prompts];
+      if (!Array.isArray(prompts) || !prompts.length || prompts.some(x => typeof x !== 'string')) return err(res, 400, 'Thiếu trường "prompt" (chuỗi hoặc mảng chuỗi; chưa hỗ trợ mảng token)');
+      if (prompts.length > 16) return err(res, 400, 'Tối đa 16 prompt mỗi yêu cầu');
+      if (body.stream && prompts.length > 1) return err(res, 400, '"stream" chỉ dùng với một prompt');
+      try { await ensureModel(body.model); } catch (e) { return err(res, 400, e.message, 'model_not_found'); }
+      const st = engine.status();
+      const id = 'cmpl-' + crypto.randomBytes(12).toString('hex');
+      const created = Math.floor(Date.now() / 1000);
+      const ac = new AbortController();
+      res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+      const opts = { temperature: body.temperature ?? 0.7, topP: body.top_p, maxTokens: body.max_tokens ?? 256, signal: ac.signal };
+      const stops = (Array.isArray(body.stop) ? body.stop : body.stop ? [body.stop] : []).filter(x => typeof x === 'string' && x).slice(0, 4);
+      const cut = (t) => { let at = -1; for (const x of stops) { const i = t.indexOf(x); if (i >= 0 && (at < 0 || i < at)) at = i; } return at < 0 ? { text: t, stopped: false } : { text: t.slice(0, at), stopped: true }; };
+      const msgs = (pr) => [{ role: 'user', content: pr }];
+      if (body.stream) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', ...cors() });
+        const chunk = (text, finish = null) => res.write('data: ' + JSON.stringify({ id, object: 'text_completion', created, model: st.id, choices: [{ index: 0, text, logprobs: null, finish_reason: finish }] }) + '\n\n');
+        if (body.echo) chunk(prompts[0]);
+        let acc = '', sent = 0, stopped = false;
+        try {
+          const r = await engine.generate(msgs(prompts[0]), { ...opts, onToken: (t) => { if (stopped) return; acc += t; const c = cut(acc); if (c.stopped) { stopped = true; if (c.text.length > sent) chunk(c.text.slice(sent)); sent = c.text.length; ac.abort(); return; } const safe = acc.length - Math.max(0, ...stops.map(x => x.length - 1)); if (safe > sent) { chunk(acc.slice(sent, safe)); sent = safe; } } }).catch((e) => { if (stopped) return { finishReason: 'stop' }; throw e; });
+          if (!stopped && acc.length > sent) chunk(acc.slice(sent));
+          chunk('', stopped ? 'stop' : r && r.finishReason === 'length' ? 'length' : 'stop');
+          res.write('data: [DONE]\n\n');
+        } catch (e) { res.write('data: ' + JSON.stringify({ error: { message: e.message } }) + '\n\n'); }
+        return res.end();
+      }
+      try {
+        const choices = []; let pt = 0, ct = 0;
+        for (const [index, pr] of prompts.entries()) {
+          const r = await engine.generate(msgs(pr), opts); const c = cut(r.text || '');
+          choices.push({ index, text: (body.echo ? pr : '') + c.text, logprobs: null, finish_reason: c.stopped ? 'stop' : r.finishReason === 'length' ? 'length' : 'stop' });
+          const u = await usageOf(r, msgs(pr)); pt += u.prompt_tokens; ct += u.completion_tokens;
+        }
+        log(`  → 200 text_completion × ${choices.length}`);
+        return send(res, 200, { id, object: 'text_completion', created, model: st.id, choices, usage: { prompt_tokens: pt, completion_tokens: ct, total_tokens: pt + ct } });
+      } catch (e) { return err(res, 500, e.message, 'server_error'); }
+    }
     if (req.method === 'POST' && (p === '/v1/embeddings' || p === '/embeddings')) {
       if (!embeddings) return err(res, 501, 'Máy chủ này không hỗ trợ embeddings');
       let body;
@@ -161,7 +206,7 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
       const fmt = body.encoding_format || 'float';
       if (!['float', 'base64'].includes(fmt)) return err(res, 400, '"encoding_format" phải là "float" hoặc "base64"');
       let info;
-      try { info = await embeddings.ensure(body.model); } catch (e) { return err(res, e.status || 400, e.message, 'model_not_found'); }
+      try { info = await embeddings.ensure(body.model); if (body.model && info && info.id !== body.model) log(`  (mô hình nhúng “${String(body.model).slice(0, 60)}” → dùng ${info.id})`); } catch (e) { return err(res, e.status || 400, e.message, 'model_not_found'); }
       try {
         const vecs = await embeddings.embed(input);
         const dims = Number(body.dimensions) > 0 ? Math.min(Number(body.dimensions), vecs[0].length) : null;
