@@ -48,7 +48,8 @@ function createVisionServer({ log = () => {} } = {}) {
       env: { ...process.env, LLAMA_ARG_HOST: '127.0.0.1' } });
     // 0.15.1: báo pid cho tiến trình chính — nếu engine-host bị giết (SIGKILL/sập), llama-server không bị bỏ lại chiếm 5–6 GB RAM/VRAM
     try { if (process.send && proc.pid) { process.send({ type: 'child', pid: proc.pid }); const p0 = proc; p0.once('exit', () => { try { process.send({ type: 'child-exit', pid: p0.pid }); } catch {} }); } } catch {}
-    const onData = (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { tail.push(l); if (tail.length > 40) tail.shift(); } };
+    let layers = null;
+    const onData = (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { tail.push(l); if (tail.length > 40) tail.shift(); const m = l.match(/offloaded (\d+)\/(\d+) layers to GPU/); if (m) { layers = { gpu: +m[1], total: +m[2] }; if (info) Object.assign(info, { gpuLayers: layers.gpu, totalLayers: layers.total }); } } };
     proc.stdout.on('data', onData); proc.stderr.on('data', onData);
     const exited = new Promise((resolve) => proc.once('exit', (code, signal) => resolve({ code, signal })));
     proc.once('exit', (code, signal) => { log(`[vision] llama-server kết thúc code=${code} signal=${signal}`); proc = null; info = null; });
@@ -69,7 +70,7 @@ function createVisionServer({ log = () => {} } = {}) {
     }
     let ctx = contextSize, template = TP.analyzeTemplate('');
     try { const p = await (await fetch(`http://127.0.0.1:${port}/props`, { headers: { authorization: 'Bearer ' + key } })).json(); ctx = p?.default_generation_settings?.n_ctx || ctx; template = TP.analyzeTemplate(p?.chat_template); } catch {}
-    info = { id, path: modelPath, mmproj: mmprojPath, contextSize: ctx, vision: true, loadedAt: Date.now(), template, textTools: template.strict || (template.known && !template.nativeTools) };
+    info = { id, path: modelPath, mmproj: mmprojPath, contextSize: ctx, vision: true, loadedAt: Date.now(), template, gpuLayers: layers ? layers.gpu : (gpu ? null : 0), totalLayers: layers ? layers.total : null, textTools: template.strict || (template.known && !template.nativeTools) };
     if (info.textTools) log(`[vision] mẫu chat ${template.strict ? 'bắt buộc xen kẽ user/assistant' : 'không hỗ trợ tools'}: dùng giao thức công cụ dạng văn bản của AIVN`);
     log(`[vision] llama-server sẵn sàng (cổng ${port}, ${((Date.now() - t0) / 1000).toFixed(1)} s)`);
     return info;

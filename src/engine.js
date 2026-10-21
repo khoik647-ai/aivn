@@ -174,7 +174,7 @@ async function unloadModel() {
 }
 
 function status() {
-  if (visionOn) { const v = getVision().status(); if (v) return { loaded: true, id: v.id, path: v.path, contextSize: v.contextSize, vision: true, gpu: llama && llama.gpu, toolMode: v.textTools ? 'text' : 'native', meta: v.template ? { toolTemplate: !!v.template.nativeTools } : null }; }
+  if (visionOn) { const v = getVision().status(); if (v) return { loaded: true, id: v.id, path: v.path, contextSize: v.contextSize, vision: true, gpu: llama && llama.gpu, gpuLayers: v.gpuLayers ?? null, totalLayers: v.totalLayers ?? null, toolMode: v.textTools ? 'text' : 'native', meta: v.template ? { toolTemplate: !!v.template.nativeTools } : null }; }
   return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, meta: current.meta || null, perf: current.perf || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: !!loading };
 }
 

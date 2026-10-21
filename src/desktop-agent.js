@@ -215,8 +215,10 @@ function createDesktopAgent(deps) {
       if (x != null) { n.mouseClick('left', false); await sleep(250); }
       if (a.__replace) { n.keyTap('a', process.platform === 'darwin' ? 'command' : 'control'); await sleep(120); }
       const t = String(a.text || '');
-      if (process.platform === 'linux') { // X11: dán qua bộ nhớ tạm không ổn định với mọi ứng dụng → xdotool type (Unicode)
-        try { await new Promise((res, rej) => require('child_process').execFile('xdotool', ['type', '--delay', '12', '--', t], { timeout: 60000 }, (e) => e ? rej(e) : res())); return; } catch {}
+      // 0.16: mọi hệ điều hành đều DÁN cả đoạn một lần (nhanh, đúng dấu tiếng Việt). Trước đây Linux dùng "xdotool type" —
+      // kiểm thử thật cho thấy nó làm rơi chữ có dấu (“xin chào” → “xin cho”), nên chỉ còn là phương án dự phòng (AIVN_TYPE_XDOTOOL=1).
+      if (process.platform === 'linux' && process.env.AIVN_TYPE_XDOTOOL === '1') {
+        try { await new Promise((res, rej) => require('child_process').execFile('xdotool', ['type', '--delay', '12', '--', t], { timeout: 60000 }, (e) => e ? rej(e) : res())); if (a.__submit) { await sleep(150); n.keyTap('enter'); } return; } catch {}
       }
       const { clipboard } = require('electron');
       const prev = await Promise.resolve(clipboard.readText()).catch(() => '');
@@ -224,6 +226,8 @@ function createDesktopAgent(deps) {
       n.keyTap('v', process.platform === 'darwin' ? 'command' : 'control'); await sleep(350);
       setTimeout(async () => { try { if (await Promise.resolve(clipboard.readText()) === t) await Promise.resolve(clipboard.writeText(prev || '')); } catch {} }, 1500);
     }
+    // 0.16: gõ xong bấm Enter trong CÙNG một bước (bấm ô + dán chữ + Enter = một lượt của mô hình)
+    if (action === 'type_text' && a.__submit) { await sleep(150); n.keyTap('enter'); }
     if (action === 'hotkey') { const k = SC.parseKeys(a.keys); const esc = k.key === 'escape'; if (esc) registerEsc(false); try { if (k.mods.length) n.keyTap(k.key, k.mods); else n.keyTap(k.key); } finally { if (esc) setTimeout(() => session && !session.asking && registerEsc(true), 300); } }
     if (action === 'scroll') { const amt = Math.max(-20, Math.min(20, Math.round(Number(a.amount) || -5))); n.scrollMouse(0, process.platform === 'win32' ? amt * 120 : amt); }
   }
@@ -237,7 +241,7 @@ function createDesktopAgent(deps) {
   }
   function describeAct(action, a, t) {
     const who = t && t.el ? `${t.el.kind} “${t.el.name || t.el.id}”` : t && t.query ? `“${t.query}”` : t && t.via === 'toạ độ' ? `vị trí (${a.x}, ${a.y})` : '';
-    if (action === 'type_text') return `gõ “${String(a.text).slice(0, 200)}”${who ? ' vào ' + who : ' vào ô đang chọn'}`;
+    if (action === 'type_text') return `gõ “${String(a.text).slice(0, 200)}”${who ? ' vào ' + who : ' vào ô đang chọn'}${a.submit ? ' rồi bấm Enter' : ''}`;
     if (action === 'hotkey') return `bấm phím ${a.keys}`;
     if (action === 'scroll') return `cuộn ${Number(a.amount) > 0 ? 'lên' : 'xuống'} ${Math.abs(Number(a.amount) || 5)} nấc${who ? ' tại ' + who : ''}`;
     return `${(ACT_LABEL[action] || action).toLowerCase()} ${who}`.trim();
@@ -263,6 +267,8 @@ function createDesktopAgent(deps) {
     }
     if (action === 'hotkey') SC.parseKeys(a.keys); // chặn tổ hợp hệ thống trước khi hỏi
     if (action === 'type_text' && !String(a.text || '')) throw new Error('Thiếu text cần gõ.');
+    // 0.16: chữ kết thúc bằng xuống dòng = gõ rồi bấm Enter (dán "\n" không gửi được ở nhiều ứng dụng chat)
+    if (action === 'type_text') { const raw = String(a.text); const tail = /\n\s*$/.test(raw); a = { ...a, text: tail ? raw.replace(/\s*\n\s*$/, '') : raw, submit: a.submit === true || a.submit === 'true' || tail }; if (!a.text.trim()) { if (a.submit) { action = 'hotkey'; a = { action: 'hotkey', keys: 'enter' }; } else throw new Error('Thiếu text cần gõ.'); } }
 
     if (!s.obs) await observe(ctx, { thumb: false });
     let needPoint = ['click', 'double_click', 'right_click'].includes(action) || ((action === 'type_text' || action === 'scroll') && (a.element || a.target || (a.x != null && a.y != null && !(Number(a.x) === 0 && Number(a.y) === 0))));
@@ -287,7 +293,7 @@ function createDesktopAgent(deps) {
       return { refused: true, forModel: 'AIVN AGENT KHÔNG BAO GIỜ gõ mật khẩu/mã PIN/OTP. Dừng lại và nhờ người dùng tự gõ vào ô này, rồi tiếp tục khi họ báo xong.', summary: 'không gõ mật khẩu' };
     }
     const desc = describeAct(action, a, t);
-    const risk = riskOf(action, { el: t && t.el, query: t && t.query, text: a.text, keys: a.keys, lastAction: s.lastAction });
+    const risk = riskOf(action, { el: t && t.el, query: t && t.query, text: action === 'type_text' && a.submit ? a.text + '\n' : a.text, keys: a.keys, lastAction: s.lastAction });
     const mode = S().agentScreenMode === 'important' ? 'important' : 'each';
     const box = t && t.x != null ? (t.el ? rectNorm(t.el.b) : t.box || (() => { const n = nativeToNorm(t.x, t.y); return { x1: n.nx - 0.012, y1: n.ny - 0.012, x2: n.nx + 0.012, y2: n.ny + 0.012 }; })()) : null;
     if (box) ov('target', { box, label: desc });
@@ -317,7 +323,7 @@ function createDesktopAgent(deps) {
       const afterSave = s.lastAction && s.lastAction.action === 'hotkey' && /^(ctrl|cmd|command|meta)\+(shift\+)?[so]$/i.test(String(s.lastAction.keys || '').replace(/\s/g, '')) && Date.now() - s.lastAction.at < 120000;
       // ô không đọc được qua Trợ năng (Zalo…): vẫn cho thay nội dung khi mô hình yêu cầu, chỉ với chữ một dòng ngắn (ô tìm kiếm), không bao giờ với tài liệu
       const shortLine = !/\n/.test(String(a.text)) && String(a.text).length <= 80 && !(el && /document|tài liệu/i.test(`${el.role || ''} ${el.kind || ''}`));
-      a = { ...a, __replace: (a.replace === true && (single || (shortLine && !(el && el.editable)))) || (afterSave && !(el && /document|tài liệu/i.test(`${el.role || ''} ${el.kind || ''}`))) };
+      a = { ...a, __submit: !!a.submit, __replace: (a.replace === true && (single || (shortLine && !(el && el.editable)))) || (afterSave && !(el && /document|tài liệu/i.test(`${el.role || ''} ${el.kind || ''}`))) };
     }
     await performAt(action, t && t.x != null ? t.x : null, t && t.x != null ? t.y : null, a);
     const prevAction = s.lastAction;
@@ -331,17 +337,19 @@ function createDesktopAgent(deps) {
     const checks = [];
     if (before && before.win && o.obs.win && before.win.title !== o.obs.win.title) checks.push(`Cửa sổ đổi thành "${o.obs.win.title}".`);
     let o2 = o;
+    let searchyDone = false;
     if (action === 'type_text') {
       const typed = U.fold(String(a.text).split('\n')[0]).slice(0, 40);
       const seen = o.obs.elements.some(e => (e.value && U.fold(e.value).includes(typed)) || (e.name && U.fold(e.name).includes(typed)));
-      checks.push(seen ? 'Đã thấy chữ vừa gõ trên màn hình.' : 'CHƯA thấy chữ vừa gõ trong danh sách phần tử (có thể ô không hiện giá trị) — hãy kiểm tra trước khi làm tiếp.');
+      if (!a.submit) checks.push(seen ? 'Đã thấy chữ vừa gõ trên màn hình.' : 'CHƯA thấy chữ vừa gõ trong danh sách phần tử (có thể ô không hiện giá trị) — hãy kiểm tra trước khi làm tiếp.');
+      else checks.push('Đã gõ (dán một lần) rồi bấm Enter.');
       // ô tìm kiếm: chờ kết quả tải, nhìn lại, rồi mới kết luận; gợi ý tìm không dấu / một phần tên
       const el = t && t.el ? t.el : focusedEl;
       const prevTxt = prevAction && Date.now() - prevAction.at < 60000 ? `${prevAction.query || ''} ${prevAction.el ? prevAction.el.name || '' : ''}` : '';
       // còn đang ở ô tìm kiếm: lần gõ trước là tìm kiếm và từ đó chưa bấm vào đâu (máy chậm có thể mất vài phút giữa hai lần gõ)
       const stillSearching = s.inSearch && Date.now() - s.inSearch < 300000;
       const searchy = (stillSearching || /tìm|tim kiem|search|find|kiếm/i.test(`${el ? el.name + ' ' + (el.kind || '') : ''} ${a.element || a.target || ''} ${prevTxt}`) || (prevAction && Date.now() - prevAction.at < 60000 && /^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(prevAction.keys || '').replace(/\s/g, '')))) && !/\n/.test(String(a.text)) && String(a.text).length <= 80;
-      if (searchy && String(a.text).trim()) {
+      if (searchy && String(a.text).trim()) { searchyDone = true;
         const q = String(a.text).split('\n')[0].trim(); const fq = U.fold(q);
         const ask = `Ô tìm kiếm vừa được gõ "${q}". Danh sách kết quả tìm kiếm đang hiện những tên nào (ghi đúng chữ)? Dòng đầu tiên trả lời CÓ nếu có kết quả khớp hoặc gần khớp "${q}", KHÔNG nếu không có, ĐANG TẢI nếu chưa hiện xong.`;
         // kết quả khớp trong danh sách phần tử (OCR thấy cả chữ trong ô tìm kiếm nên ứng dụng cây nghèo cần ≥ 2 chỗ)
@@ -371,8 +379,9 @@ function createDesktopAgent(deps) {
     // gửi tin: kiểm chứng trên màn hình (thấy chữ vừa gửi + thấy tên người nhận); kết quả nằm ở out.verify để agent.js không cho báo giả
     let verify;
     const targetName = `${t && t.el ? t.el.name || '' : ''} ${a.element || a.target || ''}`;
-    if (action === 'type_text' && !/\n\s*$/.test(String(a.text || '')) && !s.inSearch) s.lastTyped = String(a.text || '');
-    if (SV.isSendAction(action, a, targetName, s.lastTyped)) {
+    if (action === 'type_text' && !a.submit && !s.inSearch) s.lastTyped = String(a.text || '');
+    const sendA = action === 'type_text' && a.submit ? { ...a, text: a.text + '\n' } : a;
+    if (!(action === 'type_text' && a.submit && searchyDone) && SV.isSendAction(action, sendA, targetName, s.lastTyped)) {
       const msg = action === 'type_text' ? String(a.text).replace(/\n\s*$/, '') : s.lastTyped;
       const recipient = SV.recipientOf(ctx.userQuery);
       await sleep(800);

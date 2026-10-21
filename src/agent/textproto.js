@@ -125,7 +125,7 @@ function compactTools(tools) {
 // 0.15.2: bản mô tả công cụ gọn cho ngữ cảnh ≤ 16k: tối đa 2 câu / 300 ký tự cho công cụ, 70 ký tự cho tham số.
 // Câu kết thúc bằng . ! ? rồi khoảng trắng + chữ HOA (không cắt nhầm ở "vd.").
 const LEAN_DESC = {
-  screen_act: 'Làm MỘT thao tác: click / double_click / right_click (element = id [eN] của lần quan sát mới nhất hoặc tên phần tử; hoặc x,y thang 0-1000), type_text (text; element = ô cần gõ), hotkey (keys, vd. "enter", "ctrl+s"), scroll (amount âm = xuống), wait (seconds), focus_window (window). Kết quả kèm kiểm tra và danh sách phần tử mới. Không bao giờ gõ mật khẩu.',
+  screen_act: 'Làm MỘT thao tác: click / double_click / right_click (element = id [eN] của lần quan sát mới nhất hoặc tên phần tử; hoặc x,y thang 0-1000), type_text (text, dán một lần; element = ô cần gõ; submit: true = gõ xong bấm Enter — bấm ô + gõ + Enter chỉ cần MỘT lần gọi), hotkey (keys, vd. "enter", "ctrl+s"), scroll (amount âm = xuống), wait (seconds), focus_window (window). Kết quả kèm kiểm tra và danh sách phần tử mới. Không bao giờ gõ mật khẩu.',
   screen_look: 'Quan sát cửa sổ đang dùng: danh sách phần tử [eN] (loại, tên, giá trị, vị trí x,y 0-1000) và chữ đọc được. Gọi trước screen_act. window: chuyển tới cửa sổ đó trước; query: lọc phần tử theo chữ.',
   run_javascript: 'Chạy đoạn JavaScript ngắn trong hộp cát (không mạng, không đọc tệp, tối đa 3 giây); in kết quả bằng console.log. input_file: nội dung tệp trong thư mục được phép có sẵn trong biến INPUT.',
 };

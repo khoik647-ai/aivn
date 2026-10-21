@@ -70,7 +70,7 @@ test('B2: đã kiểm chứng trên màn hình thì được báo đã gửi', (
 });
 test('B2: desktop-agent ghi kết quả kiểm chứng vào out.verify sau thao tác gửi', () => {
   const src = read('src/desktop-agent.js');
-  assert.match(src, /SV\.isSendAction\(action, a, targetName, s\.lastTyped\)/); assert.match(src, /verify = SV\.verifySend\(/); assert.match(src, /detail: checks\.join\(' '\), verify \}/);
+  assert.match(src, /SV\.isSendAction\(action, sendA, targetName, s\.lastTyped\)/); assert.match(src, /verify = SV\.verifySend\(/); assert.match(src, /detail: checks\.join\(' '\), verify \}/);
   assert.match(read('src/agent/agent.js'), /verify: out\.verify/);
 });
 

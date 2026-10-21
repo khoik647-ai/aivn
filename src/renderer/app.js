@@ -1678,6 +1678,14 @@ function agentGateHtml(g) {
   const what = g.code === 'none' ? '🤖 Chưa nạp mô hình cho AIVN AGENT.' : `⛔ <b>${esc(g.modelName || 'Mô hình này')}</b> chưa dùng được cho AIVN AGENT: <b>${esc(g.reason)}</b>.`;
   return `<span class="agent-gate">${what} AIVN AGENT cần mô hình nhìn được màn hình, gọi công cụ ổn định và vừa máy. ${g.best ? 'Mô hình phù hợp nhất đã có trên máy:' : (g.recommended || []).length ? 'Gợi ý cho máy này:' : 'Chưa có mô hình nào làm được việc này mà vừa máy này — bạn vẫn dùng Trò chuyện bình thường.'}</span> ${sw}${recs}`;
 }
+// 0.16: mô hình dùng được nhưng chậm trên máy này (máy yếu, cho phép "Chạy chậm") hoặc đang tràn khỏi VRAM → cảnh báo, không chặn
+function agentSlowHtml(g) {
+  const b = g.spill && g.spill.better;
+  const btn = b ? (b.installed ? `<button class="btn sm primary" data-switch="${esc(b.id)}">⇄ Chuyển sang ${esc(b.name)}</button>` : `<button class="btn sm primary" data-rec="${esc(b.id)}" data-installed="0">⬇ Tải ${esc(b.name)}</button>`) : '';
+  const spill = g.spill ? `<b>${esc(g.modelName || 'Mô hình')}</b> đang tràn khỏi VRAM: chỉ ${g.spill.gpuLayers}/${g.spill.totalLayers} lớp chạy trên GPU, phần còn lại chạy bằng CPU nên mỗi bước sẽ chậm. ${b ? `Mô hình nhìn màn hình vừa trọn VRAM máy này: <b>${esc(b.name)}</b>.` : 'Đóng bớt ứng dụng dùng GPU (trò chơi, trình duyệt nhiều tab) rồi nạp lại có thể giúp.'}` : '';
+  const slow = g.slow ? `<b>${esc(g.modelName || 'Mô hình')}</b>: ${esc(g.slowReason || 'chạy chậm trên máy này')} Máy này không có mô hình nào cho AIVN AGENT chạy mượt, nên AIVN cho dùng mô hình chạy chậm thay vì chặn.` : '';
+  return `<span class="agent-slow">🐢 ${spill || slow}</span> ${btn}`;
+}
 function paintAgentWarn(adv) {
   const w = $('#agentWarn');
   const rec = (adv && adv.recommended) || [];
@@ -1685,6 +1693,7 @@ function paintAgentWarn(adv) {
   const g = state.agent && state.agent.gate;
   if (g && !g.cloud && !g.ok) { w.innerHTML = agentGateHtml(g); w.hidden = false; return; }
   if (!state.status.loaded) { w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN AGENT cần mô hình nhìn được màn hình và gọi công cụ ổn định, vd. <b>Qwen3-VL 8B</b> hoặc <b>Qwen3-VL 4B</b>.</span>`; w.hidden = false; return; }
+  if (g && g.ok && !g.cloud && (g.slow || g.spill)) { w.innerHTML = agentSlowHtml(g); w.hidden = false; return; }
   if (g && g.ok) { w.hidden = true; return; } // mô hình đã qua kiểm tra AIVN AGENT: không cần các cảnh báo cũ
   if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN AGENT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để AIVN AGENT làm việc đáng tin cậy, hãy chọn mô hình được đánh dấu dùng được cho AIVN AGENT trong bộ chọn mô hình.</span> ${recBtns}`; w.hidden = false; return; }
   if (adv && adv.small) { w.innerHTML = `<span>⚠ <b>${esc(adv.model)}</b>${adv.params ? ` (khoảng ${String(adv.params).replace('.', ',')} tỉ tham số)` : ''} khá nhỏ cho AIVN AGENT: có thể gọi sai công cụ, bỏ bước hoặc nói đã làm khi chưa làm. Nên chọn mô hình mạnh hơn được đánh dấu dùng được cho AIVN AGENT.</span> ${recBtns}`; w.hidden = false; return; }
