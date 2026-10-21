@@ -85,3 +85,9 @@ test('mô hình định vị dùng đúng câu lệnh và cách đọc toạ đ�
   const h = SC.parseBox('{"x": 490, "y": 350}', W, H, { coords: 'pixel' }); assert.ok(h && h.found); assert.ok(Math.abs((h.x1 + h.x2) / 2 - 0.5) < 1e-9 && Math.abs((h.y1 + h.y2) / 2 - 0.5) < 1e-9);
   const k = SC.parseBox('Click(490, 350)', W, H, { coords: 'pixel' }); assert.ok(k && k.found && Math.abs((k.x1 + k.x2) / 2 - 0.5) < 1e-9);
 });
+
+test('Holo1.5: đọc được cả JSON thiếu khoá "y" ({"x": 70, 451})', () => {
+  const SC = require('../src/screen-control');
+  const b = SC.parseBox('{"x": 70, 451}', 980, 700, { coords: 'pixel' }); assert.ok(b && b.found);
+  assert.ok(Math.abs((b.x1 + b.x2) / 2 - 70 / 980) < 1e-9 && Math.abs((b.y1 + b.y2) / 2 - 451 / 700) < 1e-9);
+});

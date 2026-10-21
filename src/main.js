@@ -1099,7 +1099,7 @@ function registerIpc() {
   });
   ipcMain.handle('files:pick', async () => {
     const r = await dialog.showOpenDialog(win, { buttonLabel: 'Mở', title: 'Chọn tệp để gửi kèm', properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'Tài liệu và ảnh', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'pdf', 'docx', 'txt', 'md', 'csv', 'json', 'html', 'xml', 'yaml', 'yml', 'log', 'js', 'ts', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rs', 'php', 'sql', 'sh'] }, { name: 'Tất cả tệp', extensions: ['*'] }] });
+      filters: [{ name: 'Tài liệu, ảnh, âm thanh và video', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'pdf', 'docx', 'odt', 'xlsx', 'xlsm', 'ods', 'pptx', 'odp', 'zip', 'mp3', 'wav', 'm4a', 'aac', 'ogg', 'opus', 'flac', 'mp4', 'webm', 'mov', 'm4v', 'mkv', 'txt', 'md', 'csv', 'json', 'html', 'xml', 'yaml', 'yml', 'log', 'js', 'ts', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rs', 'php', 'sql', 'sh'] }, { name: 'Tất cả tệp', extensions: ['*'] }] });
     return r.canceled ? [] : r.filePaths;
   });
   ipcMain.handle('clipboard:write', async (_e, t) => { await require('electron').clipboard.writeText(String(t ?? '')); return true; });
@@ -1115,11 +1115,29 @@ function registerIpc() {
     if (isTest) console.log(`[ocr] ${r.chars} ký tự, tin cậy ${r.confidence}%, ${Date.now() - t0} ms`);
     return r;
   });
-  ipcMain.handle('files:extract', async (_e, paths) => {
-    const out = [];
+  // Đọc tài liệu đính kèm; PDF scan: đọc chữ từng trang bằng OCR, báo tiến độ cho chip tệp (files:progress)
+  ipcMain.handle('files:extract', async (e, paths) => {
+    const out = []; const prog = (p, o) => { try { e.sender.send('files:progress', { path: p, ...o }); } catch {} };
     for (const p of paths || []) {
-      try { const d = await docsPool.extractFile(p); out.push({ ok: true, name: d.name, size: d.size, kind: d.kind, pages: d.pages, chars: d.chars, text: d.text }); }
-      catch (e) { out.push({ ok: false, name: path.basename(p), error: e.userMessage || ('Không đọc được tệp: ' + e.message) }); }
+      try {
+        prog(p, { stage: 'read' });
+        const d = await docsPool.extractFile(p);
+        if (d.scanned) {
+          const parts = []; let conf = 0, n = 0;
+          for (let i = 0; i < d.scanned.length; i++) {
+            prog(p, { stage: 'ocr', i: i + 1, n: d.scanned.length });
+            const r = await engine.ocr(Buffer.from(d.scanned[i].png));
+            if (r && r.chars >= 3) { parts.push(`[Trang ${d.scanned[i].page}]\n${r.text}`); conf += r.confidence; n++; }
+          }
+          if (!parts.length) throw Object.assign(new Error('x'), { userMessage: `"${d.name}" là PDF scan nhưng AIVN không tìm thấy chữ nào trên các trang (ảnh mờ hoặc chữ viết tay?).` });
+          const more = d.pages > d.scanned.length ? `\n\n[PDF có ${d.pages} trang, AIVN đọc chữ ${d.scanned.length} trang đầu]` : '';
+          const text = parts.join('\n\n') + more;
+          out.push({ ok: true, name: d.name, size: d.size, kind: 'pdf', pages: d.pages, chars: text.length, text, ocr: { pages: n, confidence: Math.round(conf / n) } });
+          continue;
+        }
+        out.push({ ok: true, name: d.name, size: d.size, kind: d.kind, pages: d.pages, unit: d.unit, files: d.files, chars: d.chars, text: d.text });
+      } catch (err) { out.push({ ok: false, name: path.basename(p), error: err.userMessage || ('Không đọc được tệp: ' + err.message) }); }
+      finally { prog(p, { stage: 'done' }); }
     }
     return out;
   });

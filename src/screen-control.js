@@ -84,6 +84,8 @@ function parseBox(text, W, H, { coords = 'auto' } = {}) {
   // mảng trần [x1,y1,x2,y2] (UI-Venus-Ground) hoặc [x,y]
   if (!nums && !/[{]/.test(t)) { const a = t.match(/\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?:\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?))?\s*\]/);
     if (a) { const [x, y] = [+a[1], +a[2]]; nums = a[3] != null ? [x, y, +a[3], +a[4]] : [x - 12, y - 12, x + 12, y + 12]; } }
+  // JSON hỏng kiểu {"x": 70, 451} (thiếu khoá "y"): vẫn là một điểm x, y
+  if (!nums) { const xy = t.match(/"x"\s*:\s*(-?\d+(?:\.\d+)?)\s*,\s*(?:"y"\s*:\s*)?(-?\d+(?:\.\d+)?)/); if (xy) { const [x, y] = [+xy[1], +xy[2]]; nums = [x - 12, y - 12, x + 12, y + 12]; } }
   if (!nums) {
     const m = t.match(/\{[\s\S]*?\}(?=[^{}]*$|\s*[,\]\n])/) || t.match(/\{[\s\S]*?\}/) || (/\(\s*\d+(?:\.\d+)?\s*,\s*\d+(?:\.\d+)?\s*\)/.test(t) ? ['{}'] : null); if (!m) return null;
     try { j = JSON.parse(m[0].replace(/'/g, '"')); } catch { const m2 = t.match(/\{[^{}]*\}/); try { j = JSON.parse(m2 && m2[0]); } catch { j = { found: !/"found"\s*:\s*false/.test(t) || undefined }; if (/"found"\s*:\s*false/.test(t)) return { found: false, why: '' }; } } // JSON hỏng (dấu nháy trong câu): vẫn thử lấy điểm (x, y)
@@ -109,9 +111,12 @@ function parseBox(text, W, H, { coords = 'auto' } = {}) {
   if (box.y2 - box.y1 < 0.003) { box.y1 = c(box.y1 - 0.01); box.y2 = c(box.y2 + 0.01); }
   return { found: true, ...box, label, coords: pixel ? 'pixel' : 'norm1000' };
 }
+const HOLO_SCHEMA = { type: 'object', properties: { x: { type: 'integer' }, y: { type: 'integer' } }, required: ['x', 'y'], additionalProperties: false };
 async function locate(engine, shot, target, { signal, modelId = '' } = {}) {
   const fam = groundingFamily(modelId); const fi = FAMILY[fam];
-  const r = await engine.generate([{ role: 'user', content: [{ type: 'text', text: LOCATE_PROMPT(target, shot.width, shot.height, fam) }, { type: 'image_url', image_url: { url: shot.dataUrl } }] }], { temperature: 0, maxTokens: 160, signal });
+  // Holo1.5: nhà phát triển gọi kèm "structured outputs" (lược đồ JSON {x, y}); không ràng buộc thì bản lượng tử Q4 hay bỏ mất khoá "y"
+  const jsonSchema = fam === 'holo' ? HOLO_SCHEMA : null;
+  const r = await engine.generate([{ role: 'user', content: [{ type: 'text', text: LOCATE_PROMPT(target, shot.width, shot.height, fam) }, { type: 'image_url', image_url: { url: shot.dataUrl } }] }], { temperature: 0, maxTokens: 160, signal, ...(jsonSchema ? { jsonSchema } : {}) });
   return { box: parseBox(r.text, shot.width, shot.height, { coords: fi.coords }), raw: String(r.text || '').slice(0, 400), family: fam };
 }
 async function describe(engine, shot, question, { signal } = {}) {

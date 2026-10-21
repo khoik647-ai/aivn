@@ -56,8 +56,43 @@ async function extractPdf(buf) {
   } finally { await doc.destroy(); }
   const text = pages.map((t, i) => (t ? `[Trang ${i + 1}]\n${t}` : '')).filter(Boolean).join('\n\n');
   const letters = (text.match(/\p{L}/gu) || []).length;
-  if (letters < 20) throw new DocError('PDF này không có lớp chữ (có thể là bản scan hoặc ảnh chụp), nên AIVN chưa đọc được. Hãy dùng PDF có thể bôi đen chữ, hoặc chuyển sang DOCX/TXT.');
+  if (letters < 20) {
+    // PDF scan / ảnh chụp: lấy ảnh của từng trang để đọc chữ bằng OCR (tiến trình chính làm, có báo tiến độ)
+    const scans = await pdfPageImages(buf).catch(() => []);
+    if (!scans.length) throw new DocError('PDF này không có lớp chữ và AIVN không tách được ảnh trang để đọc chữ (OCR). Hãy dùng PDF có thể bôi đen chữ, hoặc chuyển sang DOCX/TXT.');
+    return { text: '', pages: doc.numPages, scanned: scans };
+  }
   return { text, pages: doc.numPages };
+}
+
+// Ảnh lớn nhất của mỗi trang PDF (bản scan thường là một ảnh/trang) → PNG; tối đa SCAN_MAX_PAGES trang
+const SCAN_MAX_PAGES = 40;
+async function pdfPageImages(buf) {
+  const { pdfjs, base } = await loadPdfjs(); const { encodePng, unpack1bpp } = require('./png');
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buf), isEvalSupported: false, useSystemFonts: false, disableFontFace: true, isOffscreenCanvasSupported: false, isImageDecoderSupported: false,
+    cMapUrl: pathToFileURL(path.join(base, 'cmaps') + path.sep).href, cMapPacked: true, verbosity: 0 }).promise;
+  const out = [];
+  try {
+    const OPS = pdfjs.OPS; const n = Math.min(doc.numPages, SCAN_MAX_PAGES);
+    for (let i = 1; i <= n; i++) {
+      const page = await doc.getPage(i); const ops = await page.getOperatorList();
+      let best = null;
+      for (let k = 0; k < ops.fnArray.length; k++) {
+        const fn = ops.fnArray[k]; if (fn !== OPS.paintImageXObject && fn !== OPS.paintInlineImageXObject) continue;
+        const a = ops.argsArray[k][0]; let img = null;
+        if (typeof a === 'string') img = await new Promise((res) => { const store = a.startsWith('g_') ? page.commonObjs : page.objs; try { store.get(a, res); } catch { res(null); } setTimeout(() => res(null), 5000); });
+        else img = a;
+        if (img && img.data && img.width && img.height && (!best || img.width * img.height > best.width * best.height)) best = img;
+      }
+      if (best && best.width * best.height >= 200 * 200) {
+        const ch = best.kind === 1 ? 1 : best.kind === 2 ? 3 : 4;
+        const px = best.kind === 1 ? unpack1bpp(best.width, best.height, best.data) : best.data;
+        if (px.length >= best.width * best.height * ch) out.push({ page: i, png: encodePng(best.width, best.height, px, ch) });
+      }
+      page.cleanup();
+    }
+  } finally { await doc.destroy(); }
+  return out;
 }
 
 async function extractDocx(buf) {
@@ -79,6 +114,34 @@ function decodeText(buf) {
   return s;
 }
 
+const OFFICE_EXT = new Set(['xlsx', 'xlsm', 'pptx', 'odt', 'ods', 'odp']);
+const ARCHIVE_EXT = new Set(['zip']);
+const AUDIO_EXT = new Set(['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'flac', 'weba']);
+const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'm4v', 'mkv', 'ogv']);
+const LEGACY = { doc: 'docx', xls: 'xlsx', ppt: 'pptx' };
+const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
+const KIND = (ext) => ext === 'pdf' ? 'pdf' : ext === 'docx' || ext === 'odt' ? 'docx' : ['xlsx', 'xlsm', 'ods'].includes(ext) ? 'sheet' : ['pptx', 'odp'].includes(ext) ? 'slides' : ext === 'zip' ? 'zip' : 'text';
+// tệp bên trong ZIP mà AIVN đọc được (không đọc ảnh/âm thanh/video lồng trong tệp nén)
+const innerSupported = (n) => { const e = extOf(n); return TEXT_EXT.has(e) || OFFICE_EXT.has(e) || e === 'pdf' || e === 'docx'; };
+
+// Đọc một tệp đã nằm trong bộ nhớ (dùng chung cho tệp thường và tệp trong ZIP)
+async function extractBuffer(name, ext, buf, { depth = 0 } = {}) {
+  const O = require('./office');
+  const wrap = (label, p) => p.catch((e) => { if (e instanceof DocError) throw e; if (e && e.userMessage) throw new DocError(e.userMessage.includes(name) ? e.userMessage : `"${name}": ${e.userMessage}`); throw new DocError(`Không đọc được ${label} "${name}". Tệp có thể bị hỏng${label === 'PDF' ? ' hoặc có mật khẩu' : ''}.`); });
+  if (ext === 'pdf') return wrap('PDF', extractPdf(buf));
+  if (ext === 'docx') return wrap('DOCX', extractDocx(buf));
+  if (ext === 'xlsx' || ext === 'xlsm') return wrap('bảng tính', Promise.resolve().then(() => O.xlsx(buf)));
+  if (ext === 'pptx') return wrap('bản trình chiếu', Promise.resolve().then(() => O.pptx(buf)));
+  if (ext === 'odt' || ext === 'ods' || ext === 'odp') return wrap('tệp OpenDocument', Promise.resolve().then(() => O.odf(buf, ext)));
+  if (ext === 'zip') {
+    if (depth > 0) return { text: '[tệp nén lồng bên trong: chỉ liệt kê, không mở]' };
+    return wrap('tệp nén', O.zip(buf, Object.assign(async (n, b) => { const r = await extractBuffer(path.basename(n), extOf(n), Buffer.from(b.buffer, b.byteOffset, b.length), { depth: depth + 1 }); return r.scanned ? { text: '[PDF scan bên trong tệp nén: hãy giải nén và gửi riêng để AIVN đọc chữ bằng OCR]' } : r; }, { supports: innerSupported })));
+  }
+  if (LEGACY[ext]) throw new DocError(`Định dạng .${ext} cũ chưa được hỗ trợ. Hãy lưu "${name}" thành .${LEGACY[ext]} rồi gửi lại.`);
+  if (TEXT_EXT.has(ext) || ext === '') return { text: decodeText(buf) };
+  throw new DocError(`Định dạng .${ext} chưa được hỗ trợ. AIVN đọc được PDF (kể cả bản scan), Word (DOCX/ODT), Excel (XLSX/ODS), PowerPoint (PPTX/ODP), ZIP, âm thanh, video, ảnh, TXT/MD/CSV/JSON và tệp mã nguồn.`);
+}
+
 async function extractFile(file) {
   const name = path.basename(file);
   const ext = extOf(file);
@@ -86,18 +149,16 @@ async function extractFile(file) {
   try { st = fs.statSync(file); } catch { throw new DocError(`Không mở được tệp "${name}".`); }
   if (!st.isFile()) throw new DocError(`"${name}" không phải là tệp.`);
   if (IMAGE_EXT.has(ext)) throw new DocError(OCR_EXT.has(ext) ? `"${name}" là ảnh, AIVN sẽ đọc chữ trong ảnh bằng OCR.` : `AIVN chưa đọc được định dạng ảnh .${ext} ("${name}"). Hãy dùng PNG, JPG, WEBP, GIF hoặc BMP.`);
-  if (st.size > MAX_FILE_BYTES) throw new DocError(`"${name}" quá lớn (${(st.size / 1048576).toFixed(1)} MB). Giới hạn là 20 MB mỗi tệp.`);
+  if (AUDIO_EXT.has(ext) || VIDEO_EXT.has(ext)) throw new DocError(`"${name}" là ${AUDIO_EXT.has(ext) ? 'âm thanh' : 'video'}: AIVN xử lý bằng mô hình nghe.`);
+  const limit = ARCHIVE_EXT.has(ext) ? MAX_ARCHIVE_BYTES : MAX_FILE_BYTES;
+  if (st.size > limit) throw new DocError(`"${name}" quá lớn (${(st.size / 1048576).toFixed(1)} MB). Giới hạn là ${limit / 1048576} MB mỗi tệp${ARCHIVE_EXT.has(ext) ? ' nén' : ''}.`);
   if (st.size === 0) throw new DocError(`"${name}" là tệp rỗng.`);
-  const buf = fs.readFileSync(file);
-  let r;
-  if (ext === 'pdf') r = await extractPdf(buf).catch((e) => { if (e instanceof DocError) throw e; throw new DocError(`Không đọc được PDF "${name}" (${e.message}). Tệp có thể bị hỏng hoặc có mật khẩu.`); });
-  else if (ext === 'docx') r = await extractDocx(buf).catch((e) => { if (e instanceof DocError) throw e; throw new DocError(`Không đọc được DOCX "${name}". Tệp có thể bị hỏng.`); });
-  else if (ext === 'doc') throw new DocError(`Định dạng .doc cũ chưa được hỗ trợ. Hãy lưu "${name}" thành .docx rồi gửi lại.`);
-  else if (TEXT_EXT.has(ext) || ext === '') r = { text: decodeText(buf) };
-  else throw new DocError(`Định dạng .${ext} chưa được hỗ trợ. AIVN đọc được PDF có lớp chữ, DOCX, TXT/MD/CSV/JSON và tệp mã nguồn.`);
-  const text = r.text.replace(/\r\n?/g, '\n');
+  const r = await extractBuffer(name, ext, fs.readFileSync(file));
+  const base = { name, path: file, size: st.size, ext, kind: KIND(ext), pages: r.pages || null, unit: r.unit || null };
+  if (r.scanned) return { ...base, scanned: r.scanned, text: '', chars: 0 };
+  const text = String(r.text || '').replace(/\r\n?/g, '\n');
   if (!text.trim()) throw new DocError(`"${name}" không có nội dung chữ.`);
-  return { name, path: file, size: st.size, ext, kind: ext === 'pdf' ? 'pdf' : ext === 'docx' ? 'docx' : 'text', pages: r.pages || null, text, chars: text.length };
+  return { ...base, text, chars: text.length, files: r.files || null };
 }
 
 // ---------- Đóng gói tài liệu vào prompt ----------
@@ -171,4 +232,4 @@ function buildUserContent(question, packedBlock) {
   return `Dưới đây là nội dung tài liệu người dùng gửi kèm. Hãy dựa vào tài liệu để trả lời; nếu tài liệu không có thông tin, hãy nói rõ. Phần chữ đọc từ ảnh (OCR) có thể có lỗi chính tả nhỏ.\n\n${packedBlock}\n\nCâu hỏi: ${question}`;
 }
 
-module.exports = { OCR_EXT, extractFile, packDocuments, buildUserContent, keywords, scoreChunk, chunkText, DocError, MAX_FILE_BYTES, IMAGE_EXT, TEXT_EXT };
+module.exports = { OCR_EXT, OFFICE_EXT, AUDIO_EXT, VIDEO_EXT, ARCHIVE_EXT, extOf, extractBuffer, extractFile, packDocuments, buildUserContent, keywords, scoreChunk, chunkText, DocError, MAX_FILE_BYTES, IMAGE_EXT, TEXT_EXT };

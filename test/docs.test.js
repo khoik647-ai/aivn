@@ -18,8 +18,9 @@ test('PDF có lớp chữ', async () => {
   assert.equal(r.kind, 'pdf'); assert.equal(r.pages, 1);
   assert.match(r.text, /7 giờ 30 đến 21 giờ/); assert.match(r.text, /\[Trang 1\]/);
 });
-test('PDF scan không có chữ -> thông báo tiếng Việt', async () => {
-  await assert.rejects(extractFile(F('scan-khong-chu.pdf')), (e) => e instanceof DocError && /không có lớp chữ/.test(e.userMessage));
+test('PDF scan không có lớp chữ -> tách ảnh từng trang để OCR (0.16)', async () => {
+  const r = await extractFile(F('scan-khong-chu.pdf')); assert.ok(r.scanned && r.scanned.length >= 1); assert.strictEqual(r.text, '');
+  assert.deepStrictEqual([...r.scanned[0].png.slice(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
 });
 test('Ảnh không đi đường tài liệu (chuyển sang OCR); định dạng lạ bị từ chối rõ ràng', async () => {
   await assert.rejects(extractFile(F('anh.png')), (e) => /OCR/.test(e.userMessage));
