@@ -197,6 +197,7 @@ input:focus-visible,textarea:focus-visible,select:focus-visible{outline:none}
 .vt-theme::view-transition-old(root),.vt-theme::view-transition-new(root){animation:none;mix-blend-mode:normal}
 .theme-veil{position:fixed;inset:0;display:none;place-items:center;pointer-events:none;z-index:9999}
 .theme-veil.on{display:grid}
+.theme-ov{position:fixed;inset:0;z-index:9998;pointer-events:none;will-change:clip-path,opacity;clip-path:circle(0% at 50% 50%)}
 .theme-veil img{width:136px;height:136px;opacity:0;will-change:transform,opacity;filter:drop-shadow(0 8px 28px rgba(179,18,28,.35))}
 .vt-theme .theme-veil{view-transition-name:aivn-theme-logo}
 .vt-theme::view-transition-group(aivn-theme-logo),.vt-theme::view-transition-old(aivn-theme-logo),.vt-theme::view-transition-new(aivn-theme-logo){animation:none}

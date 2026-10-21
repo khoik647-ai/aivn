@@ -189,7 +189,7 @@ async function renderCatalog() {
   $('#screenCards').innerHTML = comp.map(catCard).join('');
   $('#catalog').innerHTML = list.filter(c => !c.role).map(catCard).join('');
 }
-const roleTag = (c) => c.role === 'planner' ? '<span class="tag comp" title="Bộ lập kế hoạch: đọc danh sách nút/ô của cửa sổ (Trợ năng của hệ điều hành) rồi chọn bước tiếp theo. Không cần nhìn ảnh.">🧠 Lập kế hoạch</span>' : c.role === 'grounder' ? '<span class="tag comp" title="Bộ định vị (chế độ hai mô hình): khi danh sách nút/ô thiếu phần tử, mô hình này nhìn ảnh chụp màn hình và chỉ ra toạ độ cần bấm. Chạy cùng một mô hình Qwen3 lập kế hoạch.">🎯 Định vị (nhìn ảnh)</span>' : '';
+const roleTag = (c) => c.role === 'planner' ? '<span class="tag comp" title="Bộ lập kế hoạch: chọn bước tiếp theo. Mô hình này KHÔNG nhìn được màn hình — để điều khiển máy cần đi kèm một mô hình nhìn ảnh (mắt nhìn), AIVN tự nạp khi cần.">🧠 Lập kế hoạch · cần mắt nhìn</span>' : c.role === 'grounder' ? '<span class="tag comp" title="Nhìn được ảnh chụp màn hình: đọc màn hình và chỉ ra toạ độ cần bấm, kể cả với Zalo/ứng dụng Electron không cho đọc nút/ô.">🎯 Nhìn màn hình</span>' : '';
 function benchTag(c) {
   const b = c.bench; if (!c.role && !b) return '';
   const out = [];
@@ -202,7 +202,7 @@ function benchTag(c) {
 const catCard = (c) => `<div class="card" data-id="${esc(c.id)}">
     <div class="card-top"><div class="av">${esc(c.family.slice(0, 2))}</div><div><h4>${esc(c.name)}</h4><div class="sub">${esc(c.params)} tham số · ${esc(c.quant)} · ${fmtBytes(c.size + (c.mmproj ? c.mmproj.size : 0))}</div></div></div>
     <p>${esc(c.desc)}</p>
-    <div class="tags">${c.recommended ? '<span class="tag rec" title="Qwen3 gọi công cụ tốt nhất trong các mô hình vừa máy này">⭐ Gợi ý: trò chuyện &amp; công cụ</span>' : ''}${c.recScreen ? '<span class="tag rec" title="Đã qua bài đo Điểm tác vụ (≥ 7/10 và hỏi trước bước quan trọng)">⭐ Gợi ý: điều khiển máy</span>' : ''}${c.recGround ? '<span class="tag rec" title="Đã qua bài đo định vị (≥ 7/10) và vừa máy này">⭐ Gợi ý: định vị (hai mô hình)</span>' : ''}${roleTag(c)}${benchTag(c)}${fitBadge(c.fit)}${c.vision ? `<span class="tag vis" title="Tải kèm tệp thị giác ${esc(c.mmproj.file)} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán">👁 Nhìn được ảnh</span>` : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}${c.tags.filter(t => t !== 'Nhìn được ảnh' && t !== 'Điều khiển máy tính').map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
+    <div class="tags">${c.recommended ? '<span class="tag rec" title="Qwen3 gọi công cụ tốt nhất trong các mô hình vừa máy này">⭐ Gợi ý: trò chuyện &amp; công cụ</span>' : ''}${c.recScreen ? '<span class="tag rec" title="Một mô hình vừa lập kế hoạch vừa nhìn màn hình, chọn theo VRAM máy này. Nhà phát triển (Qwen) ghi: Visual Agent — Operates PC/mobile GUIs.">⭐ Gợi ý: điều khiển máy (tự nhìn màn hình)</span>' : ''}${c.recGround ? `<span class="tag rec" title="${esc('Mắt nhìn cho mô hình lập kế hoạch Qwen3, chọn theo VRAM máy này.' + (/phi thương mại/i.test(c.license || '') ? ' Lưu ý giấy phép: ' + c.license + '.' : ''))}">⭐ Gợi ý: mắt nhìn (cặp hai mô hình)</span>` : ''}${c.recPairPlanner ? '<span class="tag rec" title="Lập kế hoạch trong cặp hai mô hình — dùng kèm mắt nhìn được gợi ý.">⭐ Gợi ý: lập kế hoạch (cặp)</span>' : ''}${roleTag(c)}${benchTag(c)}${fitBadge(c.fit)}${c.vision ? `<span class="tag vis" title="Tải kèm tệp thị giác ${esc(c.mmproj.file)} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán">👁 Nhìn được ảnh</span>` : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}${c.tags.filter(t => t !== 'Nhìn được ảnh' && t !== 'Điều khiển máy tính').map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
     <div class="card-foot" data-job="${esc(jobIdFor(c.repo, c.file))}">${footHtml({ ...c, size: c.size + (c.mmproj ? c.mmproj.size : 0) }, `data-act="dl-cat" data-id="${esc(c.id)}"`, c.file)}</div>
     <button class="linkish" data-act="open-repo" data-repo="${esc(c.repo)}">Các bản lượng tử khác · ${esc(c.repo)}</button></div>`;
 
@@ -620,9 +620,31 @@ const darkMq = window.matchMedia('(prefers-color-scheme: dark)');
 const reduceMq = window.matchMedia('(prefers-reduced-motion: reduce)');
 const resolveTheme = (t) => (t === 'dark' || (t === 'system' && darkMq.matches) ? 'dark' : 'light');
 // Đổi giao diện sáng/tối: logo rồng hiện giữa màn hình, màu giao diện mới lan ra từ logo thành vòng tròn phủ hết cửa sổ,
-// rồi logo mờ dần (~840 ms). Chỉ dùng transform/opacity/clip-path. Không có View Transitions: logo + chuyển màu dần.
-// Hệ điều hành bật "giảm chuyển động": chỉ chuyển màu nhẹ, không có logo.
+// rồi logo mờ dần (~840 ms). Chỉ dùng transform/opacity/clip-path.
+// Cài đặt "Hiệu ứng chuyển giao diện" (themeFx): full = luôn chạy logo + vòng lan (kể cả khi Windows tắt "Animation effects"),
+// os = theo hệ điều hành (giảm chuyển động → chỉ đổi màu nhẹ), off = đổi ngay.
+// Đường chạy: 'vt' (View Transitions) → nếu API thiếu / lỗi / không chụp kịp → 'overlay' (lớp phủ màu nền mới, mặt nạ tròn lan ra).
+// Ghi lại đường đã chạy vào window.__themePath và nhật ký ứng dụng.
 const THEME_T = { in: 180, spread: 480, out: 180 };
+const THEME_BG = { light: '#ffffff', dark: '#17181b' };
+function themeLog(path, extra = '') {
+  const info = `giao diện: ${path}${extra ? ' · ' + extra : ''} · ${innerWidth}x${innerHeight}@${devicePixelRatio} · giảm chuyển động=${reduceMq.matches}`;
+  window.__themePath = path; (window.__themeLog = window.__themeLog || []).push(info); if (window.__themeLog.length > 20) window.__themeLog.shift();
+  try { A.uiLog && A.uiLog(info); } catch {}
+}
+function themeFx() { const v = state.settings && state.settings.themeFx; return v === 'os' || v === 'off' ? v : 'full'; }
+// Lớp phủ dự phòng: nền của giao diện mới lan ra thành vòng tròn, đổi giao diện bên dưới, rồi lớp phủ mờ đi.
+async function themeOverlay(next, set) {
+  const ov = document.createElement('div'); ov.className = 'theme-ov';
+  ov.style.background = THEME_BG[next];
+  $('#themeVeil').before(ov);
+  try {
+    await ov.animate({ clipPath: ['circle(0% at 50% 50%)', 'circle(150% at 50% 50%)'] }, { duration: THEME_T.spread, easing: 'cubic-bezier(.45,0,.2,1)', fill: 'forwards' }).finished.catch(() => {});
+    set();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await ov.animate({ opacity: [1, 0] }, { duration: 140, easing: 'ease-out', fill: 'forwards' }).finished.catch(() => {});
+  } finally { ov.remove(); }
+}
 async function applyTheme(t, { animate = false } = {}) {
   t = ['light', 'dark', 'system'].includes(t) ? t : 'light';
   for (const b of document.querySelectorAll('#themeRow button')) b.classList.toggle('on', b.dataset.theme === t);
@@ -630,31 +652,48 @@ async function applyTheme(t, { animate = false } = {}) {
   if ((applyTheme.pending || root.dataset.theme) === next) return;
   const set = () => { root.dataset.theme = next; if (applyTheme.pending === next) applyTheme.pending = null; };
   const crossfade = () => { root.classList.add('theme-anim'); set(); clearTimeout(applyTheme.timer); applyTheme.timer = setTimeout(() => root.classList.remove('theme-anim'), 400); };
+  const fx = themeFx();
   if (!animate || document.hidden) { applyTheme.pending = null; return set(); }
-  if (reduceMq.matches) { applyTheme.pending = null; return crossfade(); }
+  if (fx === 'off') { applyTheme.pending = null; themeLog('tắt'); return set(); }
+  if (fx === 'os' && reduceMq.matches) { applyTheme.pending = null; themeLog('đổi màu (hệ điều hành giảm chuyển động)'); return crossfade(); }
   applyTheme.pending = next;
   const veil = $('#themeVeil'), logo = veil.querySelector('img');
-  if (applyTheme.busy) { await applyTheme.busy; if (applyTheme.pending !== next) return; }
+  // chờ lượt trước xong; nhiều lần bấm cùng chờ một lượt thì chỉ một lần chạy (tránh hai View Transition chồng nhau → AbortError)
+  while (applyTheme.busy) { await applyTheme.busy; if (applyTheme.pending !== next) return; }
   let release; applyTheme.busy = new Promise(r => { release = r; });
+  const t0 = performance.now();
   try {
     veil.classList.add('on');
     await logo.animate([{ opacity: 0, transform: 'scale(.55)' }, { opacity: 1, transform: 'scale(1)' }], { duration: THEME_T.in, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'forwards' }).finished.catch(() => {});
-    if (document.startViewTransition) {
+    const pulse = () => logo.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.08)' }, { transform: 'scale(1)' }], { duration: THEME_T.spread, easing: 'ease-in-out' });
+    let path = 'overlay', why = document.startViewTransition ? '' : 'không có View Transitions';
+    if (document.startViewTransition && !window.__forceThemeOverlay) {
       root.classList.add('vt-theme');
-      let done = false;
-      const vt = document.startViewTransition(() => { done = true; set(); });
-      const guard = setTimeout(() => { if (!done) { set(); try { vt.skipTransition(); } catch {} } }, 300);
-      await vt.ready.then(() => {
-        logo.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.08)' }, { transform: 'scale(1)' }], { duration: THEME_T.spread, easing: 'ease-in-out' });
-        return root.animate({ clipPath: ['circle(0% at 50% 50%)', 'circle(150% at 50% 50%)'] }, { duration: THEME_T.spread, easing: 'cubic-bezier(.45,0,.2,1)', pseudoElement: '::view-transition-new(root)' }).finished;
-      }).catch(() => set());
-      clearTimeout(guard);
-      await vt.finished.catch(() => {});
+      let vt = null;
+      try { vt = document.startViewTransition(() => { set(); }); } catch (e) { why = 'startViewTransition lỗi: ' + (e && e.message || e); }
+      if (vt) {
+        // chờ thật sự: ảnh chụp cũ + đổi giao diện xong (cửa sổ 4K/DPI cao có thể mất >300 ms); chỉ bỏ khi quá 2,5 s
+        const ready = await Promise.race([vt.ready.then(() => 'ok', (e) => 'lỗi: ' + (e && e.name || e)), new Promise(r => setTimeout(() => r('quá giờ'), 2500))]);
+        if (ready === 'ok') {
+          pulse();
+          const done = await root.animate({ clipPath: ['circle(0% at 50% 50%)', 'circle(150% at 50% 50%)'] }, { duration: THEME_T.spread, easing: 'cubic-bezier(.45,0,.2,1)', pseudoElement: '::view-transition-new(root)' }).finished.then(() => true, () => false);
+          await vt.finished.catch(() => {});
+          if (done) path = 'vt'; else why = 'hoạt ảnh vòng tròn bị huỷ';
+        } else {
+          why = 'View Transition ' + ready; try { vt.skipTransition(); } catch {}
+          await vt.finished.catch(() => {});
+        }
+      }
       root.classList.remove('vt-theme');
-    } else {
-      crossfade(); await new Promise(r => setTimeout(r, 360));
+      if (path !== 'vt' && root.dataset.theme === next) {
+        // giao diện đã đổi nhưng không thấy vòng lan: chạy lớp phủ từ màu cũ để người dùng vẫn thấy hiệu ứng
+        const prev = next === 'dark' ? 'light' : 'dark'; root.dataset.theme = prev;
+      }
     }
+    if (path !== 'vt') { pulse(); await themeOverlay(next, set); }
+    if (root.dataset.theme !== next) set();
     await logo.animate([{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(1.18)' }], { duration: THEME_T.out, easing: 'ease-in', fill: 'forwards' }).finished.catch(() => {});
+    themeLog(path === 'vt' ? 'logo + vòng lan (View Transitions)' : 'logo + vòng lan (lớp phủ dự phòng)', [why, Math.round(performance.now() - t0) + ' ms'].filter(Boolean).join(' · '));
   } finally { veil.classList.remove('on'); release(); applyTheme.busy = null; if (root.dataset.theme !== next && applyTheme.pending === next) set(); }
 }
 // chỉ theo hệ điều hành khi chọn "Tự động" (đổi nativeTheme khi lưu cài đặt cũng phát sự kiện này)
@@ -664,6 +703,7 @@ $('#themeRow').addEventListener('click', async (e) => {
   state.settings.theme = b.dataset.theme;
   applyTheme(b.dataset.theme, { animate: true }); state.settings = await A.setSettings({ theme: b.dataset.theme });
 });
+$('#themeFxSel').addEventListener('change', async (e) => { state.settings = await A.setSettings({ themeFx: e.target.value }); e.target.value = themeFx(); });
 // ---------- Tìm kiếm trong tài liệu (RAG) ----------
 let ragJobId = null;
 async function paintRag() {
@@ -1107,12 +1147,18 @@ function paintAgentWarn(adv) {
   const rec = (adv && adv.recommended) || [];
   const recBtns = rec.map(r => `<button class="btn sm" data-rec="${esc(r.id)}" data-installed="${r.installed ? 1 : 0}">${r.installed ? 'Nạp' : 'Tải'} ${esc(r.name)}</button>`).join(' ');
   if (!state.status.loaded) { w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN AGENT chạy tốt nhất với <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b>.</span>`; w.hidden = false; return; }
-  if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN AGENT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để mở ứng dụng, đọc tệp, điều khiển máy đáng tin cậy, hãy dùng <b>Qwen3 4B/8B</b>.</span> ${recBtns}`; w.hidden = false; return; }
+  if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN AGENT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để gọi công cụ (mở ứng dụng, đọc tệp) đáng tin cậy, hãy dùng <b>Qwen3 4B/8B</b>; điều khiển màn hình còn cần mô hình nhìn ảnh (Qwen3-VL).</span> ${recBtns}`; w.hidden = false; return; }
   if (adv && adv.small) { w.innerHTML = `<span>⚠ <b>${esc(adv.model)}</b>${adv.params ? ` (khoảng ${String(adv.params).replace('.', ',')} tỉ tham số)` : ''} khá nhỏ cho AIVN AGENT: có thể gọi sai công cụ, bỏ bước hoặc nói đã làm khi chưa làm. Nên dùng <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b>.</span> ${recBtns}`; w.hidden = false; return; }
-  if (adv && adv.planner === false && state.settings && state.settings.agentScreen) { w.innerHTML = `<span>🖥 Điều khiển máy đang bật với <b>${esc(adv.model)}</b>. Mô hình này chưa qua bài đo Điểm tác vụ của AIVN; để bấm/gõ đáng tin cậy, dùng <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b> làm mô hình chính (mô hình nhìn ảnh có thể đặt làm “Mô hình định vị” trong Cài đặt).</span> ${recBtns}`; w.hidden = false; return; }
+  if (adv && adv.eyes && adv.eyes.needed) {
+    const r = adv.eyes.rec; const busy = adv.eyes.pending && jobs && [...jobs.values()].some(j => j.catalogId === adv.eyes.pending && j.status !== 'done');
+    w.innerHTML = `<span>👁 <b>Điều khiển màn hình cần mắt nhìn.</b> <b>${esc(adv.model)}</b> chỉ đọc chữ, không nhìn được màn hình — Zalo và các ứng dụng Electron gần như không cho đọc nút/ô, nên AIVN AGENT sẽ bấm nhầm hoặc báo “không tìm thấy”. ${r ? `Nạp thêm <b>${esc(r.name)}</b> (${fmtBytes(r.size)}): AIVN tự dùng nó để nhìn ảnh chụp mỗi bước.` : ''}</span> ${r ? `<button class="btn sm primary" data-eyes="${esc(r.id)}" ${busy ? 'disabled' : ''}>${busy ? 'Đang tải mắt nhìn…' : r.installed ? '👁 Nạp thêm mắt nhìn' : '👁 Tải & nạp thêm mắt nhìn'}</button>` : ''}`;
+    w.hidden = false; return;
+  }
   w.hidden = true;
 }
 $('#agentWarn').addEventListener('click', async (e) => {
+  const ey = e.target.closest('[data-eyes]');
+  if (ey) { ey.disabled = true; try { const r = await A.agentEyes(ey.dataset.eyes); if (r.installed) toast(`Đã bật mắt nhìn: ${r.name} ✓`); else { if (r.job) paintJob(r.job); toast(`Đang tải ${r.name}. Tải xong AIVN tự dùng làm mắt nhìn.`); } } catch (err) { toast(cleanErr(err.message), true); ey.disabled = false; } refreshAgent(); return; }
   const b = e.target.closest('[data-rec]'); if (!b) return;
   if (b.dataset.installed === '1') { const c = state.catalog.find(x => x.id === b.dataset.rec) || (await A.catalog()).find(x => x.id === b.dataset.rec); await refreshModels(); const m = state.models.find(x => c && x.file.toLowerCase() === c.file.toLowerCase()); if (m) loadModel(m.id); }
   else { show('discover'); try { const j = await A.dlStart({ catalogId: b.dataset.rec }); paintJob(j); toast('Đang tải mô hình cho AIVN AGENT, xem tiến độ ở mục Đang tải'); } catch (err) { toast(cleanErr(err.message), true); } }
@@ -1222,7 +1268,7 @@ function paintComputer(c) {
   if (!c) return;
   $('#agComp').checked = c.enabled; $('#agAutoRO').checked = c.autoReadOnly; $('#agAutoRO').disabled = !c.enabled;
   $('#agScreen').checked = c.screen;
-  $('#agScreenNote').innerHTML = `AIVN AGENT tự mở ứng dụng và thao tác như bạn: đọc danh sách nút/ô của cửa sổ (Trợ năng của hệ điều hành) và chữ trên màn hình, bấm/gõ từng bước rồi kiểm tra lại. Mô hình thường (Qwen3 4B/8B) dùng được; mô hình nhìn ảnh giúp tìm phần tử khó. Luôn hỏi trước khi gửi tin nhắn, thanh toán, xoá, nộp biểu mẫu; không bao giờ gõ mật khẩu. Dừng: <b>Esc</b>, <b>${esc(c.stopKey)}</b> hoặc nút “Dừng ngay”.`;
+  $('#agScreenNote').innerHTML = `AIVN AGENT tự mở ứng dụng và thao tác như bạn: đọc danh sách nút/ô của cửa sổ (Trợ năng của hệ điều hành) và chữ trên màn hình, bấm/gõ từng bước rồi kiểm tra lại. Cần <b>nhìn được màn hình</b>: dùng mô hình nhìn ảnh (Qwen3-VL) làm mô hình chính, hoặc mô hình chữ + mắt nhìn (AIVN tự nạp mô hình nhìn ảnh đã cài). Luôn hỏi trước khi gửi tin nhắn, thanh toán, xoá, nộp biểu mẫu; không bao giờ gõ mật khẩu. Dừng: <b>Esc</b>, <b>${esc(c.stopKey)}</b> hoặc nút “Dừng ngay”.`;
   $('#agGrounder').innerHTML = '<option value="">Không dùng — chỉ cây giao diện + đọc chữ</option>' + (c.grounders || []).map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join(''); $('#agGrounder').value = c.grounder || '';
   $('#agScreenOpts').hidden = !c.screen; $('#agScreenMode').value = c.screenMode || 'each'; $('#agScreenBudget').value = String(c.screenBudget || 40);
   paintBench();
@@ -1341,9 +1387,9 @@ async function refreshSecurity() {
     <span>Kiểm tra thu hồi</span><b>${l.lastCheckOk ? 'lần cuối ' + new Date(l.lastCheckOk).toLocaleString('vi-VN') : 'chưa kiểm tra được'}${l.graceLeftMs != null ? ` · còn dùng ngoại tuyến ${Math.max(0, Math.floor(l.graceLeftMs / 864e5))} ngày` : ''}</b></div>
     <div class="row"><button class="btn sm" id="secRecheck">Kiểm tra lại qua Internet</button></div>`;
   const k = await A.lockInfo();
-  $('#lockState').innerHTML = k.enabled ? '🔒 Khóa ứng dụng đang <b>bật</b>.' : 'Khóa ứng dụng đang <b>tắt</b>.';
+  $('#lockState').innerHTML = k.enabled ? '🔒 Khoá ứng dụng đang <b>bật</b>.' : 'Khoá ứng dụng đang <b>tắt</b>.';
   $('#lkCur').hidden = !k.enabled; $('#lkOff').hidden = !k.enabled; $('#lkNow').hidden = !k.enabled;
-  $('#lkSave').textContent = k.enabled ? 'Đổi mật khẩu' : 'Bật Khóa ứng dụng';
+  $('#lkSave').textContent = k.enabled ? 'Đổi mật khẩu' : 'Bật Khoá ứng dụng';
   $('#lkIdle').value = String(k.idleMinutes || 0); $('#lkSleep').checked = k.lockOnSleep;
   paintAdmin(await A.adminState());
 }
@@ -1373,7 +1419,7 @@ $('#view-security').addEventListener('click', async (e) => {
   try {
     if (t.id === 'secCopyMc') { await A.copyText($('#secMachine').textContent); toast('Đã chép Mã máy ✓'); }
     if (t.id === 'secRecheck') { const r = await A.licenseCheck(); toast(r.ok ? 'Đã kiểm tra danh sách thu hồi ✓' : 'Chưa kết nối được: ' + (r.error || ''), !r.ok); refreshSecurity(); }
-    if (t.id === 'lkOff') { await A.lockDisable({ current: $('#lkCur').value }); $('#lkCur').value = ''; toast('Đã tắt Khóa ứng dụng'); refreshSecurity(); }
+    if (t.id === 'lkOff') { await A.lockDisable({ current: $('#lkCur').value }); $('#lkCur').value = ''; toast('Đã tắt Khoá ứng dụng'); refreshSecurity(); }
     if (t.id === 'lkNow') await A.lockNow();
     if (t.id === 'admImport') { const r = await A.adminImport({ pass: $('#admNewPass').value }); if (!r.canceled) toast('Đã nhập khoá quản trị ✓'); paintAdmin(await A.adminState()); }
     if (t.id === 'admForget') { if (await modalAsk({ icon: '⚠️', title: 'Gỡ khoá quản trị khỏi máy này?', message: 'Bản mã hoá của khoá riêng trên máy này sẽ bị xoá. Hãy chắc chắn bạn còn giữ tệp aivn-admin-key.json ở nơi an toàn.', okLabel: 'Gỡ khoá', noLabel: 'Huỷ' })) paintAdmin(await A.adminForget()); }
@@ -1394,7 +1440,7 @@ async function doRevoke(id, name) {
 $('#view-security').addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
-    if (e.target.id === 'lockForm') { await A.lockSet({ password: $('#lkNew').value, confirm: $('#lkNew2').value, current: $('#lkCur').value }); for (const i of ['#lkNew', '#lkNew2', '#lkCur']) $(i).value = ''; toast('Đã bật Khóa ứng dụng ✓'); refreshSecurity(); }
+    if (e.target.id === 'lockForm') { await A.lockSet({ password: $('#lkNew').value, confirm: $('#lkNew2').value, current: $('#lkCur').value }); for (const i of ['#lkNew', '#lkNew2', '#lkCur']) $(i).value = ''; toast('Đã bật Khoá ứng dụng ✓'); refreshSecurity(); }
     if (e.target.id === 'admUnlockForm') paintAdmin(await A.adminUnlock($('#admPass').value));
     if (e.target.id === 'admIssueForm') {
       const r = await A.adminIssue({ name: $('#admName').value, machineCode: $('#admMc').value, days: $('#admDays').value || null });
@@ -1411,7 +1457,7 @@ $('#lkSleep').addEventListener('change', async (e) => { await A.lockOptions({ lo
 // ---------- Khởi động ----------
 (async () => {
   state.settings = await A.getSettings();
-  applyTheme(state.settings.theme);
+  applyTheme(state.settings.theme); $('#themeFxSel').value = themeFx();
   bindSettings();
   $('#gpuOn').checked = state.settings.gpu !== false;
   paintAdvanced();
@@ -1568,3 +1614,5 @@ document.addEventListener('click', async (e) => {
   } catch (err) { toast(cleanErr(err.message), true); }
   b.disabled = false; b.textContent = 'Tăng ngữ cảnh';
 });
+// tải xong mắt nhìn: AIVN tự đặt làm mô hình định vị (main) — làm mới biểu ngữ AIVN AGENT
+A.onDlDone(() => setTimeout(() => { if (typeof refreshAgent === 'function') refreshAgent().catch(() => {}); }, 800));

@@ -122,8 +122,8 @@
             <label class="check toggle"><input type="checkbox" id="agScreen"> <span><b>🖱 Điều khiển màn hình <em class="beta">Thử nghiệm</em></b><small id="agScreenNote">AIVN AGENT tự mở ứng dụng và bấm/gõ từng bước như bạn. Dừng: Esc hoặc Ctrl+Alt+Q.</small></span></label>
             <div class="screen-opts" id="agScreenOpts" hidden>
               <label class="small">Xin phép <select id="agScreenMode"><option value="each">Hỏi từng bước</option><option value="important">Chỉ hỏi bước quan trọng</option></select></label>
-              <label class="small grounder-row">Mô hình định vị (tuỳ chọn) <select id="agGrounder"><option value="">Không dùng — chỉ cây giao diện + đọc chữ</option></select>
-                <small class="muted">Chế độ hai mô hình: mô hình đang chat (vd. Qwen3 4B/8B) lập kế hoạch; mô hình định vị nhìn ảnh (Holo, UI-TARS, Qwen-VL) chỉ tìm toạ độ khi cửa sổ không cho biết vị trí nút. Holo/UI-TARS định vị tốt nhưng lập kế hoạch kém — đừng dùng chúng làm mô hình chat. Cần thêm RAM/VRAM để chạy song song.</small></label>
+              <label class="small grounder-row">Mô hình định vị (tuỳ chọn) <select id="agGrounder"><option value="">Tự động — dùng mô hình nhìn ảnh đã cài khi mô hình chính không nhìn được</option></select>
+                <small class="muted">Mắt nhìn của AIVN AGENT. Mô hình chỉ đọc chữ (Qwen3 4B/8B…) KHÔNG nhìn được màn hình; Zalo và các ứng dụng Electron gần như không cho đọc nút/ô. Vì vậy khi mô hình chính không nhìn được ảnh, AIVN tự dùng một mô hình nhìn ảnh (UI-TARS, Holo, Qwen3-VL) để nhìn ảnh chụp mỗi bước và tìm toạ độ. Cách đơn giản nhất: nạp Qwen3-VL làm mô hình chính (vừa lập kế hoạch vừa nhìn). Holo/UI-TARS nhìn tốt nhưng lập kế hoạch kém — đừng dùng làm mô hình chat.</small></label>
               <div class="bench-box" id="benchBox"><b>📏 Đo Điểm tác vụ trên máy này</b>
                 <small class="muted">AIVN mở một cửa sổ thử “AIVN Bench” và để mô hình tự làm 10 việc có kịch bản (mở ứng dụng, bấm nút có tên, gõ tiếng Việt, đọc chữ, nhấp đúp…) + 1 bài an toàn (phải hỏi trước khi gửi). Chấm điểm tự động bằng trạng thái thật của cửa sổ. Mất khoảng 10–40 phút; đừng dùng chuột/bàn phím trong lúc đo (Esc để dừng).</small>
                 <div class="row wrap"><select id="benchModel" aria-label="Mô hình cần đo"></select><button type="button" class="btn sm" id="benchRun">Bắt đầu đo</button><button type="button" class="btn sm" id="benchStop" hidden>Dừng</button></div>
@@ -153,6 +153,7 @@
           <input type="number" id="maxTok" min="16" max="8192" step="16">
         </label>
         <label class="check"><input type="checkbox" id="gpuOn"> Tăng tốc bằng GPU (Vulkan/CUDA/Metal)<small>Tắt nếu nạp mô hình bị lỗi. AIVN tự chuyển sang CPU khi GPU nạp lỗi. Đổi cài đặt này sẽ gỡ mô hình đang nạp.</small></label>
+        <label>Hiệu ứng chuyển giao diện<select id="themeFxSel"><option value="full">Đầy đủ (mặc định)</option><option value="os">Theo hệ điều hành</option><option value="off">Tắt</option></select><small>Logo rồng và vòng màu lan ra khi đổi sáng/tối. "Đầy đủ" vẫn chạy khi Windows tắt hiệu ứng động.</small></label>
         <div class="row wrap"><button type="button" class="btn sm" id="openLogs2">🧾 Mở thư mục nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>
         <details class="adv" id="advBox">
           <summary>Nâng cao: phần cứng &amp; ghi đè</summary>
@@ -234,7 +235,7 @@
           <div class="row between"><h3>Gợi ý của AIVN</h3><div class="fam-filter" id="famFilter"></div></div>
           <section id="screenArea" class="screen-area" hidden>
             <h3>🖥 Mô hình điều khiển máy tính</h3>
-            <p class="muted small">AIVN AGENT điều khiển máy bằng <b>hai vai</b>: <b>🧠 Lập kế hoạch</b> — một mô hình chữ gọi công cụ tốt (Qwen3 4B/8B) đọc danh sách nút/ô của cửa sổ qua Trợ năng của hệ điều hành và quyết định bước tiếp; <b>🎯 Định vị</b> (tuỳ chọn, chế độ hai mô hình) — một mô hình nhìn ảnh (Holo1.5, UI-TARS, Qwen-VL) chỉ ra toạ độ khi danh sách thiếu nút. Nhãn ⭐ Gợi ý chỉ dành cho mô hình đã qua bài đo thật (<b>Điểm tác vụ</b> ≥ 7/10 và luôn hỏi trước khi gửi); điểm ghi rõ đo ở đâu.</p>
+            <p class="muted small">Điều khiển máy cần <b>nhìn được màn hình</b>: mô hình chỉ đọc chữ không đủ (Zalo và ứng dụng Electron gần như không cho đọc nút/ô). Chọn một trong hai: <b>(a)</b> một <b>mô hình nhìn ảnh</b> vừa lập kế hoạch vừa nhìn (Qwen3-VL 8B nếu GPU ≥ 8 GB, Qwen3-VL 4B với 4 GB, Qwen3-VL 2B nếu ít hơn); hoặc <b>(b)</b> cặp <b>🧠 Lập kế hoạch</b> (Qwen3 4B/8B) + <b>🎯 Mắt nhìn</b> (UI-TARS, Holo1.5) — AIVN tự nạp mắt nhìn khi cần. ⭐ Gợi ý dựa trên VRAM của máy này; Điểm tác vụ chỉ hiện khi đã đo thật.</p>
             <div class="cards" id="screenCards"></div>
             <h3 class="mt">Các mô hình khác</h3>
           </section>
@@ -333,17 +334,17 @@
     </section>
     <section class="view" id="view-security">
       <div class="page narrow">
-        <div class="page-head"><div><h2>🔐 Bảo mật &amp; Quản trị</h2><p class="muted">Kích hoạt của máy này, Khóa ứng dụng bằng mật khẩu, và trang Quản trị dành cho chủ sở hữu.</p></div></div>
+        <div class="page-head"><div><h2>🔐 Bảo mật &amp; Quản trị</h2><p class="muted">Kích hoạt của máy này, Khoá ứng dụng bằng mật khẩu, và trang Quản trị dành cho chủ sở hữu.</p></div></div>
         <div class="sec-card" id="secLicense"></div>
         <div class="sec-card">
-          <h3>🔒 Khóa ứng dụng</h3>
+          <h3>🔒 Khoá ứng dụng</h3>
           <p class="small muted">Đặt mật khẩu để mở AIVN trên máy này. AIVN chỉ lưu giá trị băm (scrypt) của mật khẩu; quên mật khẩu thì chỉ có thể xoá dữ liệu AIVN để dùng lại. Đây là khoá mở ứng dụng, không mã hoá tệp trên ổ đĩa.</p>
           <div id="lockState" class="small"></div>
           <form id="lockForm" class="sec-form">
             <input type="password" id="lkCur" placeholder="Mật khẩu hiện tại" autocomplete="current-password" hidden>
             <input type="password" id="lkNew" placeholder="Mật khẩu mới (ít nhất 4 ký tự)" autocomplete="new-password">
             <input type="password" id="lkNew2" placeholder="Nhập lại mật khẩu mới" autocomplete="new-password">
-            <div class="row"><button class="btn primary" type="submit" id="lkSave">Bật Khóa ứng dụng</button><button class="btn" type="button" id="lkOff" hidden>Tắt khoá</button><button class="btn" type="button" id="lkNow" hidden>Khóa ngay</button></div>
+            <div class="row"><button class="btn primary" type="submit" id="lkSave">Bật Khoá ứng dụng</button><button class="btn" type="button" id="lkOff" hidden>Tắt khoá</button><button class="btn" type="button" id="lkNow" hidden>Khoá ngay</button></div>
           </form>
           <div class="row lk-opts"><label>Tự khoá khi không dùng <select id="lkIdle"><option value="0">Không</option><option value="5">5 phút</option><option value="15">15 phút</option><option value="30">30 phút</option><option value="60">60 phút</option></select></label><label class="check"><input type="checkbox" id="lkSleep"> Khoá khi máy ngủ / khoá màn hình</label></div>
         </div>

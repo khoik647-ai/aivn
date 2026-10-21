@@ -130,6 +130,10 @@ function claimCheck(query, text, steps, names) {
 }
 
 // Chống "giả vờ làm": mô hình viết bước giả ("[screen,act] Gõ…") hoặc nói đã gửi/đã mở khi chưa có công cụ nào báo thành công
+const NOT_FOUND_RE = /không\s+(tìm\s+thấy|thấy|có)(?!\p{L})|chưa\s+(tìm\s+thấy|thấy)(?!\p{L})|không\s+(ra|hiện)\s+kết\s+quả|no\s+(match|result)|not\s+found/iu;
+const openNudge = (hit) => `(Kiểm tra tự động của AIVN) Kết quả tìm kiếm "${hit.name}" đã hiện${hit.id ? ` ở [${hit.id}]` : ''} nhưng bạn CHƯA bấm vào. Người dùng đã yêu cầu mở, nên hãy bấm vào kết quả đó ngay (screen_act click${hit.id ? ` element "${hit.id}"` : ''}) rồi kiểm tra cửa sổ đã mở đúng người. Mở một cuộc trò chuyện hay một mục không cần hỏi lại; chỉ việc gửi tin nhắn hoặc thao tác quan trọng mới cần người dùng cho phép.`;
+const OPEN_WANT_RE = /(mở|open|vào|nhắn|trò\s+chuyện|chat|xem|gọi)(?!\p{L})/iu;
+const searchNudge = (todo) => `(Kiểm tra tự động của AIVN) Chưa được kết luận "không tìm thấy": ô tìm kiếm mới thử chưa đủ cách. Hãy lần lượt ${todo.map(v => `gõ lại "${v}" vào ô tìm kiếm (screen_act type_text, replace: true), chờ kết quả rồi kiểm tra`).join('; ')}. Chỉ báo không tìm thấy sau khi đã thử hết và nêu các cách đã thử.`;
 const NO_ACTION_WARN = 'Mô hình này chưa thực sự thao tác gì — chưa có việc nào được làm. Hãy dùng Qwen3 4B/8B (hỗ trợ công cụ tốt).';
 const FAKE_NUDGE = '[AIVN kiểm tra] Bạn CHƯA gọi công cụ nào trong lượt này, nên chưa có việc gì thực sự được làm. Không được viết bước giả (như "[screen,act] …") hay nói đã làm. Hãy gọi công cụ thật ngay bây giờ (khối <tool_call> hoặc lời gọi công cụ), hoặc nói thẳng là bạn không làm được và vì sao.';
 const REPEAT_WARN = 'Mô hình bắt đầu lặp lại cùng một câu nên AIVN đã tự dừng lại. Mẹo: dùng Qwen3 4B Instruct 2507 hoặc Qwen3 8B cho việc dùng công cụ, và nạp ít mô hình cùng lúc nếu GPU ít bộ nhớ.';
@@ -138,7 +142,7 @@ const REPEAT_NUDGE = '(Kiểm tra tự động của AIVN) Bạn đang lặp l�
 const REPEAT_ACT_NUDGE = '(Kiểm tra tự động của AIVN) Bạn đang lặp lại câu hỏi xin phép. Người dùng ĐÃ yêu cầu bạn làm, và các công cụ máy tính đang bật. Không hỏi lại, không viết hướng dẫn: gọi công cụ đầu tiên ngay bây giờ (vd. open_app để mở ứng dụng).';
 const CANNOT = { name: 'cannot_do', description: 'Dùng khi không có công cụ phù hợp hoặc không thể làm yêu cầu. Nêu lý do ngắn gọn bằng tiếng Việt.', parameters: { type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'] } };
 const CLAIMS = [
-  [/(đã|vừa)\s+(mở|khởi động|bật)(?!\p{L})/iu, ['open_app', 'open_path', 'open_url', 'run_command']],
+  [/(đã|vừa)\s+(mở|khởi động|bật)(?!\p{L})/iu, ['open_app', 'open_path', 'open_url', 'run_command', 'screen_act']], // bấm mở một cuộc trò chuyện/mục trong ứng dụng cũng là "đã mở"
   [/(đã|vừa)\s+(gửi|nhắn|gõ|nhập|bấm|nhấn|click|chọn|cuộn)(?!\p{L})|gửi[^.\n]{0,40}thành công|đã được gửi/iu, ['screen_act']],
   [/(đã|vừa)\s+(đóng|tắt)\s+(ứng dụng|app|chương trình|cửa sổ)/iu, ['close_app', 'system_action']],
   [/(đã|vừa)\s+(chạy|thực thi)\s+(lệnh|câu lệnh)/iu, ['run_command']],
@@ -186,6 +190,13 @@ function sanitizeHistory(messages, { act = false } = {}) {
     return c === m.content ? m : { ...m, content: c };
   });
   return { messages: out, hidden: n, guides };
+}
+// khoảng cách Levenshtein (dùng để gợi ý tên tệp gõ sai)
+function editDist(a, b) {
+  if (Math.abs(a.length - b.length) > 3) return 99;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) { const cur = [i]; for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; }
+  return prev[b.length];
 }
 function fakeActionCheck(text, steps, names, query = '') {
   const t = String(text || '');
@@ -262,13 +273,23 @@ function createAgent(deps) {
     let firstErr = null;
     for (const c of cands) {
       const real = realOrNull(c) || (allowMissing ? realForNew(path.resolve(c)) : null);
-      if (!real) { firstErr ||= new ToolError(`Không tìm thấy "${p}" trong thư mục được phép.`); continue; }
+      if (!real) { firstErr ||= new ToolError(`Không tìm thấy "${p}" trong thư mục được phép.${nearName(c, p)}`); continue; }
       const root = roots.find(r => inside(r.real, real));
       if (!root) { firstErr = new ToolError(`Từ chối truy cập (Access denied): "${p}" nằm ngoài các thư mục người dùng cho phép. AIVN AGENT chỉ được làm việc trong: ${roots.map(r => r.shown).join('; ')}. Gọi list_allowed_directories để xem danh sách.`); continue; }
       if (!realOrNull(c) && !allowMissing) continue;
       return { root, full: real, rel: path.relative(root.real, real) };
     }
     throw firstErr || new ToolError(`Không tìm thấy "${p}".`);
+  }
+  // mô hình nhỏ hay gõ sai một hai ký tự tên tệp ("chii-tieu…"): gợi ý tên gần nhất có trong cùng thư mục
+  function nearName(cand, asked) {
+    try {
+      const want = path.basename(cand).toLowerCase(); if (want.length < 4) return '';
+      const best = fs.readdirSync(path.dirname(cand)).map(f => ({ f, d: editDist(f.toLowerCase(), want) })).filter(x => x.d <= Math.max(1, Math.min(3, Math.floor(want.length / 6)))).sort((a, b) => a.d - b.d)[0];
+      if (!best) return '';
+      const fixed = String(asked).replace(/[^\\/]+$/, () => best.f);
+      return ` Có tệp tên gần giống: "${fixed}" — nếu đúng là tệp này thì gọi lại với đúng tên đó.`;
+    } catch { return ''; }
   }
   // tên hiển thị: một thư mục được phép → đường dẫn tương đối; nhiều thư mục → kèm tên thư mục
   const shown = (r) => (folders().length > 1 ? path.join(path.basename(r.root.shown), r.rel || '') : (r.rel || '.')).replace(/\\/g, '/');
@@ -517,7 +538,7 @@ function createAgent(deps) {
     const ctx = { signal, convoId, userQuery: query, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
     const steps = [], seen = new Map();
     (runStore.getStore() || {}).steps = steps;
-    let text = '', finishReason = 'stop', calls = 0, nudged = false, deskNudged = false, forcedTried = false, warning = null, fakeSeen = false, emptyNudged = false, loopRetried = false;
+    let text = '', finishReason = 'stop', calls = 0, searchNudged = false, openNudged = false, nudged = false, deskNudged = false, forcedTried = false, warning = null, fakeSeen = false, emptyNudged = false, loopRetried = false;
     const smp = SMP.samplingFor(st.id || '', 'agent', { temperature: typeof s.agentTemperature === 'number' && s.agentTemperature !== 0.2 ? s.agentTemperature : null }); // 0.2 = mặc định cũ (dễ lặp) → tự động theo mô hình
     const turnBudget = Number(s.agentTurnMaxTokens) || 6000;
     const usage = { completion_tokens: 0, seconds: 0 };
@@ -602,6 +623,12 @@ function createAgent(deps) {
         }
         let deskPending = null; try { deskPending = !deskNudged && names.includes('screen_act') && deps.computer && deps.computer.pending ? await deps.computer.pending() : null; } catch {}
         if (deskPending && round < maxRounds - 2) { deskNudged = true; msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: `(Kiểm tra tự động của AIVN) ${deskPending} Hãy làm nốt bằng screen_act rồi mới trả lời; nếu không làm được thì nói rõ là CHƯA xong.` }); onStatus({ stage: 'verify', round, discarded: r.text || '' }); continue; }
+        // ô tìm kiếm (Zalo, danh bạ…) chưa ra kết quả: không được kết luận "không tìm thấy" khi còn cách tìm chưa thử
+        // đã thấy kết quả tìm kiếm mà dừng lại hỏi/không bấm: nhắc một lần mở luôn (người dùng đã yêu cầu mở)
+        let found = null; try { found = !openNudged && names.includes('screen_act') && deps.computer && deps.computer.searchFound ? deps.computer.searchFound() : null; } catch {}
+        if (found && OPEN_WANT_RE.test(String(query || '')) && round < maxRounds - 2) { openNudged = true; msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: openNudge(found) }); onStatus({ stage: 'verify', round, discarded: r.text || '' }); continue; }
+        let todo = null; try { todo = !searchNudged && names.includes('screen_act') && deps.computer && deps.computer.searchTodo ? deps.computer.searchTodo() : null; } catch {}
+        if (todo && NOT_FOUND_RE.test(r.text || '') && round < maxRounds - 2) { searchNudged = true; msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: searchNudge(todo) }); onStatus({ stage: 'verify', round, discarded: r.text || '' }); continue; }
         const nudge = !nudged && round < maxRounds - 2 ? (claimCheck(query, r.text || '', steps, names) || (fake ? FAKE_NUDGE : null)) : null;
         if (nudge) { nudged = true; msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: nudge }); onStatus({ stage: 'verify', round, discarded: r.text || '' }); continue; }
         if (fake && !forcedTried && names.length && !signal?.aborted) {
@@ -689,4 +716,4 @@ function createAgent(deps) {
   return { run, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck };
 }
 
-module.exports = { isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN };
+module.exports = { editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN };
