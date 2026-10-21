@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+// llama-server giả cho kiểm thử B13: nghe cổng --port, trả 200 cho mọi yêu cầu (/health, /props)
+const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
+require('http').createServer((q, r) => { r.setHeader('content-type', 'application/json'); r.end('{}'); }).listen(port, '127.0.0.1');
+setInterval(() => {}, 1000);

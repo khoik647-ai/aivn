@@ -29,6 +29,9 @@ function freePort() {
   });
 }
 
+// B13: mọi llama-server đang chạy trong tiến trình này — để giết ĐỒNG BỘ khi tiến trình sắp mất (không chờ dỡ mô hình)
+const LIVE = new Set(); const HOOKS = { spawn: null, exit: null }; // HOOKS: chạy trong Electron (AIVN_INPROC) thì tiến trình chính ghi pid vào tệp
+function killAllSync() { for (const p of LIVE) { try { p.kill('SIGKILL'); } catch {} } LIVE.clear(); }
 class VisionError extends Error { constructor(msg, code) { super(msg); this.code = code; } }
 
 function createVisionServer({ log = () => {} } = {}) {
@@ -48,6 +51,7 @@ function createVisionServer({ log = () => {} } = {}) {
       env: { ...process.env, LLAMA_ARG_HOST: '127.0.0.1' } });
     // 0.15.1: báo pid cho tiến trình chính — nếu engine-host bị giết (SIGKILL/sập), llama-server không bị bỏ lại chiếm 5–6 GB RAM/VRAM
     try { if (process.send && proc.pid) { process.send({ type: 'child', pid: proc.pid }); const p0 = proc; p0.once('exit', () => { try { process.send({ type: 'child-exit', pid: p0.pid }); } catch {} }); } } catch {}
+    LIVE.add(proc); { const pp = proc; try { HOOKS.spawn && HOOKS.spawn(pp.pid); } catch {} pp.once('exit', () => { LIVE.delete(pp); try { HOOKS.exit && HOOKS.exit(pp.pid); } catch {} }); }
     let layers = null;
     const onData = (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { tail.push(l); if (tail.length > 40) tail.shift(); const m = l.match(/offloaded (\d+)\/(\d+) layers to GPU/); if (m) { layers = { gpu: +m[1], total: +m[2] }; if (info) Object.assign(info, { gpuLayers: layers.gpu, totalLayers: layers.total }); } } };
     proc.stdout.on('data', onData); proc.stderr.on('data', onData);
@@ -203,4 +207,4 @@ function createVisionServer({ log = () => {} } = {}) {
   return { start, stop, generate, chatStep, countTokens, status: () => info, available: () => !!findServer() };
 }
 
-module.exports = { createVisionServer, findServer, VisionError };
+module.exports = { createVisionServer, findServer, VisionError, killAllSync, LIVE, HOOKS };

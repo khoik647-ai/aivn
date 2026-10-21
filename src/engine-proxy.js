@@ -7,7 +7,7 @@ function firstErrorLine(t) {
   const l = lines.find(x => /^(\w*Error|Error)\b[:\s]/.test(x) || /^(Uncaught|FATAL|Fatal)/i.test(x)) || lines.find(x => /cannot find module|not found|failed|lỗi/i.test(x));
   return l ? l.slice(0, 240) : '';
 }
-function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () => {}, onProgress = () => {} }) {
+function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () => {}, onProgress = () => {}, pidFile = null }) {
   let child = null, readyP = null, seq = 0;
   const pending = new Map(); // id -> {resolve, reject}
   const tokenCbs = new Map(); // reqId -> onToken
@@ -20,15 +20,15 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
   function start() {
     if (readyP) return readyP;
     readyP = new Promise((resolve, reject) => {
-      const env = { ...process.env, ...extraEnv }; for (const k of Object.keys(env)) if (env[k] === '' || env[k] == null) delete env[k]; delete env.ELECTRON_RUN_AS_NODE; delete env.NODE_OPTIONS; if (process.resourcesPath && !env.AIVN_RESOURCES) env.AIVN_RESOURCES = process.resourcesPath;
+      const env = { ...process.env, ...extraEnv, AIVN_PARENT_PID: String(process.pid) }; for (const k of Object.keys(env)) if (env[k] === '' || env[k] == null) delete env[k]; delete env.ELECTRON_RUN_AS_NODE; delete env.NODE_OPTIONS; if (process.resourcesPath && !env.AIVN_RESOURCES) env.AIVN_RESOURCES = process.resourcesPath;
       child = fork(hostScript, [], { execPath: nodePath, execArgv: [], serialization: 'json', stdio: ['ignore', 'pipe', 'pipe', 'ipc'], env, windowsHide: true });
       child.stdout.on('data', (d) => log(String(d).trimEnd()));
       errTail = ''; ready = false;
       child.stderr.on('data', (d) => { const t = String(d); errTail = (errTail + t).slice(-4000); log(t.trimEnd()); });
       child.on('message', (m) => {
         if (m.type === 'ready') { ready = true; log(`[engine] tiến trình ${m.pid}, Node ${m.node}`); return resolve(); }
-        if (m.type === 'child') { kids.add(m.pid); return; }
-        if (m.type === 'child-exit') { kids.delete(m.pid); return; }
+        if (m.type === 'child') { kids.add(m.pid); pidFile && pidFile.add(m.pid); return; }
+        if (m.type === 'child-exit') { kids.delete(m.pid); pidFile && pidFile.remove(m.pid); return; }
         if (m.type === 'token') { tokenCbs.get(m.reqId)?.(m.t, m.k); return; }
         if (m.type === 'progress') { try { onProgress(m); } catch {} return; }
         const p = pending.get(m.id); if (!p) return; pending.delete(m.id); inflight.delete(m.id);
@@ -36,7 +36,7 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
       });
       child.on('error', (e) => { log('[engine] lỗi khởi động: ' + e.message); reject(e); });
       child.on('exit', (code, signal) => {
-        for (const pid of kids) { try { process.kill(pid); log(`[engine] dừng llama-server mồ côi (pid ${pid})`); } catch {} } kids.clear();
+        for (const pid of kids) { try { process.kill(pid); log(`[engine] dừng llama-server mồ côi (pid ${pid})`); } catch {} pidFile && pidFile.remove(pid); } kids.clear();
         const wasLoaded = cached.loaded || !!loading;
         child = null; readyP = null; cached = { loaded: false }; groundCached = { loaded: false };
         const busy = [...inflight.values()]; inflight.clear();

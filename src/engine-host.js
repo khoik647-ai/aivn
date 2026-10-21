@@ -58,6 +58,18 @@ process.on('message', async (msg) => {
     reply({ id, result });
   } catch (e) { reply({ id, error: String(e && e.message || e), code: e && e.code, stack: String(e && e.stack || ''), attempts: e && e.attempts, gpu: e && e.gpu }); }
 });
-process.on('disconnect', async () => { try { await engine.unloadModel(); } catch {} try { grounder && await grounder.stop(); } catch {} process.exit(0); });
-for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, async () => { try { await engine.unloadModel(); } catch {} try { grounder && await grounder.stop(); } catch {} process.exit(0); });
+// B13 (QA lượt 2): tiến trình chính mất (đóng app, bị kill, sập) → giết NGAY mọi llama-server (đồng bộ) rồi thoát; không chờ dỡ mô hình
+// (dỡ mô hình có thể treo khi đang nạp dở, làm llama-server bị bỏ lại giữ vài GB RAM/VRAM).
+const VS = require('./vision-server');
+let quitting = false;
+function quit(why) {
+  if (quitting) return; quitting = true;
+  VS.killAllSync();
+  setTimeout(() => process.exit(0), 2500).unref(); // dỡ mô hình node-llama-cpp tối đa 2,5 giây
+  Promise.resolve().then(() => engine.unloadModel()).catch(() => {}).finally(() => process.exit(0));
+}
+process.on('disconnect', () => quit('mất kết nối tới tiến trình chính'));
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => quit(sig));
+process.on('exit', () => VS.killAllSync());
+require('./orphans').watchParent(Number(process.env.AIVN_PARENT_PID) || process.ppid, () => quit('tiến trình chính đã dừng'));
 reply({ type: 'ready', pid: process.pid, node: process.versions.node });

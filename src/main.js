@@ -53,10 +53,14 @@ function findNode() {
 }
 const hostScript = path.join(__dirname, 'engine-host.js').replace(/app\.asar([\\/])/, 'app.asar.unpacked$1');
 const nodePath = process.env.AIVN_INPROC === '1' ? null : findNode();
+// B13 (QA lượt 2): ghi pid llama-server ra tệp; lần mở sau dọn tiến trình còn sót khi AIVN bị tắt đột ngột (kill, sập, mất điện…)
+const ORPH = require('./orphans');
+const pidFile = ORPH.createPidFile(path.join(app.getPath('userData'), 'llama-server-pids.json'));
+{ const VS = require('./vision-server'); VS.HOOKS.spawn = (pid) => pidFile.add(pid); VS.HOOKS.exit = (pid) => pidFile.remove(pid); process.on('exit', () => VS.killAllSync()); }
 let engine;
 if (nodePath) {
   const { createEngineProxy } = require('./engine-proxy');
-  engine = createEngineProxy({ nodePath, hostScript, log: (m) => { console.log(m); LOG.log('engine', m); },
+  engine = createEngineProxy({ nodePath, hostScript, pidFile, log: (m) => { console.log(m); LOG.log('engine', m); },
     onProgress: (p) => send('model:progress', { id: p.id, pct: p.pct, mode: p.mode }),
     onCrash: (e) => { engineDied = true; send('model:status', { loaded: false }); send('engine:crash', { message: e.message }); } });
 } else {
@@ -2214,6 +2218,8 @@ async function selfTestV13() {
 const gotLock = isTest || app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
 else {
+  // chỉ bản đang giữ khoá một-phiên-bản mới dọn (bản mở thứ hai không được giết llama-server của bản đang chạy)
+  try { const k = pidFile.cleanup({ log: (m) => { console.log(m); LOG.log('engine', m); } }); if (k.length) LOG.log('engine', `Đã dừng ${k.length} llama-server còn sót từ lần chạy trước`); } catch (e) { console.warn('[dọn] ' + e.message); }
   app.on('second-instance', () => showWindow());
   app.on('before-quit', () => { quitting = true; });
   app.whenReady().then(async () => {
