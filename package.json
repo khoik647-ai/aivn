@@ -233,7 +233,8 @@
         "repo": "aivn",
         "releaseType": "release"
       }
-    ]
+    ],
+    "beforePack": "build/build-info.cjs"
   },
   "desktopName": "aivn.desktop"
 }
