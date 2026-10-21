@@ -1136,13 +1136,7 @@ function registerIpc() {
     if (ok.response !== 1) return listModels();
     if (m.loaded) { await engine.unloadModel(); send('model:status', engine.status()); }
     if (m.source === 'imported') settings.data.imported = settings.data.imported.filter(p => p !== m.path), settings.save();
-    else {
-      const sm = m.file.match(SPLIT_RE);
-      if (sm) for (let i = 1; i <= Number(sm[3]); i++) fs.rmSync(path.join(path.dirname(m.path), `${sm[1]}-${String(i).padStart(5, '0')}-of-${sm[3]}.gguf`), { force: true });
-      else fs.rmSync(m.path, { force: true });
-      // dọn thư mục repo/tác giả nếu đã trống
-      for (let d = path.dirname(m.path); d.startsWith(paths.models + path.sep); d = path.dirname(d)) { try { fs.rmdirSync(d); } catch { break; } }
-    }
+    else { const gone = require('./models-dir').deleteModelFiles(m, listModels(), paths.models); LOG.log('models', `Đã xoá mô hình ${m.file}`, { files: gone.map(f => path.basename(f)) }); }
     return listModels();
   });
   // ---------- Đổi thư mục mô hình (beta.3) ----------

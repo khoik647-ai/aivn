@@ -58,4 +58,16 @@ async function moveModels(from, to, { onProgress = () => {}, signal = null, stat
   prune(from);
   return { moved: moved.length, skipped: skipped.length, files: files.length, bytes: bytesTotal, sameDrive: same };
 }
-module.exports = { freeBytes, checkSpace, spaceError, validateTarget, listFiles, moveModels, driveOf, MARGIN };
+// B79 (QA lượt 8): xoá mô hình đã tải — tệp mô hình (mọi phần nếu tách), tệp thị giác mmproj nếu KHÔNG mô hình nào khác dùng chung, rồi dọn thư mục trống.
+// Không bao giờ xoá gì ngoài thư mục mô hình. Trả về danh sách tệp đã xoá.
+const SPLIT = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i;
+function deleteModelFiles(m, all, root) {
+  const inRoot = (f) => { const r = path.resolve(root) + path.sep; return path.resolve(f).startsWith(r); };
+  const gone = []; const rm = (f) => { if (!f || !inRoot(f)) return; try { if (fs.existsSync(f)) { fs.rmSync(f, { force: true }); gone.push(f); } } catch {} };
+  const sm = path.basename(m.path).match(SPLIT);
+  if (sm) for (let i = 1; i <= Number(sm[3]); i++) rm(path.join(path.dirname(m.path), `${sm[1]}-${String(i).padStart(5, '0')}-of-${sm[3]}.gguf`)); else rm(m.path);
+  if (m.mmproj && !(all || []).some(o => o !== m && o.id !== m.id && o.mmproj && path.resolve(o.mmproj) === path.resolve(m.mmproj))) rm(m.mmproj);
+  for (let d = path.dirname(m.path); inRoot(d) && path.resolve(d) !== path.resolve(root); d = path.dirname(d)) { try { fs.rmdirSync(d); } catch { break; } }
+  return gone;
+}
+module.exports = { deleteModelFiles, freeBytes, checkSpace, spaceError, validateTarget, listFiles, moveModels, driveOf, MARGIN };
