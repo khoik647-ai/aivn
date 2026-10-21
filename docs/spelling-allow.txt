@@ -90,3 +90,4 @@ batch
 preset
 seed
 ừm
+model

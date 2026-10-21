@@ -270,7 +270,7 @@
           <div class="srv-opt"><b>🔑 Khoá API</b> <span class="muted small" id="srvKeyState">Chưa có: ai trên máy này cũng gọi được API.</span>
             <div class="row wrap"><code class="srv-key" id="srvKeyShow" hidden></code><button type="button" class="btn sm" id="srvKeyGen">Tạo khoá</button><button type="button" class="btn sm" id="srvKeyReveal" hidden>Hiện &amp; sao chép</button><button type="button" class="btn sm" id="srvKeyClear" hidden>Xoá khoá</button></div></div>
           <div class="srv-opt"><label class="small">Tự gỡ mô hình nạp theo yêu cầu API (TTL) <select id="srvTtl"><option value="0">Không tự gỡ</option><option value="5">sau 5 phút không dùng</option><option value="15">sau 15 phút không dùng</option><option value="60">sau 60 phút không dùng</option><option value="240">sau 4 giờ không dùng</option></select></label>
-            <small class="muted">Khi yêu cầu API ghi "model" là mô hình chưa nạp, AIVN tự nạp mô hình đó (JIT); TTL giải phóng bộ nhớ khi không còn ai dùng.</small></div>
+            <small class="muted">Khi yêu cầu API ghi <code>model</code> là mô hình chưa nạp, AIVN tự nạp mô hình đó (JIT); TTL giải phóng bộ nhớ khi không còn ai dùng.</small></div>
           <div class="srv-opt"><b>Mô hình đang nạp</b><div class="srv-loaded" id="srvLoaded"></div></div>
         </div>
         <div class="grid2">
