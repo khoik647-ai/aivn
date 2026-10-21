@@ -34,9 +34,10 @@ const TOOL_CASES = [
   { id: 'outlook_draft', q: 'soạn email trên Outlook gửi khoik647@gmail.com, tiêu đề "Thử AIVN", nội dung "Xin chào", chỉ soạn, không gửi', ok: (c) => ['open_app', 'open_url', 'screen_look', 'list_apps'].includes(c.name) },
   { id: 'teams_zh', q: '在已打开的 Microsoft Teams 上给 Lê Văn Hùng 老师发消息：“Em xin phép nộp bài muộn 1 ngày ạ”。', ok: (c) => c.name === 'screen_look' || (c.name === 'open_app' && /teams/i.test(s(c.arguments))) },
   { id: 'gmail_en', q: 'In the open Gmail window, write an email to tranquynhanh@example.com with subject "Slides" — draft only, do not send.', ok: (c) => ['screen_look', 'open_app', 'open_url'].includes(c.name) },
-  { id: 'volume_up', q: 'tăng âm lượng lên', ok: (c) => c.name === 'system_action' && /volume_up|volume_set/.test(s(c.arguments)) },
-  { id: 'volume_set', q: 'đặt âm lượng 30', ok: (c) => c.name === 'system_action' && /volume_set/.test(s(c.arguments)) && /30/.test(s(c.arguments)) },
-  { id: 'mute', q: 'tắt tiếng máy tính', ok: (c) => c.name === 'system_action' && /mute/.test(s(c.arguments)) },
+  // direct: câu này trong AIVN AGENT thật được sys-intent.js làm thẳng (không qua mô hình) — điểm ở đây là khả năng gọi công cụ THÔ của mô hình
+  { id: 'volume_up', direct: true, q: 'tăng âm lượng lên', ok: (c) => c.name === 'system_action' && /volume_up|volume_set/.test(s(c.arguments)) },
+  { id: 'volume_set', direct: true, q: 'đặt âm lượng 30', ok: (c) => c.name === 'system_action' && /volume_set/.test(s(c.arguments)) && /30/.test(s(c.arguments)) },
+  { id: 'mute', direct: true, q: 'tắt tiếng máy tính', ok: (c) => c.name === 'system_action' && /mute/.test(s(c.arguments)) },
   { id: 'open_app', q: 'mở Zalo', ok: (c) => c.name === 'open_app' && /zalo/i.test(s(c.arguments)) },
   { id: 'outlook_step2', q: 'soạn email trên Outlook gửi khoik647@gmail.com, tiêu đề "Thử AIVN", chỉ soạn, không gửi', look: LOOK_OUTLOOK, ok: (c) => c.name === 'screen_act' && /click/.test(s(c.arguments)) && /e1|Thư mới/i.test(s(c.arguments)) },
   { id: 'messenger_step2', q: 'Trên Messenger đang mở, nói với Trần Quỳnh Anh là mai 8h họp nhóm nhé.', look: LOOK_MSG, ok: (c) => c.name === 'screen_act' && ((/click/.test(s(c.arguments)) && /e1|e4|Tìm kiếm|Trần Quỳnh Anh/i.test(s(c.arguments))) || (/type_text/.test(s(c.arguments)) && /e1/.test(s(c.arguments)))) },
@@ -54,7 +55,7 @@ async function runToolBench({ engine, defs, seeds = 3, signal, onProgress }) {
     const t0 = Date.now(); let call = null, text = '', err = null;
     try { const r = await engine.chatStep(msgs, { tools, toolChoice: 'auto', temperature: seed === 0 ? 0.2 : 0.7, maxTokens: 300, signal }); call = r && r.toolCalls && r.toolCalls[0] ? { name: r.toolCalls[0].name, arguments: r.toolCalls[0].arguments } : null; text = call ? '' : String((r && r.text) || '').slice(0, 160); }
     catch (e) { err = e.message; }
-    items.push({ id: cs.id, seed, pass: !!(call && cs.ok(call)), call, text, error: err, ms: Date.now() - t0 });
+    items.push({ id: cs.id, direct: !!cs.direct, seed, pass: !!(call && cs.ok(call)), call, text, error: err, ms: Date.now() - t0 });
   }
   const score = items.filter(x => x.pass).length;
   return { score, total: items.length, rate: items.length ? +(score / items.length).toFixed(3) : 0, pass: items.length ? score / items.length >= THRESH.tools : false, items };

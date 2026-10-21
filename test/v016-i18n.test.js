@@ -62,7 +62,7 @@ test('nối dây: script i18n trong mọi trang, cài đặt uiLang hợp lệ, 
 });
 test('agent: giao diện en/zh → lời nhắc hệ thống yêu cầu trả lời bằng ngôn ngữ đó, vẫn vừa ngữ cảnh 4096', async () => {
   const { createAgent } = require('../src/agent/agent'); const { createComputerTools } = require('../src/agent/computer-tools');
-  for (const [lang, re] of [['en', /Luôn trả lời bằng tiếng Anh \(English\) \(ngôn ngữ giao diện\)/], ['vi', /Luôn trả lời bằng tiếng Việt, thân thiện/]]) {
+  for (const [lang, re] of [['en', /Luôn trả lời bằng tiếng Anh \(English\), kể cả khi báo lỗi;/ /* B57: ngôn ngữ của người dùng */], ['vi', /Luôn trả lời bằng tiếng Việt, thân thiện/]]) {
     let sys = null; const ct = createComputerTools({ getSettings: () => ({ agentComputer: true }), openPath: async () => '', openExternal: async () => {}, visionReady: () => false, screen: {} });
     const engine = { status: () => ({ loaded: true, contextSize: 4096 }), chatStep: async (msgs) => { sys = msgs[0].content; return { text: 'ok', toolCalls: [], finishReason: 'stop', usage: {} }; } };
     const ag = createAgent({ engine, getSettings: () => ({ agentComputer: true, uiLang: lang }), memory: { count: () => 0 }, scheduler: {}, extractFile: async () => ({}), embedForMemory: async () => ({}), computer: ct });

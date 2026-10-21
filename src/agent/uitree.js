@@ -409,5 +409,11 @@ function resolveIdRef(elements, q, info = null) {
   const inf = info && info.get ? info.get(ref.id) : null; if (inf) return { goneId: { id: ref.id, inf } };
   return null;
 }
+// B37: chữ MỚI sau thao tác, đếm theo số lần xuất hiện (tệp thứ hai cùng tên cũng tính)
+function newTexts(beforeEls, afterEls, max = 4) {
+  const old = new Map(); for (const e of beforeEls || []) { const k = fold(e.name || '').trim(); if (k) old.set(k, (old.get(k) || 0) + 1); }
+  const out = []; for (const e of afterEls || []) { const n = String(e.name || '').trim(); const k = fold(n).trim(); if (!k) continue; const c = old.get(k) || 0; if (c > 0) { old.set(k, c - 1); continue; } if (n.length >= 3 && !out.includes(n)) out.push(n); }
+  return out.slice(0, max);
+}
 const isIdRef = (q) => { const r = parseIdRef(q); return !!(r && !r.label); };
-module.exports = { parseIdRef, isIdRef, resolveIdRef, ID_REF, queryVariants, findElementAny, stabilizeIds, isButtonish, taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };
+module.exports = { parseIdRef, isIdRef, resolveIdRef, newTexts, ID_REF, queryVariants, findElementAny, stabilizeIds, isButtonish, taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };

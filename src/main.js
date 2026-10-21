@@ -1601,6 +1601,8 @@ function benchScores() {
   return { local, shipped };
 }
 let benchRun = null;
+// bài đo (Điểm tác vụ và bộ đo đầy đủ) chạy cả mô hình chưa đạt để chấm điểm — chỉ chỗ này bỏ qua cổng AIVN AGENT
+const benchTurn = ({ messages, signal }) => runAgentTurn({ reqId: null, convoId: 'bench', messages, signal, gate: false });
 async function runAgentBench(ids, { only = null, onProgress = null } = {}) {
   if (benchRun) throw new Error('Bài đo đang chạy.');
   const AB = require('./agent-bench'); const U = require('./agent/uitree');
@@ -1613,7 +1615,7 @@ async function runAgentBench(ids, { only = null, onProgress = null } = {}) {
       const t0 = Date.now(); await loadById(id, { force: true }); send('model:status', engine.status());
       LOG.log('bench', `Bắt đầu đo Điểm tác vụ: ${id}`);
       const r = await AB.runBench({ BrowserWindow, desk: getDesk(), windows: U.windows, modelId: id, only, signal: ac.signal, perTaskMs: Number(process.env.AIVN_AGENTBENCH_TASKMS || 300000),
-        runTurn: ({ messages, signal }) => runAgentTurn({ reqId: null, convoId: 'bench', messages, signal, gate: false }), // bài đo chạy cả mô hình chưa đạt để chấm điểm
+        runTurn: benchTurn,
         killPid: (pid) => { try { process.kill(pid); } catch {} },
         out: process.env.AIVN_AGENTBENCH && !app.isPackaged ? path.join(process.env.AIVN_AGENTBENCH, `bench-${id}.json`) : null,
         onProgress: (p) => { onProgress && onProgress({ model: id, ...p }); send('bench:progress', { model: id, ...p }); } });
@@ -1659,7 +1661,7 @@ async function runFullBench(ids, { parts = null, apps = null, out: outFile = nul
       save();
       if (!ac.signal.aborted && on('grounding')) { prog({ model: m.size, mi: mi + 1, phase: 'grounding' }); try { const g = await runGroundingBench(m.id); r.grounding = { score: g.score, total: g.total, seconds: g.seconds, items: g.items }; } catch (e) { r.grounding = { error: e.message }; } save(); }
       const U2 = require('./agent/uitree'); benchSandbox = FB.createSandbox({ windows: U2.windows, matchWindow: U2.matchWindow, allowApp: AB.OPEN_APP[process.platform] || 'Notepad' });
-      const runTurn = ({ messages, signal }) => runAgentTurn({ reqId: null, convoId: 'bench', messages, signal, gate: false });
+      const runTurn = benchTurn;
       try {
         if (!ac.signal.aborted && on('apps')) { try { r.apps = await FB.runChatTasks({ only: apps, BrowserWindow, desk: getDesk(), runTurn, signal: ac.signal, deadline, perTaskMs: 180000 * tScale, sandboxCalls: (reset) => benchSandbox.calls(reset), onProgress: (p) => prog({ model: m.size, mi: mi + 1, ...p }) }); } catch (e) { r.apps = { error: e.message }; } save(); }
         if (!ac.signal.aborted && on('tasks')) {

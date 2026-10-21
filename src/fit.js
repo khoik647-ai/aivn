@@ -138,6 +138,8 @@ function fmtFit(f) {
 function fitDetail(f) {
   if (!f || !f.parts) return '';
   const gb = (b) => (b / 1024 ** 3).toFixed(1).replace('.', ',') + ' GB';
-  return `Ước tính ở ngữ cảnh ${f.ctx}: trọng số ${gb(f.parts.weights)}${f.parts.mmproj ? ` + tệp thị giác ${gb(f.parts.mmproj)}` : ''} + bộ đệm KV ${gb(f.parts.kv)} + bộ đệm tính toán ${gb(f.parts.compute)} = ${gb(f.need)}${f.measured ? ' (theo số đo VRAM thật khi nạp trên máy này)' : ''}`;
+  const ms = f.measured ? ' (theo số đo VRAM thật khi nạp trên máy này)' : '';
+  if (f.parts.mmproj) return `Ước tính ở ngữ cảnh ${f.ctx}: trọng số ${gb(f.parts.weights)} + tệp thị giác ${gb(f.parts.mmproj)} + bộ đệm KV ${gb(f.parts.kv)} + bộ đệm tính toán ${gb(f.parts.compute)} = ${gb(f.need)}${ms}`;
+  return `Ước tính ở ngữ cảnh ${f.ctx}: trọng số ${gb(f.parts.weights)} + bộ đệm KV ${gb(f.parts.kv)} + bộ đệm tính toán ${gb(f.parts.compute)} = ${gb(f.need)}${ms}`;
 }
 module.exports = { GROUPS, LABEL, parseParams, strength, kvPerToken, computeBuf, metaOf, gpuBandwidth, machineFit, sortByFit, groupByFit, fmtFit, fitDetail };

@@ -110,7 +110,47 @@ test('Zalo giả ở 2560×1440 @125% + luồng chuột lệch ×1,25 (như máy
   const o = runZalo('2560x1440', 1.25, 1.25); checkRun(o, '2560×1440 @125%');
   assert.ok(o.diag.calib.cal && Math.abs(o.diag.calib.cal.kx - 1.25) < 0.02, JSON.stringify(o.diag));
 });
+test('Zalo giả ở 1920×1080 @125% (laptop ROG G513 của Khôi, logic 1536×864) + chuột lệch ×1,25: tự hiệu chỉnh, gửi đúng nhóm', { skip: !hasX && 'cần xvfb-run + electron', timeout: 360000 }, () => {
+  const o = runZalo('1920x1080', 1.25, 1.25); checkRun(o, '1920×1080 @125%');
+  assert.ok(o.diag.calib.cal && Math.abs(o.diag.calib.cal.kx - 1.25) < 0.02, JSON.stringify(o.diag));
+});
+test('Zalo giả ở 1920×1080 @125% (laptop ROG G513), chuột đúng: không cần hiệu chỉnh', { skip: !hasX && 'cần xvfb-run + electron', timeout: 360000 }, () => {
+  const o = runZalo('1920x1080', 1.25, 0); checkRun(o, '1920×1080 @125%');
+  assert.strictEqual(o.diag.calib.cal, null); assert.strictEqual(o.diag.calib.misses, 0);
+});
 test('Zalo giả ở 1920×1080 @150%: toạ độ đúng ngay, không cần hiệu chỉnh', { skip: !hasX && 'cần xvfb-run + electron', timeout: 360000 }, () => {
   const o = runZalo('1920x1080', 1.5, 0); checkRun(o, '1920×1080 @150%');
   assert.strictEqual(o.diag.calib.cal, null); assert.strictEqual(o.diag.calib.misses, 0);
+});
+
+// beta.2 (Khôi xác nhận 21/10): laptop ROG G513 1920×1080 @125% (Windows 11, logic 1536×864) và PC 2560×1440 @125%
+for (const [name, W, H, LW, LH] of [['laptop ROG G513', 1920, 1080, 1536, 864], ['PC', 2560, 1440, 2048, 1152]]) {
+  test(`máy của Khôi — ${name}: ${W}×${H} @125% (logic ${LW}×${LH}): ảnh chụp, UIA, chuột, mép màn hình`, () => {
+    const [g] = win([{ phys: [0, 0, W, H], scale: 1.25 }]);
+    assert.deepStrictEqual(g.dip, { x: 0, y: 0, width: LW, height: LH });
+    assert.deepStrictEqual(g.phys, { x: 0, y: 0, width: W, height: H });
+    assert.ok(new RegExp(`${W}×${H} @125%`).test(D.describe([g])));
+    assert.deepStrictEqual(D.dipToPhys([g], LW / 2, LH / 2), { x: W / 2, y: H / 2 });
+    assert.deepStrictEqual(D.physToDip([g], W / 2, H / 2), { x: LW / 2, y: LH / 2 });
+    for (const [sw, sh] of [[LW, LH], [W, H], [1280, 720]]) {
+      const p = D.shotToPhys({ width: sw, height: sh, geo: g }, (sw - 1) / 2, (sh - 1) / 2);
+      assert.ok(Math.abs(p.x - (W - 1) / 2) <= 1 && Math.abs(p.y - (H - 1) / 2) <= 1, `${sw}×${sh} → ${JSON.stringify(p)}`);
+    }
+    const e = D.normToPhys(g, 1, 1); assert.ok(e.x === W - 1 && e.y === H - 1, JSON.stringify(e));
+    const ed = D.dipToPhys([g], LW - 1, LH - 1); assert.ok(ed.x <= W - 1 && ed.y <= H - 1 && ed.x >= W - 3 && ed.y >= H - 3, JSON.stringify(ed));
+    const raw = { dpi: { cx: LW, cy: LH }, win: { b: [80, 40, 800, 600] }, els: [{ b: [400, 300, 120, 32] }] };
+    assert.strictEqual(U.uiaScale(raw, g), 1.25); U.rescaleTree(raw, 1.25);
+    assert.deepStrictEqual(raw.els[0].b, [500, 375, 150, 40]);
+    assert.strictEqual(U.uiaScale({ dpi: { cx: W } }, g), 1);
+    const want = { x: Math.round(W * 0.7), y: Math.round(H * 0.6) }; const got = { x: want.x / 1.25, y: want.y / 1.25 };
+    const cal = D.calibrate(want, got); assert.ok(cal && Math.abs(cal.kx - 0.8) < 1e-9 && Math.abs(cal.ky - 0.8) < 1e-9);
+    const sent = D.applyCal(cal, { x: 300, y: H - 50 }); assert.ok(D.near({ x: sent.x * 0.8, y: sent.y * 0.8 }, { x: 300, y: H - 50 }, 1));
+    for (const [nx, ny] of [[0, 0], [0.125, 0.875], [0.5, 0.5], [0.999, 0.001]]) { const p = D.normToPhys(g, nx, ny); const n = D.physToNorm(g, p.x, p.y); assert.ok(Math.abs(n.nx - nx) * (W - 1) < 1 && Math.abs(n.ny - ny) * (H - 1) < 1); }
+  });
+}
+test('laptop ROG G513 + màn hình ngoài 2560×1440 (cả hai 125%): cửa sổ trên màn hình nào thì quy đổi theo màn hình đó', () => {
+  const G = win([{ phys: [0, 0, 1920, 1080], scale: 1.25 }, { phys: [1920, 0, 2560, 1440], scale: 1.25 }]);
+  const right = D.displayForRect(G, [2200, 200, 1200, 800]); assert.strictEqual(right.phys.width, 2560);
+  assert.deepStrictEqual(D.normToPhys(right, 0, 0), { x: 1920, y: 0 });
+  assert.strictEqual(D.displayAtPhys(G, 100, 100).phys.width, 1920);
 });

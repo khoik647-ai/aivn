@@ -143,7 +143,7 @@ test('B17 (beta.2): laptop RTX 3050 Ti 4 GB — AIVN AGENT dùng 12K, ⭐ = Qwen
   assert.strictEqual(gateBest.id, star[0].id, 'gợi ý ⭐ và cổng AIVN AGENT chọn cùng một mô hình');
   // tràn ít (≤ 1 GB): vẫn chọn được, nhóm Chạy chậm + cảnh báo; tràn nhiều: Quá nặng
   const four = ann.find(c => c.id === 'qwen3-vl-4b-instruct-q4_k_m'); assert.strictEqual(four.agentFit.level, 'slow'); assert.ok(four.agentCheck.ok && four.agentCheck.slow, JSON.stringify(four.agentCheck));
-  const eight = ann.find(c => c.id === 'qwen3-vl-8b-instruct-q4_k_m'); assert.strictEqual(eight.agentCheck.code, 'heavy');
+  const eight = ann.find(c => c.id === 'qwen3-vl-8b-instruct-q4_k_m'); assert.strictEqual(eight.agentCheck.ok, false); assert.strictEqual(eight.agentCheck.code, 'veryslow-off', 'beta.2: 8B chỉ dùng được khi tự bật “Rất chậm”'); assert.match(eight.agentCheck.reason, /Rất chậm/);
   assert.match(AP.note(P), /12K/);
 });
 test('B17: PC RTX 4070 Super — giữ 16K, chỉ nhận mô hình chạy mượt, ⭐ = Qwen3-VL 8B', () => {
@@ -183,7 +183,7 @@ test('B17: cổng chặn mô hình không dùng được thì có nút chuyển 
 test('B18: runAgentTurn (dùng cho cả Gửi và Lịch tự động) kiểm tra cổng AIVN AGENT; chỉ bài đo được bỏ qua', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'src/main.js'), 'utf8');
   const body = main.slice(main.indexOf('async function runAgentTurn('), main.indexOf('async function runAgentTurn(') + 1500);
-  assert.match(body, /gate = true/); assert.match(body, /if \(gate\) \{\s*const g = await agentModelGate\(\);\s*if \(!g\.ok\)/);
+  assert.match(body, /gate = true/); assert.match(body, /if \(gate\) \{\s*const g = await agentModelGate\(\);( agentStepScale = g\.stepScale \|\| 1;)?\s*if \(!g\.ok\)/);
   const sched = main.slice(main.indexOf('async function onScheduleFire('), main.indexOf('async function onScheduleFire(') + 2500);
   assert.match(sched, /runAgentTurn\(\{ convoId, headless: true, signal: ac\.signal, messages/); assert.ok(!/gate: false/.test(sched));
   assert.strictEqual((main.match(/runAgentTurn\([^)]*gate: false/g) || []).length, 1, 'chỉ bài đo Điểm tác vụ bỏ qua cổng');

@@ -235,7 +235,7 @@
  "Chế độ hiệu năng mới áp dụng đầy đủ khi nạp lại mô hình.",
  "Chỉ CPU",
  "Chỉ CPU (đã tắt GPU)",
- "Chỉ cho máy yếu không có mô hình nào chạy mượt: mô hình lớn hơn VRAM nhiều lần (vd. Qwen3-VL 8B trên GPU 4 GB) hiện trong bộ chọn với nhãn “Rất chậm”. Mỗi bước có thể mất 1–3 phút; không bao giờ là lựa chọn gợi ý.",
+ "Chỉ cho máy yếu không có mô hình nào chạy mượt: mô hình lớn hơn VRAM nhiều lần (ví dụ Qwen3-VL 8B trên GPU 4 GB) hiện trong bộ chọn với nhãn “Rất chậm”. Mỗi bước có thể mất 1–3 phút; không bao giờ là lựa chọn gợi ý.",
  "Chỉ chọn trong K từ (token) có xác suất cao nhất. 0 = tắt.",
  "Chỉ cần cho mô hình",
  "Chỉ dành cho máy yếu (vd. laptop GPU 4 GB) khi mô hình nhỏ chưa làm tốt việc của bạn. Mô hình lớn (vd. Qwen3-VL 8B) sẽ tràn sang RAM: mỗi bước có thể mất 1–3 phút, máy nóng và ồn hơn, ứng dụng khác chậm lại. AIVN AGENT chờ lâu gấp 3 lần trước khi báo hết giờ. Mô hình này không bao giờ được gợi ý ⭐ hay tự nạp — bạn phải tự chọn trong bộ chọn mô hình.",

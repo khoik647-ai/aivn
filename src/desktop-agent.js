@@ -196,7 +196,7 @@ function createDesktopAgent(deps) {
     if ((poor || question) && vision !== 'off') {
       const e = await eyes();
       if (e) {
-        status('Đang nhìn màn hình bằng ' + e.kind + '…');
+        status(e.kind === 'mắt nhìn' ? 'Đang nhìn màn hình bằng mắt nhìn…' : 'Đang nhìn màn hình bằng mô hình chính…'); // B33: chuỗi trọn để dịch được
         try { seen = await SC.describe(e.eng, shot, question || 'Liệt kê đúng chữ các mục đang hiển thị: danh sách/kết quả tìm kiếm, tên người/cuộc trò chuyện, ô nhập (và chữ trong ô), nút. Nói rõ nếu danh sách trống hoặc đang tải.', { signal: ctx.signal }); eyesKind = e.kind; }
         catch (err) { deps.log && deps.log('desk', 'Mắt nhìn lỗi: ' + err.message); }
       } else if (poor) s.needEyes = true;
@@ -253,7 +253,7 @@ function createDesktopAgent(deps) {
     const st = deps.engine.status();
     if (!g && !(st && st.vision)) return null;
     const modelId = g ? g.id : (st.path || st.id || ''); const eng = g ? g.engine : deps.engine;
-    status(`Đang tìm “${query}” bằng ${g ? 'mô hình định vị' : 'mô hình nhìn ảnh'}…`);
+    status(g ? `Đang tìm “${query}” bằng mô hình định vị…` : `Đang tìm “${query}” bằng mô hình nhìn ảnh…`);
     const fi = SC.familyInfo(modelId);
     const shot = await withOverlayHidden(() => deps.fakeScreen ? deps.fakeScreen() : SC.capture({ maxW: 1280, align: fi.align, geo: session && session.geo }));
     const r = await SC.locate(eng, shot, query, { signal: ctx.signal, modelId });
@@ -406,7 +406,8 @@ function createDesktopAgent(deps) {
     if (action === 'type_text' && ctx && ctx.userQuery) {
       const searchField = searchConfirmed(t, focusedEl, a);
       const R = SV.regionsOf(s.obs); const P = SV.parseSeen(s.lastSeen || '');
-      const g = SV.chatGate({ query: ctx.userQuery, text: a.text, searchField, submit: !!a.submit, proc: s.obs && s.obs.win ? s.obs.win.proc : (s.target && s.target.proc) || '', title: s.obs && s.obs.win ? s.obs.win.title : '', state: s, header: [...(R ? R.header : []), P.header].filter(Boolean) });
+      const g = SV.chatGate({ query: ctx.userQuery, text: a.text, searchField, submit: !!a.submit, proc: s.obs && s.obs.win ? s.obs.win.proc : (s.target && s.target.proc) || '', title: s.obs && s.obs.win ? s.obs.win.title : '', state: s, header: [...(R ? R.header : []), P.header].filter(Boolean), ocrHeader: R ? R.header : [], seenHeader: P.header || null });
+      if (g && s.askWho) { const q = s.askWho; s.askWho = null; deps.log && deps.log('desk', 'Chưa rõ người nhận → hỏi người dùng “Gửi cho ai?”'); return { error: 'chưa rõ người nhận', stop: true, ask: q, forModel: g, summary: 'chưa rõ người nhận — hỏi bạn' }; }
       if (g) {
         // B27: không để lặp vô tận — lần chặn thứ 3 trong lượt: dừng và báo người dùng (nêu những gì thấy trên màn hình)
         s.gateBlocks = (s.gateBlocks || 0) + 1; deps.log && deps.log('desk', `Chặn gõ tin: chưa mở đúng người nhận (lần ${s.gateBlocks})`);
@@ -472,7 +473,7 @@ function createDesktopAgent(deps) {
     await performAt(action, t && t.x != null ? t.x : null, t && t.x != null ? t.y : null, a);
     const prevAction = s.lastAction;
     // bấm vào kết quả tìm kiếm khớp người nhận → coi như đã mở cuộc trò chuyện (kiểm lại tiêu đề ngay bên dưới)
-    const rcp = ctx && ctx.userQuery ? SV.recipientOf(ctx.userQuery) : null;
+    const rcp = ctx && ctx.userQuery ? (SV.recipientOf(ctx.userQuery) || (SV.CURRENT_CHAT.test(ctx.userQuery) && s.currentChat ? s.currentChat : null)) : null; // B59: “cuộc trò chuyện hiện tại” = chat đã đọc chắc lúc gõ
     // B27 (QA lượt 4): sau khi gõ tìm (kể cả gõ + Enter, kết quả chưa ghi nhận) mà bấm vào kết quả → cũng là “mở cuộc trò chuyện”; kiểm lại bằng màn hình ngay dưới
     const clickedName = `${t && t.el ? t.el.name || '' : ''} ${t && t.query ? t.query : String(a.element || a.target || '')}`;
     const recentSearch = s.lastSearch && Date.now() - s.lastSearch.at < SEARCH_MS() ? s.lastSearch : null;
@@ -497,9 +498,13 @@ function createDesktopAgent(deps) {
     if (pd && !PD.changed(pd) && isClickAct && o.poor && !(ctx.signal && ctx.signal.aborted)) { await sleep(900); o = await observe(ctx, { ocr: 'auto' }); pd = shotDiff(beforeShot, s.shot, PD.around(box), winScope()); }
     if (pd) deps.log && deps.log('desk', `So ảnh trước/sau: ${PD.describe(pd)}${a.__moved && a.__moved.calibrated ? ' · chuột đã hiệu chỉnh' : ''}`);
     // B37 (QA lượt 6, Classroom “+ Thêm tệp”): ảnh quanh chỗ bấm gần như không đổi nhưng trên màn hình có CHỮ MỚI (dòng “Bài làm của bạn: tệp.docx”) → thao tác ĐÃ có tác dụng
-    const newTexts = (() => { if (!before || !o.obs) return []; const old = new Set(before.elements.map(e => U.fold(e.name || '')).filter(Boolean)); return [...new Set(o.obs.elements.map(e => String(e.name || '').trim()).filter(n => n.length >= 3 && !old.has(U.fold(n))))].slice(0, 4); })();
+    // QA lượt 7: đếm theo SỐ LẦN xuất hiện (tệp thứ 2 cùng tên “bai.docx” cũng là chữ mới), không chỉ theo tập hợp
+    const newTexts = before && o.obs ? U.newTexts(before.elements, o.obs.elements) : [];
+    const ADDF = /thêm tệp|thêm|tải lên|đính kèm|add file|add or create|attach|upload|添加|上传|附件/iu; const addTarget = `${t && t.el ? t.el.name || '' : ''} ${a.element || ''}`;
+    if (isClickAct && ADDF.test(addTarget) && s.addedFiles && s.addedFiles.length) checks.push(`Lưu ý: trong việc này đã thêm tệp ${s.addedFiles.slice(-3).map(n => `“${n.slice(0, 40)}”`).join(', ')} rồi — nếu người dùng chỉ cần MỘT tệp thì KHÔNG thêm nữa (sẽ bị trùng).`);
+    if (newTexts.length && isClickAct && /\.[a-z0-9]{2,5}\b/i.test(newTexts.join(' '))) { s.addedFiles = [...(s.addedFiles || []), ...newTexts.filter(n => /\.[a-z0-9]{2,5}\b/i.test(n))].slice(-10); }
     const pixChanged = PD.changed(pd) || !!(newTexts.length && isClickAct);
-    if (newTexts.length && isClickAct && !PD.changed(pd)) checks.push(`Màn hình có chữ MỚI sau thao tác: ${newTexts.map(n => `“${n.slice(0, 50)}”`).join(', ')} — thao tác ĐÃ có tác dụng${/thêm tệp|tải lên|đính kèm|add file|attach|upload|添加|上传|附件/iu.test(`${t && t.el ? t.el.name || '' : ''} ${a.element || ''}`) ? '; tệp đã được thêm, KHÔNG bấm lại “thêm tệp” (sẽ gắn trùng)' : ''}.`);
+    if (newTexts.length && isClickAct && !PD.changed(pd)) checks.push(`Màn hình có chữ MỚI sau thao tác: ${newTexts.map(n => `“${n.slice(0, 50)}”`).join(', ')} — thao tác ĐÃ có tác dụng${ADDF.test(addTarget) || /\.[a-z0-9]{2,5}\b/i.test(newTexts.join(' ')) ? '; tệp đã được thêm, KHÔNG bấm lại “thêm tệp” (sẽ gắn trùng)' : ''}.`);
     if (before && before.win && o.obs.win && before.win.title !== o.obs.win.title) checks.push(`Cửa sổ đổi thành "${o.obs.win.title}".`);
     if (openPending) {
       const R = SV.regionsOf(o.obs); const hdr = [o.obs.win ? o.obs.win.title : '', ...(R ? R.header : [])].filter(Boolean);
@@ -608,7 +613,11 @@ function createDesktopAgent(deps) {
       } catch (e) { deps.log && deps.log('desk', 'Phím tắt tìm kiếm lỗi: ' + e.message); }
     }
     if (pixChanged && !checks.some(c => /Cửa sổ đổi|Đã mở cuộc trò chuyện|Ô tìm kiếm|KIỂM CHỨNG|GỬI NHẦM|phím tắt|chữ MỚI/.test(c))) checks.push(`Màn hình đã thay đổi sau thao tác (${PD.describe(pd)}) — xem danh sách mới bên dưới để biết đã mở/chọn gì.`);
-    if (clickedInput && !checks.some(c => /Cửa sổ đổi|Đã mở cuộc trò chuyện|KIỂM CHỨNG|GỬI NHẦM|phím tắt|Hộp thoại/.test(c))) { const nm = String((t && t.el && (t.el.name || t.el.placeholder)) || (t && t.query && !U.isIdRef(t.query) ? t.query : '') || '').trim().slice(0, 40); checks.unshift(nm ? `Đã đặt con trỏ vào ô “${nm}”${t && t.el && t.el.id ? ` (${t.el.id})` : ''} — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.` : `Đã đặt con trỏ vào ô nhập${t && t.el && t.el.id ? ` ${t.el.id}` : ''} — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.`); }
+    if (clickedInput && !checks.some(c => /Cửa sổ đổi|Đã mở cuộc trò chuyện|KIỂM CHỨNG|GỬI NHẦM|phím tắt|Hộp thoại/.test(c))) { const nm = String((t && t.el && (t.el.name || t.el.placeholder)) || (t && t.query && !U.isIdRef(t.query) ? t.query : '') || '').trim().slice(0, 40); checks.unshift((() => { const id = t && t.el && t.el.id ? t.el.id : ''; const TAIL = ' — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.'; // B33: từng câu trọn (dịch được)
+      if (nm && id) return `Đã đặt con trỏ vào ô “${nm}” (${id}) — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.`;
+      if (nm) return `Đã đặt con trỏ vào ô “${nm}” — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.`;
+      if (id) return `Đã đặt con trỏ vào ô nhập ${id} — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.`;
+      return 'Đã đặt con trỏ vào ô nhập' + TAIL; })()); }
     if (!checks.length) checks.push(pd ? `Màn hình không thay đổi rõ ràng (so ảnh trước/sau: ${PD.describe(pd)}) — nếu cần, thử cách khác${ak && ak.search ? `; với ${ak.name} có thể dùng phím tắt ${ak.search} để mở ô tìm kiếm` : ''}.` : 'Màn hình không thay đổi rõ ràng — nếu cần, thử cách khác.');
     return { ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
   }

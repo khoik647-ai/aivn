@@ -621,7 +621,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     if (s.agentMemory !== false && deps.memory.count()) mem = await deps.memory.retrieve(query, { ...(await deps.embedForMemory()), k: 6 }).catch(() => ({ items: [] }));
     const RL = replyLang(query, s.uiLang); const RI = require('../i18n/core').REPLY_IN[RL]; // B57: ngôn ngữ câu lệnh / giao diện en/zh → trả lời bằng ngôn ngữ đó
     const lines = [
-      RL !== 'vi' && RI ? IDENTITY.replace('Luôn trả lời bằng tiếng Việt,', `Luôn trả lời bằng ${RI} (ngôn ngữ của người dùng), kể cả câu báo lỗi/báo chưa làm được;`) : IDENTITY,
+      RL !== 'vi' && RI ? IDENTITY.replace('Luôn trả lời bằng tiếng Việt,', `Luôn trả lời bằng ${RI}, kể cả khi báo lỗi;`) : IDENTITY,
       `Thời điểm hiện tại: ${nowVi()} (${tz()}).`,
       '',
       'Nguyên tắc làm việc:',
@@ -680,6 +680,13 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
     let query = lastUser ? (typeof lastUser.content === 'string' ? lastUser.content : (lastUser.content || []).map(x => x.text || '').join(' ')) : '';
     const compOn = names.some(n => COMP.includes(n)) && !headless;
+    // B59: người dùng trả lời câu hỏi “Gửi cho ai?” của lượt trước → làm lại việc trước với người nhận vừa nêu (hoặc chat đang mở nếu “đúng”)
+    { const SVq = require('./send-verify'); const prevA = [...messages].slice(0, -1).reverse().find(m => m.role === 'assistant');
+      const prevA_t = prevA ? (typeof prevA.content === 'string' ? prevA.content : '') : '';
+      if (compOn && SVq.ASKED_WHO.test(prevA_t.trim()) && query.trim().length <= 80) {
+        const prevTask = [...messages].slice(0, -1).reverse().filter(m => m.role === 'user' && typeof m.content === 'string').map(m => m.content)[0];
+        if (prevTask) { const nq = SVq.answerWho(prevTask, query); deps.log && deps.log(`[aivn agent] trả lời “Gửi cho ai?”: "${query.slice(0, 40)}" → làm lại việc trước`);
+          messages = [...messages.slice(0, -1), { ...lastUser, content: `${query}\n\n(Việc cần làm ngay bây giờ, bằng công cụ: “${nq}”)` }]; query = nq; } } }
     // câu nối tiếp ("tôi muốn hãy làm cho tôi"): lấy việc cần làm từ câu yêu cầu trước của người dùng
     if (compOn && FOLLOW_RE.test(query)) {
       const prevTask = [...messages].slice(0, -1).reverse().filter(m => m.role === 'user' && typeof m.content === 'string').map(m => m.content).find(c => ACT_RE.test(c) || /zalo|messenger|ứng dụng|tin nhắn|nhắn|gửi|mở/iu.test(c));
@@ -939,11 +946,11 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         onStep({ ...step });
         msgs.push({ role: 'tool', tool_call_id: call.id, content: typeof out.forModel === 'string' && out.forModel ? out.forModel : String(out.forModel ?? out.message ?? out.summary ?? JSON.stringify(out)) || '(không có kết quả)' });
         // B49/B36: công cụ yêu cầu DỪNG (chặn người nhận 3 lần) hoặc tin đã bị GỬI NHẦM → dừng thật, không để mô hình làm tiếp
-        if (out.stop || (out.verify && out.verify.wrongChat)) { hardStop = out.verify && out.verify.wrongChat ? { why: out.verify.why, wrong: true } : { why: String(out.error || out.summary || 'công cụ yêu cầu dừng') }; break; }
+        if (out.stop || (out.verify && out.verify.wrongChat)) { hardStop = out.ask ? { why: String(out.error || ''), ask: String(out.ask) } : out.verify && out.verify.wrongChat ? { why: out.verify.why, wrong: true } : { why: String(out.error || out.summary || 'công cụ yêu cầu dừng') }; break; }
         if (signal?.aborted) break;
       }
       if (signal?.aborted) { finishReason = 'abort'; break; }
-      if (hardStop) { text = hardStop.wrong ? `⚠ ${hardStop.why}. AIVN AGENT đã dừng, không gửi thêm gì. Bạn mở cuộc trò chuyện đó để thu hồi/xoá tin giúp mình.` : honestOf(hardStop.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng theo yêu cầu của công cụ: ${hardStop.why}`); break; }
+      if (hardStop) { text = hardStop.ask ? hardStop.ask : hardStop.wrong ? `⚠ ${hardStop.why}. AIVN AGENT đã dừng, không gửi thêm gì. Bạn mở cuộc trò chuyện đó để thu hồi/xoá tin giúp mình.` : honestOf(hardStop.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng theo yêu cầu của công cụ: ${hardStop.why}`); break; }
       // B39: cùng một cách đã hỏng mà mô hình cứ quay lại (bị chặn 2–3 lần) → dừng sớm, báo trung thực những gì đã thử
       if (look.blocked >= 2) { text = honestOf('quan sát màn hình nhiều lần liền mà mô hình không làm bước nào'); warning = null; finishReason = 'stop'; deps.log && deps.log('[aivn agent] dừng sớm (B40): quan sát lặp lại'); break; }
       { const gu = retry.giveUp(); if (gu) { text = honestOf(gu.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng sớm (B39): ${gu.why}`); break; } }

@@ -29,7 +29,7 @@ test('B47/B48: “nhắn giúp/hộ/giùm X” bỏ giúp/hộ; danh xưng sau t
   assert.strictEqual(SV.recipientOf('在已打开的 Microsoft Teams 上给 Lê Văn Hùng 老师发消息：明天请假'), 'Lê Văn Hùng');
   assert.strictEqual(SV.nameKey('Lê Văn Hùng 老师'), 'le van hung');
   assert.strictEqual(SV.nameKey('Le Van Hung teacher'), 'le van hung');
-  assert.strictEqual(SV.nameKey('王老师'), SV.nameKey('王'));
+  assert.strictEqual(SV.nameKey('王老师'), '王老师'); // QA lượt 7 (B59): chỉ còn họ → giữ danh xưng (“王” sẽ khớp mọi người họ Vương)
 });
 
 test('B36: ứng dụng chat — chưa có người nhận đã kiểm chứng thì KHÔNG gõ + Enter vào ô soạn, bất kể động từ', () => {
