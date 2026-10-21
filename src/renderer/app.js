@@ -620,9 +620,31 @@ const darkMq = window.matchMedia('(prefers-color-scheme: dark)');
 const reduceMq = window.matchMedia('(prefers-reduced-motion: reduce)');
 const resolveTheme = (t) => (t === 'dark' || (t === 'system' && darkMq.matches) ? 'dark' : 'light');
 // Đổi giao diện sáng/tối: logo rồng hiện giữa màn hình, màu giao diện mới lan ra từ logo thành vòng tròn phủ hết cửa sổ,
-// rồi logo mờ dần (~840 ms). Chỉ dùng transform/opacity/clip-path. Không có View Transitions: logo + chuyển màu dần.
-// Hệ điều hành bật "giảm chuyển động": chỉ chuyển màu nhẹ, không có logo.
+// rồi logo mờ dần (~840 ms). Chỉ dùng transform/opacity/clip-path.
+// Cài đặt "Hiệu ứng chuyển giao diện" (themeFx): full = luôn chạy logo + vòng lan (kể cả khi Windows tắt "Animation effects"),
+// os = theo hệ điều hành (giảm chuyển động → chỉ đổi màu nhẹ), off = đổi ngay.
+// Đường chạy: 'vt' (View Transitions) → nếu API thiếu / lỗi / không chụp kịp → 'overlay' (lớp phủ màu nền mới, mặt nạ tròn lan ra).
+// Ghi lại đường đã chạy vào window.__themePath và nhật ký ứng dụng.
 const THEME_T = { in: 180, spread: 480, out: 180 };
+const THEME_BG = { light: '#ffffff', dark: '#17181b' };
+function themeLog(path, extra = '') {
+  const info = `giao diện: ${path}${extra ? ' · ' + extra : ''} · ${innerWidth}x${innerHeight}@${devicePixelRatio} · giảm chuyển động=${reduceMq.matches}`;
+  window.__themePath = path; (window.__themeLog = window.__themeLog || []).push(info); if (window.__themeLog.length > 20) window.__themeLog.shift();
+  try { A.uiLog && A.uiLog(info); } catch {}
+}
+function themeFx() { const v = state.settings && state.settings.themeFx; return v === 'os' || v === 'off' ? v : 'full'; }
+// Lớp phủ dự phòng: nền của giao diện mới lan ra thành vòng tròn, đổi giao diện bên dưới, rồi lớp phủ mờ đi.
+async function themeOverlay(next, set) {
+  const ov = document.createElement('div'); ov.className = 'theme-ov';
+  ov.style.background = THEME_BG[next];
+  $('#themeVeil').before(ov);
+  try {
+    await ov.animate({ clipPath: ['circle(0% at 50% 50%)', 'circle(150% at 50% 50%)'] }, { duration: THEME_T.spread, easing: 'cubic-bezier(.45,0,.2,1)', fill: 'forwards' }).finished.catch(() => {});
+    set();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await ov.animate({ opacity: [1, 0] }, { duration: 140, easing: 'ease-out', fill: 'forwards' }).finished.catch(() => {});
+  } finally { ov.remove(); }
+}
 async function applyTheme(t, { animate = false } = {}) {
   t = ['light', 'dark', 'system'].includes(t) ? t : 'light';
   for (const b of document.querySelectorAll('#themeRow button')) b.classList.toggle('on', b.dataset.theme === t);
@@ -630,31 +652,48 @@ async function applyTheme(t, { animate = false } = {}) {
   if ((applyTheme.pending || root.dataset.theme) === next) return;
   const set = () => { root.dataset.theme = next; if (applyTheme.pending === next) applyTheme.pending = null; };
   const crossfade = () => { root.classList.add('theme-anim'); set(); clearTimeout(applyTheme.timer); applyTheme.timer = setTimeout(() => root.classList.remove('theme-anim'), 400); };
+  const fx = themeFx();
   if (!animate || document.hidden) { applyTheme.pending = null; return set(); }
-  if (reduceMq.matches) { applyTheme.pending = null; return crossfade(); }
+  if (fx === 'off') { applyTheme.pending = null; themeLog('tắt'); return set(); }
+  if (fx === 'os' && reduceMq.matches) { applyTheme.pending = null; themeLog('đổi màu (hệ điều hành giảm chuyển động)'); return crossfade(); }
   applyTheme.pending = next;
   const veil = $('#themeVeil'), logo = veil.querySelector('img');
-  if (applyTheme.busy) { await applyTheme.busy; if (applyTheme.pending !== next) return; }
+  // chờ lượt trước xong; nhiều lần bấm cùng chờ một lượt thì chỉ một lần chạy (tránh hai View Transition chồng nhau → AbortError)
+  while (applyTheme.busy) { await applyTheme.busy; if (applyTheme.pending !== next) return; }
   let release; applyTheme.busy = new Promise(r => { release = r; });
+  const t0 = performance.now();
   try {
     veil.classList.add('on');
     await logo.animate([{ opacity: 0, transform: 'scale(.55)' }, { opacity: 1, transform: 'scale(1)' }], { duration: THEME_T.in, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'forwards' }).finished.catch(() => {});
-    if (document.startViewTransition) {
+    const pulse = () => logo.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.08)' }, { transform: 'scale(1)' }], { duration: THEME_T.spread, easing: 'ease-in-out' });
+    let path = 'overlay', why = document.startViewTransition ? '' : 'không có View Transitions';
+    if (document.startViewTransition && !window.__forceThemeOverlay) {
       root.classList.add('vt-theme');
-      let done = false;
-      const vt = document.startViewTransition(() => { done = true; set(); });
-      const guard = setTimeout(() => { if (!done) { set(); try { vt.skipTransition(); } catch {} } }, 300);
-      await vt.ready.then(() => {
-        logo.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.08)' }, { transform: 'scale(1)' }], { duration: THEME_T.spread, easing: 'ease-in-out' });
-        return root.animate({ clipPath: ['circle(0% at 50% 50%)', 'circle(150% at 50% 50%)'] }, { duration: THEME_T.spread, easing: 'cubic-bezier(.45,0,.2,1)', pseudoElement: '::view-transition-new(root)' }).finished;
-      }).catch(() => set());
-      clearTimeout(guard);
-      await vt.finished.catch(() => {});
+      let vt = null;
+      try { vt = document.startViewTransition(() => { set(); }); } catch (e) { why = 'startViewTransition lỗi: ' + (e && e.message || e); }
+      if (vt) {
+        // chờ thật sự: ảnh chụp cũ + đổi giao diện xong (cửa sổ 4K/DPI cao có thể mất >300 ms); chỉ bỏ khi quá 2,5 s
+        const ready = await Promise.race([vt.ready.then(() => 'ok', (e) => 'lỗi: ' + (e && e.name || e)), new Promise(r => setTimeout(() => r('quá giờ'), 2500))]);
+        if (ready === 'ok') {
+          pulse();
+          const done = await root.animate({ clipPath: ['circle(0% at 50% 50%)', 'circle(150% at 50% 50%)'] }, { duration: THEME_T.spread, easing: 'cubic-bezier(.45,0,.2,1)', pseudoElement: '::view-transition-new(root)' }).finished.then(() => true, () => false);
+          await vt.finished.catch(() => {});
+          if (done) path = 'vt'; else why = 'hoạt ảnh vòng tròn bị huỷ';
+        } else {
+          why = 'View Transition ' + ready; try { vt.skipTransition(); } catch {}
+          await vt.finished.catch(() => {});
+        }
+      }
       root.classList.remove('vt-theme');
-    } else {
-      crossfade(); await new Promise(r => setTimeout(r, 360));
+      if (path !== 'vt' && root.dataset.theme === next) {
+        // giao diện đã đổi nhưng không thấy vòng lan: chạy lớp phủ từ màu cũ để người dùng vẫn thấy hiệu ứng
+        const prev = next === 'dark' ? 'light' : 'dark'; root.dataset.theme = prev;
+      }
     }
+    if (path !== 'vt') { pulse(); await themeOverlay(next, set); }
+    if (root.dataset.theme !== next) set();
     await logo.animate([{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(1.18)' }], { duration: THEME_T.out, easing: 'ease-in', fill: 'forwards' }).finished.catch(() => {});
+    themeLog(path === 'vt' ? 'logo + vòng lan (View Transitions)' : 'logo + vòng lan (lớp phủ dự phòng)', [why, Math.round(performance.now() - t0) + ' ms'].filter(Boolean).join(' · '));
   } finally { veil.classList.remove('on'); release(); applyTheme.busy = null; if (root.dataset.theme !== next && applyTheme.pending === next) set(); }
 }
 // chỉ theo hệ điều hành khi chọn "Tự động" (đổi nativeTheme khi lưu cài đặt cũng phát sự kiện này)
@@ -664,6 +703,7 @@ $('#themeRow').addEventListener('click', async (e) => {
   state.settings.theme = b.dataset.theme;
   applyTheme(b.dataset.theme, { animate: true }); state.settings = await A.setSettings({ theme: b.dataset.theme });
 });
+$('#themeFxSel').addEventListener('change', async (e) => { state.settings = await A.setSettings({ themeFx: e.target.value }); e.target.value = themeFx(); });
 // ---------- Tìm kiếm trong tài liệu (RAG) ----------
 let ragJobId = null;
 async function paintRag() {
@@ -1411,7 +1451,7 @@ $('#lkSleep').addEventListener('change', async (e) => { await A.lockOptions({ lo
 // ---------- Khởi động ----------
 (async () => {
   state.settings = await A.getSettings();
-  applyTheme(state.settings.theme);
+  applyTheme(state.settings.theme); $('#themeFxSel').value = themeFx();
   bindSettings();
   $('#gpuOn').checked = state.settings.gpu !== false;
   paintAdvanced();
