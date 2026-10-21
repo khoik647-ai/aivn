@@ -110,6 +110,16 @@ sed -e "s#href=\"AIVN-Setup.exe\"#href=\"$BASE_URL/AIVN-Setup.exe\"#g" \
     -e "s#href=\"AIVN-mac-x64.zip\"#href=\"$BASE_URL/AIVN-mac-x64.zip\"#g" \
     site/index.html > "$SITE/index.html"
 for f in preview-desktop.png preview-mobile.png favicon.svg favicon.ico apple-touch-icon.png; do [[ -f "site/$f" ]] && cp "site/$f" "$SITE/"; done
+# dung lượng tải thật của bản phát hành này (QA B10), MB thập phân, làm tròn
+mb() { node -e 'const s=require("fs").statSync(process.argv[1]).size;process.stdout.write(String(Math.round(s/1e6)))' "$1"; }
+MB_WIN="$(mb "$OUT/AIVN-Setup.exe")"; MB_ARM="$(mb "$OUT/AIVN-mac-arm64.zip")"; MB_X64="$(mb "$OUT/AIVN-mac-x64.zip")"
+sed -i -e "s/__MB_WIN__/$MB_WIN/g" -e "s/__MB_ARM__/$MB_ARM/g" -e "s/__MB_X64__/$MB_X64/g" "$SITE/index.html"
+grep -q "__MB_" "$SITE/index.html" && die "trang web còn chỗ dung lượng chưa điền"
+echo "Dung lượng trên trang: Windows ~$MB_WIN MB · Mac ARM ~$MB_ARM MB · Mac Intel ~$MB_X64 MB"
+# trang kết quả tự kiểm chứng (nhãn ✓ trong Kho mô hình trỏ tới đây; QA B8)
+node build/md-page.cjs docs/verified.md "$SITE/verified.html" || die "không tạo được verified.html"
+grep -q 'id="v0143-nhin-anh"' "$SITE/verified.html" || die "verified.html thiếu mục kiểm chứng"
+
 [[ -f "$SITE/favicon.svg" ]] || die "thiếu site/favicon.svg (logo)"
 node build/merge-revoked.cjs site/revoked.json "$SITE/revoked.json" || die "thiếu revoked.json hợp lệ (chạy /workspace/aivn-admin/admin.cjs publish)"
 touch "$SITE/.nojekyll"

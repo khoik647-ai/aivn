@@ -73,6 +73,17 @@ function setMode(mode) {
 }
 const convoMode = (c) => c.mode === 'agent' ? 'agent' : 'chat';
 
+// Tên hiển thị của mô hình (QA B12): tên trong Khám phá thay cho id tệp thô
+function modelLabel(id) {
+  const m = (state.models || []).find(x => x.id === id || x.file === id || (x.catalog && x.catalog.id === id));
+  if (m) return m.catalog ? m.catalog.name : m.file.replace(/\.gguf$/i, '');
+  const c = (state.catalog || []).find(x => x.id === id); return c ? c.name : id;
+}
+// Hộp cảnh báo dưới câu trả lời: tiêu đề theo đúng loại cảnh báo (QA B5: không ghi “Chưa có việc nào được làm” khi công cụ đã chạy xong)
+function warnBox(w) {
+  const none = /^Mô hình này chưa thực sự thao tác gì/.test(w); const model = /mô hình/i.test(w);
+  return `<div class="no-action" role="alert"><b>⚠ ${none ? 'Chưa có việc nào được làm' : 'Lưu ý'}</b><span>${esc(w)}</span>${model ? '<button type="button" class="btn sm" data-rec-go="1">Mở Khám phá</button>' : ''}</div>`;
+}
 // ---------- Mô hình ----------
 // Bộ chọn mô hình: xếp theo mức chạy trên máy này (Chạy mượt → Chạy chậm → Không chạy được, mạnh trước).
 // Chế độ AIVN AGENT: chỉ chọn được mô hình làm được việc agent; mô hình khác bị khoá kèm lý do ngắn.
@@ -80,7 +91,7 @@ function modelOptionsHtml(models, cur, agentMode) {
   const name = (m) => (m.vision ? '👁 ' : '') + (m.catalog ? m.catalog.name : m.file);
   const fitOf = (m) => agentMode ? (m.agentFit || m.fit) : m.fit;
   const opt = (m, dis, why) => `<option value="${esc(m.id)}" class="${fitGroupOf(fitOf(m)) === 'no' ? 'opt-no' : ''}" ${m.id === cur ? 'selected' : ''} ${dis ? 'disabled' : ''} title="${esc(why || (fitOf(m) ? fitOf(m).hint : ''))}">${esc(name(m))}${fitOf(m) && fitOf(m).text ? ' · ' + esc(fitOf(m).text) : ' · ' + fmtBytes(m.size)}${why ? ' — ' + esc(why) : ''}</option>`;
-  const head = `<option value="">${models.length ? (agentMode ? '— Chọn mô hình cho AIVN AGENT —' : '— Chọn mô hình để nạp —') : '— Chưa có mô hình, hãy vào Kho mô hình —'}</option>`;
+  const head = `<option value="">${models.length ? (agentMode ? '— Chọn mô hình cho AIVN AGENT —' : '— Chọn mô hình để nạp —') : '— Chưa có mô hình, hãy vào mục Khám phá —'}</option>`;
   const ok = agentMode ? models.filter(m => m.agent && m.agent.ok) : models;
   const bad = agentMode ? models.filter(m => !(m.agent && m.agent.ok)) : [];
   const groups = FIT_GROUPS.map(([k, label]) => { const items = sortFit(ok, fitOf).filter(m => fitGroupOf(fitOf(m)) === k); return items.length ? `<optgroup label="${esc(label)}">${items.map(m => opt(m, k === 'no' && agentMode, k === 'no' && agentMode ? 'Quá nặng cho máy' : '')).join('')}</optgroup>` : ''; }).join('');
@@ -93,7 +104,7 @@ async function refreshModels() {
   const cur = state.status.loaded ? state.status.id : '';
   sel.innerHTML = modelOptionsHtml(state.models, cur, isAgent());
   const t = $('#modelTable');
-  if (!state.models.length) { t.innerHTML = `<div class="tr"><span class="muted">Chưa có mô hình nào. Hãy tải ở mục Kho mô hình hoặc nhập tệp GGUF có sẵn.</span></div>`; return; }
+  if (!state.models.length) { t.innerHTML = `<div class="tr"><span class="muted">Chưa có mô hình nào. Hãy tải ở mục Khám phá hoặc nhập tệp GGUF có sẵn.</span></div>`; return; }
   t.innerHTML = `<div class="tr head"><span>Tên</span><span>Dung lượng</span><span>Nguồn</span><span>Đường dẫn</span><span>Thao tác</span></div>` +
     state.models.map(m => `<div class="tr" data-id="${esc(m.id)}">
       <span><b>${esc(m.catalog ? m.catalog.name : m.file)}</b>${m.loaded ? '<span class="badge">Đang nạp</span>' : ''}${m.vision ? '<span class="badge vis" title="Có tệp thị giác (mmproj) cạnh mô hình">👁 Nhìn được ảnh</span>' : ''}<div class="muted" style="font-size:11.5px">${esc(m.id)}</div></span>
@@ -131,7 +142,7 @@ async function loadModel(id, extra = {}) {
   refreshModels();
   return ok;
 }
-// Gửi tin khi chưa nạp mô hình: tự nạp mô hình đang chọn / dùng lần trước; nếu chưa có mô hình nào thì chỉ đường tới Kho mô hình
+// Gửi tin khi chưa nạp mô hình: tự nạp mô hình đang chọn / dùng lần trước; nếu chưa có mô hình nào thì chỉ đường tới Khám phá
 async function ensureLoaded() {
   if (state.status.loaded) return true;
   if (state.status.loading) { toast('Mô hình đang được nạp, chờ một chút rồi gửi lại', true); return false; }
@@ -143,7 +154,7 @@ async function ensureLoaded() {
   const pool = isAgent() ? agentList : list;
   const pick = pool.find(m => m.id === $('#modelSelect').value) || pool.find(m => state.settings && m.id === state.settings.lastModel) || pool[0];
   if (!pick) {
-    const go = await modalAsk({ icon: '📦', title: 'Chưa có mô hình nào', message: 'Bạn cần tải một mô hình trước khi trò chuyện. Mở Kho mô hình để tải (gợi ý: Qwen3 4B Instruct 2507, hoặc Qwen3 8B nếu máy mạnh)?', okLabel: 'Mở Kho mô hình', noLabel: 'Để sau' });
+    const go = await modalAsk({ icon: '📦', title: 'Chưa có mô hình nào', message: 'Bạn cần tải một mô hình trước khi trò chuyện. Mở Khám phá để tải (gợi ý: Qwen3 4B Instruct 2507, hoặc Qwen3 8B nếu máy mạnh)?', okLabel: 'Mở Khám phá', noLabel: 'Để sau' });
     if (go) show('discover'); return false;
   }
   toast(`Đang nạp ${pick.catalog ? pick.catalog.name : pick.file}…`);
@@ -348,7 +359,7 @@ function setStatus(st) {
 }
 A.onModelStatus(st => { setStatus(st); if (!st.loading) { refreshModels(); refreshChatDefaults(); } if (!st.loading && isAgent()) refreshAgent(); });
 
-// ---------- Kho mô hình ----------
+// ---------- Khám phá ----------
 
 const jobs = new Map(); // id -> snapshot
 const disc = { fam: 'all', results: null, repo: null, lastQuery: null };
@@ -416,7 +427,7 @@ function benchTag(c) {
 }
 // Nhãn khả năng có nguồn (src/catalog-claims.js): ✓ AIVN đã tự kiểm chứng · ⓘ theo lời nhà phát triển · ⚠ AIVN thử chưa đạt
 const CLAIM_MARK = { v: '✓', d: 'ⓘ', x: '⚠' };
-const srcHost = (u) => { try { const h = new URL(u).hostname.replace(/^www\./, ''); return /verified\.md/.test(u) ? 'docs/verified.md' : h; } catch { return u; } };
+const srcHost = (u) => { try { const h = new URL(u).hostname.replace(/^www\./, ''); return /verified\.(md|html)/.test(u) ? 'trang kiểm chứng của AIVN' : h; } catch { return u; } };
 function claimTitle(cl) {
   const body = cl.k === 'd' ? `Nhà phát triển ghi: “${cl.q}”` : cl.note || '';
   return `${cl.kindLabel}: ${cl.label}. ${body} — Nguồn: ${srcHost(cl.src)} (bấm để mở)`;
@@ -590,7 +601,7 @@ function renderMessages() {
     const ag = m.role === 'assistant' && (m.steps || m.agent);
     const extra = m.role === 'assistant' ? webSrcHtml(m) + (m.memories && m.memories.length ? `<div class="mem-used" title="${esc(m.memories.join('\n'))}">🧠 Đã dùng ${m.memories.length} ghi nhớ liên quan</div>` : '') : '';
     const sched = m.scheduled ? `<div class="sched-tag">⏰ Lịch tự động · ${new Date(m.scheduled.at).toLocaleString('vi-VN')}${m.scheduled.late ? ' · chạy bù (trễ)' : ''}${m.scheduled.manual ? ' · chạy thủ công' : ''}</div>` : '';
-    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN AGENT' : 'AIVN'}${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}${think}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions">${/cần nhiều ngữ cảnh hơn|ngữ cảnh[^.]*quá nhỏ/i.test(m.content || '') ? '<button type="button" class="btn sm primary" data-ctx-grow="1">Tăng ngữ cảnh</button>' : ''}<button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning ? `<div class="no-action" role="alert"><b>⚠ Chưa có việc nào được làm</b><span>${esc(m.warning)}</span><button type="button" class="btn sm" data-rec-go="1">Mở Kho mô hình</button></div>` : ''}${srcs}${extra}${sched}${stats}${copyBtn}</div>${warn}`;
+    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN AGENT' : 'AIVN'}${m.model ? ' · ' + esc(modelLabel(m.model)) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}${think}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions">${/cần nhiều ngữ cảnh hơn|ngữ cảnh[^.]*quá nhỏ/i.test(m.content || '') ? '<button type="button" class="btn sm primary" data-ctx-grow="1">Tăng ngữ cảnh</button>' : ''}<button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning && m.warning !== 'blocked' ? warnBox(m.warning) : ''}${srcs}${extra}${sched}${stats}${copyBtn}</div>${warn}`;
   }).join('');
   box.scrollTop = box.scrollHeight;
   paintCtxBar(lastStats(state.current));
@@ -1565,7 +1576,7 @@ document.addEventListener('keydown', (e) => {
 // Giới thiệu nhanh lần đầu (4 bước)
 const OB = [
   { big: '🐉', h: 'Chào mừng đến với AIVN', p: 'Trợ lý AI chạy hoàn toàn trên máy bạn — không gửi dữ liệu ra ngoài. Làm quen trong 30 giây nhé.' },
-  { big: '🗃', h: 'Bước 1: Tải một mô hình', p: 'Vào Kho mô hình. Gợi ý cho trò chuyện và công cụ: Qwen3 4B Instruct 2507 (hoặc Qwen3 8B nếu máy mạnh). Mô hình có nhãn ⭐ là lựa chọn AIVN đã kiểm chứng cho máy bạn.' },
+  { big: '🗃', h: 'Bước 1: Tải một mô hình', p: 'Vào mục Khám phá. Gợi ý cho trò chuyện và công cụ: Qwen3 4B Instruct 2507 (hoặc Qwen3 8B nếu máy mạnh). Mô hình có nhãn ⭐ là lựa chọn AIVN đã kiểm chứng cho máy bạn.' },
   { big: '🤖', h: 'Bước 2: Dùng AIVN AGENT', p: 'AIVN AGENT đọc/ghi tệp trong thư mục bạn cho phép, mở ứng dụng, và (thử nghiệm) điều khiển chuột/bàn phím. Mỗi bước có tác động đều hiện thẻ xin phép: Ctrl+Enter để cho phép, Esc để từ chối.' },
   { big: '⌘', h: 'Bước 3: Phím tắt', p: 'Ctrl+K mở bảng lệnh để làm mọi thứ nhanh; Ctrl+. ẩn/hiện bảng cài đặt; Ctrl+/ xem tất cả phím tắt.' }
 ];
@@ -1676,8 +1687,8 @@ function paintAgentWarn(adv) {
   if (g && !g.cloud && !g.ok) { w.innerHTML = agentGateHtml(g); w.hidden = false; return; }
   if (!state.status.loaded) { w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN AGENT cần mô hình nhìn được màn hình và gọi công cụ ổn định, vd. <b>Qwen3-VL 8B</b> hoặc <b>Qwen3-VL 4B</b>.</span>`; w.hidden = false; return; }
   if (g && g.ok) { w.hidden = true; return; } // mô hình đã qua kiểm tra AIVN AGENT: không cần các cảnh báo cũ
-  if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN AGENT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để gọi công cụ (mở ứng dụng, đọc tệp) đáng tin cậy, hãy dùng <b>Qwen3 4B/8B</b>; điều khiển màn hình còn cần mô hình nhìn ảnh (Qwen3-VL).</span> ${recBtns}`; w.hidden = false; return; }
-  if (adv && adv.small) { w.innerHTML = `<span>⚠ <b>${esc(adv.model)}</b>${adv.params ? ` (khoảng ${String(adv.params).replace('.', ',')} tỉ tham số)` : ''} khá nhỏ cho AIVN AGENT: có thể gọi sai công cụ, bỏ bước hoặc nói đã làm khi chưa làm. Nên dùng <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b>.</span> ${recBtns}`; w.hidden = false; return; }
+  if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN AGENT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để AIVN AGENT làm việc đáng tin cậy, hãy chọn mô hình được đánh dấu dùng được cho AIVN AGENT trong bộ chọn mô hình.</span> ${recBtns}`; w.hidden = false; return; }
+  if (adv && adv.small) { w.innerHTML = `<span>⚠ <b>${esc(adv.model)}</b>${adv.params ? ` (khoảng ${String(adv.params).replace('.', ',')} tỉ tham số)` : ''} khá nhỏ cho AIVN AGENT: có thể gọi sai công cụ, bỏ bước hoặc nói đã làm khi chưa làm. Nên chọn mô hình mạnh hơn được đánh dấu dùng được cho AIVN AGENT.</span> ${recBtns}`; w.hidden = false; return; }
   if (adv && adv.eyes && adv.eyes.needed) {
     const r = adv.eyes.rec; const busy = adv.eyes.pending && jobs && [...jobs.values()].some(j => j.catalogId === adv.eyes.pending && j.status !== 'done');
     w.innerHTML = `<span>👁 <b>Điều khiển màn hình cần mắt nhìn.</b> <b>${esc(adv.model)}</b> chỉ đọc chữ, không nhìn được màn hình — Zalo và các ứng dụng Electron gần như không cho đọc nút/ô, nên AIVN AGENT sẽ bấm nhầm hoặc báo “không tìm thấy”. ${r ? `Nạp thêm <b>${esc(r.name)}</b> (${fmtBytes(r.size)}): AIVN tự dùng nó để nhìn ảnh chụp mỗi bước.` : ''}</span> ${r ? `<button class="btn sm primary" data-eyes="${esc(r.id)}" ${busy ? 'disabled' : ''}>${busy ? 'Đang tải mắt nhìn…' : r.installed ? '👁 Nạp thêm mắt nhìn' : '👁 Tải & nạp thêm mắt nhìn'}</button>` : ''}`;
@@ -2054,13 +2065,13 @@ let chipPop = null; // { id, el }
 function chipState(c, info) {
   const off = new Set(info.toolsOff || []); const comp = info.computer || {};
   switch (c.id) {
-    case 'files': if (off.has('files')) return { st: 'off' }; return info.folders.some(f => f.exists) ? { st: 'on' } : { st: 'blocked', why: 'Chưa cho phép thư mục nào, nên AIVN AGENT không đọc/ghi được tệp.', fix: 'Thêm thư mục', act: () => $('#addFolder').click() };
+    case 'files': if (off.has('files')) return { st: 'off' }; return info.folders.some(f => f.exists) ? { st: 'on' } : { st: 'blocked', short: 'chưa có thư mục', why: 'Chưa cho phép thư mục nào, nên AIVN AGENT không đọc/ghi được tệp.', fix: 'Thêm thư mục', act: () => $('#addFolder').click() };
     case 'web': return { st: info.web ? 'on' : 'off' };
-    case 'python': if (!info.python.available) return { st: 'blocked', why: 'Máy chưa có Python 3.', fix: 'Hướng dẫn cài Python', act: () => modalAsk({ icon: '🐍', title: 'Cài Python 3', message: 'Tải Python 3 từ trang chính thức python.org (Windows: nhớ tích "Add python.exe to PATH" khi cài; macOS: cài gói .pkg). Cài xong, khởi động lại AIVN rồi bật nút Python.', okLabel: 'Mở python.org', noLabel: 'Đóng' }).then(ok => ok && A.openExternal('https://www.python.org/downloads/')) };
+    case 'python': if (!info.python.available) return { st: 'blocked', short: 'chưa có Python', why: 'Máy chưa có Python 3.', fix: 'Hướng dẫn cài Python', act: () => modalAsk({ icon: '🐍', title: 'Cài Python 3', message: 'Tải Python 3 từ trang chính thức python.org (Windows: nhớ tích "Add python.exe to PATH" khi cài; macOS: cài gói .pkg). Cài xong, khởi động lại AIVN rồi bật nút Python.', okLabel: 'Mở python.org', noLabel: 'Đóng' }).then(ok => ok && A.openExternal('https://www.python.org/downloads/')) };
       return { st: info.python.enabled ? 'on' : 'off' };
     case 'memory': return { st: info.memory.enabled ? 'on' : 'off' };
     case 'computer': return { st: comp.enabled ? 'on' : 'off' };
-    case 'screen': if (!comp.screen) return { st: 'off' }; return comp.vision ? { st: 'on' } : { st: 'blocked', why: 'Cần nạp một mô hình nhìn được ảnh (có biểu tượng 👁, vd. Qwen3-VL 4B, xem mục “Mô hình điều khiển máy tính” trong Kho).', fix: 'Mở Kho mô hình', act: () => show('discover'), canOff: true };
+    case 'screen': if (!comp.screen) return { st: 'off' }; return comp.vision ? { st: 'on' } : { st: 'blocked', short: 'cần mô hình nhìn màn hình', why: 'Đang bị chặn: mô hình hiện tại không nhìn được màn hình nên AIVN AGENT không được bấm/gõ trong ứng dụng. Chọn một mô hình được đánh dấu dùng được cho AIVN AGENT (có 👁, vd. Qwen3-VL) ở bộ chọn mô hình, hoặc xem mục “Mô hình điều khiển máy tính” trong Khám phá.', fix: 'Mở Khám phá', act: () => show('discover'), canOff: true };
     default: return { st: off.has(c.id) ? 'off' : 'on' };
   }
 }
@@ -2070,7 +2081,7 @@ function renderToolChips(info) {
     const s = chipState(c, info);
     const label = s.st === 'on' ? 'đang bật' : s.st === 'off' ? 'đang tắt' : 'chưa dùng được';
     const tip = `${c.desc}\n${s.st === 'blocked' ? '⚠ ' + s.why : s.st === 'on' ? 'Bấm để tắt.' : 'Bấm để bật.'}`;
-    return `<span class="tool-chip ${s.st}" data-chip="${c.id}"><button type="button" class="tc-main" aria-pressed="${s.st === 'on'}" aria-label="${esc(c.n)}: ${label}${s.st === 'blocked' ? '. ' + esc(s.why) : ''}" title="${esc(tip)}">${c.i} ${esc(c.n)}${s.st === 'on' ? '' : ' · tắt'}</button><button type="button" class="tc-more" aria-haspopup="dialog" aria-expanded="false" aria-label="Xem mô tả và ví dụ cho ${esc(c.n)}" title="Mô tả và ví dụ">▾</button></span>`;
+    return `<span class="tool-chip ${s.st}" data-chip="${c.id}"><button type="button" class="tc-main" aria-pressed="${s.st === 'on'}" aria-label="${esc(c.n)}: ${label}${s.st === 'blocked' ? '. ' + esc(s.why) : ''}" title="${esc(tip)}">${c.i} ${esc(c.n)}${s.st === 'on' ? '' : s.st === 'blocked' ? ' · ' + esc(s.short || 'bị chặn') : ' · tắt'}</button><button type="button" class="tc-more" aria-haspopup="dialog" aria-expanded="false" aria-label="Xem mô tả và ví dụ cho ${esc(c.n)}" title="Mô tả và ví dụ">▾</button></span>`;
   }).join('');
   if (chipPop) { const id = chipPop.id; closeChipPop(); openChipPop(id, false); }
 }

@@ -20,7 +20,7 @@ async function getJson(url, { token, fetchImpl = fetch, timeout = 20000 } = {}) 
   let res;
   try { res = await fetchImpl(url, { headers: authHeaders(url, token), signal: AbortSignal.timeout(timeout) }); }
   catch (e) { throw new HfError('Không kết nối được Hugging Face. Hãy kiểm tra Internet.', 0); }
-  if (res.status === 401 || res.status === 403) throw new HfError('Repo này yêu cầu đăng nhập Hugging Face. Hãy nhập HF token trong mục Kho mô hình → Token Hugging Face.', res.status);
+  if (res.status === 401 || res.status === 403) throw new HfError('Repo này yêu cầu đăng nhập Hugging Face. Hãy nhập HF token trong mục Khám phá → Token Hugging Face.', res.status);
   if (res.status === 404) throw new HfError('Không tìm thấy repo trên Hugging Face.', 404);
   if (res.status === 429) throw new HfError('Hugging Face đang giới hạn số lượt truy vấn, vui lòng thử lại sau ít phút.', 429);
   if (!res.ok) throw new HfError(`Hugging Face trả về lỗi ${res.status}.`, res.status);

@@ -49,7 +49,8 @@ function groundingFamily(id) {
   if (/qwen3-?vl/.test(s)) return 'qwen3vl';
   // Holo1.5 và UI-Venus-Ground dựa trên Qwen2.5-VL (toạ độ điểm ảnh) nhưng được huấn luyện với câu lệnh riêng: dùng đúng câu lệnh của nhà phát triển
   if (/holo/.test(s)) return 'holo';
-  if (/ui-?venus/.test(s)) return 'venus';
+  // UI-Venus: câu lệnh hộp [x1,y1,x2,y2] của nhà phát triển cho 3/10 trên AIVN Bench (hộp lệch ~20 px), câu lệnh điểm kiểu Qwen2.5-VL cho 8/10 → dùng cách đo được tốt hơn
+  if (/ui-?venus/.test(s)) return 'qwen25vl';
   if (/showui|os-?atlas|gui-?actor/.test(s)) return 'qwen25vl';
   return 'generic';
 }

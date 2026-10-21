@@ -1,11 +1,12 @@
 'use strict';
-// Nhãn khả năng trong Kho mô hình — mỗi nhãn đều có nguồn.
+// Nhãn khả năng trong Khám phá — mỗi nhãn đều có nguồn.
 //   k: 'v' = Đã kiểm chứng: AIVN tự chạy thử, kết quả ghi ở docs/verified.md (đường dẫn trong src)
 //   k: 'd' = Theo nhà phát triển: trích từ thẻ mô hình / tài liệu chính thức (src), q = câu gốc
 //   k: 'x' = AIVN đã thử nhưng CHƯA đạt (hiện như cảnh báo, để không ai hiểu nhầm lời nhà phát triển là đã kiểm chứng)
 // Quy tắc (có kiểm thử): nhãn điều khiển màn hình ('screen', 'gui') chỉ được gắn cho mô hình nhìn được ảnh.
 const HF = 'https://huggingface.co/';
-const VER = 'https://github.com/khoik647-ai/aivn/blob/main/docs/verified.md';
+// trang tĩnh trên GitHub Pages, release.sh tạo từ docs/verified.md mỗi lần phát hành (liên kết tới nhánh main bị 404 trước khi phát hành — QA B8)
+const VER = 'https://khoik647-ai.github.io/aivn/verified.html';
 const TAGS = {
   vision: 'Nhìn được ảnh', tools: 'Gọi công cụ', reasoning: 'Suy luận', code: 'Lập trình', multilingual: 'Đa ngôn ngữ',
   vi: 'Tiếng Việt', gui: 'Định vị giao diện', screen: 'Điều khiển máy tính', long: 'Ngữ cảnh dài', moe: 'MoE (nhanh so với cỡ)',

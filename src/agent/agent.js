@@ -134,20 +134,70 @@ const NOT_FOUND_RE = /không\s+(tìm\s+thấy|thấy|có)(?!\p{L})|chưa\s+(tìm
 const openNudge = (hit) => `(Kiểm tra tự động của AIVN) Kết quả tìm kiếm "${hit.name}" đã hiện${hit.id ? ` ở [${hit.id}]` : ''} nhưng bạn CHƯA bấm vào. Người dùng đã yêu cầu mở, nên hãy bấm vào kết quả đó ngay (screen_act click${hit.id ? ` element "${hit.id}"` : ''}) rồi kiểm tra cửa sổ đã mở đúng người. Mở một cuộc trò chuyện hay một mục không cần hỏi lại; chỉ việc gửi tin nhắn hoặc thao tác quan trọng mới cần người dùng cho phép.`;
 const OPEN_WANT_RE = /(mở|open|vào|nhắn|trò\s+chuyện|chat|xem|gọi)(?!\p{L})/iu;
 const searchNudge = (todo) => `(Kiểm tra tự động của AIVN) Chưa được kết luận "không tìm thấy": ô tìm kiếm mới thử chưa đủ cách. Hãy lần lượt ${todo.map(v => `gõ lại "${v}" vào ô tìm kiếm (screen_act type_text, replace: true), chờ kết quả rồi kiểm tra`).join('; ')}. Chỉ báo không tìm thấy sau khi đã thử hết và nêu các cách đã thử.`;
-const NO_ACTION_WARN = 'Mô hình này chưa thực sự thao tác gì — chưa có việc nào được làm. Hãy dùng Qwen3 4B/8B (hỗ trợ công cụ tốt).';
+// Cảnh báo không gợi ý cứng một mô hình (có thể chính là mô hình đang dùng): chỉ tới bộ chọn mô hình của AIVN AGENT
+const NO_ACTION_WARN = 'Mô hình này chưa thực sự thao tác gì — chưa có việc nào được làm. Hãy chọn một mô hình được đánh dấu dùng được cho AIVN AGENT trong bộ chọn mô hình.';
+const NO_COMP_WARN = 'Mô hình chưa thao tác được trên máy tính trong lượt này (các bước khác đã chạy xong ở trên).';
+const noActionWarn = (steps) => steps.some(x => COMP.includes(x.name) && x.status === 'ok') ? null : steps.some(x => x.status === 'ok') ? NO_COMP_WARN : NO_ACTION_WARN;
+// Gửi tin/thao tác quan trọng chỉ được báo thành công khi desktop-agent đã KIỂM CHỨNG trên màn hình (step.verify.sent):
+// thấy chữ vừa gửi trong cuộc trò chuyện và thấy tên người nhận (nếu người dùng nêu tên). Không có bằng chứng thì không được nói đã gửi.
+const SEND_CLAIM_RE = /(đã|vừa)\s+(được\s+)?(gửi|nhắn)(?!\p{L})|gửi[^.\n]{0,40}thành công|đã được gửi|(tin nhắn|lời chúc)[^.\n]{0,40}(đã|vừa)\s+(xuất hiện|tới|đến)/iu;
+const OCR_CLAIM_RE = /(xác nhận|kiểm tra|thấy)[^.\n]{0,24}(qua|bằng|nhờ)\s+OCR|OCR[^.\n]{0,24}(xác nhận|cho thấy)/iu;
+const sendVerified = (steps) => steps.some(x => x.status === 'ok' && x.verify && x.verify.sent === true);
+const ocrDone = (steps) => steps.some(x => x.status === 'ok' && (x.name === 'read_screen_text' || (x.verify && x.verify.ocr)));
+function sendClaimCheck(text, steps) {
+  const t = String(text || '');
+  if (SEND_CLAIM_RE.test(t) && !/(chưa|không)\s+(được\s+)?(gửi|xác nhận)/iu.test(t) && !sendVerified(steps)) {
+    const last = [...steps].reverse().find(x => x.verify && x.verify.sent === false);
+    return '[AIVN kiểm tra] Chưa có bằng chứng trên màn hình là tin đã được gửi tới đúng người' + (last && last.verify.why ? ` (${last.verify.why})` : '') + '. Hãy chụp lại màn hình (screen_look) để kiểm tra: đúng cuộc trò chuyện của người nhận, và tin vừa gửi đã hiện trong khung chat. Nếu chưa đúng thì làm lại (tìm người nhận, mở cuộc trò chuyện, gõ, gửi). Chỉ nói "đã gửi" khi đã thấy trên màn hình; nếu không kiểm được thì nói rõ là CHƯA xác nhận.';
+  }
+  if (OCR_CLAIM_RE.test(t) && !ocrDone(steps)) return '[AIVN kiểm tra] Lượt này chưa có bước đọc chữ trên màn hình (OCR) nào. Không được viết "xác nhận qua OCR". Chỉ báo những gì các công cụ thật sự trả về.';
+  return null;
+}
+// QA B6: mô hình nhỏ chép nguyên kết quả OCR (kèm cả “\n” dạng chữ) làm câu trả lời → đổi “\n” thành xuống dòng,
+// và đặt phần chữ đọc được vào khối trích dẫn gọn (tối đa 12 dòng) thay vì đổ nguyên cục
+function tidyAnswer(text, steps) {
+  let t = String(text || '');
+  if (/\\n/.test(t) && !/```/.test(t)) t = t.replace(/(?:\\r)?\\n/g, '\n');
+  const ocr = steps.filter(x => x.status === 'ok' && (x.name === 'read_screen_text' || x.name === 'screen_look') && x.detail).map(x => String(x.detail));
+  for (const d of ocr) {
+    const lines = d.split('\n').map(l => l.trim()).filter(l => l.length >= 3);
+    const hit = lines.filter(l => t.includes(l));
+    if (hit.length >= 4 && hit.join('').length > 80) {
+      const first = t.indexOf(hit[0]); const lastL = hit[hit.length - 1]; const end = t.lastIndexOf(lastL) + lastL.length;
+      if (first >= 0 && end > first) {
+        const shown = hit.slice(0, 12).map(l => '> ' + l).join('\n') + (hit.length > 12 ? `\n> … (còn ${hit.length - 12} dòng)` : '');
+        t = (t.slice(0, first).trim() + '\n\nChữ đọc được trên màn hình:\n' + shown + '\n\n' + t.slice(end).trim()).trim();
+      }
+      break;
+    }
+  }
+  return t;
+}
+// Chốt chặn cuối: mô hình vẫn khẳng định đã gửi khi chưa kiểm chứng → thay bằng câu trung thực
+function guardClaims(text, steps) {
+  let t = String(text || '');
+  if (OCR_CLAIM_RE.test(t) && !ocrDone(steps)) t = t.replace(/\s*\(?[^.\n()]{0,30}(xác nhận|kiểm tra|thấy)[^.\n()]{0,24}(qua|bằng|nhờ)\s+OCR\)?/giu, '');
+  if (SEND_CLAIM_RE.test(t) && !/(chưa|không)\s+(được\s+)?(gửi|xác nhận)/iu.test(t) && !sendVerified(steps)) {
+    const acted = steps.filter(x => x.name === 'screen_act' && x.status === 'ok').map(x => x.summary).filter(Boolean).slice(-4);
+    const why = ([...steps].reverse().find(x => x.verify && x.verify.sent === false) || { verify: {} }).verify.why;
+    return { text: `Mình CHƯA xác nhận được là tin nhắn đã gửi tới đúng người${why ? ` (${why})` : ''}.` + (acted.length ? ` Các thao tác đã làm: ${acted.join('; ')}.` : '') + ' Bạn kiểm tra lại cửa sổ trò chuyện giúp mình, hoặc giao lại việc để mình làm lại từng bước.', warning: 'AIVN chặn một câu báo “đã gửi” chưa có bằng chứng trên màn hình.' };
+  }
+  return { text: t, warning: null };
+}
 const FAKE_NUDGE = '[AIVN kiểm tra] Bạn CHƯA gọi công cụ nào trong lượt này, nên chưa có việc gì thực sự được làm. Không được viết bước giả (như "[screen,act] …") hay nói đã làm. Hãy gọi công cụ thật ngay bây giờ (khối <tool_call> hoặc lời gọi công cụ), hoặc nói thẳng là bạn không làm được và vì sao.';
-const REPEAT_WARN = 'Mô hình bắt đầu lặp lại cùng một câu nên AIVN đã tự dừng lại. Mẹo: dùng Qwen3 4B Instruct 2507 hoặc Qwen3 8B cho việc dùng công cụ, và nạp ít mô hình cùng lúc nếu GPU ít bộ nhớ.';
+const REPEAT_WARN = 'Mô hình bắt đầu lặp lại cùng một câu nên AIVN đã tự dừng lại. Mẹo: chọn mô hình được đánh dấu dùng được cho AIVN AGENT, và nạp ít mô hình cùng lúc nếu GPU ít bộ nhớ.';
 const BUDGET_WARN = 'Lượt này đã dài quá giới hạn của AIVN AGENT nên được dừng lại. Hãy chia việc thành các bước nhỏ hơn.';
 const REPEAT_NUDGE = '(Kiểm tra tự động của AIVN) Bạn đang lặp lại cùng một câu. Dừng lặp: trả lời ngắn gọn, mỗi ý một lần, không hỏi lại.';
 const REPEAT_ACT_NUDGE = '(Kiểm tra tự động của AIVN) Bạn đang lặp lại câu hỏi xin phép. Người dùng ĐÃ yêu cầu bạn làm, và các công cụ máy tính đang bật. Không hỏi lại, không viết hướng dẫn: gọi công cụ đầu tiên ngay bây giờ (vd. open_app để mở ứng dụng).';
 const CANNOT = { name: 'cannot_do', description: 'Dùng khi không có công cụ phù hợp hoặc không thể làm yêu cầu. Nêu lý do ngắn gọn bằng tiếng Việt.', parameters: { type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'] } };
 const CLAIMS = [
   [/(đã|vừa)\s+(mở|khởi động|bật)(?!\p{L})/iu, ['open_app', 'open_path', 'open_url', 'run_command', 'screen_act']], // bấm mở một cuộc trò chuyện/mục trong ứng dụng cũng là "đã mở"
-  [/(đã|vừa)\s+(gửi|nhắn|gõ|nhập|bấm|nhấn|click|chọn|cuộn)(?!\p{L})|gửi[^.\n]{0,40}thành công|đã được gửi/iu, ['screen_act']],
+  [/(đã|vừa)\s+(gõ|nhập|bấm|nhấn|click|chọn|cuộn)(?!\p{L})/iu, ['screen_act']], // “đã gửi” cần kiểm chứng trên màn hình: sendClaimCheck
   [/(đã|vừa)\s+(đóng|tắt)\s+(ứng dụng|app|chương trình|cửa sổ)/iu, ['close_app', 'system_action']],
   [/(đã|vừa)\s+(chạy|thực thi)\s+(lệnh|câu lệnh)/iu, ['run_command']],
   [/(đã|vừa)\s+chụp\s+màn hình|màn hình (đang )?hiển thị/iu, ['screen_look', 'screen_act']],
 ];
+const SCREEN_CTRL = ['screen_act', 'screen_look'];
 const COMP = ['open_app', 'open_path', 'open_url', 'close_app', 'run_command', 'system_action', 'screen_look', 'screen_act', 'list_apps', 'running_apps'];
 // Câu khẳng định "ứng dụng chưa cài / không có" (hay gợi ý dùng bản web thay thế)
 const NOT_INSTALLED_RE = /(chưa\s+(được\s+)?cài(\s+đặt)?|không\s+được\s+cài(\s+đặt)?|chưa\s+có\s+(ứng dụng|trên máy)|không\s+(có|tìm thấy|tồn tại)[^.\n]{0,40}(ứng dụng|trên máy|trong máy)|không có trên máy|zalo\.me|chat\.zalo|(trang|bản|phiên bản)\s+web\s+(của\s+)?zalo)/iu;
@@ -213,6 +263,7 @@ function fakeActionCheck(text, steps, names, query = '') {
   if (names.includes('open_app') && NOT_INSTALLED_RE.test(t) && !steps.some(x => x.name === 'open_app' || x.name === 'list_apps')) return 'claim'; // nói "chưa cài" mà lượt này chưa hề kiểm tra
   if (!names.some(n => COMP.includes(n)) && !steps.length) return null;
   for (const [re, tools] of CLAIMS) if (re.test(t) && !ok(tools)) return 'claim';
+  if (SEND_CLAIM_RE.test(t) && !/(chưa|không)\s+(được\s+)?(gửi|xác nhận)/iu.test(t) && !sendVerified(steps)) return 'claim'; // “đã gửi” cần kiểm chứng trên màn hình
   return null;
 }
 
@@ -299,6 +350,8 @@ function createAgent(deps) {
     const off = new Set(Array.isArray(s.agentToolsOff) ? s.agentToolsOff : []);
     return activeToolsRaw({ headless, s }).filter(n => !Object.entries(TOOL_GROUPS).some(([g, list]) => off.has(g) && list.includes(n)));
   }
+  // QA B3: không có mô hình nhìn được màn hình (và không có não trên mây nhìn ảnh) → không đưa công cụ điều khiển màn hình cho mô hình
+  const screenEyes = () => { try { if (deps.cloudVision && deps.cloudVision()) return true; const st = deps.engine && deps.engine.status ? deps.engine.status() : null; return !!(st && st.vision); } catch { return false; } };
   function activeToolsRaw({ headless, s }) {
     const names = ['calculator', 'get_datetime', 'run_javascript'];
     if (folders().length) names.push('list_allowed_directories', 'list_files', 'read_file', 'read_multiple_files', 'write_file', 'delete_file');
@@ -306,7 +359,7 @@ function createAgent(deps) {
     if (s.agentPython && sandbox.findPython()) names.push('run_python');
     if (s.agentMemory !== false) names.push('save_memory');
     if (!headless) names.push('create_reminder');
-    if (deps.computer) names.push(...deps.computer.names({ headless }));
+    if (deps.computer) names.push(...deps.computer.names({ headless }).filter(n => !SCREEN_CTRL.includes(n) || screenEyes()));
     if (deps.mcp && !headless && s.agentMcp !== false) { try { names.push(...deps.mcp.names()); } catch {} }
     return names;
   }
@@ -472,6 +525,7 @@ function createAgent(deps) {
     ];
     if (names.includes('open_app')) lines.push('Máy tính: bạn mở được ứng dụng (open_app, list_apps), tệp/thư mục (open_path), trang web (open_url), xem/đóng ứng dụng đang mở, chạy lệnh terminal (run_command, người dùng duyệt từng lệnh) và thao tác hệ thống (system_action). Hệ điều hành: ' + ({ win32: 'Windows (lệnh chạy bằng PowerShell)', darwin: 'macOS (lệnh chạy bằng zsh)' }[process.platform] || 'Linux') + '. Ưu tiên công cụ chuyên dụng (open_app, open_url…) thay vì run_command. "Mở máy tính" nghĩa là mở ứng dụng Máy tính (Calculator) bằng open_app; Không bao giờ khẳng định một ứng dụng "không có" hay "chưa cài" trên máy; nếu open_app báo không tìm thấy: thử list_apps với từ khoá ngắn (vd. "zalo"), rồi trên Windows thử run_command `cmd /c start "" "<tên>"` (người dùng duyệt lệnh) trước khi bỏ cuộc; cuối cùng mới nói là chưa tìm/mở được và hỏi tên chính xác. KHÔNG tự mở trang web hay tìm trên mạng để thay cho ứng dụng (vd. mở zalo.me thay cho Zalo) khi người dùng chưa đồng ý — hãy hỏi trước. khi người dùng nhờ mở/chạy ứng dụng, hãy GỌI open_app ngay thay vì nói không làm được. Không bao giờ chạy lệnh xoá hàng loạt, tải mã từ mạng về chạy, hay đổi cài đặt bảo mật.');
     else lines.push('Máy tính: các công cụ mở ứng dụng/chạy lệnh đang TẮT (Cài đặt AIVN AGENT → Truy cập máy tính).');
+    if (deps.computer && !names.includes('screen_act') && deps.computer.names({ headless: false }).includes('screen_act')) lines.push('Điều khiển màn hình (bấm, gõ trong ứng dụng như Zalo) đang BỊ CHẶN vì mô hình hiện tại không nhìn được màn hình. Nếu người dùng nhờ thao tác trong ứng dụng, nói rõ là chưa làm được và nhờ họ chọn mô hình được đánh dấu dùng được cho AIVN AGENT; không giả vờ đã làm.');
     lines.push(`Công cụ ĐANG BẬT trong lượt này (gọi được ngay): ${names.join(', ') || '(không có)'}. Tuyệt đối không bảo người dùng "bật" hay "cho phép" một công cụ đã có trong danh sách này — cứ gọi nó. Chỉ khi công cụ cần thiết KHÔNG có trong danh sách mới nói người dùng bật trong Cài đặt AIVN AGENT.`);
     if (names.includes('open_app') && !names.includes('screen_act')) lines.push('Gửi tin nhắn, bấm hay gõ trong ứng dụng khác (Zalo, Messenger…) cần bật "Điều khiển màn hình" (Cài đặt AIVN AGENT); hiện ĐANG TẮT, nên bạn chỉ mở được ứng dụng (open_app) rồi phải nói rõ người dùng tự gõ và gửi, hoặc bật Điều khiển màn hình.');
     if (names.includes('open_app')) lines.push('QUAN TRỌNG: các công cụ máy tính ở trên ĐANG BẬT và hoạt động thật. Khi người dùng nhờ làm một việc trên máy (mở ứng dụng, nhắn tin, bấm, gõ…), hãy TỰ LÀM bằng lời gọi công cụ ngay — KHÔNG viết hướng dẫn từng bước cho người dùng tự làm, KHÔNG hỏi lại "bạn có muốn tôi thực hiện không" (người dùng đã yêu cầu rồi), KHÔNG viết nhãn giả trong ngoặc vuông như [Mở Zalo] [Nhắn tin]. Chỉ hỏi lại ngay trước bước gửi/xoá/thanh toán.');
@@ -629,21 +683,22 @@ function createAgent(deps) {
         if (found && OPEN_WANT_RE.test(String(query || '')) && round < maxRounds - 2) { openNudged = true; msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: openNudge(found) }); onStatus({ stage: 'verify', round, discarded: r.text || '' }); continue; }
         let todo = null; try { todo = !searchNudged && names.includes('screen_act') && deps.computer && deps.computer.searchTodo ? deps.computer.searchTodo() : null; } catch {}
         if (todo && NOT_FOUND_RE.test(r.text || '') && round < maxRounds - 2) { searchNudged = true; msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: searchNudge(todo) }); onStatus({ stage: 'verify', round, discarded: r.text || '' }); continue; }
-        const nudge = !nudged && round < maxRounds - 2 ? (claimCheck(query, r.text || '', steps, names) || (fake ? FAKE_NUDGE : null)) : null;
+        const nudge = !nudged && round < maxRounds - 2 ? (claimCheck(query, r.text || '', steps, names) || sendClaimCheck(r.text || '', steps) || (fake ? FAKE_NUDGE : null)) : null;
         if (nudge) { nudged = true; msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: nudge }); onStatus({ stage: 'verify', round, discarded: r.text || '' }); continue; }
         if (fake && !forcedTried && names.length && !signal?.aborted) {
           // lần cuối: buộc mô hình chọn MỘT công cụ thật hoặc cannot_do (sinh có ràng buộc ngữ pháp JSON)
           forcedTried = true; onStatus({ stage: 'verify', round, discarded: r.text || '' });
-          msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: FAKE_NUDGE });
+          const claimed = r.text || '';
+          msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: sendClaimCheck(claimed, steps) || FAKE_NUDGE });
           let fr = null; try { const compTools = tools.filter(t => COMP.includes(t.name)); fr = await deps.engine.chatStep(msgs, { tools: [...(compTools.length ? compTools : tools), CANNOT], toolChoice: 'required', temperature: 0, maxTokens: 400, signal }); } catch (e) { deps.log && deps.log('[aivn agent] buộc gọi công cụ lỗi: ' + e.message); }
           const c = fr && fr.toolCalls && fr.toolCalls[0];
           if (c && c.name !== 'cannot_do' && names.includes(c.name)) { r = { ...fr, text: '', toolCalls: [c] }; }
-          else { text = c && c.arguments && c.arguments.reason ? 'Mình chưa làm được việc này: ' + String(c.arguments.reason) : ''; warning = NO_ACTION_WARN; finishReason = 'stop'; break; }
+          else { text = c && c.arguments && c.arguments.reason ? 'Mình chưa làm được việc này: ' + String(c.arguments.reason) : guardClaims(claimed, steps).text; const blockedClaim = text !== claimed; if (!blockedClaim) text = ''; warning = noActionWarn(steps) || (blockedClaim ? guardClaims(claimed, steps).warning : null); finishReason = 'stop'; break; }
         } else {
           text = r.text; finishReason = r.finishReason;
           if (fake) {
             const did = steps.some(x => COMP.includes(x.name) && x.status === 'ok');
-            if (!did) warning = NO_ACTION_WARN;
+            if (!did) warning = noActionWarn(steps);
             text = stripFake(String(text || '').replace(/<tool_call>[\s\S]*?(<\/tool_call>|$)/g, '').replace(/<\/?tool_result[^>]*>/g, '')).trim();
             if (!text && did) { const lastOk = [...steps].reverse().find(x => x.status === 'ok'); text = 'Xong: ' + lastOk.summary + '.'; }
           }
@@ -686,7 +741,7 @@ function createAgent(deps) {
           out = { error: msg, forModel: `Lỗi: ${msg}`, summary: msg };
           if (!userErr) deps.log && deps.log(`[aivn agent] ${call.name} lỗi: ${msg}`);
         }
-        Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, ms: Date.now() - step.startedAt });
+        Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, ms: Date.now() - step.startedAt });
         logTool(step);
         onStep({ ...step });
         msgs.push({ role: 'tool', tool_call_id: call.id, content: typeof out.forModel === 'string' && out.forModel ? out.forModel : String(out.forModel ?? out.message ?? out.summary ?? JSON.stringify(out)) || '(không có kết quả)' });
@@ -705,7 +760,8 @@ function createAgent(deps) {
       const okSteps = steps.filter(x => x.status === 'ok');
       text = 'Đã làm:\n' + okSteps.slice(-12).map(x => `- ${x.label || x.name}: ${String(x.summary || '').slice(0, 120)}`).join('\n') + (okSteps.length > 12 ? `\n- … và ${okSteps.length - 12} bước khác` : '');
     }
-    if (fakeSeen && !warning && finishReason !== 'abort' && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) warning = NO_ACTION_WARN;
+    if (fakeSeen && !warning && finishReason !== 'abort' && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) warning = noActionWarn(steps);
+    if (finishReason !== 'abort') { const g = guardClaims(text, steps); text = tidyAnswer(g.text, steps); if (g.warning) warning = warning || g.warning; }
     usage.seconds = (Date.now() - t0) / 1000;
     usage.tokensPerSecond = usage.seconds ? usage.completion_tokens / usage.seconds : 0;
     const urls = steps.flatMap(x => x.urls || []);
@@ -716,4 +772,4 @@ function createAgent(deps) {
   return { run, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck };
 }
 
-module.exports = { editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN };
+module.exports = { editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };

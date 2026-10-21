@@ -89,3 +89,4 @@ x
 batch
 preset
 seed
+ừm

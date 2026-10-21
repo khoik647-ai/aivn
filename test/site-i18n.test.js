@@ -30,7 +30,12 @@ test('bản en/zh không còn chữ tiếng Việt (trừ tên riêng)', () => {
 });
 test('tên tác giả và khối liên hệ giữ nguyên ở mọi ngôn ngữ', () => {
   const contact = (html.match(/<ul[^>]*class="foot-contact"[\s\S]*?<\/ul>/) || [''])[0];
-  assert.ok(/khoik647@gmail\.com/.test(contact) && /0896 403 538/.test(contact), 'thiếu khối liên hệ'); assert.ok(!/data-i18n/.test(contact), 'khối liên hệ không được dịch');
+  assert.ok(/khoik647@gmail\.com/.test(contact) && /0896 403 538/.test(contact), 'thiếu khối liên hệ');
+  // QA B9: nhãn “Điện thoại” và aria-label được dịch; en/zh hiện số quốc tế +84 896 403 538; liên kết gọi có +84 để gọi được từ nước ngoài
+  assert.match(contact, /href="tel:\+84896403538"/); assert.match(contact, /data-i18n-aria-label="@aria-label\.contact"/);
+  for (const l of ['en', 'zh']) { assert.strictEqual(D[l]['foot.phonenum'], '+84 896 403 538', l); assert.ok(D[l]['foot.phone'] && D[l]['@aria-label.contact'], l); }
+  assert.strictEqual(D.en['foot.phone'], 'Phone:'); assert.strictEqual(D.zh['foot.phone'], '电话：');
+  assert.ok(!/data-i18n="[^"]*"[^>]*>[^<]*khoik647/.test(contact), 'địa chỉ email không được dịch');
   for (const l of ['en', 'zh']) for (const k of keys) {
     const m = html.match(new RegExp(`data-i18n="${k.replace('.', '\\.')}"[^>]*>([\\s\\S]*?)<\\/`)); if (m && m[1].includes(NAME)) assert.ok(D[l][k].includes(NAME), `${l} ${k} mất tên tác giả`);
   }
@@ -47,4 +52,14 @@ test('có nút chọn ngôn ngữ, đặt <html lang>, nhớ lựa chọn, tự 
 });
 test('bản dịch trong site/i18n/*.json đã được ghép vào index.html', () => {
   const r = require('child_process').spawnSync('python3', [path.join(root, 'tools/site_i18n_build.py'), '--check']); assert.strictEqual(r.status, 0, String(r.stderr));
+});
+
+test('QA B10: dung lượng tải trên trang do release.sh điền từ tệp thật của bản phát hành', () => {
+  assert.ok(!/~(233|251|264) MB/.test(html), 'còn dung lượng viết cứng cũ');
+  for (const t of ['__MB_WIN__', '__MB_ARM__', '__MB_X64__']) assert.ok(html.includes(t), t);
+  const rel = fs.readFileSync(path.join(root, 'release.sh'), 'utf8');
+  assert.match(rel, /MB_WIN="\$\(mb "\$OUT\/AIVN-Setup\.exe"\)"/); assert.match(rel, /grep -q "__MB_" "\$SITE\/index\.html" && die/);
+});
+test('QA B11: trang web gọi mục tải mô hình là “Khám phá” (Discover / 发现), không còn “Kho mô hình”', () => {
+  assert.ok(!/Kho mô hình/.test(html)); assert.ok(!Object.values(D.en).some(v => /Model Hub/.test(v))); assert.ok(!Object.values(D.zh).some(v => /模型库/.test(v)));
 });

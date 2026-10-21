@@ -173,7 +173,9 @@ function createComputerTools(deps) {
       }
       case 'system_action': {
         const act = String(a.action || ''); const d = C.SYS[act]; if (!d) throw new CompError('Thao tác không hỗ trợ: ' + act);
-        if (d.confirm) { const r = await confirmOrRefuse(ctx, { kind: 'system', icon: d.danger ? '⚠️' : '🖥', title: d.label + '?', short: d.label.toLowerCase(), message: `AIVN AGENT muốn: ${d.label}.${act === 'shutdown' || act === 'restart' ? ' Hãy lưu công việc đang làm trước.' : ''}`, okLabel: d.label, noLabel: 'Không' }, `Người dùng KHÔNG đồng ý (${d.label}). Đừng thử lại.`); if (r) return r; }
+        // chưa được yêu cầu đúng thao tác này → luôn hỏi (kể cả khi đã bật “Luôn cho phép” hay “Tự làm không hỏi”); thao tác nguy hiểm luôn hỏi
+        const asked = C.sysAsked(act, ctx.userQuery);
+        if (d.confirm || !asked) { const r = await confirmOrRefuse(ctx, { kind: 'system', icon: d.danger ? '⚠️' : '🖥', title: d.label + '?', short: d.label.toLowerCase(), message: `AIVN AGENT muốn: ${d.label}.${asked ? '' : ' Bạn CHƯA yêu cầu thao tác này trong tin nhắn.'}${act === 'shutdown' || act === 'restart' ? ' Hãy lưu công việc đang làm trước.' : ''}`, okLabel: d.label, noLabel: 'Không', unrequested: !asked }, `Người dùng KHÔNG đồng ý (${d.label})${asked ? '' : ' — người dùng không hề yêu cầu thao tác này'}. Đừng thử lại; quay lại đúng việc người dùng hỏi.`); if (r) return r; }
         const lbl = await C.systemAction(act, { keyTap: deps.keyTap, openExternal: deps.openExternal });
         return { forModel: `Đã thực hiện: ${lbl}.`, summary: lbl };
       }

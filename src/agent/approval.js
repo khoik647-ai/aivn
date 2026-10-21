@@ -9,7 +9,7 @@ const APPROVE = {
   run_python: { allowAlways: true, warn: 'Mã Python do mô hình viết sẽ chạy ngay mà không hỏi lại (vẫn trong thư mục tạm, chặn mạng).' },
   run_command: { allowAlways: true, warn: 'Lệnh hệ thống do mô hình chọn sẽ chạy ngay mà không hỏi lại.' },
   close_app: { allowAlways: true, warn: 'AIVN AGENT sẽ đóng ứng dụng mà không hỏi lại — dữ liệu chưa lưu có thể mất.' },
-  system_action: { allowAlways: true, warn: 'Các thao tác hệ thống (khoá máy, âm lượng…) sẽ chạy ngay mà không hỏi lại.' }
+  system_action: { allowAlways: true, warn: 'Các thao tác hệ thống (khoá máy, âm lượng…) bạn đã yêu cầu sẽ chạy ngay mà không hỏi lại. Thao tác bạn không yêu cầu vẫn luôn được hỏi trước.' }
 };
 const isMcp = (name) => /^mcp__/.test(name);
 function needsApproval(name) { return !!APPROVE[name] || isMcp(name); }

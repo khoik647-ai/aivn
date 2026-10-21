@@ -904,7 +904,7 @@ const CATALOG = [
   "vision": true,
   "desc": "Mô hình định vị phần tử giao diện của Ant Group (dựa trên Qwen2.5-VL 7B), chỉ dùng ảnh chụp màn hình.",
   "computer": true,
-  "grounding": "venus",
+  "grounding": "qwen25vl",
   "screenPriority": 4
  }
 ];

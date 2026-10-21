@@ -58,3 +58,21 @@ Mô hình chính **Qwen3 4B Instruct 2507** (Q4_K_M), máy không GPU, ngữ c�
 - **Máy chủ API:** trả `tool_calls` đúng chuẩn OpenAI cho công cụ `get_weather`.
 - **Điều khiển màn hình (kèm mắt nhìn Qwen3-VL 2B Q8_0):** việc “Trong cửa sổ Zalo đang mở, tìm liên hệ Trần Quỳnh Anh và mở cuộc trò chuyện với người đó.” trên Zalo giả lập. AIVN AGENT nhìn màn hình, gõ tên vào ô Tìm kiếm, gõ lại không dấu khi không thấy kết quả, rồi bấm đúng “Tran Quynh Anh” (4 bước, 289 giây).
 - Mọi câu trả lời và báo cáo đều bằng tiếng Việt.
+
+<a id="v016-dinh-vi"></a>
+## 0.16 — Điểm định vị (AIVN Bench, 10 nút)
+
+Ảnh chụp cửa sổ AIVN Bench có 10 mục (nút, ô nhập, ô đánh dấu, thẻ, mục danh sách). Mô hình được hỏi toạ độ của từng mục; đạt khi điểm trả về nằm trong khung của mục đó. Máy thử: Linux, 8 luồng CPU, không GPU (chạy bằng llama-server). Mỗi mô hình dùng đúng định dạng lời nhắc và đầu ra mà nhà phát triển công bố.
+
+| Mô hình | Điểm định vị | Thời gian |
+|---|---|---|
+| UI-TARS-1.5 7B (tác tử giao diện) | 9/10 | 171 giây |
+| Qwen3-VL 8B Instruct | 9/10 | 258 giây |
+| Qwen3-VL 4B Instruct | 8/10 | 106 giây |
+| UI-Venus Ground 7B (định vị giao diện) | 8/10 | 419 giây (câu lệnh điểm kiểu Qwen2.5-VL; câu lệnh hộp `[x1,y1,x2,y2]` của nhà phát triển chỉ được 3/10 vì hộp lệch khoảng 20 điểm ảnh, nên AIVN dùng câu lệnh điểm) |
+| Qwen3-VL 2B Instruct | 6/10 | 85 giây |
+| Holo1.5 3B (định vị giao diện) | 4/10 | 131 giây |
+| Qwen2.5-VL 3B Instruct | 2/10 | 142 giây |
+| Holo1.5 7B (định vị giao diện) | 1/10 | 173 giây (đầu ra JSON hỏng, ví dụ `{"x": 70, 451}`; AIVN đã thêm ràng buộc JSON và sẽ đo lại) |
+
+AIVN AGENT chỉ nhận mô hình có điểm định vị từ 6/10 trở lên, nhìn được màn hình và gọi công cụ ổn định (đã kiểm chứng ở các mục trên).

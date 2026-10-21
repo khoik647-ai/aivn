@@ -375,7 +375,7 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       const vr = h.gpu && h.gpu !== 'metal' && h.vram ? (h.vram.free || h.vram.total || 0) * 0.9 : 0;
       const need = m.size * 1.05 + 0.5 * 1024 ** 3;
       if (need > freeRam + vr) {
-        const e = new Error(`Mô hình cần khoảng ${(need / 1024 ** 3).toFixed(1)} GB nhưng máy chỉ còn khoảng ${((freeRam + vr) / 1024 ** 3).toFixed(1)} GB trống (RAM${vr ? ' + VRAM' : ''}). Nạp vẫn có thể được nhưng máy sẽ rất chậm hoặc treo. Nên đóng bớt ứng dụng hoặc chọn bản nhỏ hơn (Q4_K_M, Q3_K_M hoặc mô hình ít tham số hơn) trong Kho mô hình.`);
+        const e = new Error(`Mô hình cần khoảng ${(need / 1024 ** 3).toFixed(1)} GB nhưng máy chỉ còn khoảng ${((freeRam + vr) / 1024 ** 3).toFixed(1)} GB trống (RAM${vr ? ' + VRAM' : ''}). Nạp vẫn có thể được nhưng máy sẽ rất chậm hoặc treo. Nên đóng bớt ứng dụng hoặc chọn bản nhỏ hơn (Q4_K_M, Q3_K_M hoặc mô hình ít tham số hơn) trong Khám phá.`);
         e.code = 'LOW_MEM'; e.modelId = m.id; e.catalogId = m.catalog ? m.catalog.id : null; throw e;
       }
     }
@@ -1655,7 +1655,7 @@ async function qa144() {
   save(); app.quit();
 }
 
-// QA 0.14.3 (AIVN_QA143=thư mục, chỉ khi phát triển): nút công cụ, đính kèm ở cả hai chế độ, đổi giao diện + giảm chuyển động, tìm trong Kho
+// QA 0.14.3 (AIVN_QA143=thư mục, chỉ khi phát triển): nút công cụ, đính kèm ở cả hai chế độ, đổi giao diện + giảm chuyển động, tìm trong Khám phá
 async function qa143() {
   const { clipboard, ClipboardItem } = require('electron');
   const dir = process.env.AIVN_QA143; fs.mkdirSync(dir, { recursive: true });
@@ -1804,7 +1804,7 @@ async function shots141() {
   app.exit(0);
 }
 
-// Tự kiểm thử v0.12 (AIVN_SELFTEST_V12=1): nhìn ảnh, RAG trên PDF dài, /v1/embeddings, Kho mô hình, đổi giao diện
+// Tự kiểm thử v0.12 (AIVN_SELFTEST_V12=1): nhìn ảnh, RAG trên PDF dài, /v1/embeddings, Khám phá, đổi giao diện
 async function selfTestV12() {
   const { clipboard, ClipboardItem } = require('electron');
   const wc = win.webContents; const out = { started: new Date().toISOString() };
@@ -1894,7 +1894,7 @@ async function selfTestV12() {
       out.modelsList = JSON.parse(await curl(['http://localhost:' + port + '/v1/models'])).data.map(m => m.id + (m.type ? ':' + m.type : '') + (m.vision ? ':vision' : ''));
       save();
     }
-    // 4) Kho mô hình
+    // 4) Khám phá
     await js('show("discover")'); await until('document.querySelectorAll("#catalog .card").length > 0', 20000);
     out.kho = await js('({ nav: document.querySelector(".nav-item[data-view=discover]").innerText, title: document.querySelector("#view-discover h2").innerText, cards: document.querySelectorAll("#catalog .card").length, visionCards: [...document.querySelectorAll("#catalog .card")].filter(c => c.querySelector(".tag.vis")).map(c => c.querySelector("h4").innerText) })');
     await shot('app-kho-mo-hinh-light.png');

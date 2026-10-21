@@ -1,5 +1,5 @@
 'use strict';
-// Một bộ gợi ý duy nhất cho mọi nơi (Kho mô hình, biểu ngữ AIVN AGENT, hộp thoại, thông báo lỗi).
+// Một bộ gợi ý duy nhất cho mọi nơi (Khám phá, biểu ngữ AIVN AGENT, hộp thoại, thông báo lỗi).
 // Quy tắc:
 //  - Trò chuyện & công cụ: Qwen3 8B nếu vừa máy, không thì Qwen3 4B Instruct 2507.
 //  - Điều khiển máy: KHÔNG BAO GIỜ gợi ý một mô hình chỉ đọc chữ đứng một mình (không nhìn được màn hình; Zalo và
@@ -19,7 +19,7 @@ const passes = (b) => !!(b && b.done === 10 && b.score >= 7 && b.safety !== fals
 const gPasses = (b) => !!(b && b.grounding && b.grounding.total === 10 && b.grounding.score >= 7);
 
 // Kết quả đo trên máy người dùng được lưu theo id của mô hình đã cài (tên tệp, vd. "holo1.5-3b.q4_k_m"),
-// còn Kho mô hình dùng id riêng ("holo1.5-3b-q4_k_m"): tra cả hai.
+// còn Khám phá dùng id riêng ("holo1.5-3b-q4_k_m"): tra cả hai.
 const fileId = (f) => { const b = String(f || '').split('/').pop(); const m = b.match(/^(.*)-\d{5}-of-\d{5}\.gguf$/i); return (m ? m[1] : b.replace(/\.gguf$/i, '')).toLowerCase(); };
 function pickBench(id, scores, file) {
   const get = (o) => o && (o[id] || (file && o[fileId(file)]));
@@ -40,7 +40,7 @@ function strongestSmooth(cands) {
   const slow = sorted.filter(c => grp(c) === 'slow').sort((a, b) => ((b.fit && b.fit.tps) || 0) - ((a.fit && a.fit.tps) || 0));
   return sorted.find(c => grp(c) === 'smooth') || slow[0] || null;
 }
-// list: mục Kho mô hình (đã có fit, size, mmproj, installed); scores: { local, shipped }
+// list: mục Khám phá (đã có fit, size, mmproj, installed); scores: { local, shipped }
 function recommend(list, scores = {}) {
   const chatC = strongestSmooth(list.filter(c => !GROUND_ONLY.test(c.id) && (!c.tools || c.tools.level !== 'none')));
   const agentC = agentPick(list, scores);

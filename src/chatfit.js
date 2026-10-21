@@ -26,9 +26,18 @@ function fitOverflow(messages, policy = 'trim-middle', maxTokens = 1024, ctx = 0
   let dropped = 0;
   for (let i = protectHead; i < last && total > budget; i++) { keep[i] = false; total -= sizes[i]; dropped++; }
   if (total > budget && policy === 'trim-middle') for (let i = first; i < protectHead && total > budget; i++) { keep[i] = false; total -= sizes[i]; dropped++; }
+  // QA B7: bỏ theo lượt — câu trả lời (và kết quả công cụ) của một câu hỏi đã bỏ cũng phải bỏ, nếu không sẽ còn
+  // 2 tin assistant liền nhau và mẫu chat bắt luân phiên (Gemma, Mistral…) báo lỗi “Conversation roles must alternate”
+  for (let i = first; i < last; i++) if (!keep[i] && messages[i].role === 'user')
+    for (let j = i + 1; j < last && messages[j].role !== 'user'; j++) if (keep[j]) { keep[j] = false; dropped++; }
   let out = messages.filter((_, i) => keep[i]);
   // không bắt đầu phần hội thoại bằng câu trả lời của trợ lý (một số mẫu chat yêu cầu user trước)
-  while (out.length > 1 && out[first] && out[first].role === 'assistant' && first < out.length - 1) { out.splice(first, 1); dropped++; }
+  while (out.length > 1 && out[first] && out[first].role !== 'user' && first < out.length - 1) { out.splice(first, 1); dropped++; }
+  // chốt cuối: hai tin cùng vai liền nhau (user/assistant) → bỏ tin cũ hơn (tin cuối của người dùng luôn giữ)
+  for (let i = out.length - 2; i >= first; i--) {
+    const a = out[i], b = out[i + 1]; const ra = a.role === 'tool' ? 'assistant' : a.role, rb = b.role === 'tool' ? 'assistant' : b.role;
+    if (ra === rb && a.role !== 'tool' && b.role !== 'tool' && (ra === 'user' || ra === 'assistant') && !(a.tool_calls && a.tool_calls.length)) { out.splice(i, 1); dropped++; }
+  }
   return { messages: out, dropped };
 }
 // Kiểm tra nhẹ JSON Schema trước khi dựng ngữ pháp (bộ dựng ngữ pháp bỏ qua kiểu lạ một cách im lặng)

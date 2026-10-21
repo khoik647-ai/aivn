@@ -3,6 +3,7 @@
 // Mô hình KHÔNG nhìn ảnh (Qwen3 4B/8B) thao tác theo id/tên phần tử; mô hình nhìn ảnh (Qwen3-VL, UI-TARS, Holo) dùng để định vị khi cây giao diện không có phần tử.
 // An toàn: lớp phủ báo "AIVN AGENT đang điều khiển" + khung đỏ ở mục tiêu kế tiếp, Esc / Ctrl+Alt+Q để dừng, hỏi trước bước quan trọng, không bao giờ gõ mật khẩu.
 const path = require('path');
+const SV = require('./agent/send-verify');
 const { BrowserWindow, screen, globalShortcut, nativeImage, ipcMain } = require('electron');
 const SC = require('./screen-control');
 const U = require('./agent/uitree');
@@ -367,12 +368,26 @@ function createDesktopAgent(deps) {
         else checks.push(`Ô tìm kiếm: đã chờ ~${Math.round(waited / 100) / 10} giây và CHƯA thấy kết quả khớp "${q}".` + (rest.length ? ` Bước tiếp theo BẮT BUỘC: gõ lại "${rest[0]}" vào ô tìm kiếm (screen_act type_text, replace: true). Chưa được nói "không tìm thấy"${rest.length > 1 ? `; nếu vẫn không ra thì lần lượt thử ${rest.slice(1).map(v => `"${v}"`).join(', ')}` : ''}.` : ' Đã thử nguyên văn, không dấu và một phần tên — có thể báo người dùng là không tìm thấy (nêu các cách đã thử).'));
       }
     }
+    // gửi tin: kiểm chứng trên màn hình (thấy chữ vừa gửi + thấy tên người nhận); kết quả nằm ở out.verify để agent.js không cho báo giả
+    let verify;
+    const targetName = `${t && t.el ? t.el.name || '' : ''} ${a.element || a.target || ''}`;
+    if (action === 'type_text' && !/\n\s*$/.test(String(a.text || '')) && !s.inSearch) s.lastTyped = String(a.text || '');
+    if (SV.isSendAction(action, a, targetName, s.lastTyped)) {
+      const msg = action === 'type_text' ? String(a.text).replace(/\n\s*$/, '') : s.lastTyped;
+      const recipient = SV.recipientOf(ctx.userQuery);
+      await sleep(800);
+      o2 = await observe(ctx, { question: (o.poor || deps.engine.status().vision) ? `Cuộc trò chuyện đang mở là với ai (ghi đúng tên ở đầu khung chat)? Chép đúng chữ 3 tin nhắn cuối cùng trong khung chat.` : '' });
+      verify = SV.verifySend({ msg, recipient, screenText: o2.text, seen: o2.seen, winTitle: o2.obs.win ? o2.obs.win.title : '' });
+      verify.ocr = !!(o2.src && /OCR/.test(o2.src));
+      checks.push(verify.sent ? `ĐÃ KIỂM CHỨNG trên màn hình: thấy tin “${String(msg).slice(0, 40)}”${recipient ? ` trong cuộc trò chuyện với “${recipient}”` : ''}.` : `CHƯA kiểm chứng được là đã gửi: ${verify.why}. Không được báo “đã gửi”; hãy screen_look để kiểm tra rồi làm lại cho đúng.`);
+      s.lastTyped = null;
+    }
     if (beforeDialog && s.dialog === beforeDialog) checks.push(`Hộp thoại “${beforeDialog}” VẪN đang mở — việc trong hộp thoại CHƯA xong. Xác nhận bằng nút của hộp thoại (Save/Lưu/OK/Mở) hoặc hotkey "enter"; đừng báo đã xong.`);
     else if (beforeDialog && !s.dialog) checks.push(`Hộp thoại “${beforeDialog}” đã đóng.`);
     const foc = o.obs.elements.find(e => e.focused); if (foc) checks.push(`Đang chọn: [${foc.id}] ${foc.kind} "${foc.name}".`);
     if (before && o.obs.elements.length && Math.abs(o.obs.elements.length - before.elements.length) > 3) checks.push(`Số phần tử: ${before.elements.length} → ${o.obs.elements.length}.`);
     if (!checks.length) checks.push('Màn hình không thay đổi rõ ràng — nếu cần, thử cách khác.');
-    return { forModel: `Đã ${desc}.\nKiểm tra: ${checks.join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : ''), thumb: o2.thumb, detail: checks.join(' ') };
+    return { forModel: `Đã ${desc}.\nKiểm tra: ${checks.join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
   }
 
   async function look(a, ctx) {

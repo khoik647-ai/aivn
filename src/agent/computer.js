@@ -283,16 +283,22 @@ async function closeApp(name, { platform = process.platform, force = false } = {
 }
 
 // ---------- Thao tác hệ thống ----------
+// ask: câu của người dùng (đã bỏ dấu) có yêu cầu ĐÚNG thao tác này không. Không có yêu cầu rõ ràng → luôn hỏi trước (QA B1:
+// agent tự khoá màn hình khi người dùng chỉ hỏi một câu). confirm: luôn hỏi kể cả khi được yêu cầu.
 const SYS = {
-  lock: { label: 'Khoá màn hình', confirm: false },
-  sleep: { label: 'Cho máy ngủ', confirm: true },
-  shutdown: { label: 'Tắt máy', confirm: true, danger: true },
-  restart: { label: 'Khởi động lại máy', confirm: true, danger: true },
-  volume_up: { label: 'Tăng âm lượng', confirm: false }, volume_down: { label: 'Giảm âm lượng', confirm: false }, mute: { label: 'Tắt/bật tiếng', confirm: false },
-  open_settings: { label: 'Mở Cài đặt hệ thống', confirm: false },
-  show_desktop: { label: 'Hiện màn hình chính (thu nhỏ mọi cửa sổ)', confirm: false },
-  empty_trash: { label: 'Dọn Thùng rác', confirm: true, danger: true },
+  lock: { label: 'Khoá màn hình', confirm: false, ask: /\b(khoa|lock)\s*(lai\s*)?(man hinh|may|screen|pc|computer)|\block\b/ },
+  sleep: { label: 'Cho máy ngủ', confirm: true, ask: /\b(ngu|sleep)\b/ },
+  shutdown: { label: 'Tắt máy', confirm: true, danger: true, ask: /tat may|shut ?down/ },
+  restart: { label: 'Khởi động lại máy', confirm: true, danger: true, ask: /khoi dong lai|restart|reboot/ },
+  volume_up: { label: 'Tăng âm lượng', confirm: false, ask: /(tang|to len|lon len|vặn to|van to).{0,20}(am luong|tieng|loa)|(am luong|tieng|loa).{0,12}(to|lon) (len|hon)|volume up/ },
+  volume_down: { label: 'Giảm âm lượng', confirm: false, ask: /(giam|nho lai|van nho|ha).{0,20}(am luong|tieng|loa)|(am luong|tieng|loa).{0,12}nho (lai|xuong|hon)|volume down/ },
+  mute: { label: 'Tắt/bật tiếng', confirm: false, ask: /(tat|bat|mo) (tieng|am thanh|loa)|im lang|mute|unmute/ },
+  open_settings: { label: 'Mở Cài đặt hệ thống', confirm: false, ask: /cai dat|settings|thiet lap/ },
+  show_desktop: { label: 'Hiện màn hình chính (thu nhỏ mọi cửa sổ)', confirm: false, ask: /man hinh chinh|desktop|thu nho (het|tat ca|moi)/ },
+  empty_trash: { label: 'Dọn Thùng rác', confirm: true, danger: true, ask: /thung rac|trash|recycle/ },
 };
+// người dùng có yêu cầu đúng thao tác hệ thống này trong câu của lượt hiện tại không
+const sysAsked = (action, query) => { const d = SYS[action]; return !!(d && d.ask && d.ask.test(fold(query))); };
 async function systemAction(action, { platform = process.platform, keyTap = null, openExternal = null } = {}) {
   const win = platform === 'win32', mac = platform === 'darwin';
   const ps = (c) => run('powershell.exe', ['-NoProfile', '-Command', c]);
@@ -317,4 +323,4 @@ async function systemAction(action, { platform = process.platform, keyTap = null
   return SYS[action].label;
 }
 
-module.exports = { lnkTarget, winDirs, psEncoded, PS_APPS, deepApps, parseWinApps, macSpotlight, mergeApps, exeFromIcon, checkCommand, listApps, findApp, score, fold, expandPath, knownFolder, EXEC_EXT, runCommand, runningApps, matchRunning, closeApp, systemAction, SYS, WIN_BUILTIN, PROTECTED, BLOCK };
+module.exports = { lnkTarget, winDirs, psEncoded, PS_APPS, deepApps, parseWinApps, macSpotlight, mergeApps, exeFromIcon, checkCommand, listApps, findApp, score, fold, expandPath, knownFolder, EXEC_EXT, runCommand, runningApps, matchRunning, closeApp, systemAction, SYS, sysAsked, WIN_BUILTIN, PROTECTED, BLOCK };

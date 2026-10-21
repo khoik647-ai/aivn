@@ -77,7 +77,8 @@ test('mô hình định vị dùng đúng câu lệnh và cách đọc toạ đ�
   const SC = require('../src/screen-control');
   for (const c of CATALOG.filter(x => x.grounding)) assert.strictEqual(SC.groundingFamily(c.file), c.grounding, c.id);
   assert.strictEqual(SC.groundingFamily('Holo1.5-7B.Q4_K_M.gguf'), 'holo');
-  assert.strictEqual(SC.groundingFamily('UI-Venus-Ground-7B.Q4_K_M.gguf'), 'venus');
+  // UI-Venus: đo trên AIVN Bench, câu lệnh điểm kiểu Qwen2.5-VL (8/10) tốt hơn câu lệnh hộp của nhà phát triển (3/10)
+  assert.strictEqual(SC.groundingFamily('UI-Venus-Ground-7B.Q4_K_M.gguf'), 'qwen25vl');
   assert.match(SC.LOCATE_PROMPT('nút Gửi', 980, 700, 'holo'), /^Localize an element on the GUI image according to the provided target and output a click position\.\n \* You must output a valid JSON following the format: \{"x": int, "y": int\}\n Your target is:\nnút Gửi$/);
   assert.strictEqual(SC.LOCATE_PROMPT('nút Gửi', 980, 700, 'venus'), 'Outline the position corresponding to the instruction: nút Gửi. The output should be only [x1,y1,x2,y2].');
   const W = 980, H = 700;
