@@ -127,6 +127,35 @@ AIVN.exe --agent-task "trong Google Docs 'QA nháp', thay tất cả 'ngày mai'
 AIVN.exe --agent-task "mở Zalo, soạn tin cho Lan: mai họp lúc 9 giờ, chỉ soạn đừng gửi" --model 8b --out C:\qa\zalo\result.json
 ```
 
+### `ensure_app` — bước chuẩn bị ứng dụng (chạy bằng mã, trước mô hình)
+
+Khôi **không cần mở sẵn gì**. Khi câu lệnh nhắc tới một ứng dụng (“nhắn Zalo cho …”, “mở Chrome, …”, “trong Google Docs …”, “soạn thư trên Gmail …”)
+và điều khiển màn hình đang bật, AIVN chạy bước `ensure_app` **trước khi mô hình làm gì** (và trước mỗi `open_chat`), rồi ghi bước đó vào
+`result.json` (`tool: "ensure_app"`, `auto: true`). Thứ tự xử lý:
+
+| Trạng thái ứng dụng | AIVN làm | `how` |
+|---|---|---|
+| Đã ở trước | không bấm gì, chỉ chờ sẵn sàng | `already` |
+| Thu nhỏ | `ShowWindow(SW_RESTORE)` + `SetForegroundWindow` (Windows chặn thì `AttachThreadInput`, rồi mẹo phím Alt) | `restored` |
+| Bị cửa sổ khác che | đưa lên trước như trên, nhật ký ghi % bị che | `raised` |
+| Chỉ còn biểu tượng ở khay | chạy lại `.exe` của tiến trình (ứng dụng một-phiên-bản tự hiện cửa sổ) → không được thì bấm biểu tượng khay qua UI Automation (cả “Hiện biểu tượng ẩn”) → cuối cùng `ShowWindow` cửa sổ ẩn | `tray` |
+| Chưa mở | mở bằng chuỗi tìm của `open_app` (lối tắt Start Menu, `shell:AppsFolder`/AUMID, App Paths, thư mục cài, Desktop); **nhớ cách mở thành công** theo từng ứng dụng (`%APPDATA%\AIVN\app-launch-cache.json`) | `launched` |
+| Ứng dụng web (Gmail, Google Docs/Sheets/Drive…) | thẻ đã mở → đưa lên; chưa có → bảo đảm Chrome rồi mở địa chỉ | `web` |
+
+**Sẵn sàng** = cửa sổ chính hiện, không “Not Responding” (`IsHungAppWindow`), cây giao diện/OCR **giống nhau 2 lần nhìn liên tiếp**. Hết hạn (45 giây)
+→ dừng với lỗi rõ (`code`: `timeout` / `hung` / `tray` / `not-found`), `status: "failed"`. **Màn hình đăng nhập** (Google “Sign in/Đăng nhập”, “Chọn tài khoản”,
+Zalo “Quét mã QR”…) → **dừng và hỏi** người dùng (`outcome: "asked_user"`, `asked: "login"`), không bao giờ tự gõ tài khoản/mật khẩu.
+`not-found` không dừng hẳn: mô hình được thử cách khác (bấm Start rồi gõ tên…).
+
+```powershell
+# Đóng hẳn Zalo (hoặc thu nhỏ / để Zalo nằm ở khay / che bằng cửa sổ khác) rồi chạy:
+AIVN.exe --agent-task "nhắn Zalo cho Cloud của tôi: test ensure_app, không cần hỏi lại" --model 4b --profile C:\qa\profile --agent-settings-from main --out C:\qa\ensure\result.json --shots C:\qa\ensure\shots
+(Get-Content C:\qa\ensure\result.json -Raw | ConvertFrom-Json).steps | Where-Object tool -eq 'ensure_app' | Format-List summary, status, ms
+# Chrome đóng, Gmail chưa đăng nhập → mong đợi asked_user (hỏi đăng nhập), không gõ gì
+AIVN.exe --agent-task "soạn thư trên Gmail gửi lan@example.com: báo cáo tuần, chỉ soạn đừng gửi" --model 4b --out C:\qa\gmail\result.json
+```
+Nhật ký: các dòng `ensure_app <ứng dụng>: …` trong `%APPDATA%\AIVN\logs\aivn.log` (từng bước + thời gian).
+
 ## `--qa-ui`
 
 ```powershell

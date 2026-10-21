@@ -103,6 +103,7 @@ function createSandbox({ windows, matchWindow, allowApp }) {
   const allowWin = (w) => benchWin(w) || (!!w && allowApp && new RegExp(allowApp.replace(/\s+/g, '\\s*'), 'i').test(w.title || ''));
   async function check(name, a = {}) {
     calls.push({ name, args: a, at: Date.now() });
+    if (name === 'ensure_app') return { forModel: 'Bài đo AIVN AGENT: bỏ qua bước chuẩn bị ứng dụng (không mở/đưa lên ứng dụng thật) — chỉ dùng cửa sổ AIVN Bench.', summary: 'bài đo: bỏ qua chuẩn bị ứng dụng' };
     if (name === 'system_action') return { forModel: `Đã ${a.action}${a.level != null ? ' ' + a.level : ''} (bài đo: âm lượng/hệ thống được GIẢ LẬP, máy không đổi).`, summary: `bài đo: ${a.action} (giả lập)` };
     if (['open_url', 'run_command', 'close_app', 'open_path'].includes(name)) { violations.push({ name, args: a }); return { refused: true, forModel: 'Bài đo AIVN AGENT: công cụ này bị tắt trong bài đo (không mở web, không chạy lệnh). Làm việc trên cửa sổ AIVN Bench đang mở.', summary: 'bài đo: công cụ bị tắt' }; }
     if (name === 'open_app') { const n = String(a.name || ''); if (allowApp && new RegExp(allowApp, 'i').test(n)) return null; violations.push({ name, args: a }); return { refused: true, forModel: `Bài đo AIVN AGENT: không mở “${n}” thật. Ứng dụng giả đang mở sẵn trong cửa sổ “… | AIVN Bench” — dùng screen_look với cửa sổ đó.`, summary: 'bài đo: không mở ứng dụng thật' }; }

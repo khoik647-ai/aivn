@@ -431,6 +431,47 @@ function createDesktopAgent(deps) {
     return false;
   }
   function inSearchMode() { const s = session; return !!(s && s.searchMode && s.searchMode.at && Date.now() - s.searchMode.at < SEARCH_MS()); }
+  // ensure_app: đưa ứng dụng về trạng thái sẵn sàng từ mọi trạng thái (chưa mở / thu nhỏ / bị che / chỉ ở khay / web + đăng nhập) — xem agent/ensure-app.js
+  const eaCache = new Map();
+  function ensureDepsFor(s, ctx) {
+    const EA = require('./agent/ensure-app'); const C = require('./agent/computer');
+    const lg = (m) => deps.log && deps.log('desk', m);
+    const generic = { // macOS/Linux (và Windows khi thiếu trình phụ): danh sách cửa sổ thường, không có thông tin khay/treo
+      looseTitle: true,
+      state: async () => ({ windows: (await U.windows()).map(w => ({ ...w, vis: true, min: !!w.min, active: !!w.active })), procs: [] }),
+      focus: async (w) => ({ ok: await U.focus(w).catch(() => false), how: 'set' }),
+    };
+    const hasWmctrl = process.platform === 'linux' && (() => { try { return require('child_process').spawnSync('which', ['wmctrl']).status === 0; } catch { return false; } })();
+    const plat = process.platform === 'linux' && hasWmctrl ? EA.linuxDeps() : process.platform === 'win32' ? EA.winDeps({ log: lg, click: async (x, y) => { const n = SC.libnut(); n.moveMouse(Math.round(x), Math.round(y)); await sleep(80); n.mouseClick('left', false); } }) : generic;
+    return {
+      ...plat, webApp: C.webApp, cache: eaCache, log: lg, sleep,
+      launch: (q) => (deps.launchApp ? deps.launchApp(q) : Promise.resolve({ ok: false, tried: ['không có bộ mở ứng dụng'] })),
+      openUrl: async (url, bw) => {
+        if (process.platform === 'win32' && bw && bw.path && /\.exe$/i.test(bw.path)) { const { spawn } = require('child_process'); const c = spawn(bw.path, [url], { detached: true, stdio: 'ignore' }); c.on('error', () => {}); c.unref(); return; }
+        if (deps.openExternal) return deps.openExternal(url); throw new Error('không mở được địa chỉ web');
+      },
+      look: async (w) => {
+        s.target = { hwnd: w.hwnd, pid: w.pid, proc: w.proc, title: w.title }; s.obs = null;
+        const o = await observe(ctx, { thumb: false }); s.ensureObsText = o && o.text ? o.text : '';
+        const els = (s.obs && s.obs.elements) || [];
+        return { sig: els.length ? screenHash(s.obs) + '|' + U.fold((s.obs.win && s.obs.win.title) || w.title || '') : null, text: els.map(e => e.name || e.value || '').filter(Boolean).join(' · ').slice(0, 4000) };
+      },
+      ...(deps.ensureDeps ? deps.ensureDeps(s, ctx) : {}),
+    };
+  }
+  async function ensureApp(a, ctx) {
+    const app = String(a.app || a.window || a.name || '').trim(); if (!app) throw new Error('Cần tên ứng dụng (app).');
+    const s = await begin(ctx); status(`Đang chuẩn bị ${app}…`);
+    const r = await require('./agent/ensure-app').ensureApp(app, ensureDepsFor(s, ctx), { timeoutMs: Number(a.timeout_ms) > 0 ? Number(a.timeout_ms) : 45000 });
+    deps.log && deps.log('desk', `ensure_app ${app}: ${r.ok ? 'SẴN SÀNG' : 'LỖI ' + r.code} sau ${Math.round(r.ms / 100) / 10} giây — ${r.steps.join(' → ')}`);
+    if (r.ok) {
+      const w = r.window; s.target = { hwnd: w.hwnd, pid: w.pid, proc: w.proc, title: w.title }; s.ensured = { app, at: Date.now(), hwnd: w.hwnd };
+      const what = { already: 'đã ở trước', restored: 'đã khôi phục từ thu nhỏ', raised: 'đã đưa lên trước (đang bị che)', launched: 'đã khởi động', tray: 'đã mở lại từ khay hệ thống', web: 'đã mở trên trình duyệt' }[r.how] || r.how;
+      const o = s.ensureObsText || '';
+      return { forModel: `${app} sẵn sàng: cửa sổ “${w.title}” (${what}).${r.warn ? ' CẢNH BÁO: ' + r.warn + '.' : ''} Các bước: ${r.steps.join('; ')}.${o ? '\n' + o : ''}`, summary: r.how === 'already' ? `${app}: đã ở trước` : r.how === 'restored' ? `${app}: đã khôi phục từ thu nhỏ` : r.how === 'raised' ? `${app}: đã đưa lên trước (đang bị che)` : r.how === 'launched' ? `${app}: đã khởi động` : r.how === 'tray' ? `${app}: đã mở lại từ khay hệ thống` : r.how === 'web' ? `${app}: đã mở trên trình duyệt` : `${app}: sẵn sàng`, how: r.how, window: w, steps: r.steps };
+    }
+    return { error: r.error, code: r.code, ask: r.ask || null, stop: !!r.stop, forModel: r.error, summary: r.code === 'login' ? `${app}: màn hình đăng nhập — hỏi bạn` : r.code === 'not-found' ? `${app}: chưa mở được` : r.code === 'timeout' ? `${app}: chưa sẵn sàng (quá hạn)` : r.code === 'hung' ? `${app}: không phản hồi` : r.code === 'tray' ? `${app}: chưa mở được từ khay hệ thống` : `${app}: lỗi`, detail: r.error, steps: r.steps };
+  }
   // B65: open_chat(app, người nhận) — mở ô tìm kiếm (phím tắt của ứng dụng hoặc bấm “Tìm kiếm”), xoá ô, gõ ĐÚNG tên người nhận lấy từ câu lệnh
   // của người dùng (không lấy tên mô hình đưa), chọn kết quả trùng tên, kiểm tra tiêu đề. Mô hình chỉ còn gõ nội dung tin.
   async function openChat(a, ctx) {
@@ -441,7 +482,12 @@ function createDesktopAgent(deps) {
     if (asked && SV.nameKey(asked) !== SV.nameKey(rcp)) deps.log && deps.log('desk', `open_chat: mô hình đưa “${asked.slice(0, 40)}” nhưng người dùng nêu “${rcp}” — dùng tên người dùng nêu`);
     const app = String(a.window || a.app || '').trim();
     const steps = []; const note = (x) => { steps.push(x); deps.log && deps.log('desk', 'open_chat: ' + x); };
-    if (app) { try { await look({ window: app }, ctx); note(`chuyển tới “${app}”`); } catch (e) { note(`chưa chuyển được tới “${app}”: ${String(e.message).split('\n')[0]}`); } }
+    // ensure_app trước: mở/khôi phục/đưa lên trước + chờ sẵn sàng (trừ khi vừa làm cho đúng ứng dụng này trong lượt)
+    if (app) {
+      const fresh = s.ensured && U.fold(s.ensured.app) === U.fold(app) && Date.now() - s.ensured.at < 120e3;
+      if (!fresh) { const e = await ensureApp({ app }, ctx); if (e.error) { if (e.ask || e.code !== 'not-found') return { ...e, forModel: `open_chat: ${e.forModel}`, stop: true }; note(`chưa chuẩn bị được “${app}”: ${e.summary}`); try { await look({ window: app }, ctx); } catch {} } else note(`${e.summary}`); }
+      else { try { await look({ window: app }, ctx); note(`chuyển tới “${app}”`); } catch (e) { note(`chưa chuyển được tới “${app}”: ${String(e.message).split('\n')[0]}`); } }
+    }
     if (!s.obs) await observe(ctx, { thumb: false });
     // đã mở đúng người nhận sẵn → không làm gì thêm
     { const R = SV.regionsOf(s.obs); if (SV.chatShown(rcp, s.obs && s.obs.win ? s.obs.win.title : '', R ? R.header : [], s.aliases)) { return { forModel: `Cuộc trò chuyện với “${rcp}” đang mở sẵn (đã kiểm tiêu đề). Bước tiếp: type_text NỘI DUNG tin (không kèm element)${/đừng gửi|chỉ soạn|don't send|draft only/iu.test(q) ? ', KHÔNG submit' : ', submit: true'}.`, summary: `“${rcp}” đang mở sẵn` }; } }
@@ -489,6 +535,7 @@ function createDesktopAgent(deps) {
     }
     // B65 (Zalo thật: mô hình gõ NỘI DUNG “AIVN test 100%” vào ô tìm kiếm): mở cuộc trò chuyện bằng mã, không để mô hình tự gõ tên người nhận
     if (action === 'open_chat') return openChat(a, ctx);
+    if (action === 'ensure_app') return ensureApp(a, ctx);
     if (action === 'hotkey') { // chặn tổ hợp hệ thống trước khi hỏi
       const k = require('./agent/keys').parse(a.keys);
       // B66d: Win+D / Win+M thu nhỏ mọi cửa sổ — chỉ khi người dùng xin “hiện màn hình chính”
@@ -918,7 +965,7 @@ function createDesktopAgent(deps) {
   }
   // kết quả tìm kiếm đã hiện nhưng chưa bấm vào (mô hình nhỏ hay dừng lại hỏi thay vì mở)
   function searchFound() { const s = session; return s && s.inSearch && s.foundHit ? s.foundHit : null; }
-  return { likely: (q) => (session && session.obs ? U.likelyTarget(session.obs.elements, q) : null), diag: () => ({ calib: { ...calib }, displays: session && session.diag ? session.diag.displays : SC.displayInfo().text }), searchFound, searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
+  return { likely: (q) => (session && session.obs ? U.likelyTarget(session.obs.elements, q) : null), diag: () => ({ calib: { ...calib }, displays: session && session.diag ? session.diag.displays : SC.displayInfo().text }), searchFound, searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, ensureApp, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
 }
 
 module.exports = { createDesktopAgent };

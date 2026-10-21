@@ -198,8 +198,8 @@ function initStores() {
   rag = createRagStore(path.join(ud, 'rag'));
   memory = createMemoryStore(path.join(ud, 'memory.json'));
   scheduler = createScheduler({ file: path.join(ud, 'schedules.json'), onFire: onScheduleFire, log: (m) => { console.log(m); log(m); } });
-  computerTools = createComputerTools({ sandbox: () => benchSandbox, getSettings: () => settings.data, listWindows: () => require('./agent/uitree').windows(), openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => LOG.block('apps', 'Quét ứng dụng đã cài (AIVN AGENT)', [`nguồn: ${JSON.stringify(d.sources)}`, `lỗi: ${d.errors.length ? d.errors.join('; ') : 'không'}`, `thư mục Desktop: ${d.dirs ? d.dirs.desktop.join(' | ') : '—'}`, `thư mục Start Menu: ${d.dirs ? d.dirs.start.join(' | ') : '—'}`, `thời gian tìm sâu: ${d.ms ?? '?'} ms`]),
-    keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: (a, ctx) => deskWrap(getDesk().look, a, ctx), act: (a, ctx) => deskWrap(getDesk().act, a, ctx), readText: (a, ctx) => deskWrap(getDesk().readText, a, ctx), pending: () => (desk && desk.active() ? desk.pending() : null), searchTodo: () => (desk && desk.active() ? desk.searchTodo() : null), searchFound: () => (desk && desk.active() ? desk.searchFound() : null), likely: (q) => (desk && desk.active() ? desk.likely(q) : null) } });
+  computerTools = createComputerTools({ launchCacheFile: path.join(app.getPath('userData'), 'app-launch-cache.json'), sandbox: () => benchSandbox, getSettings: () => settings.data, listWindows: () => require('./agent/uitree').windows(), openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => LOG.block('apps', 'Quét ứng dụng đã cài (AIVN AGENT)', [`nguồn: ${JSON.stringify(d.sources)}`, `lỗi: ${d.errors.length ? d.errors.join('; ') : 'không'}`, `thư mục Desktop: ${d.dirs ? d.dirs.desktop.join(' | ') : '—'}`, `thư mục Start Menu: ${d.dirs ? d.dirs.start.join(' | ') : '—'}`, `thời gian tìm sâu: ${d.ms ?? '?'} ms`]),
+    keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: (a, ctx) => deskWrap(getDesk().look, a, ctx), act: (a, ctx) => deskWrap(getDesk().act, a, ctx), ensureApp: (a, ctx) => deskWrap(getDesk().ensureApp, a, ctx), readText: (a, ctx) => deskWrap(getDesk().readText, a, ctx), pending: () => (desk && desk.active() ? desk.pending() : null), searchTodo: () => (desk && desk.active() ? desk.searchTodo() : null), searchFound: () => (desk && desk.active() ? desk.searchFound() : null), likely: (q) => (desk && desk.active() ? desk.likely(q) : null) } });
   mcp = require('./mcp').createMcpManager({ dir: app.getPath('userData'), log: (sc, m) => LOG.log(sc, m), onChange: () => send('mcp:changed', mcp.status()) });
   agent = createAgent({ engine: agentEngine, mcp, getSettings: () => settings.data, gateOk: () => lastGateOk, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: extractAny, embedForMemory, log, computer: computerTools,
     logTool: (x) => LOG.log('tool', `${x.auto ? '(tự động) ' : ''}${x.name} → ${x.status} sau ${x.ms ?? '?'} ms`, { args: Object.fromEntries(Object.entries(x.args || {}).map(([k, v]) => [k, typeof v === 'string' && v.length > 200 ? v.slice(0, 200) + '…' : v])), ketQua: String(x.summary || '').slice(0, 300) }),
@@ -654,7 +654,7 @@ let agentStepScale = 1; // ×3 khi mô hình đang nạp là “Rất chậm” 
 function getDesk() {
   if (desk) return desk;
   const { createDesktopAgent } = require('./desktop-agent');
-  desk = createDesktopAgent({ engine, stepScale: () => agentStepScale, getSettings: () => settings.data, setSettings: (p) => { Object.assign(settings.data, p); settings.save(); send('settings:changed', p); },
+  desk = createDesktopAgent({ engine, launchApp: (q) => computerTools.launch(q), openExternal: (u) => shell.openExternal(u), stepScale: () => agentStepScale, getSettings: () => settings.data, setSettings: (p) => { Object.assign(settings.data, p); settings.save(); send('settings:changed', p); },
     log: (scope, m) => LOG.log(scope, m), getMainWindow: () => win, preload: path.join(__dirname, 'preload.js'), isTest: isTest && process.env.AIVN_DESK_KEEPWIN === '1', autoTest: !app.isPackaged && !!process.env.AIVN_DESK_AUTO,
     autoAnswer: !app.isPackaged && process.env.AIVN_DESK_AUTO ? (req) => (qaAsks.push({ risk: req.risk || null, desc: req.desc || '', text: req.text || null }), { ok: process.env.AIVN_DESK_AUTO !== 'deny' && !(req.risk && process.env.AIVN_DESK_AUTO === 'safe'), reason: req.risk && process.env.AIVN_DESK_AUTO === 'safe' ? 'Đừng gửi, chỉ soạn sẵn' : '' }) : null,
     onStop: (reason) => stopComputer(reason), grounder: (process.env.AIVN_QA_DESK016 || process.env.AIVN_QA_B21 || process.env.AIVN_QA_ZALO_DPI) && !app.isPackaged ? async () => null : getGrounder }); // QA phím/gõ: không cần mắt nhìn (CPU chậm)
@@ -2280,6 +2280,32 @@ q.addEventListener('input',e=>list(q.value));list('');open(${B90 ? "'My Document
       await step5('b85-type-search', { action: 'type_text', text: 'Cloud của tôi' });
       await step5('b85-click-result', { action: 'click', element: 'Tên cũ: Cloud của tôi' });
       await step5('b85-send', { action: 'type_text', text: 'AIVN test - thử beta.3', submit: true });
+      out.final = await st(); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'ensure') { // ensure_app: Zalo giả bị cửa sổ khác che → đưa lên + chờ sẵn sàng; open_chat dùng lại; cửa sổ ẩn → lỗi rõ, không treo
+      const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:240px 1fr;height:100vh}#l{border-right:1px solid #ccc;padding:8px}#q{width:200px;font-size:20px;padding:5px}.it{padding:10px 4px;cursor:pointer}#c{display:flex;flex-direction:column}#h{font-weight:bold;padding:12px 16px;border-bottom:1px solid #ccc}#m{flex:1;padding:16px}#comp{font-size:20px;margin:10px;padding:8px}</style>
+<div id=l><input id=q placeholder="Tìm kiếm"><div id=list></div></div><div id=c><div id=h></div><div id=m></div><input id=comp placeholder="Nhập tin nhắn"></div>
+<script>const chats=['Nhóm Lớp K27','My Documents','Trần Văn Bình'];window.S={cur:'',sent:[]};const fold=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').toLowerCase();
+function list(f){const el=document.getElementById('list');el.innerHTML='';for(const c of chats.filter(c=>!f||fold(c).includes(fold(f)))){const d=document.createElement('div');d.className='it';d.textContent=c;d.onclick=()=>open(c);el.appendChild(d);}}
+function open(n){S.cur=n;h.textContent=n;document.title='Zalo';m.innerHTML='';q.value='';list('');comp.focus();}
+comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sent.push({to:S.cur,text:comp.value});comp.value='';}});q.addEventListener('input',()=>list(q.value));document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.key.toLowerCase()==='f'){e.preventDefault();q.focus();}});list('');open('Nhóm Lớp K27');</script>`;
+      await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(zh)); t.setTitle('Zalo'); await sleep(500);
+      const cover = new BrowserWindow({ x: 20, y: 20, width: 1100, height: 700, show: true, title: 'Ghi chú - che Zalo', webPreferences: { contextIsolation: true } });
+      await cover.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<title>Ghi chú - che Zalo</title><body style="font:30px sans-serif">Cửa sổ khác đang che Zalo</body>')); cover.focus(); await sleep(600);
+      const qe = 'Nhắn Zalo cho My Documents: "AIVN ensure test". Không cần hỏi lại.';
+      const ce = { ...ctx, userQuery: qe, auto: require('./agent/autonomy').forTurn({ setting: false, query: qe }) };
+      const stepE = async (name, fn) => { let r; const t0 = Date.now(); try { r = await fn(); } catch (e) { r = { error: String(e.message || e) }; } await sleep(400);
+        out.steps.push({ name, summary: r.summary || r.error || '', ok: !r.error, code: r.code || null, how: r.how || null, steps: r.steps || null, ms: Date.now() - t0, forModel: String(r.forModel || '').slice(0, 1500), state: await st() }); save(); return r; };
+      await stepE('ensure-covered', () => d.ensureApp({ app: 'Zalo', timeout_ms: 20000 }, ce));
+      t.minimize(); cover.focus(); await sleep(800); out.minimizedBefore = t.isMinimized();
+      await stepE('ensure-minimized', () => d.ensureApp({ app: 'Zalo', timeout_ms: 20000 }, { ...ce, userQuery: qe + '  ' }));
+      out.minimizedAfter = t.isMinimized();
+      cover.focus(); await sleep(600);
+      await stepE('ensure-openchat', () => d.act({ action: 'open_chat', window: 'Zalo' }, { ...ce, userQuery: qe + '   ' }));
+      await stepE('ensure-send', () => d.act({ action: 'type_text', text: 'AIVN ensure test', submit: true }, { ...ce, userQuery: qe + '   ' }));
+      t.hide(); await sleep(500);
+      await stepE('ensure-hidden', () => d.ensureApp({ app: 'Zalo', timeout_ms: 8000 }, { ...ce, userQuery: qe + ' ' }));
+      try { cover.destroy(); } catch {}
       out.final = await st(); throw null;
     }
     if (process.env.AIVN_QA_B21_MODE === 'b76') { // B76 (QA lượt 8, Outlook o10): nội dung thư bị gõ vào ô Tiêu đề 3 lần (id đổi theo chữ trong ô)

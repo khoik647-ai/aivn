@@ -329,6 +329,10 @@ const APP_TASK_RE = new RegExp(String.raw`(?:^|[\s,.(])(soạn|viết|tạo|đ�
 const APP_OF_RE = new RegExp(String.raw`(?:trên|trong|bằng|qua|ở|vào|tại|on|in|using|via)\s+(?:ứng dụng\s+|app\s+|trang\s+|web\s+)?(${APP_NAMES})`, 'iu');
 const HOWTO_RE = /^\s*(?:giải thích|cho (?:tôi|mình|em) biết|hướng dẫn|chỉ (?:tôi|mình|em)|làm (?:sao|thế nào)|tại sao|vì sao|cách|có cách|how|what|why|explain|can you explain)\b|(?:là gì|như thế nào|thế nào|ra sao|được không|không vậy)\s*\??\s*$|\?\s*$/iu;
 const isAppTask = (q) => { const t = String(q || ''); return APP_TASK_RE.test(t) && !HOWTO_RE.test(t); };
+// ensure_app: “nhắn Zalo cho Lan …”, “gửi Messenger …” — ứng dụng nhắn tin/thư nêu ở bất kỳ đâu trong câu gửi tin (không chỉ “trên X”)
+const CHAT_APP_RE = /(?:^|[\s,.(“"])(zalo|messenger|telegram|teams|slack|discord|whatsapp|viber|gmail|outlook)(?=[\s,.:;!?"“”)]|$)/iu;
+const SEND_VERB_RE = /(?:^|[\s,.])(nhắn|gửi tin|gửi cho|trả lời|soạn tin|send|message|reply|text)(?=[\s,.:]|$)/iu;
+const chatAppOf = (q) => { const t = String(q || ''); if (!SEND_VERB_RE.test(t)) return ''; const m = CHAT_APP_RE.exec(t); return m ? m[1] : ''; };
 const appOf = (q) => { const m = APP_OF_RE.exec(String(q || '')); return m ? m[1].replace(/\s+/g, ' ').trim() : ''; };
 const NO_APP_ACTION_WARN = (app) => `⚠ AIVN AGENT CHƯA thao tác gì trên ${app || 'ứng dụng'} trong lượt này (không có bước nào được làm) — nội dung ở trên chỉ là chữ trong khung chat, chưa được soạn/gửi trong ${app || 'ứng dụng'}. Bạn giao lại việc hoặc chọn mô hình mạnh hơn nhé.`;
 // B44: tên công cụ/tham số nội bộ → chữ thường ngày (theo nhãn của công cụ)
@@ -795,7 +799,28 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     // "mở X": gọi open_app THẬT ngay (không phụ thuộc mô hình hay lịch sử cũ)
     const intent = names.includes('open_app') && !headless ? openIntent(query) : null;
     let autoOpen = null;
-    if (intent) {
+    // ensure_app (bước chạy bằng MÃ): việc trên một ứng dụng → mở/khôi phục/đưa lên trước + chờ sẵn sàng TRƯỚC khi mô hình làm gì,
+    // để người dùng không phải mở sẵn. Màn hình đăng nhập → dừng và hỏi; treo/khay/quá hạn → dừng với lỗi rõ; chưa thấy ứng dụng → để mô hình thử cách khác.
+    const ensureTarget = !headless && names.includes('screen_act') && deps.computer && deps.computer.has && deps.computer.has('ensure_app') ? (appTask || (intent && intent.name) || chatAppOf(query) || '') : '';
+    if (ensureTarget && !/^trình duyệt$/i.test(ensureTarget)) {
+      const def = defOf('ensure_app'); const id = 'auto_ensure_' + Date.now().toString(36); const args = { app: ensureTarget };
+      const step = { id, name: 'ensure_app', label: def.label, icon: def.icon, args, status: 'running', startedAt: Date.now(), round: 0, pre: '', auto: true };
+      steps.push(step); onStep({ ...step }); onStatus({ stage: 'tools', round: 0, pre: '' });
+      let out; try { out = await exec('ensure_app', args, ctx); } catch (e) { const msg = (e && e.message) || String(e); out = { error: msg, forModel: `Lỗi: ${msg}`, summary: msg.split('\n')[0] }; }
+      Object.assign(step, { status: out.ask ? 'asked' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, ms: Date.now() - step.startedAt });
+      onStep({ ...step }); logTool(step); calls++;
+      deps.log && deps.log(`[aivn agent] ensure_app “${ensureTarget}” → ${step.status}: ${String(out.summary || '').slice(0, 160)}`);
+      const base = { steps, usage, finishReason: 'stop', urls: [], memories: sys.memories.map(m => m.text), tools: names, warning: null };
+      if (out.ask) return { ...base, text: out.ask, asked: out.code || 'login', outcome: 'asked_user' };
+      if (out.error && out.code !== 'not-found') return { ...base, text: `Mình chưa làm được: ${String(out.error).slice(0, 400)}`, outcome: 'failed' };
+      msgs.push({ role: 'assistant', content: '', tool_calls: [{ id, type: 'function', function: { name: 'ensure_app', arguments: JSON.stringify(args) } }] });
+      msgs.push({ role: 'tool', tool_call_id: id, content: String(out.forModel || out.summary || '') });
+      if (!out.error) {
+        autoOpen = { ok: true, out };
+        if (intent && !intent.rest) return { ...base, text: `Đã mở ${ensureTarget}${out.window && out.window.title ? ` (“${out.window.title}”)` : ''} và sẵn sàng.`, outcome: 'done' };
+      }
+    }
+    if (intent && !autoOpen) {
       const call = { id: 'auto_open_' + Date.now().toString(36), name: 'open_app', arguments: { name: intent.name } };
       const def = defOf('open_app');
       const step = { id: call.id, name: 'open_app', label: def.label, icon: def.icon, args: call.arguments, status: 'running', startedAt: Date.now(), round: 0, pre: '', auto: true };
