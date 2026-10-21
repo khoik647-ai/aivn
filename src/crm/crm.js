@@ -2,6 +2,8 @@
 // Lưu cục bộ (SQLite), không gửi dữ liệu đi đâu.
 const crypto = require('crypto');
 const T = require('./text');
+const TAX = require('./tax');
+const { companyOf } = require('./company');
 
 const STAGES = [
   { id: 'new', name: 'Mới', prob: 10 }, { id: 'contacted', name: 'Đã liên hệ', prob: 20 }, { id: 'quoted', name: 'Báo giá', prob: 40 },
@@ -88,7 +90,7 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
     c.leads = db.all(`SELECT * FROM leads WHERE contact_id IN (${qs}) ORDER BY updated_at DESC`, ids).map(l => ({ ...l, stage_vi: STAGE_VI[l.stage] }));
     c.activities = db.all(`SELECT * FROM activities WHERE contact_id IN (${qs}) ORDER BY (done_at IS NOT NULL), coalesce(due_at, 9e15) ASC, created_at DESC`, ids).map(pubAct);
     c.history = db.all(`SELECT * FROM history WHERE contact_id IN (${qs}) ORDER BY at DESC LIMIT 300`, ids);
-    c.quotes = db.all(`SELECT * FROM quotes WHERE contact_id IN (${qs}) ORDER BY created_at DESC`, ids).map(q => ({ ...q, ...quoteTotals(q.id, q.vat_pct), status_vi: QUOTE_STATUS[q.status] }));
+    c.quotes = db.all(`SELECT * FROM quotes WHERE contact_id IN (${qs}) ORDER BY created_at DESC`, ids).map(q => ({ ...q, ...quoteTotals(q), status_vi: QUOTE_STATUS[q.status] }));
     const won = c.leads.filter(l => l.stage === 'won');
     c.stats = { openLeads: c.leads.filter(l => !['won', 'lost'].includes(l.stage)).length, wonRevenue: won.reduce((a, l) => a + (l.expected_revenue || 0), 0), pipeline: c.leads.filter(l => !['won', 'lost'].includes(l.stage)).reduce((a, l) => a + (l.expected_revenue || 0), 0), openActivities: c.activities.filter(a => !a.done_at).length };
     return c;
@@ -215,10 +217,11 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
     // 0.16 (theo Odoo): loại sản phẩm — product = hàng lưu kho (theo dõi tồn), consu = hàng tiêu dùng (giao nhưng không tính tồn), service = dịch vụ
     p.type = ['product', 'consu', 'service'].includes(p.type) ? p.type : 'product';
     if (old && old.type !== p.type && db.get("SELECT id FROM moves WHERE product_id = ? AND state = 'done' LIMIT 1", [p.id])) throw new CrmError('Sản phẩm đã có dịch chuyển kho: không đổi loại sản phẩm được nữa.');
+    p.vat_pct = TAX.vatOf(p.vat_pct, 10); // 0.16: thuế GTGT mặc định của sản phẩm (Odoo: Thuế khách hàng/nhà cung cấp)
     p.cost = Math.max(0, T.parseVnd(p.cost)); p.barcode = str(p.barcode, 60); p.category = str(p.category, 80); p.min_qty = Math.max(0, Number(String(p.min_qty ?? 0).replace(',', '.')) || 0);
     if (p.sku && db.get('SELECT id FROM products WHERE sku = ? AND id != ? AND active = 1', [p.sku, p.id || ''])) throw new CrmError(`Mã sản phẩm "${p.sku}" đã dùng cho sản phẩm khác.`);
     if (p.barcode && db.get('SELECT id FROM products WHERE barcode = ? AND id != ? AND active = 1', [p.barcode, p.id || ''])) throw new CrmError(`Mã vạch "${p.barcode}" đã dùng cho sản phẩm khác.`);
-    const cols = ['name', 'sku', 'unit', 'price', 'description', 'active', 'type', 'cost', 'barcode', 'category', 'min_qty', 'updated_at'];
+    const cols = ['name', 'sku', 'unit', 'price', 'description', 'active', 'type', 'cost', 'barcode', 'category', 'min_qty', 'vat_pct', 'updated_at'];
     if (old) db.run(`UPDATE products SET ${cols.map(k => k + '=?').join(', ')} WHERE id=?`, [...cols.map(k => p[k]), p.id]);
     else { p.id = newId('p'); db.run(`INSERT INTO products(id, created_at, ${cols.join(', ')}) VALUES (?, ?, ${cols.map(() => '?').join(', ')})`, [p.id, now(), ...cols.map(k => p[k])]); }
     return db.get('SELECT * FROM products WHERE id = ?', [p.id]);
@@ -230,11 +233,11 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
     if (Math.abs(q) > 1e-9 && !force) { const e = new CrmError(`Sản phẩm còn tồn ${(Math.round(q * 1000) / 1000).toLocaleString('vi-VN')} trong kho. Kiểm kê về 0 trước khi lưu trữ, hoặc xác nhận vẫn lưu trữ.`); e.code = 'stock'; throw e; }
     return db.run('UPDATE products SET active = 0 WHERE id = ?', [id]) > 0;
   };
-  function quoteTotals(qid, vatPct) {
-    const lines = db.all('SELECT * FROM quote_lines WHERE quote_id = ? ORDER BY pos', [qid]);
-    const sub = lines.reduce((a, l) => a + Math.round((l.qty || 0) * (l.price || 0) * (1 - (l.discount_pct || 0) / 100)), 0);
-    const vat = Math.round(sub * (Number(vatPct) || 0) / 100);
-    return { subtotal: sub, vat, total: sub + vat, lineCount: lines.length };
+  // 0.16: thuế theo từng dòng (src/crm/tax.js); chứng từ cũ làm tròn “toàn chứng từ” nên tổng giữ nguyên
+  function quoteTotals(q) {
+    const lines = db.all('SELECT * FROM quote_lines WHERE quote_id = ? ORDER BY pos', [q.id]);
+    const t = TAX.totals(lines, TAX.roundingOf(q.tax_rounding));
+    return { subtotal: t.amount_untaxed, vat: t.amount_tax, total: t.amount_total, tax_groups: t.tax_groups, lineCount: lines.length };
   }
   function nextQuoteNumber() { const y = new Date().getFullYear(); const r = db.get('SELECT number FROM quotes WHERE number LIKE ? ORDER BY number DESC LIMIT 1', [`BG-${y}-%`]); const n = r ? parseInt(r.number.split('-')[2], 10) + 1 : 1; return `BG-${y}-${String(n).padStart(4, '0')}`; }
   function saveQuote(input = {}) {
@@ -251,12 +254,16 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
     q.commitment_date = /^\d{4}-\d{2}-\d{2}$/.test(q.commitment_date || '') ? q.commitment_date : null;
     q.date = /^\d{4}-\d{2}-\d{2}$/.test(q.date || '') ? q.date : today();
     q.valid_until = /^\d{4}-\d{2}-\d{2}$/.test(q.valid_until || '') ? q.valid_until : null;
-    q.vat_pct = (() => { const x = q.vat_pct; if (x === undefined || x === null || x === '') return 10; const n = Number(String(x).replace('%', '').trim()); if (![0, 5, 8, 10].includes(n)) throw new CrmError(`Thuế suất GTGT “${x}” không hợp lệ — chỉ nhận 0%, 5%, 8% hoặc 10%.`); return n; })(); q.notes = str(q.notes, 3000); q.updated_at = now(); // B52 q.notes = str(q.notes, 3000); q.updated_at = now();
-    const lines = Array.isArray(input.lines) ? input.lines.map((l, i) => ({ id: newId('ql'), product_id: l.product_id || null, name: str(l.name, 300), unit: str(l.unit, 30) || 'cái', qty: (() => { const n = T.parseQty(l.qty); if (l.qty != null && String(l.qty).trim() !== '' && !Number.isFinite(n)) throw new CrmError(`Số lượng “${l.qty}” không phải là số.`); return Math.max(0, Number.isFinite(n) ? n : 0); })(), price: Math.max(0, T.parseVnd(l.price)), discount_pct: Math.max(0, Math.min(100, Number(l.discount_pct) || 0)), pos: i })).filter(l => l.name) : null;
+    q.vat_pct = TAX.vatOf(q.vat_pct, 10); q.notes = str(q.notes, 3000); q.updated_at = now(); // B52; mức của chứng từ = mức mặc định cho dòng không ghi thuế
+    q.tax_rounding = old ? TAX.roundingOf(old.tax_rounding) : companyOf(db).tax_rounding;
+    // thuế của dòng: ghi trên dòng > mức chứng từ người dùng vừa chọn > thuế mặc định của sản phẩm > mức chứng từ
+    const docVatGiven = input.vat_pct !== undefined && input.vat_pct !== null && input.vat_pct !== '';
+    const lineVat = (l) => { if (l.vat_pct !== undefined && l.vat_pct !== null && l.vat_pct !== '') return TAX.vatOf(l.vat_pct); if (!docVatGiven && l.product_id) { const pr = db.get('SELECT vat_pct FROM products WHERE id = ?', [l.product_id]); if (pr && pr.vat_pct != null) return TAX.vatOf(pr.vat_pct); } return q.vat_pct; };
+    const lines = Array.isArray(input.lines) ? input.lines.map((l, i) => ({ id: newId('ql'), product_id: l.product_id || null, name: str(l.name, 300), unit: str(l.unit, 30) || 'cái', qty: (() => { const n = T.parseQty(l.qty); if (l.qty != null && String(l.qty).trim() !== '' && !Number.isFinite(n)) throw new CrmError(`Số lượng “${l.qty}” không phải là số.`); return Math.max(0, Number.isFinite(n) ? n : 0); })(), price: Math.max(0, T.parseVnd(l.price)), discount_pct: Math.max(0, Math.min(100, Number(l.discount_pct) || 0)), vat_pct: lineVat(l), pos: i })).filter(l => l.name) : null;
     db.tx(() => {
       if (old) db.run('UPDATE quotes SET contact_id=?, lead_id=?, status=?, date=?, valid_until=?, notes=?, vat_pct=?, owner=?, payment_days=?, commitment_date=?, updated_at=? WHERE id=?', [q.contact_id, q.lead_id, q.status, q.date, q.valid_until, q.notes, q.vat_pct, q.owner, q.payment_days, q.commitment_date, q.updated_at, q.id]);
-      else { q.id = newId('q'); q.number = nextQuoteNumber(); db.run('INSERT INTO quotes(id, number, contact_id, lead_id, status, date, valid_until, notes, vat_pct, owner, payment_days, commitment_date, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [q.id, q.number, q.contact_id, q.lead_id, q.status, q.date, q.valid_until, q.notes, q.vat_pct, q.owner, q.payment_days, q.commitment_date, now(), q.updated_at]); }
-      if (lines) { db.run('DELETE FROM quote_lines WHERE quote_id = ?', [q.id]); for (const l of lines) db.run('INSERT INTO quote_lines(id, quote_id, product_id, name, unit, qty, price, discount_pct, pos) VALUES (?,?,?,?,?,?,?,?,?)', [l.id, q.id, l.product_id, l.name, l.unit, l.qty, l.price, l.discount_pct, l.pos]); }
+      else { q.id = newId('q'); q.number = nextQuoteNumber(); db.run('INSERT INTO quotes(id, number, contact_id, lead_id, status, date, valid_until, notes, vat_pct, owner, payment_days, commitment_date, tax_rounding, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [q.id, q.number, q.contact_id, q.lead_id, q.status, q.date, q.valid_until, q.notes, q.vat_pct, q.owner, q.payment_days, q.commitment_date, q.tax_rounding, now(), q.updated_at]); }
+      if (lines) { db.run('DELETE FROM quote_lines WHERE quote_id = ?', [q.id]); for (const l of lines) db.run('INSERT INTO quote_lines(id, quote_id, product_id, name, unit, qty, price, discount_pct, vat_pct, pos) VALUES (?,?,?,?,?,?,?,?,?,?)', [l.id, q.id, l.product_id, l.name, l.unit, l.qty, l.price, l.discount_pct, l.vat_pct, l.pos]); }
     });
     const full = getQuote(q.id);
     if (!old) hist(q.contact_id, q.lead_id, 'quote', `Tạo báo giá ${full.number}: ${T.fmtVnd(full.total)}`);
@@ -266,14 +273,14 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
   }
   function getQuote(id) {
     const q = db.get('SELECT * FROM quotes WHERE id = ?', [id]); if (!q) throw new CrmError('Không tìm thấy báo giá.');
-    q.lines = db.all('SELECT * FROM quote_lines WHERE quote_id = ? ORDER BY pos', [id]).map(l => ({ ...l, amount: Math.round(l.qty * l.price * (1 - (l.discount_pct || 0) / 100)) }));
-    Object.assign(q, quoteTotals(id, q.vat_pct)); q.status_vi = QUOTE_STATUS[q.status]; q.total_words = T.vndWords(q.total);
+    q.lines = db.all('SELECT * FROM quote_lines WHERE quote_id = ? ORDER BY pos', [id]).map(l => ({ ...l, amount: TAX.lineSubtotal(l), tax: TAX.lineTax(l) }));
+    Object.assign(q, quoteTotals(q)); q.status_vi = QUOTE_STATUS[q.status]; q.total_words = T.vndWords(q.total);
     q.contact = q.contact_id ? pubContact(db.get('SELECT * FROM contacts WHERE id = ?', [q.contact_id])) : null;
     if (q.contact && q.contact.company_id) q.company = pubContact(db.get('SELECT * FROM contacts WHERE id = ?', [q.contact.company_id]));
     q.lead = q.lead_id ? db.get('SELECT id, title FROM leads WHERE id = ?', [q.lead_id]) : null;
     return q;
   }
-  const listQuotes = ({ q = '', status = '' } = {}) => db.all(`SELECT q.*, c.name AS contact_name FROM quotes q LEFT JOIN contacts c ON c.id = q.contact_id WHERE 1 ${status ? 'AND q.status = ?' : ''} ${q ? 'AND (lower(q.number) LIKE ? OR c.name_norm LIKE ?)' : ''} ORDER BY q.created_at DESC`, [...(status ? [status] : []), ...(q ? ['%' + q.toLowerCase() + '%', '%' + T.fold(q) + '%'] : [])]).map(x => ({ ...x, ...quoteTotals(x.id, x.vat_pct), status_vi: QUOTE_STATUS[x.status] }));
+  const listQuotes = ({ q = '', status = '' } = {}) => db.all(`SELECT q.*, c.name AS contact_name FROM quotes q LEFT JOIN contacts c ON c.id = q.contact_id WHERE 1 ${status ? 'AND q.status = ?' : ''} ${q ? 'AND (lower(q.number) LIKE ? OR c.name_norm LIKE ?)' : ''} ORDER BY q.created_at DESC`, [...(status ? [status] : []), ...(q ? ['%' + q.toLowerCase() + '%', '%' + T.fold(q) + '%'] : [])]).map(x => ({ ...x, ...quoteTotals(x), status_vi: QUOTE_STATUS[x.status] }));
   const deleteQuote = (id) => { const q = db.get('SELECT * FROM quotes WHERE id = ?', [id]); if (!q) return false; if (q.status === 'sale') throw new CrmError('Không xoá được đơn bán hàng đã xác nhận — hãy huỷ đơn trước.'); if (db.get("SELECT id FROM invoices WHERE so_id = ? AND state != 'cancel' LIMIT 1", [id]) || db.get("SELECT id FROM pickings WHERE so_id = ? AND state = 'done' LIMIT 1", [id])) throw new CrmError('Đơn đã có hoá đơn hoặc đã giao hàng: không xoá được, chỉ huỷ.'); db.run("DELETE FROM moves WHERE picking_id IN (SELECT id FROM pickings WHERE so_id = ?)", [id]); db.run('DELETE FROM pickings WHERE so_id = ?', [id]); db.tx(() => { db.run('DELETE FROM quote_lines WHERE quote_id = ?', [id]); db.run('DELETE FROM quotes WHERE id = ?', [id]); }); hist(q.contact_id, q.lead_id, 'quote', `Xoá báo giá ${q.number}`); return true; };
 
   // ---------- Chế độ xem đã lưu ----------

@@ -132,7 +132,7 @@ test('Báo cáo: doanh số theo tháng / khách hàng / sản phẩm, tồn kho
   db.run("UPDATE quotes SET status = 'accepted'"); db.flushSync(); db.close();
   const db2 = await openDb(file); assert.strictEqual(db2.get('SELECT status FROM quotes LIMIT 1').status, 'sale');
   assert.ok(db2.get("SELECT type FROM products WHERE name = 'Bàn làm việc'").type === 'product');
-  assert.strictEqual(db2.get("SELECT value FROM meta WHERE key = 'schema'").value, '2');
+  assert.strictEqual(db2.get("SELECT value FROM meta WHERE key = 'schema'").value, '3');
   db2.close();
 });
 

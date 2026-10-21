@@ -49,13 +49,27 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS ix_invl ON invoice_lines(invoice_id)`,
   `CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY, number TEXT, invoice_id TEXT, partner_id TEXT, amount INTEGER NOT NULL, date TEXT, method TEXT DEFAULT 'bank', memo TEXT, created_at INTEGER)`,
   `CREATE INDEX IF NOT EXISTS ix_pay_inv ON payments(invoice_id)`,
+  // 0.16 Mua hàng (theo Odoo purchase.order): yêu cầu báo giá → đơn mua → nhận hàng → hoá đơn nhà cung cấp → trả tiền
+  `CREATE TABLE IF NOT EXISTS purchase_orders (id TEXT PRIMARY KEY, number TEXT, partner_id TEXT, partner_ref TEXT, state TEXT NOT NULL DEFAULT 'draft', date_order TEXT, date_planned TEXT,
+    payment_days INTEGER DEFAULT 0, vat_pct REAL DEFAULT 10, tax_rounding TEXT, owner TEXT, notes TEXT, confirmed_at INTEGER, created_at INTEGER, updated_at INTEGER)`,
+  `CREATE INDEX IF NOT EXISTS ix_po_partner ON purchase_orders(partner_id)`,
+  `CREATE TABLE IF NOT EXISTS purchase_lines (id TEXT PRIMARY KEY, po_id TEXT NOT NULL, product_id TEXT, name TEXT, unit TEXT, qty REAL DEFAULT 1, price INTEGER DEFAULT 0, discount_pct REAL DEFAULT 0,
+    vat_pct REAL DEFAULT 10, pos INTEGER DEFAULT 0)`,
+  `CREATE INDEX IF NOT EXISTS ix_pol ON purchase_lines(po_id)`,
 ];
 // cột thêm cho bảng cũ (CSDL tạo từ 0.15.x): thêm nếu chưa có, giữ nguyên dữ liệu
 const ADD_COLUMNS = {
-  products: [['type', "TEXT DEFAULT 'product'"], ['cost', 'INTEGER DEFAULT 0'], ['barcode', 'TEXT'], ['min_qty', 'REAL DEFAULT 0'], ['category', 'TEXT']],
-  quotes: [['confirmed_at', 'INTEGER'], ['owner', 'TEXT'], ['payment_days', 'INTEGER DEFAULT 0'], ['commitment_date', 'TEXT']],
+  products: [['type', "TEXT DEFAULT 'product'"], ['cost', 'INTEGER DEFAULT 0'], ['barcode', 'TEXT'], ['min_qty', 'REAL DEFAULT 0'], ['category', 'TEXT'], ['vat_pct', 'REAL DEFAULT 10']],
+  quotes: [['confirmed_at', 'INTEGER'], ['owner', 'TEXT'], ['payment_days', 'INTEGER DEFAULT 0'], ['commitment_date', 'TEXT'], ['tax_rounding', 'TEXT']],
+  // 0.16 (lược đồ 3): thuế GTGT theo từng dòng, Mua hàng (phiếu nhập gắn đơn mua, hoá đơn nhà cung cấp), chiều thanh toán
+  quote_lines: [['vat_pct', 'REAL']],
+  invoices: [['tax_rounding', 'TEXT'], ['ref', 'TEXT'], ['po_id', 'TEXT']],
+  invoice_lines: [['vat_pct', 'REAL'], ['po_line_id', 'TEXT']],
+  pickings: [['po_id', 'TEXT']],
+  moves: [['po_line_id', 'TEXT']],
+  payments: [['payment_type', "TEXT DEFAULT 'inbound'"]],
 };
-const VERSION = 2;
+const VERSION = 3;
 
 async function openDb(file) {
   const S = await sqlJs();
@@ -77,6 +91,14 @@ async function openDb(file) {
   // 0.16: trạng thái báo giá theo Odoo (draft/sent/sale/cancel); bản cũ “accepted/rejected” đổi sang “sale/cancel”
   db.exec("UPDATE quotes SET status = 'sale', confirmed_at = COALESCE(confirmed_at, updated_at) WHERE status = 'accepted'");
   db.exec("UPDATE quotes SET status = 'cancel' WHERE status = 'rejected'");
+  // 0.16 lược đồ 3: thuế một mức cho cả chứng từ → thuế theo từng dòng. Dòng cũ nhận mức của chứng từ; chứng từ cũ làm tròn thuế
+  // “toàn chứng từ” (Odoo round_globally) nên tổng tiền giữ nguyên từng đồng. Chạy lại vô hại (chỉ đụng giá trị còn trống).
+  db.exec("UPDATE quote_lines SET vat_pct = COALESCE((SELECT q.vat_pct FROM quotes q WHERE q.id = quote_lines.quote_id), 10) WHERE vat_pct IS NULL");
+  db.exec("UPDATE invoice_lines SET vat_pct = COALESCE((SELECT i.vat_pct FROM invoices i WHERE i.id = invoice_lines.invoice_id), 10) WHERE vat_pct IS NULL");
+  db.exec("UPDATE quotes SET tax_rounding = 'global' WHERE tax_rounding IS NULL");
+  db.exec("UPDATE invoices SET tax_rounding = 'global' WHERE tax_rounding IS NULL");
+  db.exec("UPDATE purchase_orders SET tax_rounding = 'line' WHERE tax_rounding IS NULL");
+  db.exec("UPDATE payments SET payment_type = 'inbound' WHERE payment_type IS NULL");
   const was = (db.exec("SELECT value FROM meta WHERE key = 'schema'")[0] || { values: [[null]] }).values[0][0];
   db.run('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)', ['schema', String(Math.max(VERSION, Number(was) || 0))]);
   let timer = null, dirty = false;
