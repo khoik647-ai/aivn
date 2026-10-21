@@ -61,7 +61,7 @@ test('ngữ cảnh 8192 + lịch sử rất dài: bỏ tin cũ để vừa, vẫ
   assert.strictEqual(m[0].role, 'system'); assert.strictEqual(m[1].role, 'user');
   assert.strictEqual(m[m.length - 1].content.includes('Thủ đô Việt Nam'), true);
   assert.ok(m.length < hist.length, 'đã bỏ bớt tin cũ');
-  assert.ok(logs.some(l => /bỏ \d+ tin cũ/.test(l)));
+  assert.ok(logs.some(l => /bỏ \d+ (?:tin|bước) cũ/.test(l)));
 });
 
 // Tái hiện bằng mô hình thật (bỏ qua nếu máy không có tệp): ngữ cảnh 1437 → lỗi thiếu ngữ cảnh rõ ràng; nạp mặc định → ≥ 8192 và trả lời được

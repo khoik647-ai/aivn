@@ -13,6 +13,7 @@ const { evaluate, fmtVi } = require('./calc');
 const sandbox = require('./sandbox');
 const web = require('./web');
 const { DAY_VI } = require('./scheduler');
+const CP = require('./compact');
 const TP = require('./textproto');
 
 const MAX_ROUNDS = 20, MAX_CALLS = 32; // 0.15: 8 vòng không đủ cho việc nhiều tệp (6 ghi chú = 8 lời gọi) — giới hạn token mỗi lượt vẫn chặn chạy mãi
@@ -577,18 +578,34 @@ function createAgent(deps) {
     if (san.guides) deps.log && deps.log(`[aivn agent] ẩn ${san.guides} câu trả lời cũ chỉ hướng dẫn/hỏi lại (không gọi công cụ)`);
     const msgs = [{ role: 'system', content: sys.text }, ...san.messages];
     const st = deps.engine.status();
-    // 0.15.2: kiểm tra lời nhắc có vừa ngữ cảnh không TRƯỚC khi gửi (lỗi "Failed to compress chat history" của bộ máy là do thiếu ngữ cảnh)
-    { const tc = (x) => (deps.engine.countTokens ? deps.engine.countTokens(x) : Math.ceil(String(x).length / 3));
-      const mt = (m) => tc(typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '')) + 8;
-      const sysTok = tc(sys.text), toolTok = tc(JSON.stringify(tools)); let histTok = msgs.slice(1).reduce((n, m) => n + mt(m), 0);
-      const reserve = Math.min(2048, Math.max(768, Math.floor((st.contextSize || 8192) * 0.15)));
-      let need = sysTok + toolTok + histTok + reserve, dropped = 0;
-      // lịch sử dài: bỏ bớt tin cũ nhất (giữ tin cuối của người dùng) trước khi đòi ngữ cảnh lớn hơn
-      while (st.contextSize && need > st.contextSize && msgs.length > 2) { const m = msgs.splice(1, 1)[0]; histTok -= mt(m); need -= mt(m); dropped++; }
-      while (dropped && msgs[1].role !== 'user' && msgs.length > 2) { histTok -= mt(msgs[1]); need -= mt(msgs[1]); msgs.splice(1, 1); dropped++; }
-      if (dropped) deps.log && deps.log(`[aivn agent] bỏ ${dropped} tin cũ để vừa ngữ cảnh`);
-      deps.log && deps.log(`[aivn agent] lời nhắc ~${sysTok} token + ${tools.length} công cụ ~${toolTok} token + lịch sử ~${histTok} token (+${reserve} để trả lời) / ngữ cảnh ${st.contextSize || '?'}`);
-      if (st.contextSize && need > st.contextSize) { const e = new Error(`Lời nhắc cần khoảng ${need} token nhưng ngữ cảnh chỉ có ${st.contextSize}.`); e.code = 'CTX_SMALL'; e.need = need; e.have = st.contextSize; throw e; } }
+    // 0.16: tự thu gọn lịch sử + ảnh TRƯỚC MỖI lần gọi mô hình (không còn hỏng vì hết ngữ cảnh giữa lượt dài)
+    const tc = (x) => (deps.engine.countTokens ? deps.engine.countTokens(x) : Math.ceil(String(x).length / 3));
+    const toolTokOf = (t) => tc(JSON.stringify(t || []));
+    const reserveOf = () => Math.min(2048, Math.max(768, Math.floor((st.contextSize || 8192) * 0.15)));
+    const fitMsgs = (useTools, { extra = 0, tag = '' } = {}) => {
+      const cs = (deps.engine.status() || {}).contextSize || st.contextSize || 0;
+      const r = CP.compact(msgs, { contextSize: cs, count: tc, toolTok: toolTokOf(useTools), reserve: reserveOf() + extra });
+      if (r.actions.length) { msgs.splice(0, msgs.length, ...r.messages); deps.log && deps.log(`[aivn agent] thu gọn${tag ? ' (' + tag + ')' : ''}: ${r.actions.join(', ')} → ~${r.tokens}/${r.budget} token`); }
+      return r;
+    };
+    // gọi mô hình: thu gọn trước; nếu bộ máy vẫn báo hết ngữ cảnh → thu gọn mạnh hơn rồi thử lại (tối đa 2 lần)
+    const callModel = async (useTools, opts) => {
+      fitMsgs(useTools);
+      for (let k = 0; ; k++) {
+        try { return await deps.engine.chatStep(msgs, { ...opts, tools: useTools }); }
+        catch (e) {
+          const ctxErr = e && (e.code === 'CTX_SMALL' || TP.CTX_RE.test(String(e.message || '')) || /context.?length|n_ctx|too long/i.test(String(e.message || '')));
+          if (!ctxErr || k >= 2 || (opts.signal && opts.signal.aborted)) throw e;
+          const cs = (deps.engine.status() || {}).contextSize || 8192;
+          deps.log && deps.log(`[aivn agent] bộ máy báo hết ngữ cảnh (${String(e.message || e).slice(0, 80)}) — thu gọn mạnh hơn và thử lại`);
+          fitMsgs(useTools, { extra: Math.floor(cs * (k ? 0.35 : 0.2)), tag: 'thử lại ' + (k + 1) });
+        }
+      }
+    };
+    { const r = fitMsgs(tools, { tag: 'đầu lượt' });
+      deps.log && deps.log(`[aivn agent] lời nhắc + ${tools.length} công cụ + lịch sử ~${r.tokens} token / ngân sách ${r.budget === Infinity ? '?' : r.budget} (ngữ cảnh ${st.contextSize || '?'})`);
+      // chỉ khi riêng lời nhắc hệ thống + công cụ + yêu cầu hiện tại đã không vừa: báo cần ngữ cảnh lớn hơn (bên ngoài tự tăng ngữ cảnh)
+      if (!r.fits && st.contextSize) { const need = r.tokens + toolTokOf(tools) + reserveOf(); const e = new Error(`Lời nhắc cần khoảng ${need} token nhưng ngữ cảnh chỉ có ${st.contextSize}.`); e.code = 'CTX_SMALL'; e.need = need; e.have = st.contextSize; throw e; } }
     const ctx = { signal, convoId, userQuery: query, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
     const steps = [], seen = new Map();
     (runStore.getStore() || {}).steps = steps;
@@ -633,7 +650,7 @@ function createAgent(deps) {
       let loopHit = null;
       const guard = RG.createRepeatGuard((info) => { loopHit = info; deps.log && deps.log(`[aivn agent] phát hiện lặp (${info.kind}, ${info.count} lần): “${info.sample}” — dừng sinh`); rc.abort(); });
       const budgetLeft = Math.max(256, turnBudget - usage.completion_tokens);
-      let r = await deps.engine.chatStep(msgs, { tools: forcing ? [...tools, CANNOT] : tools, toolChoice: last ? 'none' : forcing ? 'required' : 'auto', temperature: smp.temperature, sampling: forcing ? null : smp, maxTokens: Math.min(s.maxTokens || 1024, budgetLeft), signal: rc.signal,
+      let r = await callModel(forcing ? [...tools, CANNOT] : tools, { toolChoice: last ? 'none' : forcing ? 'required' : 'auto', temperature: smp.temperature, sampling: forcing ? null : smp, maxTokens: Math.min(s.maxTokens || 1024, budgetLeft), signal: rc.signal,
         onToken: (t) => { streamed += t; guard.push(t); if (!loopHit) onToken(t, round); } });
       if (signal) signal.removeEventListener('abort', relay);
       usage.completion_tokens += r.usage?.completion_tokens || 0;
@@ -646,7 +663,7 @@ function createAgent(deps) {
           if (actAsk && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) {
             // thử lại MỘT lần bằng lời gọi công cụ có ràng buộc ngữ pháp (không thể lặp câu)
             msgs.push({ role: 'assistant', content: kept }, { role: 'user', content: REPEAT_ACT_NUDGE });
-            let fr = null; try { const compTools = tools.filter(t => COMP.includes(t.name)); fr = await deps.engine.chatStep(msgs, { tools: [...(compTools.length ? compTools : tools), CANNOT], toolChoice: 'required', temperature: 0, maxTokens: 400, signal }); } catch (e) { deps.log && deps.log('[aivn agent] buộc gọi công cụ sau khi lặp lỗi: ' + e.message); }
+            let fr = null; try { const compTools = tools.filter(t => COMP.includes(t.name)); fr = await callModel([...(compTools.length ? compTools : tools), CANNOT], { toolChoice: 'required', temperature: 0, maxTokens: 400, signal }); } catch (e) { deps.log && deps.log('[aivn agent] buộc gọi công cụ sau khi lặp lỗi: ' + e.message); }
             const c = fr && fr.toolCalls && fr.toolCalls[0];
             if (c && c.name !== 'cannot_do' && names.includes(c.name)) { msgs.pop(); msgs.pop(); r = { ...fr, text: '', toolCalls: [c] }; loopHit = null; }
             else { text = c && c.arguments && c.arguments.reason ? 'Mình chưa làm được việc này: ' + String(c.arguments.reason) : kept; warning = REPEAT_WARN; finishReason = 'stop'; break; }
@@ -690,7 +707,7 @@ function createAgent(deps) {
           forcedTried = true; onStatus({ stage: 'verify', round, discarded: r.text || '' });
           const claimed = r.text || '';
           msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: sendClaimCheck(claimed, steps) || FAKE_NUDGE });
-          let fr = null; try { const compTools = tools.filter(t => COMP.includes(t.name)); fr = await deps.engine.chatStep(msgs, { tools: [...(compTools.length ? compTools : tools), CANNOT], toolChoice: 'required', temperature: 0, maxTokens: 400, signal }); } catch (e) { deps.log && deps.log('[aivn agent] buộc gọi công cụ lỗi: ' + e.message); }
+          let fr = null; try { const compTools = tools.filter(t => COMP.includes(t.name)); fr = await callModel([...(compTools.length ? compTools : tools), CANNOT], { toolChoice: 'required', temperature: 0, maxTokens: 400, signal }); } catch (e) { deps.log && deps.log('[aivn agent] buộc gọi công cụ lỗi: ' + e.message); }
           const c = fr && fr.toolCalls && fr.toolCalls[0];
           if (c && c.name !== 'cannot_do' && names.includes(c.name)) { r = { ...fr, text: '', toolCalls: [c] }; }
           else { text = c && c.arguments && c.arguments.reason ? 'Mình chưa làm được việc này: ' + String(c.arguments.reason) : guardClaims(claimed, steps).text; const blockedClaim = text !== claimed; if (!blockedClaim) text = ''; warning = noActionWarn(steps) || (blockedClaim ? guardClaims(claimed, steps).warning : null); finishReason = 'stop'; break; }
