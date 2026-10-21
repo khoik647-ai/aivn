@@ -18,7 +18,7 @@ function companyOf(db) {
 }
 function saveCompany(db, input = {}) {
   const old = companyOf(db); const c = { ...old, ...Object.fromEntries(Object.entries(input || {}).filter(([k, v]) => v !== undefined && k in DEFAULTS)) };
-  c.name = str(c.name, 200); c.address = str(c.address, 400); c.phone = str(c.phone, 40); c.email = str(c.email, 200).toLowerCase(); c.website = str(c.website, 200);
+  c.name = str(c.name, 200); if (!c.name) throw fail('Hãy nhập tên công ty.'); c.address = str(c.address, 400); c.phone = str(c.phone, 40); c.email = str(c.email, 200).toLowerCase(); c.website = str(c.website, 200);
   c.tax_id = T.normTax(c.tax_id); if (!T.validTax(c.tax_id)) throw fail(`Mã số thuế "${input.tax_id}" phải có 10 số (hoặc 10 số-3 số cho chi nhánh, 12 số với cá nhân).`);
   if (!T.validEmail(c.email)) throw fail(`Email "${c.email}" chưa đúng.`);
   if (c.phone && !T.validPhone(T.normPhone(c.phone))) throw fail(`Số điện thoại "${c.phone}" chưa đúng định dạng Việt Nam (vd. 0912 345 678 hoặc +84 912 345 678).`);

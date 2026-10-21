@@ -157,8 +157,8 @@ for (const lang of ['vi', 'en']) {
     }
     assert.strictEqual(d.backorder, 'WH/OUT/00002');
     assert.strictEqual(d.db.receivable, 3800000); assert.strictEqual(d.db.salesMonth, 8000000); assert.strictEqual(d.db.deliveriesReady, 1);
-    if (lang === 'vi') { assert.strictEqual(d.invoice.ribbon, 'THANH TOÁN MỘT PHẦN'); assert.strictEqual(d.order.total, '8.800.000 đ'); }
-    else { assert.strictEqual(d.invoice.ribbon, 'PARTIALLY PAID'); assert.strictEqual(d.order.total, '8,800,000 VND'); assert.match(d.steps['10-don-xac-nhan'].toasts.join(' '), /Order BG-\d{4}-\d{4} confirmed · delivery created/); }
+    if (lang === 'vi') { assert.strictEqual(d.invoice.ribbon, 'THANH TOÁN MỘT PHẦN'); assert.strictEqual(d.order.total, '8.800.000 ₫'); }
+    else { assert.strictEqual(d.invoice.ribbon, 'PARTIALLY PAID'); assert.strictEqual(d.order.total, '8,800,000 ₫'); assert.match(d.steps['10-don-xac-nhan'].toasts.join(' '), /Order BG-\d{4}-\d{4} confirmed · delivery created/); }
   });
 }
 

@@ -2854,6 +2854,7 @@ else {
     if (process.env.AIVN_QAPAR && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaPar().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QA_MEDIA && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaMedia().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QA_BIZ && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaBiz().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
+    if (process.env.AIVN_QA_PURCHASE && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => require('./qa-purchase').qaPurchase({ win, app, VI: String(I18N_CORE.VI) }).catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QAUI && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaUI().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QACU && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaCU().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QA_B21 && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaB21().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));

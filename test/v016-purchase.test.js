@@ -155,3 +155,41 @@ test('Công ty: lưu MST, ngân hàng, logo; kiểm tra dữ liệu; mã VietQR 
   assert.strictEqual(p.crcOk, true); assert.strictEqual(p.amount, 1000000); assert.strictEqual(p.memo, inv.number); assert.match(qr.svg, /^<svg/);
   biz.registerPayment(inv.id, {}); assert.strictEqual(biz.invoiceQr(inv.id).ok, false, 'đã thu đủ thì không hiện QR');
 });
+
+// Giao diện thật (Electron + xvfb), vi/en/zh: Cài đặt › Công ty → RFQ → đơn mua → nhận 6/10 → hoá đơn NCC → trả một phần → báo cáo → hoá đơn 8% + 10% có VietQR → PDF
+const { spawnSync } = require('child_process');
+const ROOT = path.join(__dirname, '..');
+const hasX = spawnSync('which', ['xvfb-run']).status === 0 && fs.existsSync(path.join(ROOT, 'node_modules/.bin/electron'));
+const USER_DATA = new Set(['chuyến', 'gói', 'cái']); // đơn vị tính do người dùng nhập — không dịch
+for (const lang of ['vi', 'en', 'zh']) {
+  test(`Mua hàng + công ty + VietQR + PDF — giao diện thật (${lang})`, { skip: !hasX && 'cần xvfb-run + electron' }, () => {
+    const dir = process.env.AIVN_QA_SHOTS ? path.join(process.env.AIVN_QA_SHOTS) : fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-qapo-'));
+    const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-qapo-ud-'));
+    const env = Object.assign({}, process.env, { AIVN_USER_DATA: ud, AIVN_SKIP_ACTIVATION: '1', AIVN_QA_PURCHASE: dir, AIVN_QA_BIZ_LANG: lang, AIVN_QA_PDF_DIR: path.join(dir, 'pdf') });
+    const r = spawnSync('timeout', ['300', 'xvfb-run', '-a', '-s', '-screen 0 1366x900x24', path.join(ROOT, 'node_modules/.bin/electron'), '.', '--no-sandbox'], { cwd: ROOT, encoding: 'utf8', env });
+    const f = path.join(dir, `qapurchase-${lang}.json`); assert.ok(fs.existsSync(f), 'QA Mua hàng không chạy xong: ' + (r.stderr || '').slice(-800));
+    const d = JSON.parse(fs.readFileSync(f, 'utf8')); assert.ok(!d.error, d.error); assert.deepStrictEqual(d.errs, []);
+    for (const [k, s] of Object.entries(d.steps)) { assert.ok(!s.error, k + ': ' + s.error); assert.strictEqual(s.err || '', '', k); assert.deepStrictEqual((s.leftover || []).filter(t => !USER_DATA.has(t)), [], `${k}: còn tiếng Việt chưa dịch`); }
+    assert.strictEqual(d.company.qr_ready, true); assert.ok(d.company.logo > 1000 && d.company.logo < 400 * 1024, 'logo đã thu nhỏ và lưu');
+    // nghiệm thu: nhận 6/10 → tồn 6, chờ nhập 4, giá vốn 1.000.000; hoá đơn NCC 6 bàn + vận chuyển; trả 2.000.000 → còn 5.140.000
+    assert.deepStrictEqual(d.stock, [{ name: 'Bàn làm việc gỗ sồi', on_hand: 6, incoming: 4, cost: 1000000 }]);
+    assert.match(d.bill.number, /^BILL\/\d{4}\/\d{2}\/0001$/);
+    assert.strictEqual(d.payable.agedTotals.total, 5140000); assert.strictEqual(d.overview.payable, 5140000); assert.strictEqual(d.overview.poToReceive, 1);
+    assert.strictEqual(d.inv.qr, true);
+    assert.deepStrictEqual(d.pdfs.sort(), [`${lang}-INV-${d.inv.number.slice(4, 8)}-00001.pdf`, `${lang}-P00001.pdf`, `${lang}-WH-IN-00001.pdf`].sort());
+    const money = { vi: (s) => s.replace(/,/g, '.'), en: (s) => s, zh: (s) => s }[lang];
+    assert.match(d.po.taxes.join(' | '), new RegExp(money('40,000 ₫').replace('.', '\\.'))); assert.match(d.inv.totals.at(-1), new RegExp(money('18,460,000 ₫').replace(/\./g, '\\.')));
+    assert.match(d.bill.due.at(-1), new RegExp(money('5,140,000 ₫').replace(/\./g, '\\.')));
+    if (lang === 'vi') { assert.strictEqual(d.bill.ribbon, 'THANH TOÁN MỘT PHẦN'); assert.deepStrictEqual(d.poAfterReceipt.badges, ['Nhận một phần', 'Chờ hoá đơn']); assert.match(d.inv.qrText, /Nội dung: INV\/\d{4}\/00001/); }
+    if (lang === 'en') { assert.strictEqual(d.bill.ribbon, 'PARTIALLY PAID'); assert.deepStrictEqual(d.poAfterReceipt.badges, ['Partially received', 'To bill']); assert.match(d.invDraft.join(' | '), /VAT 8% on 12,000,000 ₫ 960,000 ₫/); }
+    if (lang === 'zh') assert.deepStrictEqual(d.poAfterReceipt.badges, ['部分收货', '待收账单']);
+    // PDF: chữ có dấu tiếng Việt trích ra được (phông nhúng đúng)
+    if (spawnSync('which', ['pdftotext']).status === 0) {
+      const txt = spawnSync('pdftotext', ['-layout', path.join(dir, 'pdf', `${lang}-P00001.pdf`), '-'], { encoding: 'utf8' }).stdout;
+      assert.match(txt, /Công ty TNHH Giải pháp AIVN/i); assert.match(txt, /Bàn làm việc gỗ sồi/); assert.match(txt, /Đặng Văn Khôi/);
+      if (lang === 'vi') { assert.match(txt, /ĐƠN MUA HÀNG/); assert.match(txt, /Mười một triệu năm trăm bốn mươi nghìn đồng/); }
+      if (lang === 'en') assert.match(txt, /Eleven million five hundred and forty thousand Vietnamese dong/);
+      if (lang === 'zh') assert.match(txt, /壹仟壹佰伍拾肆万越南盾整/);
+    }
+  });
+}

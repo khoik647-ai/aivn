@@ -42,7 +42,7 @@
     <!-- KINH DOANH → KHÁCH HÀNG -->
     <section class="view" id="view-crm">
       <div class="crm-head"><h2>💼 <span>Kinh doanh</span></h2>
-        <nav class="crm-tabs" role="tablist" aria-label="Kinh doanh"><button data-crm="dash" class="on" role="tab">Tổng quan</button><button data-crm="contacts" role="tab">Liên hệ</button><button data-crm="leads" role="tab">CRM</button><button data-crm="acts" role="tab">Việc cần làm</button><button data-crm="sales" role="tab">Bán hàng</button><button data-crm="stock" role="tab">Kho</button><button data-crm="invoices" role="tab">Hoá đơn</button><button data-crm="reports" role="tab">Báo cáo</button></nav>
+        <nav class="crm-tabs" role="tablist" aria-label="Kinh doanh"><button data-crm="dash" class="on" role="tab">Tổng quan</button><button data-crm="contacts" role="tab">Liên hệ</button><button data-crm="leads" role="tab">CRM</button><button data-crm="acts" role="tab">Việc cần làm</button><button data-crm="sales" role="tab">Bán hàng</button><button data-crm="purchase" role="tab">Mua hàng</button><button data-crm="stock" role="tab">Kho</button><button data-crm="invoices" role="tab">Hoá đơn</button><button data-crm="reports" role="tab">Báo cáo</button></nav>
         <div class="crm-actions"><input type="search" id="crmQ" placeholder="Tìm tên, số chứng từ, số điện thoại, email…" aria-label="Tìm trong Kinh doanh"><button class="btn sm primary" id="crmAdd">＋ Thêm</button><button class="btn sm" id="crmImport" title="Nhập từ CSV/Excel">⬆ Nhập</button><button class="btn sm" id="crmExport" title="Xuất CSV (mở được bằng Excel)">⬇ Xuất</button></div>
       </div>
       <div class="crm-body" id="crmBody"></div>
@@ -347,6 +347,7 @@
         <nav class="set-nav" role="tablist" aria-label="Mục cài đặt" id="setNav">
           <h2 class="set-title">Cài đặt</h2>
           <button type="button" role="tab" data-stab="general" class="on">Chung</button>
+          <button type="button" role="tab" data-stab="company" data-crm-nav>Công ty</button>
           <button type="button" role="tab" data-stab="hardware">Phần cứng &amp; bộ máy</button>
           <button type="button" role="tab" data-stab="perf">Hiệu năng</button>
           <button type="button" role="tab" data-stab="docs">Tìm trong tài liệu</button>
@@ -363,6 +364,7 @@
             <div class="set-row"><div><b>Thanh điều hướng thu gọn</b><small>Chỉ hiện biểu tượng (Ctrl+B).</small></div><label class="switch"><input type="checkbox" id="railCompactChk"><span></span></label></div>
             <div class="set-row"><div><b>Phím tắt</b><small>Ctrl+1…4 chuyển màn hình chính, Ctrl+L nạp mô hình, Ctrl+K bảng lệnh.</small></div><button type="button" class="btn sm" id="setKeys">Xem tất cả phím tắt</button></div>
           </section>
+          <section class="set-pane" data-spane="company" role="tabpanel"><h3 class="pane-title">Công ty</h3><div id="bizCompany"></div></section>
           <section class="set-pane" data-spane="hardware" role="tabpanel"><h3 class="pane-title">Phần cứng &amp; bộ máy</h3>
             <div class="set-card">
           <div class="hw-info small" id="hwInfo">Đang đọc phần cứng…</div>

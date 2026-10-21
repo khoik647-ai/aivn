@@ -35,7 +35,8 @@ const amountWords = (n, lang) => lang === 'en' ? enWords(n) : lang === 'zh' ? zh
 
 function render(doc, { company: c, lang = 'vi', qr = null, generatedAt = new Date() } = {}) {
   lang = ['vi', 'en', 'zh'].includes(lang) ? lang : 'vi';
-  const t = (s) => lang === 'vi' ? s : i18n().tr(s, lang);
+  const ASCII = { en: { MST: 'Tax ID', STT: 'No.' }, zh: { MST: '税号', STT: '序号' } }; // từ viết tắt không dấu (bộ trích khoá chỉ lấy chữ có dấu)
+  const t = (s) => lang === 'vi' ? s : (ASCII[lang][s] || i18n().tr(s, lang));
   const loc = LOCALE[lang];
   const money = (n) => (Math.round(Number(n) || 0)).toLocaleString(loc) + ' ₫';
   const qty = (n) => (Math.round((Number(n) || 0) * 1000) / 1000).toLocaleString(loc);
