@@ -270,7 +270,9 @@ function startGateTimers() {
   powerMonitor.on('resume', () => licenseCheck().catch(() => {}));
 }
 function registerGateIpc(handle) {
-  handle('gate:state', () => ({ mode: gateMode(), license: lic.publicInfo(), lock: appLock.info() }));
+  handle('gate:state', () => ({ mode: gateMode(), license: lic.publicInfo(), lock: appLock.info(), lang: uiLang() })); // B77: màn kích hoạt theo ngôn ngữ trong cài đặt
+  // B77: chọn ngôn ngữ ngay trên màn kích hoạt/khoá — chỉ đổi uiLang (không mở rộng quyền ghi cài đặt cho màn cổng)
+  handle('gate:lang', (_e, l) => { if (I18N_CORE.LANGS.includes(l) && settings.data.uiLang !== l) { settings.data.uiLang = l; settings.save(); try { buildMenus(); paintTray(); } catch {} } return uiLang(); });
   handle('gate:activate', async (_e, code) => { lic.activate(code); licenseCheck().catch(() => {}); if (activated()) startServices(); loadUi(); return lic.publicInfo(); });
   handle('gate:retry', async () => { const r = await licenseCheck(); return { ok: !!(r && r.ok), error: r && r.error }; });
   handle('gate:unlock', async (_e, pw) => { if (!isLocked()) return { ok: true }; const r = await appLock.unlock(String(pw || '')); if (r.ok) { unlocked = true; loadUi(); } return r; });
@@ -3055,6 +3057,12 @@ else {
     if (qaReq.warn) { LOG.log('qa', qaReq.warn); console.warn('[AIVN QA] ' + qaReq.warn); }
     if (qaReq.enabled) win.webContents.once('did-finish-load', () => setTimeout(async () => { let r = null; try { r = await qaRun(qaReq); } catch (e) { LOG.log('qa', 'QA runner lỗi: ' + (e.stack || e.message)); } const code = r ? (r.exitCode ?? QAR.exitCodeOf(r.status)) : 2; try { process.stdout.write(`[AIVN QA] ${r ? r.status : 'failed'} → ${qaReq.args.out}\n`); } catch {} app.exit(code); }, 2500));
     if (app.isPackaged || process.env.AIVN_UPDATE_CHECK === '1') setTimeout(() => updater.check({ silent: true }), Number(process.env.AIVN_UPDATE_DELAY || 5000));
+    if (process.env.AIVN_QA_GATE && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(async () => { // B77: màn kích hoạt theo uiLang + ô chọn ngôn ngữ
+      const out = { mode: gateMode() }; const js = (c) => win.webContents.executeJavaScript(c, true);
+      const dump = () => js(`({ lang: document.documentElement.lang, sel: (document.getElementById('gLang') || {}).value || null, opts: [...document.querySelectorAll('#gLang option')].map(o => o.value), title: document.getElementById('gaTitle').textContent, steps: document.querySelector('.gate-steps').innerText, go: document.getElementById('gaGo').textContent })`);
+      try { out.first = await dump(); await js(`(() => { const s = document.getElementById('gLang'); s.value = 'zh'; s.dispatchEvent(new Event('change')); })()`); await new Promise(r => setTimeout(r, 800)); out.after = await dump(); out.saved = settings.data.uiLang; }
+      catch (e) { out.error = String(e && e.stack || e); }
+      fs.writeFileSync(path.join(process.env.AIVN_QA_GATE, 'gate.json'), JSON.stringify(out, null, 1)); app.exit(0); }, 1500));
     if (process.env.AIVN_SHOTS141) win.webContents.once('did-finish-load', () => setTimeout(() => shots141().catch(e => { console.error('SHOTS lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_FULLBENCH && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => runFullBench((process.env.AIVN_FULLBENCH_MODELS || '').split(',').filter(Boolean), { parts: process.env.AIVN_FULLBENCH_PARTS ? process.env.AIVN_FULLBENCH_PARTS.split(',') : null, apps: process.env.AIVN_FULLBENCH_APPS ? process.env.AIVN_FULLBENCH_APPS.split(',') : null, out: path.join(process.env.AIVN_FULLBENCH, 'result.json') }).then(r => { console.log('FULLBENCH', JSON.stringify(r)); app.quit(); }, e => { console.error('FULLBENCH lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_AGENTBENCH && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaBench().catch(e => { console.error('BENCH lỗi', e); app.exit(2); }), 2500));

@@ -22,3 +22,7 @@
 .gate-owner summary{cursor:pointer;color:var(--muted);font-size:13px}
 .gate-owner[open]{display:grid;gap:8px}
 .gate-owner input{width:100%}
+
+/* B77: chọn ngôn ngữ trên màn cổng */
+.gate-lang{position:fixed;top:12px;right:16px;display:flex;align-items:center;gap:6px;font-size:14px;z-index:2}
+.gate-lang select{padding:4px 8px;border-radius:8px}
