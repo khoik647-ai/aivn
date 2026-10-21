@@ -82,6 +82,7 @@
             <button type="button" class="btn ghost" id="apDenyReason">Từ chối kèm lý do</button>
           </div>
         </section>
+        <div class="slash-pop" id="slashPop" role="listbox" aria-label="Lệnh nhanh" hidden></div>
         <form class="composer" id="composer">
           <button type="button" class="btn icon" id="attachBtn" title="Đính kèm tệp (PDF có lớp chữ, DOCX, TXT, MD, CSV, JSON, mã nguồn, ảnh · tối đa 20 MB)" aria-label="Đính kèm tệp">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.4 11.6-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
@@ -90,7 +91,7 @@
           <button type="button" class="btn danger" id="stopBtn" hidden>■ Dừng</button>
           <button type="submit" class="btn primary" id="sendBtn">Gửi ↑</button>
         </form>
-        <div class="gen-stats" id="genStats"></div>
+        <div class="under-composer"><div class="gen-stats" id="genStats"></div><div class="ctx-bar" id="ctxBar" hidden></div></div>
       </div>
       <aside class="settings">
         <div class="only-agent agent-settings" id="agentSettings">
@@ -120,8 +121,8 @@
             <label class="check toggle"><input type="checkbox" id="agScreen"> <span><b>🖱 Điều khiển màn hình <em class="beta">Thử nghiệm</em></b><small id="agScreenNote">AIVN AGENT tự mở ứng dụng và bấm/gõ từng bước như bạn. Dừng: Esc hoặc Ctrl+Alt+Q.</small></span></label>
             <div class="screen-opts" id="agScreenOpts" hidden>
               <label class="small">Xin phép <select id="agScreenMode"><option value="each">Hỏi từng bước</option><option value="important">Chỉ hỏi bước quan trọng</option></select></label>
-              <label class="small grounder-row">Mô hình định vị (tuỳ chọn) <select id="agGrounder"><option value="">Không dùng — chỉ cây giao diện + đọc chữ</option></select>
-                <small class="muted">Chế độ hai mô hình: mô hình đang chat (vd. Qwen3 4B/8B) lập kế hoạch; mô hình định vị nhìn ảnh (Holo, UI-TARS, Qwen-VL) chỉ tìm toạ độ khi cửa sổ không cho biết vị trí nút. Holo/UI-TARS định vị tốt nhưng lập kế hoạch kém — đừng dùng chúng làm mô hình chat. Cần thêm RAM/VRAM để chạy song song.</small></label>
+              <label class="small grounder-row">Mô hình định vị (tuỳ chọn) <select id="agGrounder"><option value="">Tự động — dùng mô hình nhìn ảnh đã cài khi mô hình chính không nhìn được</option></select>
+                <small class="muted">Mắt nhìn của AIVN AGENT. Mô hình chỉ đọc chữ (Qwen3 4B/8B…) KHÔNG nhìn được màn hình; Zalo và các ứng dụng Electron gần như không cho đọc nút/ô. Vì vậy khi mô hình chính không nhìn được ảnh, AIVN tự dùng một mô hình nhìn ảnh (UI-TARS, Holo, Qwen3-VL) để nhìn ảnh chụp mỗi bước và tìm toạ độ. Cách đơn giản nhất: nạp Qwen3-VL làm mô hình chính (vừa lập kế hoạch vừa nhìn). Holo/UI-TARS nhìn tốt nhưng lập kế hoạch kém — đừng dùng làm mô hình chat.</small></label>
               <div class="bench-box" id="benchBox"><b>📏 Đo Điểm tác vụ trên máy này</b>
                 <small class="muted">AIVN mở một cửa sổ thử “AIVN Bench” và để mô hình tự làm 10 việc có kịch bản (mở ứng dụng, bấm nút có tên, gõ tiếng Việt, đọc chữ, nhấp đúp…) + 1 bài an toàn (phải hỏi trước khi gửi). Chấm điểm tự động bằng trạng thái thật của cửa sổ. Mất khoảng 10–40 phút; đừng dùng chuột/bàn phím trong lúc đo (Esc để dừng).</small>
                 <div class="row wrap"><select id="benchModel" aria-label="Mô hình cần đo"></select><button type="button" class="btn sm" id="benchRun">Bắt đầu đo</button><button type="button" class="btn sm" id="benchStop" hidden>Dừng</button></div>
@@ -133,18 +134,50 @@
                     <p class="small"><button class="linkish" data-goto="memory">Quản lý ghi nhớ →</button> · <button class="linkish" data-goto="schedule">Lịch tự động →</button></p>
           <p class="small muted">JavaScript luôn chạy trong hộp cát riêng: không đọc tệp, không vào mạng, tối đa 3 giây.</p>
         </div>
-        <div class="only-chat">
-        <h3>Cài đặt trò chuyện</h3>
-        <label>Lời nhắc hệ thống
-          <textarea id="sysPrompt" rows="6"></textarea>
-        </label>
-        <label>Nhiệt độ <output id="tempOut">0.7</output>
-          <input type="range" id="temp" min="0" max="2" step="0.05">
-          <small>Thấp: chính xác, ổn định · Cao: sáng tạo, ngẫu nhiên</small>
-        </label>
-        <label>Số token tối đa
-          <input type="number" id="maxTok" min="16" max="8192" step="16">
-        </label>
+        <div class="only-chat cp">
+          <div class="cp-head"><h3>Cài đặt trò chuyện</h3></div>
+          <div class="preset-bar">
+            <select id="presetSel" aria-label="Preset"></select>
+            <button type="button" class="btn sm" id="presetSave" title="Lưu thay đổi vào preset này">Lưu</button>
+            <button type="button" class="btn sm" id="presetMore" aria-haspopup="menu" aria-expanded="false" title="Thao tác khác với preset" aria-label="Thao tác khác với preset">⋯</button>
+            <div class="menu preset-menu" id="presetMenu" role="menu" hidden>
+              <button type="button" role="menuitem" data-pm="saveas">Lưu thành preset mới…</button>
+              <button type="button" role="menuitem" data-pm="reset">Bỏ thay đổi (về preset đã lưu)</button>
+              <button type="button" role="menuitem" data-pm="rename">Đổi tên…</button>
+              <hr>
+              <button type="button" role="menuitem" data-pm="import">Nhập từ tệp JSON… <small class="muted">(AIVN hoặc LM Studio)</small></button>
+              <button type="button" role="menuitem" data-pm="export">Xuất ra tệp JSON…</button>
+              <hr>
+              <button type="button" role="menuitem" data-pm="delete" class="danger-item">Xoá preset</button>
+            </div>
+          </div>
+          <div class="preset-dirty small" id="presetDirty" hidden>● Đã thay đổi so với preset · <button type="button" class="linkbtn" data-pm="reset">bỏ thay đổi</button></div>
+          <div class="cp-tabs" role="tablist" aria-label="Nhóm cài đặt">
+            <button type="button" role="tab" data-cpt="sys" aria-selected="true" class="on">Hệ thống</button>
+            <button type="button" role="tab" data-cpt="smp" aria-selected="false">Lấy mẫu</button>
+            <button type="button" role="tab" data-cpt="out" aria-selected="false">Đầu ra</button>
+          </div>
+          <div class="cp-pane" data-cpp="sys" role="tabpanel">
+            <div class="prm-h"><label for="sysPrompt">Lời nhắc hệ thống</label><span class="muted small" id="sysTok"></span></div>
+            <textarea id="sysPrompt" rows="10" placeholder="Mô tả vai trò, giọng văn, quy tắc trả lời cho mô hình…"></textarea>
+            <p class="hint">Mô hình đọc phần này trước mỗi câu trả lời. Đổi preset ở trên để dùng lời nhắc soạn sẵn.</p>
+          </div>
+          <div class="cp-pane" data-cpp="smp" role="tabpanel" hidden>
+            <div class="prm" data-k="temperature"><div class="prm-h"><label for="temp">Nhiệt độ</label><input type="number" class="prm-n" id="tempN" min="0" max="2" step="0.05" aria-label="Nhiệt độ (số)"><output id="tempOut" hidden></output></div>
+              <input type="range" id="temp" min="0" max="2" step="0.05" aria-label="Nhiệt độ"><small>Thấp: chính xác, ổn định · Cao: sáng tạo, ngẫu nhiên</small></div>
+            <div id="prmList" class="adv-only"></div>
+            <p class="hint basic-only">Chuyển sang <b>Nâng cao</b> ở thanh dưới cùng để chỉnh Top K, Top P, Min P, phạt lặp và seed.</p>
+          </div>
+          <div class="cp-pane" data-cpp="out" role="tabpanel" hidden>
+            <div class="prm"><div class="prm-h"><label for="maxTok">Số token tối đa mỗi câu trả lời</label></div><input type="number" id="maxTok" min="16" max="32768" step="16"></div>
+            <div class="prm"><div class="prm-h"><label for="overflowSel">Khi vượt độ dài ngữ cảnh</label></div>
+              <select id="overflowSel"><option value="trim-middle">Cắt phần giữa (giữ lượt đầu và phần gần nhất)</option><option value="rolling">Trượt: bỏ dần tin cũ nhất</option><option value="stop">Dừng lại và báo cho tôi</option></select></div>
+            <div class="prm adv-only"><div class="prm-h"><label for="stopIn">Chuỗi dừng</label><span class="muted small">tối đa 8</span></div>
+              <div class="stop-chips" id="stopChips"></div><input type="text" id="stopIn" placeholder="Gõ chuỗi rồi Enter (vd. ###)" maxlength="100" autocomplete="off"><small>Mô hình dừng ngay khi viết ra một trong các chuỗi này.</small></div>
+            <div class="prm adv-only"><label class="check toggle"><input type="checkbox" id="jsonOn"> <span><b>Đầu ra có cấu trúc (JSON)</b><small>Buộc mô hình trả lời đúng lược đồ JSON bên dưới.</small></span></label>
+              <textarea id="jsonSchema" rows="8" spellcheck="false" class="mono" aria-label="Lược đồ JSON" hidden></textarea>
+              <small id="jsonErr" class="err" hidden></small></div>
+          </div>
         </div>
       </aside>
     </section>
@@ -175,7 +208,7 @@
           <div class="row between"><h3>Gợi ý của AIVN</h3><div class="fam-filter" id="famFilter"></div></div>
           <section id="screenArea" class="screen-area" hidden>
             <h3>🖥 Mô hình điều khiển máy tính</h3>
-            <p class="muted small">AIVN AGENT điều khiển máy bằng <b>hai vai</b>: <b>🧠 Lập kế hoạch</b> — một mô hình chữ gọi công cụ tốt (Qwen3 4B/8B) đọc danh sách nút/ô của cửa sổ qua Trợ năng của hệ điều hành và quyết định bước tiếp; <b>🎯 Định vị</b> (tuỳ chọn, chế độ hai mô hình) — một mô hình nhìn ảnh (Holo1.5, UI-TARS, Qwen-VL) chỉ ra toạ độ khi danh sách thiếu nút. Nhãn ⭐ Gợi ý chỉ dành cho mô hình đã qua bài đo thật (<b>Điểm tác vụ</b> ≥ 7/10 và luôn hỏi trước khi gửi); điểm ghi rõ đo ở đâu.</p>
+            <p class="muted small">Điều khiển máy cần <b>nhìn được màn hình</b>: mô hình chỉ đọc chữ không đủ (Zalo và ứng dụng Electron gần như không cho đọc nút/ô). Chọn một trong hai: <b>(a)</b> một <b>mô hình nhìn ảnh</b> vừa lập kế hoạch vừa nhìn (Qwen3-VL 8B nếu GPU ≥ 8 GB, Qwen3-VL 4B với 4 GB, Qwen3-VL 2B nếu ít hơn); hoặc <b>(b)</b> cặp <b>🧠 Lập kế hoạch</b> (Qwen3 4B/8B) + <b>🎯 Mắt nhìn</b> (UI-TARS, Holo1.5) — AIVN tự nạp mắt nhìn khi cần. ⭐ Gợi ý dựa trên VRAM của máy này; Điểm tác vụ chỉ hiện khi đã đo thật.</p>
             <div class="cards" id="screenCards"></div>
             <h3 class="mt">Các mô hình khác</h3>
           </section>
@@ -288,6 +321,7 @@
         <div class="set-body" id="setBody">
           <section class="set-pane on" data-spane="general" role="tabpanel"><h3 class="pane-title">Chung</h3>
             <div class="set-row"><div><b>Giao diện</b><small>Sáng, tối, hoặc theo hệ điều hành.</small></div><div id="themeSlot"><div class="theme-row" id="themeRow" role="group" aria-label="Giao diện"><button type="button" data-theme="light" title="Giao diện sáng">☀ Sáng</button><button type="button" data-theme="dark" title="Giao diện tối">☾ Tối</button><button type="button" data-theme="system" title="Theo hệ điều hành">Tự động</button></div></div></div>
+            <div class="set-row"><div><b>Hiệu ứng chuyển giao diện</b><small>Logo rồng và vòng màu lan ra khi đổi sáng/tối. "Đầy đủ" vẫn chạy khi Windows tắt hiệu ứng động.</small></div><select id="themeFxSel" aria-label="Hiệu ứng chuyển giao diện"><option value="full">Đầy đủ (mặc định)</option><option value="os">Theo hệ điều hành</option><option value="off">Tắt</option></select></div>
             <div class="set-row"><div><b>Mức hiển thị</b><small>Cơ bản ẩn các tham số kỹ thuật (lớp GPU, batch, DRY…). Nâng cao hiện đầy đủ.</small></div><div class="seg" id="uiModeSeg" role="radiogroup" aria-label="Mức hiển thị"><button type="button" role="radio" data-uimode="basic">Cơ bản</button><button type="button" role="radio" data-uimode="advanced">Nâng cao</button></div></div>
             <div class="set-row"><div><b>Thanh điều hướng thu gọn</b><small>Chỉ hiện biểu tượng (Ctrl+B).</small></div><label class="switch"><input type="checkbox" id="railCompactChk"><span></span></label></div>
             <div class="set-row"><div><b>Phím tắt</b><small>Ctrl+1…4 chuyển màn hình chính, Ctrl+L nạp mô hình, Ctrl+K bảng lệnh.</small></div><button type="button" class="btn sm" id="setKeys">Xem tất cả phím tắt</button></div>
@@ -336,17 +370,17 @@
         </div>
           </section>
           <section class="set-pane" data-spane="security" role="tabpanel"><h3 class="pane-title">Bảo mật &amp; Quản trị</h3>
-            <p class="muted small">Kích hoạt của máy này, Khóa ứng dụng bằng mật khẩu, và trang Quản trị dành cho chủ sở hữu.</p>
+            <p class="muted small">Kích hoạt của máy này, Khoá ứng dụng bằng mật khẩu, và trang Quản trị dành cho chủ sở hữu.</p>
         <div class="sec-card" id="secLicense"></div>
         <div class="sec-card">
-          <h3>🔒 Khóa ứng dụng</h3>
+          <h3>🔒 Khoá ứng dụng</h3>
           <p class="small muted">Đặt mật khẩu để mở AIVN trên máy này. AIVN chỉ lưu giá trị băm (scrypt) của mật khẩu; quên mật khẩu thì chỉ có thể xoá dữ liệu AIVN để dùng lại. Đây là khoá mở ứng dụng, không mã hoá tệp trên ổ đĩa.</p>
           <div id="lockState" class="small"></div>
           <form id="lockForm" class="sec-form">
             <input type="password" id="lkCur" placeholder="Mật khẩu hiện tại" autocomplete="current-password" hidden>
             <input type="password" id="lkNew" placeholder="Mật khẩu mới (ít nhất 4 ký tự)" autocomplete="new-password">
             <input type="password" id="lkNew2" placeholder="Nhập lại mật khẩu mới" autocomplete="new-password">
-            <div class="row"><button class="btn primary" type="submit" id="lkSave">Bật Khóa ứng dụng</button><button class="btn" type="button" id="lkOff" hidden>Tắt khoá</button><button class="btn" type="button" id="lkNow" hidden>Khóa ngay</button></div>
+            <div class="row"><button class="btn primary" type="submit" id="lkSave">Bật Khoá ứng dụng</button><button class="btn" type="button" id="lkOff" hidden>Tắt khoá</button><button class="btn" type="button" id="lkNow" hidden>Khoá ngay</button></div>
           </form>
           <div class="row lk-opts"><label>Tự khoá khi không dùng <select id="lkIdle"><option value="0">Không</option><option value="5">5 phút</option><option value="15">15 phút</option><option value="30">30 phút</option><option value="60">60 phút</option></select></label><label class="check"><input type="checkbox" id="lkSleep"> Khoá khi máy ngủ / khoá màn hình</label></div>
         </div>
@@ -403,6 +437,7 @@
   <div class="ld-body"><div class="ld-list" id="ldList" role="listbox" aria-label="Mô hình đã tải về"></div><div class="ld-pane" id="ldPane"></div></div>
   <div class="ld-foot"><label class="ld-remember"><input type="checkbox" id="ldRemember" checked> Nhớ cài đặt nạp cho mô hình này</label><span class="grow"></span><button class="btn" id="ldCancel">Huỷ</button><button class="btn danger" id="ldUnload" hidden>⏏ Gỡ khỏi bộ nhớ</button><button class="btn primary" id="ldGo" disabled>Nạp mô hình</button></div>
 </div></div>
+<div class="modal-back" id="promptModal" hidden><form class="modal" role="dialog" aria-modal="true" aria-labelledby="pmTitle" id="pmForm"><h3 id="pmTitle"></h3><input type="text" id="pmInput" maxlength="60" autocomplete="off" aria-labelledby="pmTitle"><small class="err" id="pmErr" hidden></small><div class="row end"><button type="button" class="btn" id="pmNo">Huỷ</button><button type="submit" class="btn primary" id="pmYes">Lưu</button></div></form></div>
 <div class="modal-back palette-back" id="palette" hidden><div class="palette" role="dialog" aria-label="Tìm lệnh nhanh"><input id="palQ" type="text" placeholder="Gõ để tìm lệnh: “mô hình”, “AIVN AGENT”, “MCP”, “tốc độ”…" aria-label="Tìm lệnh"><div class="pal-list" id="palList" role="listbox"></div><div class="small muted pal-foot">↑↓ chọn · Enter chạy · Esc đóng</div></div></div>
 <div class="modal-back" id="keysModal" hidden><div class="modal keys-modal" role="dialog" aria-labelledby="keysTitle"><h3 id="keysTitle">⌨ Phím tắt</h3><table class="keys-table">
 <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd></td><td>Tìm lệnh nhanh</td></tr><tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>Cuộc trò chuyện mới</td></tr><tr><td><kbd>Ctrl</kbd>+<kbd>.</kbd></td><td>Ẩn/hiện bảng cài đặt</td></tr><tr><td><kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Gửi / xuống dòng</td></tr><tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd></td><td>Cho phép bước AIVN AGENT đang xin</td></tr><tr><td><kbd>Esc</kbd></td><td>Từ chối bước đang xin · đóng hộp thoại</td></tr><tr><td><kbd>Esc</kbd> hoặc <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Q</kbd></td><td>Dừng ngay khi AIVN AGENT điều khiển máy</td></tr><tr><td><kbd>Ctrl</kbd>+<kbd>/</kbd></td><td>Bảng phím tắt này</td></tr></table><div class="row"><button class="btn primary" id="keysClose">Đóng</button></div></div></div>

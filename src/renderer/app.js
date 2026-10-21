@@ -329,7 +329,7 @@ function setStatus(st) {
   paintSbModel(st); paintPill(st);
   if (!$('#loader').hidden) { renderLdList(); ldFoot(); }
 }
-A.onModelStatus(st => { setStatus(st); if (!st.loading) refreshModels(); if (!st.loading && isAgent()) refreshAgent(); });
+A.onModelStatus(st => { setStatus(st); if (!st.loading) { refreshModels(); refreshChatDefaults(); } if (!st.loading && isAgent()) refreshAgent(); });
 
 // ---------- Kho mô hình ----------
 
@@ -375,7 +375,7 @@ async function renderCatalog() {
   $('#screenCards').innerHTML = comp.map(catCard).join('');
   $('#catalog').innerHTML = list.filter(c => !c.role).map(catCard).join('');
 }
-const roleTag = (c) => c.role === 'planner' ? '<span class="tag comp" title="Bộ lập kế hoạch: đọc danh sách nút/ô của cửa sổ (Trợ năng của hệ điều hành) rồi chọn bước tiếp theo. Không cần nhìn ảnh.">🧠 Lập kế hoạch</span>' : c.role === 'grounder' ? '<span class="tag comp" title="Bộ định vị (chế độ hai mô hình): khi danh sách nút/ô thiếu phần tử, mô hình này nhìn ảnh chụp màn hình và chỉ ra toạ độ cần bấm. Chạy cùng một mô hình Qwen3 lập kế hoạch.">🎯 Định vị (nhìn ảnh)</span>' : '';
+const roleTag = (c) => c.role === 'planner' ? '<span class="tag comp" title="Bộ lập kế hoạch: chọn bước tiếp theo. Mô hình này KHÔNG nhìn được màn hình — để điều khiển máy cần đi kèm một mô hình nhìn ảnh (mắt nhìn), AIVN tự nạp khi cần.">🧠 Lập kế hoạch · cần mắt nhìn</span>' : c.role === 'grounder' ? '<span class="tag comp" title="Nhìn được ảnh chụp màn hình: đọc màn hình và chỉ ra toạ độ cần bấm, kể cả với Zalo/ứng dụng Electron không cho đọc nút/ô.">🎯 Nhìn màn hình</span>' : '';
 function benchTag(c) {
   const b = c.bench; if (!c.role && !b) return '';
   const out = [];
@@ -388,7 +388,7 @@ function benchTag(c) {
 const catCard = (c) => `<div class="card" data-id="${esc(c.id)}">
     <div class="card-top"><div class="av">${esc(c.family.slice(0, 2))}</div><div><h4>${esc(c.name)}</h4><div class="sub">${esc(c.params)} tham số · ${esc(c.quant)} · ${fmtBytes(c.size + (c.mmproj ? c.mmproj.size : 0))}</div></div></div>
     <p>${esc(c.desc)}</p>
-    <div class="tags">${c.recommended ? '<span class="tag rec" title="Qwen3 gọi công cụ tốt nhất trong các mô hình vừa máy này">⭐ Gợi ý: trò chuyện &amp; công cụ</span>' : ''}${c.recScreen ? '<span class="tag rec" title="Đã qua bài đo Điểm tác vụ (≥ 7/10 và hỏi trước bước quan trọng)">⭐ Gợi ý: điều khiển máy</span>' : ''}${c.recGround ? '<span class="tag rec" title="Đã qua bài đo định vị (≥ 7/10) và vừa máy này">⭐ Gợi ý: định vị (hai mô hình)</span>' : ''}${roleTag(c)}${benchTag(c)}${fitBadge(c.fit)}${c.vision ? `<span class="tag vis" title="Tải kèm tệp thị giác ${esc(c.mmproj.file)} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán">👁 Nhìn được ảnh</span>` : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}${c.tags.filter(t => t !== 'Nhìn được ảnh' && t !== 'Điều khiển máy tính').map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
+    <div class="tags">${c.recommended ? '<span class="tag rec" title="Qwen3 gọi công cụ tốt nhất trong các mô hình vừa máy này">⭐ Gợi ý: trò chuyện &amp; công cụ</span>' : ''}${c.recScreen ? '<span class="tag rec" title="Một mô hình vừa lập kế hoạch vừa nhìn màn hình, chọn theo VRAM máy này. Nhà phát triển (Qwen) ghi: Visual Agent — Operates PC/mobile GUIs.">⭐ Gợi ý: điều khiển máy (tự nhìn màn hình)</span>' : ''}${c.recGround ? `<span class="tag rec" title="${esc('Mắt nhìn cho mô hình lập kế hoạch Qwen3, chọn theo VRAM máy này.' + (/phi thương mại/i.test(c.license || '') ? ' Lưu ý giấy phép: ' + c.license + '.' : ''))}">⭐ Gợi ý: mắt nhìn (cặp hai mô hình)</span>` : ''}${c.recPairPlanner ? '<span class="tag rec" title="Lập kế hoạch trong cặp hai mô hình — dùng kèm mắt nhìn được gợi ý.">⭐ Gợi ý: lập kế hoạch (cặp)</span>' : ''}${roleTag(c)}${benchTag(c)}${fitBadge(c.fit)}${c.vision ? `<span class="tag vis" title="Tải kèm tệp thị giác ${esc(c.mmproj.file)} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán">👁 Nhìn được ảnh</span>` : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}${c.tags.filter(t => t !== 'Nhìn được ảnh' && t !== 'Điều khiển máy tính').map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
     <div class="card-foot" data-job="${esc(jobIdFor(c.repo, c.file))}">${footHtml({ ...c, size: c.size + (c.mmproj ? c.mmproj.size : 0) }, `data-act="dl-cat" data-id="${esc(c.id)}"`, c.file)}</div>
     <button class="linkish" data-act="open-repo" data-repo="${esc(c.repo)}">Các bản lượng tử khác · ${esc(c.repo)}</button></div>`;
 
@@ -504,6 +504,16 @@ $('#messages').addEventListener('click', async (e) => {
 A.onEngineCrash((e) => toast(e.message, true));
 $('#newChat').addEventListener('click', () => { state.current = null; renderConvos(); renderMessages(); $('#input').focus(); });
 
+// biểu tượng nút thao tác tin nhắn (SVG đơn sắc: ký tự ⧉ ⑂ thiếu trong phông Windows/Linux nên hiện ô trống)
+const svgI = (d) => `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const MICON = {
+  copy: svgI('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>'),
+  edit: svgI('<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/>'),
+  regen: svgI('<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/>'),
+  branch: svgI('<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 4-6 3-11 7"/>'),
+  del: svgI('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'),
+  prev: svgI('<path d="M15 6l-6 6 6 6"/>'), next: svgI('<path d="M9 6l6 6-6 6"/>'),
+};
 function renderMessages() {
   const box = $('#messages');
   const msgs = state.current ? state.current.messages : [];
@@ -514,6 +524,7 @@ function renderMessages() {
     return;
   }
   if (!msgs.length) {
+    paintCtxBar(null);
     box.innerHTML = `<div class="empty"><img class="logo-big" src="logo-tile.svg" alt="">
       <h2>Xin chào! Hôm nay bạn muốn hỏi gì?</h2><p>${state.status.loaded ? 'Mô hình đã sẵn sàng. Mọi thứ chạy ngay trên máy bạn, không cần Internet.' : 'Hãy chọn một mô hình ở thanh phía trên (Ctrl+L), hoặc vào <b>Khám phá</b> để tải mô hình đầu tiên.'}</p></div>`;
     return;
@@ -521,14 +532,20 @@ function renderMessages() {
   box.innerHTML = msgs.map((m, i) => {
     const atts = m.attachments && m.attachments.length ? `<div class="atts">${m.attachments.map(a => `<span class="att">${a.kind === 'image' && a.thumb && /^data:image\/jpeg;base64,/.test(a.thumb) ? `<img class="thumb" src="${a.thumb}" alt="">` : fileIcon(a.kind)} ${esc(a.name)} · ${fmtBytes(a.size)}</span>`).join('')}</div>` : '';
     const warn = (m.visionNote ? `<div class="doc-warn vis">👁 ${esc(m.visionNote)}.</div>` : '') + (m.ocrNote ? `<div class="doc-warn ocr">🖼 ${esc(m.ocrNote)}.</div>` : '') + (m.docWarning ? `<div class="doc-warn">⚠ ${esc(m.docWarning)}</div>` : '');
-    const copyBtn = m.role === 'assistant' && m.content && !m.error ? `<button class="copy-btn" data-copy="${i}" title="Sao chép câu trả lời">⧉ Sao chép</button>` : '';
+    const isLast = i === msgs.length - 1; const chatMode = !isAgent() && !(m.steps || m.agent);
+    const ab = (act, ic, t) => `<button type="button" class="mact" data-mact="${act}" title="${t}" aria-label="${t}">${MICON[act] || ic}</button>`;
+    const nav = m.alts && m.alts.length > 1 ? `<span class="alt-nav">${ab('prev', '‹', 'Phiên bản trước')}<span>${(m.alt ?? m.alts.length - 1) + 1}/${m.alts.length}</span>${ab('next', '›', 'Phiên bản sau')}</span>` : '';
+    const copyBtn = !m.content || state.generating && isLast ? '' : `<div class="msg-acts">${nav}${m.content && !m.error ? ab('copy', '⧉', 'Sao chép') : ''}${chatMode && m.role === 'user' ? ab('edit', '✎', 'Sửa tin nhắn') : ''}${chatMode && m.role === 'assistant' && msgs[i - 1] && msgs[i - 1].role === 'user' ? ab('regen', '↻', 'Tạo lại câu trả lời') : ''}${chatMode ? ab('branch', '⑂', 'Rẽ nhánh từ đây (tạo cuộc trò chuyện mới)') + ab('del', '🗑', 'Xoá tin nhắn') : ''}</div>`;
+    const think = m.role === 'assistant' && m.thought ? `<details class="think"><summary>${m.thinkSecs ? 'Đã suy nghĩ ' + fmtSec(m.thinkSecs) : 'Quá trình suy nghĩ'}</summary><div class="think-body">${esc(m.thought)}</div></details>` : '';
+    const stats = m.role === 'assistant' && !m.error ? statsHtml(m.stats) : '';
     const srcs = m.role === 'assistant' && Array.isArray(m.sources) && m.sources.length ? `<div class="sources">${m.sources.map(x => `<div class="src" title="${esc(x.preview || '')}">📎 Trích từ: <b>${esc(x.file)}</b>, đoạn ${x.chunk}${x.page ? ` · trang ${x.page}${x.pageEnd && x.pageEnd !== x.page ? '–' + x.pageEnd : ''}` : ''}</div>`).join('')}</div>` : '';
     const ag = m.role === 'assistant' && (m.steps || m.agent);
     const extra = m.role === 'assistant' ? webSrcHtml(m) + (m.memories && m.memories.length ? `<div class="mem-used" title="${esc(m.memories.join('\n'))}">🧠 Đã dùng ${m.memories.length} ghi nhớ liên quan</div>` : '') : '';
     const sched = m.scheduled ? `<div class="sched-tag">⏰ Lịch tự động · ${new Date(m.scheduled.at).toLocaleString('vi-VN')}${m.scheduled.late ? ' · chạy bù (trễ)' : ''}${m.scheduled.manual ? ' · chạy thủ công' : ''}</div>` : '';
-    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN AGENT' : 'AIVN'}${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions">${/cần nhiều ngữ cảnh hơn|ngữ cảnh[^.]*quá nhỏ/i.test(m.content || '') ? '<button type="button" class="btn sm primary" data-ctx-grow="1">Tăng ngữ cảnh</button>' : ''}<button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning ? `<div class="no-action" role="alert"><b>⚠ Chưa có việc nào được làm</b><span>${esc(m.warning)}</span><button type="button" class="btn sm" data-rec-go="1">Mở Kho mô hình</button></div>` : ''}${srcs}${extra}${sched}${copyBtn}</div>${warn}`;
+    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN AGENT' : 'AIVN'}${m.model ? ' · ' + esc(m.model) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}${think}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions">${/cần nhiều ngữ cảnh hơn|ngữ cảnh[^.]*quá nhỏ/i.test(m.content || '') ? '<button type="button" class="btn sm primary" data-ctx-grow="1">Tăng ngữ cảnh</button>' : ''}<button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning ? `<div class="no-action" role="alert"><b>⚠ Chưa có việc nào được làm</b><span>${esc(m.warning)}</span><button type="button" class="btn sm" data-rec-go="1">Mở Kho mô hình</button></div>` : ''}${srcs}${extra}${sched}${stats}${copyBtn}</div>${warn}`;
   }).join('');
   box.scrollTop = box.scrollHeight;
+  paintCtxBar(lastStats(state.current));
 }
 
 // ---------- Tệp đính kèm ----------
@@ -647,7 +664,9 @@ input.addEventListener('input', () => { input.style.height = 'auto'; input.style
 input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#composer').requestSubmit(); } });
 $('#composer').addEventListener('submit', async (e) => {
   e.preventDefault();
-  let text = input.value.trim();
+  let text = input.value.trim(); $('#slashPop').hidden = true;
+  // lệnh / chạy ngay cả khi đang tạo câu trả lời (chỉ đổi cài đặt cục bộ), trừ /moi
+  if (!isAgent() && text.startsWith('/') && runSlash(text)) return;
   if (state.generating) return;
   if (isAgent()) { if (pending.some(a => a.loading)) { toast('Đang đọc tệp, vui lòng đợi một chút…'); return; } if (text || pending.some(a => a.ok)) sendAgent(text); return; }
   if (pending.some(a => a.loading)) { toast('Đang đọc tệp, vui lòng đợi một chút…'); return; }
@@ -666,7 +685,7 @@ $('#composer').addEventListener('submit', async (e) => {
   if (!state.status.loaded && !(await ensureLoaded())) return;
   if (!state.current) state.current = { id: uid(), title: text.slice(0, 48), messages: [], createdAt: Date.now(), updatedAt: Date.now(), mode: 'chat' };
   const conv = state.current;
-  const userMsg = { role: 'user', content: text };
+  const userMsg = { role: 'user', content: text, at: Date.now() };
   if (docsToSend.length) userMsg.attachments = docsToSend.map(a => ({ name: a.name, size: a.size, kind: a.kind, pages: a.pages || null, ...(a.kind === 'image' ? { thumb: a.thumb, ocrChars: a.ocrChars, direct: !!(vision && a.vis) } : {}) }));
   if (directImgs.length) { userMsg.visionNote = VISION_NOTE; visImgs.set(userMsg, directImgs.map(a => a.vis)); }
   if (docsToSend.some(a => a.kind === 'image' && !(vision && a.vis))) userMsg.ocrNote = OCR_NOTE;
@@ -675,22 +694,32 @@ $('#composer').addEventListener('submit', async (e) => {
   const reply = { role: 'assistant', content: '', model: state.status.id };
   conv.messages.push(reply);
   input.value = ''; input.style.height = 'auto';
+  await runTurn(conv, userMsg, reply, { docsToSend, directImgs });
+});
+// Một lượt trả lời (dùng cho gửi mới, tạo lại, sửa rồi gửi lại). userMsg và reply đã nằm trong conv.messages.
+async function runTurn(conv, userMsg, reply, { docsToSend = [], directImgs = [] } = {}) {
+  const vision = !!state.status.vision;
   renderMessages();
-  const bodyEl = $('#messages .msg:last-child .body'); bodyEl.classList.add('cursor');
+  const ri = conv.messages.indexOf(reply);
+  const msgEl = () => document.querySelector(`#messages .msg[data-i="${ri}"]`);
+  const bodyEl = msgEl().querySelector('.body'); bodyEl.classList.add('cursor');
   const reqId = uid(); state.generating = reqId; genStartedAt = Date.now(); setPhase('think');
   $('#sendBtn').hidden = true; $('#stopBtn').hidden = false; $('#genStats').textContent = 'Đang suy nghĩ…';
-  const s = state.settings;
+  const s = state.settings; const cp = chatParams();
   // Lịch sử gửi cho mô hình: chỉ tin nhắn có tài liệu gần nhất giữ toàn bộ nội dung đã đóng gói, tin cũ hơn chỉ ghi tên tệp
-  const all = conv.messages.slice(0, -2); // bỏ câu trả lời lỗi và câu hỏi ngay trước nó (tránh mô hình trả lời lại câu cũ)
+  const ui = conv.messages.indexOf(userMsg);
+  const all = conv.messages.slice(0, ui);
   const prior = all.filter((m, i) => !m.error && !(m.role === 'user' && all[i + 1] && all[i + 1].error));
   const lastCtxIdx = docsToSend.length ? -1 : prior.map(m => !!m.context).lastIndexOf(true);
+  const ownImgs = directImgs.length ? directImgs.map(a => a.vis) : (vision && visImgs.get(userMsg)) || [];
   // mô hình nhìn ảnh: hỏi tiếp mà không gửi ảnh mới thì gửi lại ảnh gần nhất trong phiên
-  const lastImgIdx = vision && !directImgs.length ? prior.map(m => visImgs.has(m)).lastIndexOf(true) : -1;
-  const history = [{ role: 'system', content: s.systemPrompt }, ...prior.map((m, i) => {
+  const lastImgIdx = vision && !ownImgs.length ? prior.map(m => visImgs.has(m)).lastIndexOf(true) : -1;
+  const lastText = docsToSend.length ? userMsg.content : (userMsg.context || userMsg.content);
+  const history = [{ role: 'system', content: cp.systemPrompt }, ...prior.map((m, i) => {
       const t = m.context && i === lastCtxIdx ? m.context : (m.attachments ? `[Đã gửi kèm: ${m.attachments.map(a => a.name + (a.kind === 'image' ? (a.direct ? ' (ảnh)' : ' (ảnh, đã đọc chữ bằng OCR)') : '')).join(', ')}]\n` : '') + m.content;
       return { role: m.role, content: i === lastImgIdx ? [{ type: 'text', text: t }, ...visImgs.get(m).map(url => ({ type: 'image_url', image_url: { url } }))] : t };
     }),
-    { role: 'user', content: text }];
+    { role: 'user', content: lastText }];
   const offRag = A.onRagProgress((p) => {
     if (p.reqId !== reqId) return;
     $('#genStats').textContent = p.stage === 'search' ? 'Đang tìm đoạn liên quan trong tài liệu…' : p.total ? `Đang lập chỉ mục “${p.name}”: ${p.done}/${p.total} đoạn…` : 'Đang chuẩn bị tìm kiếm tài liệu…';
@@ -702,47 +731,282 @@ $('#composer').addEventListener('submit', async (e) => {
     if (info.ragAvailable) offerRag();
     if (info.truncated) {
       const parts = info.files.filter(f => f.truncated).map(f => `${f.name} (~${f.usedPct}%)`).join(', ');
-      userMsg.docWarning = `Tài liệu dài hơn giới hạn ngữ cảnh của mô hình, AIVN chỉ dùng một phần: ${parts}. Đã giữ phần mở đầu và các đoạn liên quan nhất tới câu hỏi. Tăng "Độ dài ngữ cảnh" trong cài đặt để dùng nhiều hơn.`;
+      userMsg.docWarning = `Tài liệu dài hơn giới hạn ngữ cảnh của mô hình, AIVN chỉ dùng một phần: ${parts}. Đã giữ phần mở đầu và các đoạn liên quan nhất tới câu hỏi. Tăng "Độ dài ngữ cảnh" trong hộp nạp mô hình (Ctrl+L) để dùng nhiều hơn.`;
       const box = $('#messages'); const w = document.createElement('div'); w.className = 'doc-warn'; w.textContent = '⚠ ' + userMsg.docWarning;
-      box.insertBefore(w, box.lastElementChild);
+      box.insertBefore(w, msgEl());
     }
   });
-  let rafPending = false;
-  const off = A.onToken(({ reqId: r, t }) => {
-    if (r !== reqId) return; reply.content += t;
-    if (!rafPending) { rafPending = true; requestAnimationFrame(() => { rafPending = false; bodyEl.innerHTML = md(reply.content); const box = $('#messages'); box.scrollTop = box.scrollHeight; }); }
-  });
-  const offRec = A.onChatRecover((x) => { if (x.reqId !== reqId) return; reply.content = ''; bodyEl.innerHTML = ''; $('#genStats').textContent = x.grow ? `Ngữ cảnh chưa đủ — đang nạp lại mô hình với ngữ cảnh ${Number(x.ctx).toLocaleString('vi-VN')}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${x.ctx}) và thử lại…`; });
+  let rafPending = false; const t0 = Date.now(); let thinkStart = null, thinkEnd = null;
+  const paint = () => { rafPending = false; const el = msgEl(); if (!el) return;
+    if (reply.thought) { let d = el.querySelector('.think'); if (!d) { d = document.createElement('details'); d.className = 'think'; d.open = true; d.innerHTML = '<summary></summary><div class="think-body"></div>'; el.insertBefore(d, el.querySelector('.body')); }
+      d.querySelector('summary').textContent = thinkEnd ? `Đã suy nghĩ ${fmtSec((thinkEnd - thinkStart) / 1000)}` : 'Đang suy nghĩ…'; d.querySelector('.think-body').textContent = reply.thought; }
+    bodyEl.innerHTML = md(reply.content); const box = $('#messages'); if (box.scrollHeight - box.scrollTop - box.clientHeight < 160) box.scrollTop = box.scrollHeight; };
+  const queue = () => { if (!rafPending) { rafPending = true; requestAnimationFrame(paint); } };
+  const off = A.onToken(({ reqId: r, t }) => { if (r !== reqId) return; if (thinkStart && !thinkEnd) thinkEnd = Date.now(); reply.content += t; if ($('#genStats').textContent === 'Đang suy nghĩ…') $('#genStats').textContent = 'Đang trả lời…'; queue(); });
+  const offThink = A.onThink(({ reqId: r, t }) => { if (r !== reqId) return; if (!thinkStart) thinkStart = Date.now(); reply.thought = (reply.thought || '') + t; queue(); });
+  const offRec = A.onChatRecover((x) => { if (x.reqId !== reqId) return; reply.content = ''; reply.thought = ''; bodyEl.innerHTML = ''; $('#genStats').textContent = x.grow ? `Ngữ cảnh chưa đủ — đang nạp lại mô hình với ngữ cảnh ${Number(x.ctx).toLocaleString('vi-VN')}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${x.ctx}) và thử lại…`; });
   try {
-    const r = await A.generate({ reqId, convoId: conv.id, messages: history, temperature: s.temperature, maxTokens: s.maxTokens,
+    const r = await A.generate({ reqId, convoId: conv.id, messages: history, temperature: cp.temperature, maxTokens: cp.maxTokens, params: cp,
       docs: docsToSend.filter(a => !(vision && a.kind === 'image' && a.vis)).map(a => ({ name: a.name, text: a.text, kind: a.kind, pages: a.pages })),
-      images: directImgs.map(a => a.vis) });
-    reply.content = r.text || reply.content;
+      images: ownImgs });
+    reply.content = r.text || reply.content; if (r.thought) reply.thought = r.thought;
+    if (reply.thought) reply.thinkSecs = ((thinkEnd || Date.now()) - (thinkStart || t0)) / 1000;
     if (r.finishReason === 'abort' && r.stoppedBy && r.stoppedBy !== 'người dùng bấm Dừng') reply.content += `\n\n_Đã dừng (${r.stoppedBy})._`;
-    paintSbSpeed(r.usage);
-    $('#genStats').textContent = `${r.usage.completion_tokens} token · ${r.usage.tokensPerSecond.toFixed(1)} token/giây · ${r.usage.seconds.toFixed(1)} giây${r.finishReason === 'abort' ? ' · đã dừng' : r.finishReason === 'length' ? ' · chạm giới hạn token' : ''}`;
+    reply.stats = { tokens: r.usage.completion_tokens, tps: r.usage.tokensPerSecond, secs: r.usage.seconds, ttft: r.usage.ttft ?? null, stop: r.finishReason === 'abort' ? 'abort' : (r.stopReason || r.finishReason), ctxUsed: r.usage.contextTokens ?? null, ctxSize: r.usage.contextSize ?? null, dropped: r.dropped || 0, preset: cp.presetName || null };
+    reply.model = state.status.id || reply.model; delete reply.error;
+    if (reply.alts) { reply.alts.push(snapAlt(reply)); reply.alt = reply.alts.length - 1; }
+    paintSbSpeed(r.usage); paintCtxBar(reply.stats);
+    $('#genStats').textContent = '';
+    if (r.dropped) toast(`Cuộc trò chuyện dài hơn ngữ cảnh: AIVN đã tạm bỏ ${r.dropped} tin cũ khi gửi (chính sách “${OVERFLOW_LABEL[cp.overflow] || cp.overflow}”).`);
   } catch (err) {
-    reply.error = true; reply.content = (reply.content ? reply.content + '\n\n' : '') + '⚠ ' + err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    reply.error = true; reply.content = (reply.content ? reply.content + '\n\n' : '') + '⚠ ' + cleanErr(err.message);
+    if (reply.alts) { reply.alts.push(snapAlt(reply)); reply.alt = reply.alts.length - 1; }
     $('#genStats').textContent = '';
   } finally {
-    off(); offInfo(); offRag(); offRec(); state.generating = null; $('#sendBtn').hidden = false; $('#stopBtn').hidden = true;
+    off(); offThink(); offInfo(); offRag(); offRec(); state.generating = null; $('#sendBtn').hidden = false; $('#stopBtn').hidden = true;
     conv.updatedAt = Date.now(); await A.saveConvo(conv); await loadConvos(); renderMessages();
   }
+}
+const fmtSec = (x) => (x < 10 ? x.toFixed(1) : Math.round(x)).toString().replace('.', ',') + ' giây';
+const STOP_LABEL = { eogToken: 'hết câu (EOS)', stop: 'hết câu', eos: 'hết câu (EOS)', maxTokens: 'chạm giới hạn token', length: 'chạm giới hạn token', customStopTrigger: 'gặp chuỗi dừng', stopGenerationTrigger: 'gặp chuỗi dừng', abort: 'đã dừng', functionCalls: 'gọi công cụ' };
+const OVERFLOW_LABEL = { 'trim-middle': 'Cắt phần giữa', rolling: 'Trượt (bỏ tin cũ nhất)', stop: 'Dừng lại' };
+const snapAlt = (m) => ({ content: m.content, thought: m.thought || null, thinkSecs: m.thinkSecs || null, stats: m.stats || null, model: m.model || null, sources: m.sources || null, error: !!m.error });
+function statsHtml(st) {
+  if (!st) return '';
+  const parts = [st.tps ? `${st.tps.toFixed(1).replace('.', ',')} token/giây` : null, st.tokens != null ? `${st.tokens} token` : null,
+    st.ttft != null ? `${fmtSec(st.ttft)} tới token đầu` : null, st.stop ? `Dừng: ${STOP_LABEL[st.stop] || st.stop}` : null, st.preset ? `Preset: ${st.preset}` : null];
+  return `<div class="msg-stats">${parts.filter(Boolean).map(esc).join(' · ')}</div>`;
+}
+function paintCtxBar(st) {
+  const el = $('#ctxBar'); if (!el) return;
+  const size = (st && st.ctxSize) || state.status.contextSize; const used = st && st.ctxUsed;
+  if (!size || used == null || isAgent()) { el.hidden = true; return; }
+  const p = Math.min(100, used / size * 100); el.hidden = false;
+  el.className = 'ctx-bar' + (p > 90 ? ' bad' : p > 70 ? ' warn' : '');
+  el.title = `Ngữ cảnh đã dùng: ${used.toLocaleString('vi-VN')} / ${size.toLocaleString('vi-VN')} token`;
+  el.innerHTML = `<div class="ctx-track"><div style="width:${p.toFixed(1)}%"></div></div><span>${p < 1 && used ? '<1' : Math.round(p)}% ngữ cảnh</span>`;
+}
+function lastStats(conv) { if (!conv) return null; for (let i = conv.messages.length - 1; i >= 0; i--) if (conv.messages[i].stats) return conv.messages[i].stats; return null; }
+// ---- Thao tác trên tin nhắn: sửa, tạo lại (giữ các phiên bản), rẽ nhánh, xoá ----
+$('#messages').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-mact]'); if (!b || !state.current) return;
+  const conv = state.current; const i = Number(b.closest('.msg').dataset.i); const m = conv.messages[i]; if (!m) return;
+  const act = b.dataset.mact;
+  if (state.generating && act !== 'copy') { toast('Đang trả lời — bấm Dừng trước đã', true); return; }
+  if (act === 'copy') { await A.copyText(m.content); toast('Đã sao chép ✓'); }
+  if (act === 'regen') {
+    const u = conv.messages[i - 1]; if (!u || u.role !== 'user') return;
+    if (!state.status.loaded && !(await ensureLoaded())) return;
+    if (i < conv.messages.length - 1) { const ok = await modalAsk({ icon: '↻', title: 'Tạo lại câu trả lời này?', message: `Các tin nhắn phía sau (${conv.messages.length - 1 - i}) sẽ bị bỏ. Nếu muốn giữ, hãy dùng “Rẽ nhánh” trước.`, okLabel: 'Tạo lại', noLabel: 'Huỷ' }); if (!ok) return; conv.messages.splice(i + 1); }
+    if (!m.alts) { m.alts = [snapAlt(m)]; }
+    m.content = ''; m.thought = null; m.stats = null; m.sources = null; delete m.error; m.model = state.status.id;
+    await runTurn(conv, u, m);
+  }
+  if (act === 'prev' || act === 'next') {
+    if (!m.alts) return; const k = Math.max(0, Math.min(m.alts.length - 1, (m.alt ?? m.alts.length - 1) + (act === 'next' ? 1 : -1)));
+    Object.assign(m, m.alts[k], { alt: k }); if (!m.alts[k].error) delete m.error; else m.error = true;
+    await A.saveConvo(conv); renderMessages();
+  }
+  if (act === 'branch') {
+    const c = { id: uid(), title: (conv.title || 'Cuộc trò chuyện') + ' (nhánh)', messages: JSON.parse(JSON.stringify(conv.messages.slice(0, i + 1))), createdAt: Date.now(), updatedAt: Date.now(), mode: 'chat', branchOf: conv.id, folder: conv.folder || null };
+    await A.saveConvo(c); await loadConvos(); state.current = state.convos.find(x => x.id === c.id) || c; renderConvos(); renderMessages(); toast('Đã rẽ nhánh thành cuộc trò chuyện mới ✓');
+  }
+  if (act === 'del') {
+    const ok = await modalAsk({ icon: '🗑', title: 'Xoá tin nhắn này?', message: m.role === 'user' ? 'Chỉ xoá tin nhắn của bạn; câu trả lời phía sau vẫn giữ.' : 'Chỉ xoá câu trả lời này.', okLabel: 'Xoá', noLabel: 'Huỷ', danger: true });
+    if (!ok) return; conv.messages.splice(i, 1); conv.updatedAt = Date.now(); await A.saveConvo(conv); renderMessages();
+  }
+  if (act === 'edit') editMsg(i);
 });
+function editMsg(i) {
+  const conv = state.current; const m = conv.messages[i]; const el = document.querySelector(`#messages .msg[data-i="${i}"]`); if (!el) return;
+  el.classList.add('editing');
+  el.querySelector('.body').innerHTML = `<textarea class="edit-box" rows="3" aria-label="Sửa tin nhắn">${esc(m.content)}</textarea><div class="edit-acts"><span class="small muted">Ctrl+Enter: gửi lại · Esc: huỷ</span><button class="btn sm" data-eact="cancel">Huỷ</button><button class="btn sm" data-eact="save">Chỉ lưu</button><button class="btn sm primary" data-eact="send">Gửi lại</button></div>`;
+  const ta = el.querySelector('.edit-box'); ta.style.height = Math.min(320, ta.scrollHeight + 4) + 'px'; ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+  const done = async (how) => {
+    const v = ta.value.trim(); if (how === 'cancel' || !v) { renderMessages(); return; }
+    m.content = v; delete m.context; conv.updatedAt = Date.now();
+    if (how === 'save') { await A.saveConvo(conv); renderMessages(); return; }
+    if (!state.status.loaded && !(await ensureLoaded())) { renderMessages(); return; }
+    conv.messages.splice(i + 1); const reply = { role: 'assistant', content: '', model: state.status.id }; conv.messages.push(reply);
+    await runTurn(conv, m, reply);
+  };
+  el.querySelector('.edit-acts').addEventListener('click', (e) => { const b = e.target.closest('[data-eact]'); if (b) done(b.dataset.eact); });
+  ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); done('cancel'); } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done('send'); } });
+}
 let genStartedAt = 0;
 $('#stopBtn').addEventListener('click', () => { if (!state.generating) return; if (Date.now() - genStartedAt < 700) return; /* bấm đúp nút Gửi: cú bấm thứ hai rơi vào nút Dừng */ A.stop(state.generating); });
+
+// ---------- 0.16: tham số trò chuyện + preset (bố cục kiểu LM Studio: Hệ thống · Lấy mẫu · Đầu ra) ----------
+const PRM = [
+  { k: 'topK', label: 'Top K', min: 0, max: 1000, step: 1, hint: 'Chỉ chọn trong K từ (token) có xác suất cao nhất. 0 = tắt.' },
+  { k: 'topP', label: 'Top P', min: 0, max: 1, step: 0.01, hint: 'Chọn trong nhóm token có tổng xác suất P.' },
+  { k: 'minP', label: 'Min P', min: 0, max: 1, step: 0.01, hint: 'Bỏ token có xác suất nhỏ hơn P × token tốt nhất.' },
+  { k: 'repeatPenalty', label: 'Phạt lặp lại', min: 0.5, max: 3, step: 0.01, hint: 'Lớn hơn 1 thì mô hình ít lặp lại từ đã dùng.' },
+  { k: 'presencePenalty', label: 'Phạt chủ đề cũ', min: -2, max: 2, step: 0.05, hint: 'Lớn hơn 0 thì mô hình hay nói ý mới hơn.' },
+  { k: 'seed', label: 'Seed', min: 0, max: 2147483647, step: 1, hint: 'Cùng seed + cùng câu hỏi → câu trả lời lặp lại được (chạy CPU nhiều luồng có thể lệch đôi chút). Để trống = ngẫu nhiên.', noDefault: true },
+];
+const cp = { builtin: [], defaults: null };
+const cpParams = () => ({ ...((state.settings && state.settings.chatParams) || {}) });
+const presetsAll = () => [...cp.builtin, ...(((state.settings && state.settings.presets) || []).map(p => ({ ...p, builtin: false })))];
+const activePreset = () => { const all = presetsAll(); return all.find(p => p.id === (state.settings && state.settings.activePreset)) || all[0] || null; };
+const normP = (o) => { const r = {}; for (const [k, v] of Object.entries(o || {})) if (v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length) && v !== false) r[k] = v; return JSON.stringify(Object.keys(r).sort().map(k => [k, r[k]])); };
+function cpDirty() {
+  const p = activePreset(); if (!p) return false; const s = state.settings;
+  return (s.systemPrompt || '') !== (p.systemPrompt || '') || Number(s.temperature) !== Number(p.temperature) || Number(s.maxTokens) !== Number(p.maxTokens || 1024) || normP(cpParams()) !== normP(p.params);
+}
+function chatParams() {
+  const s = state.settings || {}; const q = cpParams(); const p = activePreset();
+  let jsonSchema = null; if (q.jsonOn && q.jsonSchema) { try { jsonSchema = JSON.parse(q.jsonSchema); } catch {} }
+  return { systemPrompt: s.systemPrompt || '', temperature: Number(s.temperature), maxTokens: Number(s.maxTokens) || 1024,
+    topK: q.topK ?? null, topP: q.topP ?? null, minP: q.minP ?? null, repeatPenalty: q.repeatPenalty ?? null, presencePenalty: q.presencePenalty ?? null,
+    seed: q.seed ?? null, stop: q.stop || null, overflow: q.overflow || 'trim-middle', jsonSchema, presetName: p ? p.name + (cpDirty() ? ' (đã sửa)' : '') : null };
+}
+async function cpSave(patch) { state.settings = await A.setSettings(patch); paintPresetBar(); }
+async function cpSetParam(k, v) { const q = cpParams(); if (v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length)) delete q[k]; else q[k] = v; await cpSave({ chatParams: q }); }
+function paintPresetBar() {
+  const all = presetsAll(); const cur = activePreset(); const sel = $('#presetSel');
+  const b = all.filter(p => p.builtin), u = all.filter(p => !p.builtin);
+  sel.innerHTML = `<optgroup label="Preset của AIVN">${b.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</optgroup>` + (u.length ? `<optgroup label="Preset của tôi">${u.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</optgroup>` : '');
+  if (cur) sel.value = cur.id;
+  const dirty = cpDirty(); $('#presetDirty').hidden = !dirty;
+  $('#presetSave').disabled = !dirty && !!cur; $('#presetSave').title = cur && cur.builtin ? 'Preset của AIVN không sửa được — lưu thành preset mới' : 'Lưu thay đổi vào preset này';
+  for (const it of $('#presetMenu').querySelectorAll('[data-pm=rename],[data-pm=delete]')) it.disabled = !cur || cur.builtin;
+  $('#presetMenu').querySelector('[data-pm=reset]').disabled = !dirty;
+}
+function paintCp() {
+  const s = state.settings; if (!s) return; const q = cpParams();
+  if (document.activeElement !== $('#sysPrompt')) $('#sysPrompt').value = s.systemPrompt || '';
+  $('#temp').value = s.temperature; $('#tempN').value = s.temperature; $('#tempOut').textContent = s.temperature;
+  $('#maxTok').value = s.maxTokens; $('#overflowSel').value = q.overflow || 'trim-middle';
+  const d = cp.defaults || {};
+  $('#prmList').innerHTML = PRM.map(p => { const v = q[p.k]; const def = p.noDefault ? '' : d[p.k] != null ? String(d[p.k]).replace('.', ',') : '';
+    return `<div class="prm${v != null ? ' set' : ''}" data-k="${p.k}"><div class="prm-h"><label for="prm-${p.k}">${p.label}</label><span class="prm-r"><input type="number" class="prm-n" id="prm-${p.k}" min="${p.min}" max="${p.max}" step="${p.step}" value="${v ?? ''}" placeholder="${p.noDefault ? 'ngẫu nhiên' : def ? 'mô hình: ' + def : 'mặc định'}"><button type="button" class="prm-reset" data-reset="${p.k}" title="Về mặc định của mô hình" aria-label="Đặt lại ${p.label}" ${v == null ? 'hidden' : ''}>↺</button></span></div><small>${p.hint}</small></div>`; }).join('');
+  $('#stopChips').innerHTML = (q.stop || []).map((x, i) => `<span class="stop-chip"><code>${esc(JSON.stringify(x).slice(1, -1))}</code><button type="button" data-stop-del="${i}" aria-label="Bỏ chuỗi dừng">✕</button></span>`).join('');
+  $('#jsonOn').checked = !!q.jsonOn; $('#jsonSchema').hidden = !q.jsonOn; if (document.activeElement !== $('#jsonSchema')) $('#jsonSchema').value = q.jsonSchema || '';
+  paintJsonErr(); paintSysTok(); paintPresetBar();
+}
+function paintSysTok() { const n = Math.ceil(($('#sysPrompt').value || '').length / 3.2); $('#sysTok').textContent = n ? `≈ ${n.toLocaleString('vi-VN')} token` : ''; }
+function paintJsonErr() {
+  const q = cpParams(); const el = $('#jsonErr'); let msg = '';
+  if (q.jsonOn) { if (!q.jsonSchema || !q.jsonSchema.trim()) msg = 'Hãy nhập lược đồ JSON (JSON Schema).'; else { try { const j = JSON.parse(q.jsonSchema); if (!j || typeof j !== 'object' || Array.isArray(j)) msg = 'Lược đồ phải là một đối tượng JSON.'; } catch (e) { msg = 'JSON chưa hợp lệ: ' + e.message; } } }
+  el.textContent = msg; el.hidden = !msg; $('#jsonSchema').classList.toggle('bad', !!msg);
+}
+async function refreshChatDefaults() { cp.defaults = await A.chatDefaults().catch(() => null); paintCp(); }
+async function applyPreset(p) {
+  if (!p) return;
+  await cpSave({ activePreset: p.id, systemPrompt: p.systemPrompt || '', temperature: Number(p.temperature ?? 0.7), maxTokens: Number(p.maxTokens || 1024), chatParams: { ...(p.params || {}) } });
+  paintCp();
+}
+function promptText({ title, value = '', okLabel = 'Lưu', validate }) {
+  return new Promise((resolve) => {
+    const m = $('#promptModal'); $('#pmTitle').textContent = title; $('#pmInput').value = value; $('#pmYes').textContent = okLabel; $('#pmErr').hidden = true; m.hidden = false;
+    setTimeout(() => { $('#pmInput').focus(); $('#pmInput').select(); }, 0);
+    const end = (v) => { m.hidden = true; $('#pmForm').onsubmit = null; $('#pmNo').onclick = null; m.onkeydown = null; resolve(v); };
+    $('#pmForm').onsubmit = (e) => { e.preventDefault(); const v = $('#pmInput').value.trim(); const err = !v ? 'Hãy nhập tên' : validate ? validate(v) : null; if (err) { $('#pmErr').textContent = err; $('#pmErr').hidden = false; return; } end(v); };
+    $('#pmNo').onclick = () => end(null); m.onkeydown = (e) => { if (e.key === 'Escape') { e.preventDefault(); end(null); } };
+  });
+}
+const curSnapshot = () => { const s = state.settings; return { systemPrompt: s.systemPrompt || '', temperature: Number(s.temperature), maxTokens: Number(s.maxTokens) || 1024, params: cpParams() }; };
+const nameTaken = (n, exceptId) => presetsAll().some(p => p.id !== exceptId && p.name.toLowerCase() === n.toLowerCase()) ? 'Đã có preset tên này' : null;
+async function presetSaveAs(snapshot = curSnapshot(), name = null) {
+  const cur = activePreset();
+  name = name || await promptText({ title: 'Lưu thành preset mới', value: cur ? cur.name + ' (của tôi)' : 'Preset của tôi', validate: (v) => nameTaken(v) });
+  if (!name) return;
+  const p = { id: 'u:' + uid(), name, ...snapshot };
+  await cpSave({ presets: [...(state.settings.presets || []), p], activePreset: p.id }); paintCp(); toast(`Đã lưu preset “${name}” ✓`);
+}
+async function presetAction(act) {
+  $('#presetMenu').hidden = true; $('#presetMore').setAttribute('aria-expanded', 'false');
+  const cur = activePreset(); const user = state.settings.presets || [];
+  if (act === 'save') { if (!cur || cur.builtin) return presetSaveAs(); await cpSave({ presets: user.map(p => p.id === cur.id ? { ...p, ...curSnapshot() } : p) }); paintCp(); toast(`Đã lưu preset “${cur.name}” ✓`); }
+  if (act === 'saveas') return presetSaveAs();
+  if (act === 'reset') return applyPreset(cur);
+  if (act === 'rename' && cur && !cur.builtin) { const n = await promptText({ title: 'Đổi tên preset', value: cur.name, validate: (v) => nameTaken(v, cur.id) }); if (n) { await cpSave({ presets: user.map(p => p.id === cur.id ? { ...p, name: n } : p) }); paintCp(); } }
+  if (act === 'delete' && cur && !cur.builtin) { const ok = await modalAsk({ icon: '🗑', title: `Xoá preset “${cur.name}”?`, message: 'Cài đặt trò chuyện hiện tại vẫn giữ nguyên; chỉ xoá preset đã lưu.', okLabel: 'Xoá', noLabel: 'Huỷ' }); if (ok) { await cpSave({ presets: user.filter(p => p.id !== cur.id), activePreset: cp.builtin[0] && cp.builtin[0].id }); paintCp(); toast('Đã xoá preset'); } }
+  if (act === 'export') { const r = await A.presetExport({ name: cur ? cur.name : 'Preset', ...curSnapshot() }).catch(e => ({ ok: false, error: cleanErr(e.message) })); if (r.ok) toast('Đã xuất preset ✓'); else if (r.error) toast(r.error, true); }
+  if (act === 'import') { const r = await A.presetImport().catch(e => ({ ok: false, error: cleanErr(e.message) })); if (r.error) return toast('Không nhập được preset: ' + r.error, true); if (!r.ok) return;
+    let name = r.preset.name; if (nameTaken(name)) name = await promptText({ title: 'Tên preset đã có — đặt tên khác', value: name + ' (nhập)', validate: (v) => nameTaken(v) }); if (!name) return;
+    const { name: _n, ...snap } = r.preset; await presetSaveAs(snap, name); await applyPreset(activePreset()); }
+}
+async function initChatPanel() {
+  cp.builtin = await A.presetsBuiltin().catch(() => []);
+  const save = (patch) => cpSave(patch);
+  $('#sysPrompt').addEventListener('input', () => { paintSysTok(); });
+  $('#sysPrompt').addEventListener('change', e => save({ systemPrompt: e.target.value }));
+  $('#temp').addEventListener('input', e => { $('#tempN').value = e.target.value; $('#tempOut').textContent = e.target.value; });
+  $('#temp').addEventListener('change', e => save({ temperature: Number(e.target.value) }));
+  $('#tempN').addEventListener('change', e => { const v = Math.max(0, Math.min(2, Number(e.target.value) || 0)); e.target.value = v; $('#temp').value = v; save({ temperature: v }); });
+  $('#maxTok').addEventListener('change', e => { const v = Math.max(16, Math.min(32768, Math.round(Number(e.target.value)) || 1024)); e.target.value = v; save({ maxTokens: v }); });
+  $('#overflowSel').addEventListener('change', e => cpSetParam('overflow', e.target.value === 'trim-middle' ? null : e.target.value));
+  $('#prmList').addEventListener('change', async (e) => { const row = e.target.closest('.prm'); if (!row || !e.target.classList.contains('prm-n')) return; const p = PRM.find(x => x.k === row.dataset.k);
+    let v = e.target.value === '' ? null : Number(e.target.value); if (v != null) { if (!Number.isFinite(v)) v = null; else v = Math.max(p.min, Math.min(p.max, p.step >= 1 ? Math.round(v) : v)); }
+    await cpSetParam(p.k, v); paintCp(); });
+  $('#prmList').addEventListener('click', async (e) => { const b = e.target.closest('[data-reset]'); if (b) { await cpSetParam(b.dataset.reset, null); paintCp(); } });
+  $('#stopIn').addEventListener('keydown', async (e) => { if (e.key !== 'Enter') return; e.preventDefault(); const raw = e.target.value; if (!raw) return; const v = raw.replace(/\\n/g, '\n'); const cur = cpParams().stop || [];
+    if (cur.length >= 8) return toast('Tối đa 8 chuỗi dừng', true); if (cur.includes(v)) return toast('Chuỗi dừng này đã có', true); e.target.value = ''; await cpSetParam('stop', [...cur, v]); paintCp(); $('#stopIn').focus(); });
+  $('#stopChips').addEventListener('click', async (e) => { const b = e.target.closest('[data-stop-del]'); if (!b) return; const cur = [...(cpParams().stop || [])]; cur.splice(Number(b.dataset.stopDel), 1); await cpSetParam('stop', cur); paintCp(); });
+  $('#jsonOn').addEventListener('change', async (e) => { const q = cpParams(); q.jsonOn = e.target.checked || undefined; if (e.target.checked && !q.jsonSchema) q.jsonSchema = JSON.stringify({ type: 'object', properties: { tra_loi: { type: 'string' } }, required: ['tra_loi'] }, null, 2); if (!q.jsonOn) delete q.jsonOn; await cpSave({ chatParams: q }); paintCp(); });
+  $('#jsonSchema').addEventListener('input', async (e) => { const q = cpParams(); q.jsonSchema = e.target.value; state.settings.chatParams = q; paintJsonErr(); });
+  $('#jsonSchema').addEventListener('change', async (e) => { await cpSetParam('jsonSchema', e.target.value); paintJsonErr(); });
+  $('#presetSel').addEventListener('change', async (e) => {
+    const p = presetsAll().find(x => x.id === e.target.value); if (!p) return;
+    if (cpDirty()) { const ok = await modalAsk({ icon: '⚠️', title: 'Bỏ thay đổi chưa lưu?', message: `Cài đặt hiện tại khác preset “${(activePreset() || {}).name || ''}”. Chuyển sang “${p.name}” sẽ bỏ các thay đổi này.`, okLabel: 'Chuyển preset', noLabel: 'Ở lại' }); if (!ok) { paintPresetBar(); return; } }
+    await applyPreset(p); toast(`Đang dùng preset “${p.name}”`);
+  });
+  $('#presetSave').addEventListener('click', () => presetAction('save'));
+  $('#presetMore').addEventListener('click', (e) => { e.stopPropagation(); const m = $('#presetMenu'); m.hidden = !m.hidden; $('#presetMore').setAttribute('aria-expanded', String(!m.hidden)); if (!m.hidden) m.querySelector('button:not(:disabled)').focus(); });
+  document.addEventListener('click', (e) => { if (!$('#presetMenu').hidden && !e.target.closest('#presetMenu')) { $('#presetMenu').hidden = true; $('#presetMore').setAttribute('aria-expanded', 'false'); } });
+  $('#presetMenu').addEventListener('keydown', (e) => { if (e.key === 'Escape') { $('#presetMenu').hidden = true; $('#presetMore').focus(); } });
+  document.querySelector('.cp').addEventListener('click', (e) => { const b = e.target.closest('[data-pm]'); if (b && !b.disabled) presetAction(b.dataset.pm); });
+  document.querySelector('.cp-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-cpt]'); if (b) cpTab(b.dataset.cpt); });
+  document.querySelector('.cp-tabs').addEventListener('keydown', (e) => { if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return; const tabs = [...document.querySelectorAll('[data-cpt]')]; const i = tabs.findIndex(t => t.classList.contains('on')); const n = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]; cpTab(n.dataset.cpt); n.focus(); });
+  cpTab(localStorage.getItem('aivn.cpTab') || 'sys');
+  if (!state.settings.activePreset) { const d = cp.builtin[0]; if (d && !cpDirty.call(null)) await cpSave({ activePreset: d.id }); }
+  await refreshChatDefaults();
+}
+function cpTab(t) {
+  for (const b of document.querySelectorAll('[data-cpt]')) { const on = b.dataset.cpt === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; }
+  for (const p of document.querySelectorAll('[data-cpp]')) p.hidden = p.dataset.cpp !== t;
+  localStorage.setItem('aivn.cpTab', t);
+}
+// ---- Lệnh "/" trong ô nhập ----
+const SLASH = [
+  { c: '/moi', d: 'Bắt đầu cuộc trò chuyện mới', run: () => { if (state.generating) return toast('Đang tạo câu trả lời — bấm Dừng trước khi mở cuộc trò chuyện mới', true); $('#newChat').click(); } },
+  { c: '/preset', a: '<tên>', d: 'Chuyển preset (vd. /preset Lập trình viên)', run: async (arg) => { const p = presetsAll().find(x => x.name.toLowerCase() === arg.toLowerCase()) || presetsAll().find(x => x.name.toLowerCase().includes(arg.toLowerCase())); if (!p) return toast('Không thấy preset “' + arg + '”', true); await applyPreset(p); toast(`Đang dùng preset “${p.name}”`); } },
+  { c: '/he-thong', a: '<lời nhắc>', d: 'Đặt lời nhắc hệ thống', run: async (arg) => { if (!arg) return cpTab('sys'), $('#sysPrompt').focus(); await cpSave({ systemPrompt: arg }); paintCp(); toast('Đã đặt lời nhắc hệ thống'); } },
+  { c: '/nhiet-do', a: '<0–2>', d: 'Đặt nhiệt độ', run: async (arg) => { const v = Number(String(arg).replace(',', '.')); if (!(v >= 0 && v <= 2)) return toast('Nhiệt độ phải từ 0 đến 2', true); await cpSave({ temperature: v }); paintCp(); toast('Nhiệt độ: ' + v); } },
+  { c: '/sao-chep', d: 'Sao chép cả cuộc trò chuyện (Markdown)', run: async () => { const c = state.current; if (!c || !c.messages.length) return toast('Chưa có gì để sao chép', true); await A.copyText(c.messages.map(m => `**${m.role === 'user' ? 'Bạn' : 'AIVN'}:** ${m.content}`).join('\n\n')); toast('Đã sao chép cuộc trò chuyện ✓'); } },
+  { c: '/nap', d: 'Mở hộp nạp mô hình (Ctrl+L)', run: () => openLoader() },
+];
+function runSlash(text) {
+  const [c, ...rest] = text.split(/\s+/); const cmd = SLASH.find(x => x.c === c.toLowerCase()); if (!cmd) return false;
+  input.value = ''; input.style.height = 'auto'; $('#slashPop').hidden = true; cmd.run(rest.join(' ').trim()); return true;
+}
+let slashSel = 0;
+function paintSlash() {
+  const v = input.value; const pop = $('#slashPop');
+  if (isAgent() || !/^\/\S*$/.test(v)) { pop.hidden = true; return; }
+  const list = SLASH.filter(x => x.c.startsWith(v.toLowerCase())); if (!list.length) { pop.hidden = true; return; }
+  slashSel = Math.min(slashSel, list.length - 1);
+  pop.innerHTML = list.map((x, i) => `<button type="button" role="option" aria-selected="${i === slashSel}" class="${i === slashSel ? 'on' : ''}" data-slash="${x.c}"><code>${x.c}${x.a ? ' ' + esc(x.a) : ''}</code><span>${esc(x.d)}</span></button>`).join(''); pop.hidden = false;
+}
+input.addEventListener('input', () => { slashSel = 0; paintSlash(); });
+input.addEventListener('blur', () => { $('#slashPop').hidden = true; });
+input.addEventListener('keydown', (e) => {
+  const pop = $('#slashPop'); if (pop.hidden) return; const items = [...pop.querySelectorAll('[data-slash]')];
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); e.stopImmediatePropagation(); slashSel = (slashSel + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length; paintSlash(); }
+  else if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { const it = items[slashSel]; const cmd = SLASH.find(x => x.c === it.dataset.slash); if (cmd.a) { e.preventDefault(); e.stopImmediatePropagation(); input.value = cmd.c + ' '; pop.hidden = true; } else if (e.key === 'Tab') { e.preventDefault(); input.value = cmd.c; } }
+  else if (e.key === 'Escape') { pop.hidden = true; }
+}, true);
+$('#slashPop').addEventListener('mousedown', (e) => { const b = e.target.closest('[data-slash]'); if (!b) return; e.preventDefault(); const cmd = SLASH.find(x => x.c === b.dataset.slash); if (cmd.a) { input.value = cmd.c + ' '; $('#slashPop').hidden = true; input.focus(); } else runSlash(cmd.c); });
 
 // ---------- Cài đặt ----------
 function bindSettings() {
   const s = state.settings;
-  $('#sysPrompt').value = s.systemPrompt; $('#temp').value = s.temperature; $('#tempOut').textContent = s.temperature;
-  $('#maxTok').value = s.maxTokens; $('#ctxSize').value = String(s.contextSize ? Math.max(4096, s.contextSize) : 8192); paintPerf();
+  $('#ctxSize').value = String(s.contextSize ? Math.max(4096, s.contextSize) : 8192); paintPerf();
   $('#srvPort').value = s.apiPort; $('#srvAuto').checked = !!s.apiAutoStart;
   const save = async (patch) => { state.settings = await A.setSettings(patch); };
-  $('#sysPrompt').addEventListener('change', e => save({ systemPrompt: e.target.value }));
-  $('#temp').addEventListener('input', e => { $('#tempOut').textContent = e.target.value; });
-  $('#temp').addEventListener('change', e => save({ temperature: Number(e.target.value) }));
-  $('#maxTok').addEventListener('change', e => save({ maxTokens: Math.max(16, Number(e.target.value) || 1024) }));
+  initChatPanel().catch(e => console.error('initChatPanel', e));
   $('#ctxSize').addEventListener('change', e => { save({ contextSize: Number(e.target.value) }); toast('Độ dài ngữ cảnh mới sẽ áp dụng khi nạp lại mô hình'); });
   $('#srvAuto').addEventListener('change', e => save({ apiAutoStart: e.target.checked }));
 }
@@ -808,9 +1072,31 @@ const darkMq = window.matchMedia('(prefers-color-scheme: dark)');
 const reduceMq = window.matchMedia('(prefers-reduced-motion: reduce)');
 const resolveTheme = (t) => (t === 'dark' || (t === 'system' && darkMq.matches) ? 'dark' : 'light');
 // Đổi giao diện sáng/tối: logo rồng hiện giữa màn hình, màu giao diện mới lan ra từ logo thành vòng tròn phủ hết cửa sổ,
-// rồi logo mờ dần (~840 ms). Chỉ dùng transform/opacity/clip-path. Không có View Transitions: logo + chuyển màu dần.
-// Hệ điều hành bật "giảm chuyển động": chỉ chuyển màu nhẹ, không có logo.
+// rồi logo mờ dần (~840 ms). Chỉ dùng transform/opacity/clip-path.
+// Cài đặt "Hiệu ứng chuyển giao diện" (themeFx): full = luôn chạy logo + vòng lan (kể cả khi Windows tắt "Animation effects"),
+// os = theo hệ điều hành (giảm chuyển động → chỉ đổi màu nhẹ), off = đổi ngay.
+// Đường chạy: 'vt' (View Transitions) → nếu API thiếu / lỗi / không chụp kịp → 'overlay' (lớp phủ màu nền mới, mặt nạ tròn lan ra).
+// Ghi lại đường đã chạy vào window.__themePath và nhật ký ứng dụng.
 const THEME_T = { in: 180, spread: 480, out: 180 };
+const THEME_BG = { light: '#ffffff', dark: '#17181b' };
+function themeLog(path, extra = '') {
+  const info = `giao diện: ${path}${extra ? ' · ' + extra : ''} · ${innerWidth}x${innerHeight}@${devicePixelRatio} · giảm chuyển động=${reduceMq.matches}`;
+  window.__themePath = path; (window.__themeLog = window.__themeLog || []).push(info); if (window.__themeLog.length > 20) window.__themeLog.shift();
+  try { A.uiLog && A.uiLog(info); } catch {}
+}
+function themeFx() { const v = state.settings && state.settings.themeFx; return v === 'os' || v === 'off' ? v : 'full'; }
+// Lớp phủ dự phòng: nền của giao diện mới lan ra thành vòng tròn, đổi giao diện bên dưới, rồi lớp phủ mờ đi.
+async function themeOverlay(next, set) {
+  const ov = document.createElement('div'); ov.className = 'theme-ov';
+  ov.style.background = THEME_BG[next];
+  $('#themeVeil').before(ov);
+  try {
+    await ov.animate({ clipPath: ['circle(0% at 50% 50%)', 'circle(150% at 50% 50%)'] }, { duration: THEME_T.spread, easing: 'cubic-bezier(.45,0,.2,1)', fill: 'forwards' }).finished.catch(() => {});
+    set();
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await ov.animate({ opacity: [1, 0] }, { duration: 140, easing: 'ease-out', fill: 'forwards' }).finished.catch(() => {});
+  } finally { ov.remove(); }
+}
 async function applyTheme(t, { animate = false } = {}) {
   t = ['light', 'dark', 'system'].includes(t) ? t : 'light';
   for (const b of document.querySelectorAll('#themeRow button')) b.classList.toggle('on', b.dataset.theme === t);
@@ -818,31 +1104,48 @@ async function applyTheme(t, { animate = false } = {}) {
   if ((applyTheme.pending || root.dataset.theme) === next) return;
   const set = () => { root.dataset.theme = next; if (applyTheme.pending === next) applyTheme.pending = null; };
   const crossfade = () => { root.classList.add('theme-anim'); set(); clearTimeout(applyTheme.timer); applyTheme.timer = setTimeout(() => root.classList.remove('theme-anim'), 400); };
+  const fx = themeFx();
   if (!animate || document.hidden) { applyTheme.pending = null; return set(); }
-  if (reduceMq.matches) { applyTheme.pending = null; return crossfade(); }
+  if (fx === 'off') { applyTheme.pending = null; themeLog('tắt'); return set(); }
+  if (fx === 'os' && reduceMq.matches) { applyTheme.pending = null; themeLog('đổi màu (hệ điều hành giảm chuyển động)'); return crossfade(); }
   applyTheme.pending = next;
   const veil = $('#themeVeil'), logo = veil.querySelector('img');
-  if (applyTheme.busy) { await applyTheme.busy; if (applyTheme.pending !== next) return; }
+  // chờ lượt trước xong; nhiều lần bấm cùng chờ một lượt thì chỉ một lần chạy (tránh hai View Transition chồng nhau → AbortError)
+  while (applyTheme.busy) { await applyTheme.busy; if (applyTheme.pending !== next) return; }
   let release; applyTheme.busy = new Promise(r => { release = r; });
+  const t0 = performance.now();
   try {
     veil.classList.add('on');
     await logo.animate([{ opacity: 0, transform: 'scale(.55)' }, { opacity: 1, transform: 'scale(1)' }], { duration: THEME_T.in, easing: 'cubic-bezier(.2,.8,.2,1)', fill: 'forwards' }).finished.catch(() => {});
-    if (document.startViewTransition) {
+    const pulse = () => logo.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.08)' }, { transform: 'scale(1)' }], { duration: THEME_T.spread, easing: 'ease-in-out' });
+    let path = 'overlay', why = document.startViewTransition ? '' : 'không có View Transitions';
+    if (document.startViewTransition && !window.__forceThemeOverlay) {
       root.classList.add('vt-theme');
-      let done = false;
-      const vt = document.startViewTransition(() => { done = true; set(); });
-      const guard = setTimeout(() => { if (!done) { set(); try { vt.skipTransition(); } catch {} } }, 300);
-      await vt.ready.then(() => {
-        logo.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.08)' }, { transform: 'scale(1)' }], { duration: THEME_T.spread, easing: 'ease-in-out' });
-        return root.animate({ clipPath: ['circle(0% at 50% 50%)', 'circle(150% at 50% 50%)'] }, { duration: THEME_T.spread, easing: 'cubic-bezier(.45,0,.2,1)', pseudoElement: '::view-transition-new(root)' }).finished;
-      }).catch(() => set());
-      clearTimeout(guard);
-      await vt.finished.catch(() => {});
+      let vt = null;
+      try { vt = document.startViewTransition(() => { set(); }); } catch (e) { why = 'startViewTransition lỗi: ' + (e && e.message || e); }
+      if (vt) {
+        // chờ thật sự: ảnh chụp cũ + đổi giao diện xong (cửa sổ 4K/DPI cao có thể mất >300 ms); chỉ bỏ khi quá 2,5 s
+        const ready = await Promise.race([vt.ready.then(() => 'ok', (e) => 'lỗi: ' + (e && e.name || e)), new Promise(r => setTimeout(() => r('quá giờ'), 2500))]);
+        if (ready === 'ok') {
+          pulse();
+          const done = await root.animate({ clipPath: ['circle(0% at 50% 50%)', 'circle(150% at 50% 50%)'] }, { duration: THEME_T.spread, easing: 'cubic-bezier(.45,0,.2,1)', pseudoElement: '::view-transition-new(root)' }).finished.then(() => true, () => false);
+          await vt.finished.catch(() => {});
+          if (done) path = 'vt'; else why = 'hoạt ảnh vòng tròn bị huỷ';
+        } else {
+          why = 'View Transition ' + ready; try { vt.skipTransition(); } catch {}
+          await vt.finished.catch(() => {});
+        }
+      }
       root.classList.remove('vt-theme');
-    } else {
-      crossfade(); await new Promise(r => setTimeout(r, 360));
+      if (path !== 'vt' && root.dataset.theme === next) {
+        // giao diện đã đổi nhưng không thấy vòng lan: chạy lớp phủ từ màu cũ để người dùng vẫn thấy hiệu ứng
+        const prev = next === 'dark' ? 'light' : 'dark'; root.dataset.theme = prev;
+      }
     }
+    if (path !== 'vt') { pulse(); await themeOverlay(next, set); }
+    if (root.dataset.theme !== next) set();
     await logo.animate([{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(1.18)' }], { duration: THEME_T.out, easing: 'ease-in', fill: 'forwards' }).finished.catch(() => {});
+    themeLog(path === 'vt' ? 'logo + vòng lan (View Transitions)' : 'logo + vòng lan (lớp phủ dự phòng)', [why, Math.round(performance.now() - t0) + ' ms'].filter(Boolean).join(' · '));
   } finally { veil.classList.remove('on'); release(); applyTheme.busy = null; if (root.dataset.theme !== next && applyTheme.pending === next) set(); }
 }
 // chỉ theo hệ điều hành khi chọn "Tự động" (đổi nativeTheme khi lưu cài đặt cũng phát sự kiện này)
@@ -852,6 +1155,7 @@ $('#themeRow').addEventListener('click', async (e) => {
   state.settings.theme = b.dataset.theme;
   applyTheme(b.dataset.theme, { animate: true }); state.settings = await A.setSettings({ theme: b.dataset.theme });
 });
+$('#themeFxSel').addEventListener('change', async (e) => { state.settings = await A.setSettings({ themeFx: e.target.value }); e.target.value = themeFx(); });
 // ---------- Tìm kiếm trong tài liệu (RAG) ----------
 let ragJobId = null;
 async function paintRag() {
@@ -1137,12 +1441,14 @@ $('#crmBody').addEventListener('dragover', (e) => { const col = e.target.closest
 $('#crmBody').addEventListener('drop', async (e) => { const col = e.target.closest('.kcol'); if (!col) return; e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); await C('moveLead', id, col.dataset.stage).catch(err => toast(err.message, true)); renderCrm(); });
 
 // --- UX 0.15.0: bảng lệnh Ctrl+K, ẩn/hiện bảng phải, phím tắt, giới thiệu nhanh ---
-function togglePanel(force) {
+// Bảng cài đặt bên phải: người dùng bấm thì nhớ lựa chọn; chưa bấm lần nào thì tự ẩn khi cửa sổ hẹp (< 1100 px) như LM Studio
+function togglePanel(force, save = true) {
   const v = $('#view-chat'); const off = typeof force === 'boolean' ? force : !v.classList.contains('no-panel');
-  v.classList.toggle('no-panel', off); localStorage.setItem('aivn.noPanel', off ? '1' : '0');
+  v.classList.toggle('no-panel', off); if (save) localStorage.setItem('aivn.noPanel', off ? '1' : '0');
   $('#panelToggle').textContent = off ? '⇤ Hiện bảng cài đặt' : '⇥ Ẩn bảng cài đặt';
 }
-if (localStorage.getItem('aivn.noPanel') === '1' || (localStorage.getItem('aivn.noPanel') === null && innerWidth < 1100)) togglePanel(true); else togglePanel(false);
+const autoPanel = () => { const p = localStorage.getItem('aivn.noPanel'); togglePanel(p === null ? innerWidth < 1100 : p === '1', false); };
+autoPanel(); window.addEventListener('resize', () => { if (localStorage.getItem('aivn.noPanel') === null) autoPanel(); });
 $('#panelToggle').addEventListener('click', () => togglePanel());
 const openKeys = () => { $('#keysModal').hidden = false; $('#keysClose').focus(); };
 $('#helpKeys').addEventListener('click', openKeys);
@@ -1303,12 +1609,18 @@ function paintAgentWarn(adv) {
   const rec = (adv && adv.recommended) || [];
   const recBtns = rec.map(r => `<button class="btn sm" data-rec="${esc(r.id)}" data-installed="${r.installed ? 1 : 0}">${r.installed ? 'Nạp' : 'Tải'} ${esc(r.name)}</button>`).join(' ');
   if (!state.status.loaded) { w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN AGENT chạy tốt nhất với <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b>.</span>`; w.hidden = false; return; }
-  if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN AGENT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để mở ứng dụng, đọc tệp, điều khiển máy đáng tin cậy, hãy dùng <b>Qwen3 4B/8B</b>.</span> ${recBtns}`; w.hidden = false; return; }
+  if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN AGENT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để gọi công cụ (mở ứng dụng, đọc tệp) đáng tin cậy, hãy dùng <b>Qwen3 4B/8B</b>; điều khiển màn hình còn cần mô hình nhìn ảnh (Qwen3-VL).</span> ${recBtns}`; w.hidden = false; return; }
   if (adv && adv.small) { w.innerHTML = `<span>⚠ <b>${esc(adv.model)}</b>${adv.params ? ` (khoảng ${String(adv.params).replace('.', ',')} tỉ tham số)` : ''} khá nhỏ cho AIVN AGENT: có thể gọi sai công cụ, bỏ bước hoặc nói đã làm khi chưa làm. Nên dùng <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b>.</span> ${recBtns}`; w.hidden = false; return; }
-  if (adv && adv.planner === false && state.settings && state.settings.agentScreen) { w.innerHTML = `<span>🖥 Điều khiển máy đang bật với <b>${esc(adv.model)}</b>. Mô hình này chưa qua bài đo Điểm tác vụ của AIVN; để bấm/gõ đáng tin cậy, dùng <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b> làm mô hình chính (mô hình nhìn ảnh có thể đặt làm “Mô hình định vị” trong Cài đặt).</span> ${recBtns}`; w.hidden = false; return; }
+  if (adv && adv.eyes && adv.eyes.needed) {
+    const r = adv.eyes.rec; const busy = adv.eyes.pending && jobs && [...jobs.values()].some(j => j.catalogId === adv.eyes.pending && j.status !== 'done');
+    w.innerHTML = `<span>👁 <b>Điều khiển màn hình cần mắt nhìn.</b> <b>${esc(adv.model)}</b> chỉ đọc chữ, không nhìn được màn hình — Zalo và các ứng dụng Electron gần như không cho đọc nút/ô, nên AIVN AGENT sẽ bấm nhầm hoặc báo “không tìm thấy”. ${r ? `Nạp thêm <b>${esc(r.name)}</b> (${fmtBytes(r.size)}): AIVN tự dùng nó để nhìn ảnh chụp mỗi bước.` : ''}</span> ${r ? `<button class="btn sm primary" data-eyes="${esc(r.id)}" ${busy ? 'disabled' : ''}>${busy ? 'Đang tải mắt nhìn…' : r.installed ? '👁 Nạp thêm mắt nhìn' : '👁 Tải & nạp thêm mắt nhìn'}</button>` : ''}`;
+    w.hidden = false; return;
+  }
   w.hidden = true;
 }
 $('#agentWarn').addEventListener('click', async (e) => {
+  const ey = e.target.closest('[data-eyes]');
+  if (ey) { ey.disabled = true; try { const r = await A.agentEyes(ey.dataset.eyes); if (r.installed) toast(`Đã bật mắt nhìn: ${r.name} ✓`); else { if (r.job) paintJob(r.job); toast(`Đang tải ${r.name}. Tải xong AIVN tự dùng làm mắt nhìn.`); } } catch (err) { toast(cleanErr(err.message), true); ey.disabled = false; } refreshAgent(); return; }
   const b = e.target.closest('[data-rec]'); if (!b) return;
   if (b.dataset.installed === '1') { const c = state.catalog.find(x => x.id === b.dataset.rec) || (await A.catalog()).find(x => x.id === b.dataset.rec); await refreshModels(); const m = state.models.find(x => c && x.file.toLowerCase() === c.file.toLowerCase()); if (m) loadModel(m.id); }
   else { show('discover'); try { const j = await A.dlStart({ catalogId: b.dataset.rec }); paintJob(j); toast('Đang tải mô hình cho AIVN AGENT, xem tiến độ ở mục Đang tải'); } catch (err) { toast(cleanErr(err.message), true); } }
@@ -1418,7 +1730,7 @@ function paintComputer(c) {
   if (!c) return;
   $('#agComp').checked = c.enabled; $('#agAutoRO').checked = c.autoReadOnly; $('#agAutoRO').disabled = !c.enabled;
   $('#agScreen').checked = c.screen;
-  $('#agScreenNote').innerHTML = `AIVN AGENT tự mở ứng dụng và thao tác như bạn: đọc danh sách nút/ô của cửa sổ (Trợ năng của hệ điều hành) và chữ trên màn hình, bấm/gõ từng bước rồi kiểm tra lại. Mô hình thường (Qwen3 4B/8B) dùng được; mô hình nhìn ảnh giúp tìm phần tử khó. Luôn hỏi trước khi gửi tin nhắn, thanh toán, xoá, nộp biểu mẫu; không bao giờ gõ mật khẩu. Dừng: <b>Esc</b>, <b>${esc(c.stopKey)}</b> hoặc nút “Dừng ngay”.`;
+  $('#agScreenNote').innerHTML = `AIVN AGENT tự mở ứng dụng và thao tác như bạn: đọc danh sách nút/ô của cửa sổ (Trợ năng của hệ điều hành) và chữ trên màn hình, bấm/gõ từng bước rồi kiểm tra lại. Cần <b>nhìn được màn hình</b>: dùng mô hình nhìn ảnh (Qwen3-VL) làm mô hình chính, hoặc mô hình chữ + mắt nhìn (AIVN tự nạp mô hình nhìn ảnh đã cài). Luôn hỏi trước khi gửi tin nhắn, thanh toán, xoá, nộp biểu mẫu; không bao giờ gõ mật khẩu. Dừng: <b>Esc</b>, <b>${esc(c.stopKey)}</b> hoặc nút “Dừng ngay”.`;
   $('#agGrounder').innerHTML = '<option value="">Không dùng — chỉ cây giao diện + đọc chữ</option>' + (c.grounders || []).map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join(''); $('#agGrounder').value = c.grounder || '';
   $('#agScreenOpts').hidden = !c.screen; $('#agScreenMode').value = c.screenMode || 'each'; $('#agScreenBudget').value = String(c.screenBudget || 40);
   paintBench();
@@ -1536,9 +1848,9 @@ async function refreshSecurity() {
     <span>Kiểm tra thu hồi</span><b>${l.lastCheckOk ? 'lần cuối ' + new Date(l.lastCheckOk).toLocaleString('vi-VN') : 'chưa kiểm tra được'}${l.graceLeftMs != null ? ` · còn dùng ngoại tuyến ${Math.max(0, Math.floor(l.graceLeftMs / 864e5))} ngày` : ''}</b></div>
     <div class="row"><button class="btn sm" id="secRecheck">Kiểm tra lại qua Internet</button></div>`;
   const k = await A.lockInfo();
-  $('#lockState').innerHTML = k.enabled ? '🔒 Khóa ứng dụng đang <b>bật</b>.' : 'Khóa ứng dụng đang <b>tắt</b>.';
+  $('#lockState').innerHTML = k.enabled ? '🔒 Khoá ứng dụng đang <b>bật</b>.' : 'Khoá ứng dụng đang <b>tắt</b>.';
   $('#lkCur').hidden = !k.enabled; $('#lkOff').hidden = !k.enabled; $('#lkNow').hidden = !k.enabled;
-  $('#lkSave').textContent = k.enabled ? 'Đổi mật khẩu' : 'Bật Khóa ứng dụng';
+  $('#lkSave').textContent = k.enabled ? 'Đổi mật khẩu' : 'Bật Khoá ứng dụng';
   $('#lkIdle').value = String(k.idleMinutes || 0); $('#lkSleep').checked = k.lockOnSleep;
   paintAdmin(await A.adminState());
 }
@@ -1568,7 +1880,7 @@ $('[data-spane="security"]').addEventListener('click', async (e) => {
   try {
     if (t.id === 'secCopyMc') { await A.copyText($('#secMachine').textContent); toast('Đã chép Mã máy ✓'); }
     if (t.id === 'secRecheck') { const r = await A.licenseCheck(); toast(r.ok ? 'Đã kiểm tra danh sách thu hồi ✓' : 'Chưa kết nối được: ' + (r.error || ''), !r.ok); refreshSecurity(); }
-    if (t.id === 'lkOff') { await A.lockDisable({ current: $('#lkCur').value }); $('#lkCur').value = ''; toast('Đã tắt Khóa ứng dụng'); refreshSecurity(); }
+    if (t.id === 'lkOff') { await A.lockDisable({ current: $('#lkCur').value }); $('#lkCur').value = ''; toast('Đã tắt Khoá ứng dụng'); refreshSecurity(); }
     if (t.id === 'lkNow') await A.lockNow();
     if (t.id === 'admImport') { const r = await A.adminImport({ pass: $('#admNewPass').value }); if (!r.canceled) toast('Đã nhập khoá quản trị ✓'); paintAdmin(await A.adminState()); }
     if (t.id === 'admForget') { if (await modalAsk({ icon: '⚠️', title: 'Gỡ khoá quản trị khỏi máy này?', message: 'Bản mã hoá của khoá riêng trên máy này sẽ bị xoá. Hãy chắc chắn bạn còn giữ tệp aivn-admin-key.json ở nơi an toàn.', okLabel: 'Gỡ khoá', noLabel: 'Huỷ' })) paintAdmin(await A.adminForget()); }
@@ -1589,7 +1901,7 @@ async function doRevoke(id, name) {
 $('[data-spane="security"]').addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
-    if (e.target.id === 'lockForm') { await A.lockSet({ password: $('#lkNew').value, confirm: $('#lkNew2').value, current: $('#lkCur').value }); for (const i of ['#lkNew', '#lkNew2', '#lkCur']) $(i).value = ''; toast('Đã bật Khóa ứng dụng ✓'); refreshSecurity(); }
+    if (e.target.id === 'lockForm') { await A.lockSet({ password: $('#lkNew').value, confirm: $('#lkNew2').value, current: $('#lkCur').value }); for (const i of ['#lkNew', '#lkNew2', '#lkCur']) $(i).value = ''; toast('Đã bật Khoá ứng dụng ✓'); refreshSecurity(); }
     if (e.target.id === 'admUnlockForm') paintAdmin(await A.adminUnlock($('#admPass').value));
     if (e.target.id === 'admIssueForm') {
       const r = await A.adminIssue({ name: $('#admName').value, machineCode: $('#admMc').value, days: $('#admDays').value || null });
@@ -1606,7 +1918,7 @@ $('#lkSleep').addEventListener('change', async (e) => { await A.lockOptions({ lo
 // ---------- Khởi động ----------
 (async () => {
   state.settings = await A.getSettings();
-  applyTheme(state.settings.theme);
+  applyTheme(state.settings.theme); $('#themeFxSel').value = themeFx();
   bindSettings();
   $('#gpuOn').checked = state.settings.gpu !== false;
   paintAdvanced();
@@ -1832,3 +2144,5 @@ document.addEventListener('click', async (e) => {
   } catch (err) { toast(cleanErr(err.message), true); }
   b.disabled = false; b.textContent = 'Tăng ngữ cảnh';
 });
+// tải xong mắt nhìn: AIVN tự đặt làm mô hình định vị (main) — làm mới biểu ngữ AIVN AGENT
+A.onDlDone(() => setTimeout(() => { if (typeof refreshAgent === 'function') refreshAgent().catch(() => {}); }, 800));

@@ -191,9 +191,15 @@ function normalizeContent(c) {
  * Sinh câu trả lời từ danh sách messages kiểu OpenAI.
  * onToken(text) được gọi cho từng đoạn văn bản. Trả về { text, usage, finishReason }.
  */
-function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal, onToken, sampling = null } = {}) {
+async function chatGrammar(schema) { // đầu ra JSON theo lược đồ cho trò chuyện thường (dùng chung bộ nhớ đệm với chatStep)
+  const l = await getLlama(); const sc = toGbnfSchema(schema || {});
+  try { return await grammarFor('s:' + JSON.stringify(sc), () => l.createGrammarForJsonSchema(sc)); }
+  catch (e) { const x = new Error('Lược đồ JSON không hợp lệ hoặc chưa được hỗ trợ: ' + (e && e.message || e)); x.code = 'BAD_SCHEMA'; throw x; }
+}
+// 0.16: seed, chuỗi dừng, đầu ra JSON theo lược đồ, khối suy nghĩ (onToken(t, 'think')), thời gian ra token đầu (ttft), lý do dừng, số token trong ngữ cảnh
+function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal, onToken, sampling = null, seed = null, stop = null, jsonSchema = null } = {}) {
   const run = async () => {
-    if (visionOn) return getVision().generate(messages, { temperature, maxTokens, topP, signal, onToken, sampling });
+    if (visionOn) return getVision().generate(messages, { temperature, maxTokens, topP, signal, onToken, sampling, seed, stop, jsonSchema });
     if (!current) throw new Error('Chưa nạp mô hình nào.');
     const { LlamaChatSession } = await getLib();
     const msgs = messages.map(m => ({ role: m.role, content: normalizeContent(m.content) }));
@@ -209,16 +215,26 @@ function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal,
       history.push(m.role === 'user' ? { type: 'user', text: m.content } : { type: 'model', response: [m.content] });
     }
     const sequence = seqFor(current);
+    // seed cố định: đánh giá lại lời nhắc từ đầu để kết quả lặp lại đúng từng chữ (dùng lại bộ đệm K/V làm sai khác số học nhỏ)
+    if (Number.isInteger(seed) && seed >= 0) { try { await sequence.clearHistory(); } catch {} }
     const session = new LlamaChatSession({ contextSequence: sequence, autoDisposeSequence: false });
     if (history.length) session.setChatHistory(history);
     const t0 = Date.now();
-    let text = '';
-    let finishReason = 'stop';
+    let text = '', ttft = null, thought = '';
+    let finishReason = 'stop', stopReason = null;
+    const stops = Array.isArray(stop) ? stop.filter(x => typeof x === 'string' && x.length).slice(0, 8) : [];
+    const grammar = jsonSchema ? await chatGrammar(jsonSchema) : null;
     try {
       const res = await session.promptWithMeta(prompt, {
         temperature, topP, maxTokens, signal, stopOnAbortSignal: true, ...SMP.toLlamaCpp(sampling), ...(topP != null ? { topP } : {}),
-        onTextChunk: (chunk) => { text += chunk; onToken && onToken(chunk); },
+        ...(Number.isInteger(seed) && seed >= 0 ? { seed } : {}), ...(stops.length ? { customStopTriggers: stops } : {}), ...(grammar ? { grammar } : {}),
+        onResponseChunk: (c) => {
+          if (ttft == null) ttft = (Date.now() - t0) / 1000;
+          if (c.type === 'segment') { if (c.segmentType === 'thought' && c.text) { thought += c.text; onToken && onToken(c.text, 'think'); } return; }
+          if (c.text) { text += c.text; onToken && onToken(c.text); }
+        },
       });
+      stopReason = res && res.stopReason || null;
       if (res && res.stopReason === 'maxTokens') finishReason = 'length';
       if (res && res.stopReason === 'abort') finishReason = 'abort';
       if (res && typeof res.responseText === 'string') text = res.responseText;
@@ -229,9 +245,10 @@ function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal,
     } finally {
       session.dispose({ disposeSequence: false });
     }
-    const completionTokens = current ? current.model.tokenize(text).length : 0;
-    const secs = (Date.now() - t0) / 1000;
-    return { text, finishReason, usage: { completion_tokens: completionTokens, tokensPerSecond: secs > 0 ? completionTokens / secs : 0, seconds: secs } };
+    const completionTokens = current ? current.model.tokenize(thought + text).length : 0;
+    const secs = (Date.now() - t0) / 1000; const genSecs = Math.max(0.001, secs - (ttft || 0));
+    let contextTokens = null; try { contextTokens = sequence.contextTokens.length; } catch {}
+    return { text, thought: thought || null, finishReason, stopReason, usage: { completion_tokens: completionTokens, tokensPerSecond: completionTokens > 1 ? (completionTokens - 1) / genSecs : 0, seconds: secs, ttft, contextTokens, contextSize: current ? current.context.contextSize : null } };
   };
   const p = queue.then(run, run);
   queue = p.catch(() => {});

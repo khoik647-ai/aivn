@@ -29,7 +29,7 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
         if (m.type === 'ready') { ready = true; log(`[engine] tiến trình ${m.pid}, Node ${m.node}`); return resolve(); }
         if (m.type === 'child') { kids.add(m.pid); return; }
         if (m.type === 'child-exit') { kids.delete(m.pid); return; }
-        if (m.type === 'token') { tokenCbs.get(m.reqId)?.(m.t); return; }
+        if (m.type === 'token') { tokenCbs.get(m.reqId)?.(m.t, m.k); return; }
         if (m.type === 'progress') { try { onProgress(m); } catch {} return; }
         const p = pending.get(m.id); if (!p) return; pending.delete(m.id); inflight.delete(m.id);
         if (m.error) { const e = new Error(m.error); if (m.code) e.code = m.code; if (m.stack) e.hostStack = m.stack; if (m.attempts) e.attempts = m.attempts; if (m.gpu != null) e.gpu = m.gpu; p.reject(e); } else p.resolve(m.result);

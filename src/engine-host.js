@@ -27,7 +27,7 @@ process.on('message', async (msg) => {
       case 'generate': {
         const [messages, opts, reqId] = args;
         const ac = new AbortController(); gens.set(reqId, ac);
-        try { result = await engine.generate(messages, { ...opts, signal: ac.signal, onToken: (t) => reply({ type: 'token', reqId, t }) }); }
+        try { result = await engine.generate(messages, { ...opts, signal: ac.signal, onToken: (t, k) => reply({ type: 'token', reqId, t, ...(k ? { k } : {}) }) }); }
         finally { gens.delete(reqId); }
         break;
       }

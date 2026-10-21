@@ -109,7 +109,14 @@ function createDesktopAgent(deps) {
     }
     return out.filter(l => l.text.replace(/[^\p{L}\p{N}]/gu, '').length >= 3 || l.conf >= 85);
   }
-  async function observe(ctx, { query = '', ocr = 'auto', thumb = true } = {}) {
+  // Mắt nhìn: mô hình chính nếu nhìn được ảnh, không thì mô hình định vị (tự chọn mô hình nhìn ảnh đã cài — xem main.getGrounder)
+  async function eyes() {
+    const st = deps.engine.status();
+    if (st && st.vision) return { eng: deps.engine, id: st.path || st.id || '', kind: 'mô hình chính' };
+    let g = null; try { g = deps.grounder ? await deps.grounder() : null; } catch (e) { deps.log && deps.log('desk', 'Không nạp được mắt nhìn: ' + e.message); }
+    return g ? { eng: g.engine, id: g.id, kind: 'mắt nhìn' } : null;
+  }
+  async function observe(ctx, { query = '', ocr = 'auto', thumb = true, vision = 'auto', question = '' } = {}) {
     const s = await begin(ctx); status('Đang quan sát màn hình…');
     const t0 = Date.now();
     // hộp thoại của chính ứng dụng (Lưu thành…, Mở…) đang ở trước: quan sát hộp thoại đó thay vì cửa sổ chính
@@ -119,7 +126,9 @@ function createDesktopAgent(deps) {
     if (raw && raw.win && raw.win.hwnd && !s.target) s.target = { hwnd: raw.win.hwnd, pid: raw.win.pid, proc: raw.win.proc, title: raw.win.title };
     const named = (Array.isArray(raw.els) ? raw.els : []).filter(x => x && x.n && U.INTERACTIVE.has(x.r)).length;
     let ocrLines = [];
-    const wantOcr = ocr === 'force' || (ocr !== 'off' && (raw.noTree || raw.error || named < 8));
+    const proc = (raw.win && raw.win.proc) || (s.target && s.target.proc) || '';
+    const poor = !!(raw.noTree || raw.error || named < 8 || U.poorTreeApp(proc));
+    const wantOcr = ocr === 'force' || (ocr !== 'off' && poor);
     if (wantOcr && deps.engine.ocrLines) {
       try {
         const wb = raw.win && Array.isArray(raw.win.b) && raw.win.b[2] > 100 ? raw.win.b : null;
@@ -133,10 +142,24 @@ function createDesktopAgent(deps) {
     let list = obs.elements;
     if (query) { const fq = U.fold(query); const hit = list.filter(e => U.fold(e.name).includes(fq) || (e.value && U.fold(e.value).includes(fq))); list = hit.length ? [...hit, ...list.filter(e => !hit.includes(e))] : list; }
     const text = U.formatForModel({ win: obs.win, elements: list }, { toNorm: to1000, limit: query ? 60 : 110 });
-    const src = [raw.noTree ? null : raw.error ? 'cây giao diện lỗi: ' + raw.error.slice(0, 120) : `cây giao diện ${named} phần tử có tên`, ocrLines.length ? `OCR ${ocrLines.length} cụm chữ` : null].filter(Boolean).join(' · ');
+    // cây giao diện nghèo (Zalo, ứng dụng Electron…): tự chuyển sang ảnh chụp + mô hình nhìn ảnh
+    let seen = '', eyesKind = null;
+    if ((poor || question) && vision !== 'off') {
+      const e = await eyes();
+      if (e) {
+        status('Đang nhìn màn hình bằng ' + e.kind + '…');
+        try { seen = await SC.describe(e.eng, shot, question || 'Liệt kê đúng chữ các mục đang hiển thị: danh sách/kết quả tìm kiếm, tên người/cuộc trò chuyện, ô nhập (và chữ trong ô), nút. Nói rõ nếu danh sách trống hoặc đang tải.', { signal: ctx.signal }); eyesKind = e.kind; }
+        catch (err) { deps.log && deps.log('desk', 'Mắt nhìn lỗi: ' + err.message); }
+      } else if (poor) s.needEyes = true;
+    }
+    s.lastSeen = seen;
+    const src = [raw.noTree ? null : raw.error ? 'cây giao diện lỗi: ' + raw.error.slice(0, 120) : `cây giao diện ${named} phần tử có tên`, ocrLines.length ? `OCR ${ocrLines.length} cụm chữ` : null, eyesKind ? 'ảnh chụp + ' + eyesKind : null].filter(Boolean).join(' · ');
     deps.log && deps.log('desk', `Quan sát: "${obs.win ? obs.win.title : '?'}" · ${obs.elements.length} phần tử (${src}) · ${Date.now() - t0} ms`);
     status(`Đã quan sát: ${obs.elements.length} phần tử`);
-    return { obs, text, src, shot, thumb: thumb ? thumbOf(shot) : null };
+    let text2 = text;
+    if (seen) text2 += `\nMô tả màn hình (${eyesKind} nhìn ảnh chụp, có thể chưa chính xác):\n${seen.slice(0, 2500)}`;
+    else if (poor && s.needEyes && vision !== 'off') text2 += `\nLƯU Ý: ứng dụng ${proc || 'này'} gần như không cho đọc nút/ô (chỉ có chữ OCR) và mô hình hiện tại KHÔNG nhìn được ảnh. Đừng kết luận "không có/không tìm thấy" chỉ dựa vào danh sách này; báo người dùng bấm "Nạp thêm mắt nhìn" để AIVN nhìn được màn hình.`;
+    return { obs, text: text2, src, shot, thumb: thumb ? thumbOf(shot) : null, poor, seen };
   }
 
   // ---------- xin phép (thẻ trên lớp phủ) ----------
@@ -290,10 +313,13 @@ function createDesktopAgent(deps) {
       const el = t && t.el ? t.el : focusedEl;
       const single = el && el.editable && !/document|tài liệu|soạn thảo|multi/i.test(`${el.role || ''} ${el.kind || ''}`);
       const afterSave = s.lastAction && s.lastAction.action === 'hotkey' && /^(ctrl|cmd|command|meta)\+(shift\+)?[so]$/i.test(String(s.lastAction.keys || '').replace(/\s/g, '')) && Date.now() - s.lastAction.at < 120000;
-      a = { ...a, __replace: (a.replace === true && single) || (afterSave && !(el && /document|tài liệu/i.test(`${el.role || ''} ${el.kind || ''}`))) };
+      // ô không đọc được qua Trợ năng (Zalo…): vẫn cho thay nội dung khi mô hình yêu cầu, chỉ với chữ một dòng ngắn (ô tìm kiếm), không bao giờ với tài liệu
+      const shortLine = !/\n/.test(String(a.text)) && String(a.text).length <= 80 && !(el && /document|tài liệu/i.test(`${el.role || ''} ${el.kind || ''}`));
+      a = { ...a, __replace: (a.replace === true && (single || (shortLine && !(el && el.editable)))) || (afterSave && !(el && /document|tài liệu/i.test(`${el.role || ''} ${el.kind || ''}`))) };
     }
     await performAt(action, t && t.x != null ? t.x : null, t && t.x != null ? t.y : null, a);
-    s.lastAction = { action, el: t && t.el, keys: a.keys, at: Date.now() };
+    const prevAction = s.lastAction;
+    s.lastAction = { action, el: t && t.el, keys: a.keys, at: Date.now(), query: t && t.query ? t.query : String(a.element || a.target || '') };
     deps.log && deps.log('desk', `Thao tác: ${desc}${t && t.via ? ' (định vị bằng ' + t.via + ')' : ''}`);
     ov('target', { box: null });
     await sleep(action === 'type_text' ? 500 : 700);
@@ -301,17 +327,39 @@ function createDesktopAgent(deps) {
     const o = await observe(ctx, { ocr: s.ocrUsed ? 'auto' : 'auto' });
     const checks = [];
     if (before && before.win && o.obs.win && before.win.title !== o.obs.win.title) checks.push(`Cửa sổ đổi thành "${o.obs.win.title}".`);
+    let o2 = o;
     if (action === 'type_text') {
       const typed = U.fold(String(a.text).split('\n')[0]).slice(0, 40);
       const seen = o.obs.elements.some(e => (e.value && U.fold(e.value).includes(typed)) || (e.name && U.fold(e.name).includes(typed)));
       checks.push(seen ? 'Đã thấy chữ vừa gõ trên màn hình.' : 'CHƯA thấy chữ vừa gõ trong danh sách phần tử (có thể ô không hiện giá trị) — hãy kiểm tra trước khi làm tiếp.');
+      // ô tìm kiếm: chờ kết quả tải, nhìn lại, rồi mới kết luận; gợi ý tìm không dấu / một phần tên
+      const el = t && t.el ? t.el : focusedEl;
+      const prevTxt = prevAction && Date.now() - prevAction.at < 60000 ? `${prevAction.query || ''} ${prevAction.el ? prevAction.el.name || '' : ''}` : '';
+      const searchy = (/tìm|tim kiem|search|find|kiếm/i.test(`${el ? el.name + ' ' + (el.kind || '') : ''} ${a.element || a.target || ''} ${prevTxt}`) || (prevAction && Date.now() - prevAction.at < 60000 && /^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(prevAction.keys || '').replace(/\s/g, '')))) && !/\n/.test(String(a.text)) && String(a.text).length <= 80;
+      if (searchy && String(a.text).trim()) {
+        const q = String(a.text).split('\n')[0].trim(); const fq = U.fold(q);
+        const ask = `Ô tìm kiếm vừa được gõ "${q}". Danh sách kết quả tìm kiếm đang hiện những tên nào (ghi đúng chữ)? Dòng đầu tiên trả lời CÓ nếu có kết quả khớp hoặc gần khớp "${q}", KHÔNG nếu không có, ĐANG TẢI nếu chưa hiện xong.`;
+        const judge = (oo) => { const d = U.fold(oo.seen || ''); if (oo.seen) return /^\W*(co|yes)\b/.test(d) ? 'yes' : /^\W*(dang tai|loading)/.test(d) ? 'loading' : 'no';
+          const hits = oo.obs.elements.filter(e => !(e.editable || e.focused) && U.fold(e.name || '').includes(fq)).length; return hits >= (oo.poor ? 2 : 1) ? 'yes' : 'no'; };
+        let verdict = 'no', waited = 0;
+        for (let i = 0; i < 3; i++) { // tối đa ~4,5 giây chờ kết quả
+          const ms = i === 0 ? 1200 : 1500; await sleep(ms); waited += ms; if (ctx.signal && ctx.signal.aborted) break;
+          o2 = await observe(ctx, { question: o.poor || deps.engine.status().vision ? ask : '' }); verdict = judge(o2);
+          if (verdict !== 'loading') break;
+        }
+        s.searches = s.searches || []; s.searches.push({ text: q, found: verdict === 'yes' });
+        const tried = new Set(s.searches.map(x => x.text));
+        const rest = U.searchVariants(s.searches[0].text).filter(v => !tried.has(v));
+        if (verdict === 'yes') checks.push(`Ô tìm kiếm: đã chờ kết quả và THẤY kết quả khớp "${q}". Bấm đúng kết quả đó (kiểm tra tên) trước khi làm tiếp.`);
+        else checks.push(`Ô tìm kiếm: đã chờ ~${Math.round(waited / 100) / 10} giây và CHƯA thấy kết quả khớp "${q}".` + (rest.length ? ` Trước khi nói "không tìm thấy", BẮT BUỘC thử lần lượt: ${rest.map(v => `gõ lại "${v}" (replace: true)`).join(', rồi ')}; mỗi lần chờ kết quả và kiểm tra.` : ' Đã thử nguyên văn, không dấu và một phần tên — có thể báo người dùng là không tìm thấy (nêu các cách đã thử).'));
+      }
     }
     if (beforeDialog && s.dialog === beforeDialog) checks.push(`Hộp thoại “${beforeDialog}” VẪN đang mở — việc trong hộp thoại CHƯA xong. Xác nhận bằng nút của hộp thoại (Save/Lưu/OK/Mở) hoặc hotkey "enter"; đừng báo đã xong.`);
     else if (beforeDialog && !s.dialog) checks.push(`Hộp thoại “${beforeDialog}” đã đóng.`);
     const foc = o.obs.elements.find(e => e.focused); if (foc) checks.push(`Đang chọn: [${foc.id}] ${foc.kind} "${foc.name}".`);
     if (before && o.obs.elements.length && Math.abs(o.obs.elements.length - before.elements.length) > 3) checks.push(`Số phần tử: ${before.elements.length} → ${o.obs.elements.length}.`);
     if (!checks.length) checks.push('Màn hình không thay đổi rõ ràng — nếu cần, thử cách khác.');
-    return { forModel: `Đã ${desc}.\nKiểm tra: ${checks.join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : ''), thumb: o.thumb, detail: checks.join(' ') };
+    return { forModel: `Đã ${desc}.\nKiểm tra: ${checks.join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : ''), thumb: o2.thumb, detail: checks.join(' ') };
   }
 
   async function look(a, ctx) {
@@ -361,7 +409,13 @@ function createDesktopAgent(deps) {
     try { const d = U.activeDialogOf(await U.windows(), s.target); if (d) return `Hộp thoại “${d.title || 'của ứng dụng'}” vẫn đang mở — việc chưa xong (vd. chưa bấm Save/Lưu/OK).`; } catch {}
     return null;
   }
-  return { pending, look, act, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
+  // ô tìm kiếm chưa ra kết quả mà còn cách tìm chưa thử (không dấu, một phần tên): AIVN AGENT không được kết luận "không tìm thấy"
+  function searchTodo() {
+    const s = session; if (!s || !s.searches || !s.searches.length || s.searches.some(x => x.found)) return null;
+    const tried = new Set(s.searches.map(x => x.text)); const rest = U.searchVariants(s.searches[0].text).filter(v => !tried.has(v));
+    return rest.length ? rest : null;
+  }
+  return { searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
 }
 
 module.exports = { createDesktopAgent };

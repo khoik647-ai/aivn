@@ -2,11 +2,19 @@
 // Một bộ gợi ý duy nhất cho mọi nơi (Kho mô hình, biểu ngữ AIVN AGENT, hộp thoại, thông báo lỗi).
 // Quy tắc:
 //  - Trò chuyện & công cụ: Qwen3 8B nếu vừa máy, không thì Qwen3 4B Instruct 2507.
-//  - Điều khiển máy: cùng mô hình chữ đó làm "bộ lập kế hoạch" (đọc danh sách nút/ô qua Trợ năng của hệ điều hành)
-//    + (tuỳ chọn) một mô hình nhìn ảnh làm "bộ định vị" khi danh sách thiếu phần tử.
-//  - Nhãn "Gợi ý" cho điều khiển máy CHỈ khi mô hình đã qua bài đo Điểm tác vụ (≥ 7/10 và đạt kiểm tra an toàn).
+//  - Điều khiển máy: KHÔNG BAO GIỜ gợi ý một mô hình chỉ đọc chữ đứng một mình (không nhìn được màn hình; Zalo và
+//    các ứng dụng Electron gần như không cho đọc danh sách nút/ô). Gợi ý theo VRAM (screenSetup):
+//      (a) một mô hình nhìn ảnh vừa lập kế hoạch vừa nhìn: Qwen3-VL 8B (≥ 7,5 GB VRAM), Qwen3-VL 4B (≥ 3,5 GB), Qwen3-VL 2B;
+//      (b) hoặc cặp: mô hình chữ lập kế hoạch + mô hình nhìn ảnh làm "mắt nhìn" (bộ định vị), nạp tự động.
+//    Qwen3-VL: nhà phát triển ghi "Visual Agent: Operates PC/mobile GUIs" (huggingface.co/Qwen/Qwen3-VL-8B-Instruct).
+//  - Nhãn điểm "Điểm tác vụ" vẫn chỉ từ bài đo thật.
 const PLANNERS = ['qwen_qwen3-8b-q4_k_m', 'qwen3-4b-instruct-2507-q4_k_m'];
 const GROUNDERS = ['holo1.5-3b-q4_k_m', 'qwen3-vl-4b-instruct-q4_k_m', 'qwen2.5-vl-3b-instruct-q4_k_m', 'qwen3-vl-2b-instruct-q8_0', 'ui-tars-1.5-7b-q4_k_m', 'qwen3-vl-8b-instruct-q4_k_m', 'qwen2.5-vl-7b-instruct-q4_k_m'];
+const VISION_SOLO = [ // theo thứ tự ưu tiên, kèm VRAM tối thiểu (GB) để chạy trọn trên GPU
+  { id: 'qwen3-vl-8b-instruct-q4_k_m', vram: 7.5 }, { id: 'qwen3-vl-4b-instruct-q4_k_m', vram: 3.5 }, { id: 'qwen3-vl-2b-instruct-q8_0', vram: 0 }];
+const PAIR_GROUNDER = [ // mắt nhìn cho cặp: ưu tiên mô hình chuyên điều khiển máy
+  { id: 'ui-tars-1.5-7b-q4_k_m', vram: 10 }, { id: 'holo1.5-3b-q4_k_m', vram: 0 }, { id: 'qwen3-vl-2b-instruct-q8_0', vram: 0 }];
+const VISION_IDS = new Set([...VISION_SOLO, ...PAIR_GROUNDER].map(x => x.id).concat(GROUNDERS));
 const passes = (b) => !!(b && b.done === 10 && b.score >= 7 && b.safety !== false);
 const gPasses = (b) => !!(b && b.grounding && b.grounding.total === 10 && b.grounding.score >= 7);
 
@@ -27,14 +35,31 @@ function recommend(list, scores = {}) {
   const grounder = grounders.find(c => fitRank(c.fit) >= 3 && gPasses(pickBench(c.id, scores))) || null;
   return { chat: chat && chat.id, planner: plannerOk && plannerOk.id, grounder: grounder && grounder.id, plannerCandidate: chat && chat.id };
 }
+// Điều khiển màn hình: một mô hình nhìn ảnh (solo) hoặc cặp lập kế hoạch + mắt nhìn, chọn theo VRAM (byte).
+// Không bao giờ trả về một mô hình chỉ đọc chữ đứng một mình.
+function screenSetup(list, vramBytes = 0) {
+  const GB = 1024 ** 3, v = (vramBytes || 0) / GB; const by = (id) => list.find(c => c.id === id);
+  const soloC = VISION_SOLO.filter(x => v >= x.vram && by(x.id)); const solo = soloC[0] ? by(soloC[0].id) : by(VISION_SOLO[VISION_SOLO.length - 1].id) || null;
+  const planner = by(v >= 7.5 ? PLANNERS[0] : PLANNERS[1]) || by(PLANNERS[1]) || null;
+  const gC = PAIR_GROUNDER.filter(x => v >= x.vram && by(x.id)); const grounder = gC[0] ? by(gC[0].id) : null;
+  return { solo: solo ? solo.id : null, pair: planner && grounder ? { planner: planner.id, grounder: grounder.id } : null, vramGB: Math.round(v * 10) / 10 };
+}
+// mô hình có nhìn được ảnh không (tệp mmproj hoặc trạng thái bộ máy)
+const isVision = (c) => !!(c && (c.vision || c.mmproj || VISION_IDS.has(c.id)));
+// Mắt nhìn cho một mô hình chữ khi bật điều khiển màn hình: ưu tiên mô hình đã cài, rồi theo VRAM
+function eyesFor(list, vramBytes = 0) {
+  const s = screenSetup(list, vramBytes); const order = [s.pair && s.pair.grounder, s.solo, ...PAIR_GROUNDER.map(x => x.id), ...VISION_SOLO.map(x => x.id)].filter(Boolean);
+  const cands = [...new Set(order)].map(id => list.find(c => c.id === id)).filter(Boolean);
+  return cands.find(c => c.installed) || cands[0] || null;
+}
 // gắn nhãn lên từng thẻ
-function annotate(list, scores = {}) {
-  const r = recommend(list, scores);
+function annotate(list, scores = {}, vramBytes = 0) {
+  const r = recommend(list, scores); const ss = screenSetup(list, vramBytes); r.screen = ss;
   return { rec: r, list: list.map(c => {
     const b = pickBench(c.id, scores);
     const o = { ...c, bench: b ? { score: b.score, done: b.done, safety: b.safety, where: b.where, date: b.date, seconds: b.seconds, grounding: b.grounding || null } : null };
-    o.recommended = c.id === r.chat; o.recScreen = c.id === r.planner; o.recGround = c.id === r.grounder;
-    o.role = PLANNERS.includes(c.id) ? 'planner' : GROUNDERS.includes(c.id) ? 'grounder' : null;
+    o.recommended = c.id === r.chat; o.recScreen = c.id === ss.solo; o.recGround = c.id === r.grounder || !!(ss.pair && c.id === ss.pair.grounder); o.recPairPlanner = !!(ss.pair && c.id === ss.pair.planner);
+    o.role = PLANNERS.includes(c.id) ? 'planner' : VISION_IDS.has(c.id) ? 'grounder' : null;
     return o;
   }) };
 }
@@ -57,4 +82,4 @@ function pairPlan({ vram = 0, main = 0, grounder = 0, mainVision = false } = {})
     (mainVision ? '; mô hình chính hiện là mô hình nhìn ảnh lớn — không cần nếu đã có mô hình định vị.' : '.');
   return { ok: false, grounderGpu: false, message: msg, needBytes: need };
 }
-module.exports = { pairPlan, recommend, annotate, sentence, passes, gPasses, PLANNERS, GROUNDERS, pickBench };
+module.exports = { screenSetup, eyesFor, isVision, VISION_SOLO, PAIR_GROUNDER, pairPlan, recommend, annotate, sentence, passes, gPasses, PLANNERS, GROUNDERS, pickBench };

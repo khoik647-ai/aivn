@@ -82,15 +82,18 @@ function createVisionServer({ log = () => {} } = {}) {
   }
 
   // messages kiểu OpenAI; phần ảnh: {type:'image_url', image_url:{url:'data:image/png;base64,…'}}
-  async function stream(extra, messages, { temperature = 0.7, maxTokens = 1024, topP, signal, onToken, sampling = null } = {}) {
+  async function stream(extra, messages, { temperature = 0.7, maxTokens = 1024, topP, signal, onToken, sampling = null, seed = null, stop = null, jsonSchema = null } = {}) {
     if (!info) throw new Error('Chưa nạp mô hình nhìn ảnh.');
     const t0 = Date.now();
     // chống lặp: DRY (bắt chuỗi lặp dài) + phạt lặp nhẹ; mô hình nhìn ảnh nhỏ dễ lặp câu khi mô tả
     const body = { messages, temperature, max_tokens: maxTokens, stream: true, stream_options: { include_usage: true }, top_k: 40, min_p: 0.05,
       repeat_penalty: 1.1, repeat_last_n: 256, presence_penalty: 0.3, dry_multiplier: 0.8, dry_base: 1.75, dry_allowed_length: 2, top_p: 0.9,
       ...(extra.response_format || (extra.tool_choice && extra.tool_choice !== 'auto' && extra.tool_choice !== 'none') ? SMP.toServer(SMP.samplingFor('', 'json')) : SMP.toServer(sampling)), ...(topP != null ? { top_p: topP } : {}), ...extra };
+    if (Number.isInteger(seed) && seed >= 0) body.seed = seed;
+    if (Array.isArray(stop) && stop.length) body.stop = stop.filter(x => typeof x === 'string' && x).slice(0, 8);
+    if (jsonSchema) body.json_schema = jsonSchema;
     for (const k of Object.keys(body)) if (body[k] === undefined) delete body[k];
-    let res;
+    let res; let ttft = null, thought = '';
     const empty = () => ({ text: '', toolCalls: [], finishReason: 'abort', usage: { completion_tokens: 0, tokensPerSecond: 0, seconds: 0 } });
     try {
       res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, { method: 'POST', signal,
@@ -110,7 +113,9 @@ function createVisionServer({ log = () => {} } = {}) {
           const data = line.slice(5).trim(); if (data === '[DONE]') continue;
           let j; try { j = JSON.parse(data); } catch { continue; }
           const c = j.choices && j.choices[0];
-          const piece = c?.delta?.content;
+          const piece = c?.delta?.content; const rpiece = c?.delta?.reasoning_content;
+          if ((piece || rpiece) && ttft == null) ttft = (Date.now() - t0) / 1000;
+          if (rpiece) { thought += rpiece; if (!extra.response_format) onToken && onToken(rpiece, 'think'); }
           if (piece) { text += piece; if (!extra.response_format) onToken && onToken(piece); }
           for (const tc of c?.delta?.tool_calls || []) {
             const k = tc.index ?? calls.length;
@@ -129,7 +134,8 @@ function createVisionServer({ log = () => {} } = {}) {
     const ct = usage?.completion_tokens ?? Math.ceil(text.length / 3.5);
     const toolCalls = calls.filter(Boolean).filter(c => c.name).map(c => { let a = {}; try { a = JSON.parse(c.args || '{}'); } catch { a = { _raw: c.args }; } return { id: c.id || 'call_' + crypto.randomBytes(9).toString('hex'), name: c.name, arguments: a }; });
     if (toolCalls.length && finishReason !== 'abort') finishReason = 'tool_calls';
-    return { text: text.replace(/^\s+/, ''), toolCalls, finishReason, usage: { prompt_tokens: usage?.prompt_tokens, completion_tokens: ct, tokensPerSecond: secs > 0 ? ct / secs : 0, seconds: secs } };
+    const gs = Math.max(0.001, secs - (ttft || 0));
+    return { text: text.replace(/^\s+/, ''), thought: thought || null, toolCalls, finishReason, stopReason: finishReason === 'length' ? 'maxTokens' : finishReason === 'abort' ? 'abort' : 'eogToken', usage: { prompt_tokens: usage?.prompt_tokens, completion_tokens: ct, tokensPerSecond: ct > 1 ? (ct - 1) / gs : 0, seconds: secs, ttft, contextTokens: usage ? (usage.prompt_tokens || 0) + (usage.completion_tokens || 0) : null, contextSize: info && info.contextSize || null } };
   }
   const generate = (messages, opts = {}) => stream({}, info && info.template && info.template.strict ? TP.normalizeMessages(messages) : messages, opts);
   // Chế độ văn bản: không gửi "tools" cho llama-server (tránh bộ sinh parser --jinja), mô tả công cụ trong lời nhắc và tự tách <tool_call>
