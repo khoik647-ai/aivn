@@ -41,4 +41,6 @@ test('B85 thật (Electron + Xvfb, Zalo giả 3 cột): tìm “Cloud của tôi
   assert.strictEqual(st['b85-click-result'].state.cur, 'My Documents'); assert.ok(!st['b85-send'].blocked, st['b85-send'].forModel);
   assert.deepStrictEqual(d.final.sent, [{ to: 'My Documents', text: 'AIVN test - thử beta.3' }]);
   const log = fs.readFileSync(path.join(ud, 'logs', 'aivn.log'), 'utf8'); assert.match(log, /nay mang tên “My Documents”/);
+  // hiệu năng: OCR nhớ theo vân tay điểm ảnh — các lần quan sát sau dùng lại vùng không đổi
+  const reuse = [...log.matchAll(/OCR: (\d+) vùng đọc mới, (\d+) vùng dùng lại/g)].map(m => +m[2]); assert.ok(reuse.length >= 3 && reuse.slice(1).some(n => n > 0), JSON.stringify(reuse));
 });

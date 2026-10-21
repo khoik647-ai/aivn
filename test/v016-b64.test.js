@@ -23,5 +23,6 @@ test('B64 thật (Messenger giả, đồng hồ nhảy 90 giây sau mỗi cú b�
   const by = Object.fromEntries(d.steps.map(s => [s.name, s]));
   assert.ok(!by['b64-type-name'].blocked, by['b64-type-name'].summary); assert.deepStrictEqual(by['b64-type-name'].state.searches, ['Trần Quỳnh Anh']);
   assert.ok(!by['b64k-type-name'].blocked, by['b64k-type-name'].summary); assert.deepStrictEqual(by['b64k-type-name'].state.searches, ['Trần Quỳnh Anh', 'Lê Quỳnh Anh']);
-  assert.deepStrictEqual(d.final.sent, [{ to: 'Trần Quỳnh Anh', text: 'Mai 8h họp nhóm nhé' }, { to: 'Lê Quỳnh Anh', text: 'Gửi mình file slide nhé' }]);
+  assert.deepStrictEqual(d.final.sent, [{ to: 'Trần Quỳnh Anh', text: 'Mai 8h họp nhóm nhé' }, { to: 'Lê Quỳnh Anh', text: 'Gửi mình file slide nhé' }],
+    d.steps.filter(x => /^b64-/.test(x.name)).map(x => `${x.name} ${x.blocked ? 'BLOCKED' : 'ok'} ${x.summary} ${JSON.stringify(x.state)}\n${String(x.forModel).slice(0, 600)}`).join('\n---\n') + '\nud=' + ud);
 });

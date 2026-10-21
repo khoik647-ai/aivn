@@ -119,14 +119,25 @@ function createDesktopAgent(deps) {
   }
   // OCR theo dải ngang, phóng to ~2 lần: chữ giao diện nhỏ (9-12 px) và vùng trống lớn làm OCR cả màn hình bỏ sót gần hết.
   // B65: dải chồng nhau gần nửa dải — mỗi dòng nằm TRỌN trong ít nhất hai dải (Tesseract hay bỏ sót dòng ngay dưới ô có viền/con trỏ)
+  // Hiệu năng (máy thật beta.3-pre: mỗi thao tác 16–28 s vì OCR chạy 2 lần × 11–17 s): nhớ kết quả OCR theo dấu vân tay ĐIỂM ẢNH của từng dải/khối
+  // (sha1 ảnh cắt + cỡ phóng). Màn hình không đổi → không đọc lại; đổi một phần → chỉ đọc lại dải đã đổi. Toạ độ dòng là tương đối với ảnh cắt nên dùng lại được.
+  const ocrMemo = new Map(); const ocrStat = { hit: 0, miss: 0 };
+  async function ocrMemoLines(img, scale, prep) {
+    let k = null; try { k = require('crypto').createHash('sha1').update(img.toBitmap()).digest('hex') + `:${img.getSize().width}x${img.getSize().height}@${scale}${prep ? ':' + prep.name : ''}`; } catch {}
+    if (k && ocrMemo.has(k)) { ocrStat.hit++; const v = ocrMemo.get(k); ocrMemo.delete(k); ocrMemo.set(k, v); return v; }
+    ocrStat.miss++;
+    const big = img.resize({ width: Math.round(img.getSize().width * scale), quality: 'best' });
+    const r = await deps.engine.ocrLines((prep ? prep(big) : big).toPNG());
+    if (k) { ocrMemo.set(k, r); while (ocrMemo.size > 400) ocrMemo.delete(ocrMemo.keys().next().value); }
+    return r;
+  }
   async function ocrShot(shot, region) {
-    const img = imgOf(shot); const W = shot.width, H = shot.height;
+    const img = imgOf(shot); const W = shot.width, H = shot.height; const st0 = { ...ocrStat }; const tO = Date.now();
     const R = region ? { x: Math.max(0, Math.floor(region.x1 * W)), y: Math.max(0, Math.floor(region.y1 * H)), x2: Math.min(W, Math.ceil(region.x2 * W)), y2: Math.min(H, Math.ceil(region.y2 * H)) } : { x: 0, y: 0, x2: W, y2: H };
     const bandH = 160, overlap = 72, scale = (R.x2 - R.x) < 1000 ? 3 : 2; const out = []; // hộp thoại nhỏ (chữ nhỏ): phóng to hơn
     for (let y = R.y; y < R.y2; y += bandH - overlap) {
       const h = Math.min(bandH, R.y2 - y); if (h < 12) break;
-      const crop = img.crop({ x: R.x, y, width: R.x2 - R.x, height: h }).resize({ width: Math.round((R.x2 - R.x) * scale), quality: 'best' });
-      const r = await deps.engine.ocrLines(crop.toPNG());
+      const r = await ocrMemoLines(img.crop({ x: R.x, y, width: R.x2 - R.x, height: h }), scale);
       for (const l of r.lines) {
         const x1 = R.x + l.box[0] / scale, y1 = y + l.box[1] / scale, x2 = x1 + l.box[2] / scale, y2 = y1 + l.box[3] / scale;
         if ((y1 - y < 4 && y > R.y) || (y + h - y2 < 4 && y + h < R.y2)) continue; // dòng bị cắt ở mép dải: dải kế tiếp đọc trọn
@@ -142,8 +153,8 @@ function createDesktopAgent(deps) {
     try {
       const reg = img.crop({ x: R.x, y: R.y, width: R.x2 - R.x, height: R.y2 - R.y });
       for (const bx of OB.coloredBlocks(reg)) {
-        const sc2 = 3; const c = reg.crop(bx); const inv = OB.invertForOcr(nativeImage, c.resize({ width: bx.width * sc2, quality: 'best' }));
-        const r2 = await deps.engine.ocrLines(inv.toPNG());
+        const sc2 = 3; const c = reg.crop(bx); const invert = (big) => OB.invertForOcr(nativeImage, big);
+        const r2 = await ocrMemoLines(c, sc2, Object.defineProperty(invert, 'name', { value: 'inv' }));
         for (const l of r2.lines) {
           const x1 = R.x + bx.x + (l.box[0] - 16) / sc2, y1 = R.y + bx.y + (l.box[1] - 16) / sc2, x2 = x1 + l.box[2] / sc2, y2 = y1 + l.box[3] / sc2;
           const nb = { x1: x1 / W, y1: y1 / H, x2: x2 / W, y2: y2 / H };
@@ -152,6 +163,7 @@ function createDesktopAgent(deps) {
         }
       }
     } catch (e) { deps.log && deps.log('desk', 'OCR đảo màu lỗi: ' + e.message); }
+    { const hit = ocrStat.hit - st0.hit, miss = ocrStat.miss - st0.miss; deps.log && deps.log('desk', `OCR: ${miss} vùng đọc mới, ${hit} vùng dùng lại (không đổi) · ${Date.now() - tO} ms`); }
     return out.filter(l => l.text.replace(/[^\p{L}\p{N}]/gu, '').length >= (l.inverted ? 2 : 3) || l.conf >= 85);
   }
   // Mắt nhìn: mô hình chính nếu nhìn được ảnh, không thì mô hình định vị (tự chọn mô hình nhìn ảnh đã cài — xem main.getGrounder)
