@@ -2282,6 +2282,7 @@
     "Đổi thư mục": "Change folder",
     "Đổi tên cấu hình mẫu": "Rename preset",
     "Đổi tên…": "Rename…",
+    "Đổi âm lượng": "Change volume",
     "Độ dài ngữ cảnh": "Context length",
     "Độ dài ngữ cảnh (token)": "Context length (tokens)",
     "Độ dài ngữ cảnh (áp dụng khi nạp lại)": "Context length (applies on reload)",

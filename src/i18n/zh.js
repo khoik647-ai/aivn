@@ -2282,6 +2282,7 @@
     "Đổi thư mục": "更改文件夹",
     "Đổi tên cấu hình mẫu": "重命名配置模板",
     "Đổi tên…": "重命名…",
+    "Đổi âm lượng": "调整音量",
     "Độ dài ngữ cảnh": "上下文长度",
     "Độ dài ngữ cảnh (token)": "上下文长度（token）",
     "Độ dài ngữ cảnh (áp dụng khi nạp lại)": "上下文长度（重新加载时生效）",

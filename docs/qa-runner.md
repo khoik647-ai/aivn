@@ -30,6 +30,10 @@ Hai chế độ chạy không người để bot QA kiểm thử AIVN trên máy
 * Các bước `seed`, `reset`, `setTime` **chỉ** chạy khi có `--profile` (không bao giờ ghi/xoá dữ liệu thật).
 * `--qa-ui` khi AIVN của người dùng đang mở mà **không** có `--profile` → từ chối (thoát 2), không bao giờ điều khiển cửa sổ thật.
 * `--agent-task` không kèm `--profile` khi AIVN đang mở → chuyển việc sang bản đang chạy rồi chờ `result.json` của đúng lượt đó.
+* Hồ sơ mới dùng cài đặt **mặc định** (điều khiển màn hình *tắt*). Thêm `--agent-settings-from main` để **chép** mọi cài đặt AIVN AGENT (`agent*`:
+  điều khiển máy, điều khiển màn hình, thư mục được phép, mô hình định vị…) từ hồ sơ thật sang hồ sơ QA. Hồ sơ thật chỉ được **đọc**, không ghi ngược.
+  Chỉ dùng được kèm `--profile`.
+* `--agent-task` mà điều khiển màn hình đang **tắt** → dừng ngay, `status: "blocked"`, lý do nêu rõ cài đặt nào đang tắt và cách bật (không chạy “què” rồi báo done).
 
 ## `--agent-task`
 
@@ -41,11 +45,19 @@ $LASTEXITCODE   # 0 done · 2 failed/blocked · 3 asked_user
 Get-Content -Encoding UTF8 C:\qa\r1\result.json | ConvertFrom-Json
 ```
 
-* `--model`: id trong *Mô hình của tôi*, tên tệp `.gguf`, hoặc viết tắt `2b` / `4b` / `8b` (Qwen3-VL Instruct đã có trên máy).
-* **An toàn**: mọi thẻ xin phép (gửi, xoá, mua/thanh toán, khoá máy, âm lượng, ghi đè tệp…) đều **tự TỪ CHỐI**. Không có cách nào để tự cho phép.
+* `--model`: id trong *Mô hình của tôi*, id danh mục, tên tệp `.gguf`, hoặc viết tắt `2b` / `4b` / `8b` (Qwen3-VL Instruct đã có trên máy).
+  Tên được so sau khi chuẩn hoá (bỏ gạch nối/gạch dưới/chấm, không phân biệt hoa thường): `Qwen3VL-8B-Instruct-Q4_K_M` = `qwen3-vl-8b-instruct-q4_k_m`.
+* **An toàn**: mọi thẻ xin phép (gửi, xoá, mua/thanh toán, ghi đè tệp, thao tác hệ thống do AIVN AGENT **tự** đề xuất…) đều **tự TỪ CHỐI**. Không có cách nào để tự cho phép.
+* **Lệnh hệ thống người dùng nêu rõ** (quyết định sản phẩm B1/B44): câu chỉ là một lệnh rõ ràng như “tăng âm lượng thêm 10%”, “đặt âm lượng 30%”,
+  “khoá màn hình” → làm **ngay, không có thẻ**, không qua mô hình (đường tắt). Chỉ khi AIVN AGENT **tự** muốn đổi âm lượng/khoá máy (người dùng không yêu cầu)
+  thì mới có thẻ (và trong QA bị tự từ chối). Đường tắt vẫn ghi bước vào `steps[]` (`tool: "system_action"`, `auto: true`, ảnh chụp nếu có `--shots`).
+  “thêm/bớt N%”, “by N%” = **đổi tương đối** (đọc mức hiện tại rồi đặt đúng mức mới qua Core Audio, kết quả “Âm lượng 40% → 50% (+10%)”);
+  “lên/về/thành/mức N”, “to N” = **đặt mức** N.
   Nếu lệnh có câu “chỉ soạn / đừng gửi / draft only / 只起草”, lời từ chối kèm lý do “Chỉ soạn sẵn, đừng gửi” để AIVN AGENT dừng đúng trước bước gửi.
   Thẻ bị từ chối khi lệnh **không** có câu đó → `status: "blocked"`.
 * `--agent-task` điều khiển **màn hình thật** (chuột, bàn phím, cửa sổ) nên **có** giành tiêu điểm. Đừng chạy khi người dùng đang làm việc trên máy.
+* **`status` không bao giờ mặc định là `done`**: chỉ `done` khi AIVN AGENT báo xong, câu trả lời cuối **không** nói “chưa làm được / không thể / cannot / 无法…”,
+  và với việc **gửi tin** (không phải “chỉ soạn”) thì phải có ít nhất một bước đã **kiểm chứng gửi** trên màn hình (`verification.sent`). Còn lại → `failed` kèm lý do.
 
 `result.json`:
 

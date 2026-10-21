@@ -3,8 +3,13 @@
 // Ở đây: (1) chuỗi lời gọi lặp lại theo chu kỳ 2–6 bước (ít nhất 2 lượt liền), (2) N bước liền không có tiến triển mới.
 const fold = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase();
 // chữ ký một bước: tên công cụ + tham số chính (bỏ id phần tử eN, toạ độ, số đếm) — hai lần “cùng việc” cho cùng chữ ký
-function stepSig(name, args = {}) {
-  const a = args || {}; const keep = ['action', 'name', 'window', 'keys', 'url', 'path', 'app', 'query', 'element', 'text'];
+// B86 (máy thật, Zalo): chỉ có id “e#” + chữ mô hình ĐỊNH gõ thì “bấm ô tìm → gõ → bấm kết quả → gõ” trông như chu kỳ 2 bước.
+// Có sig (do desktop-agent báo) thì dùng phần tử THẬT đã nhắm (loại + tên) và chữ THẬT đã gõ thay cho id / chữ mô hình đưa
+function stepSig(name, args = {}, sig = null) {
+  const a = { ...(args || {}) };
+  if (sig && sig.target) { a.element = sig.target; delete a.target; }
+  if (sig && sig.typed != null) a.text = sig.typed;
+  const keep = ['action', 'name', 'window', 'keys', 'url', 'path', 'app', 'query', 'element', 'text'];
   const parts = keep.filter(k => a[k] != null && a[k] !== '').map(k => `${k}=${fold(a[k]).replace(/\be\d+\b/g, 'e#').replace(/\d+/g, '#').slice(0, 60)}`);
   return `${name}(${parts.join(',')})`;
 }
@@ -24,7 +29,7 @@ function createCycleGuard({ window = 12 } = {}) {
   return {
     // progress: bước làm được (không lỗi, không bị chặn) cho kết quả CHƯA từng thấy, hoặc đã kiểm chứng gửi
     push(name, args, out = {}) {
-      const sig = stepSig(name, args); seq.push(sig);
+      const sig = stepSig(name, args, out && out.sig); seq.push(sig + (out && out.sig && out.sig.screen ? '@' + out.sig.screen : '')); // B86: chu kỳ = cùng việc VÀ màn hình lặp lại (không tiến triển)
       const ok = out && !out.error && !out.refused && !out.bad;
       const os = sig + ' → ' + outSig(out && out.summary);
       const fresh = ok && !seenOut.has(os) && !/^\(lap lai\)/.test(fold(out && out.summary));

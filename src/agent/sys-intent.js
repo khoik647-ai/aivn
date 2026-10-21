@@ -61,23 +61,37 @@ function sysAsked(action, query) {
   return cl.some(c => !isQ(c, qParts.has(c) ? '?' : '') && clauseAsks(action, c)) && !!all;
 }
 // B44: “tăng âm lượng lên 100”, “đặt âm lượng 30%”, “chỉnh âm lượng về 50”, “set volume to 40” → mức âm lượng 0..100
-function volumeLevel(query) {
+// B89 (máy thật): “tăng âm lượng thêm 10%” / “giảm âm lượng 20%” / “turn the volume up by 10%” là THAY ĐỔI tương đối (±N), không phải đặt mức N;
+// “lên/xuống/về/thành/mức/to N”, “âm lượng 30”, “đặt âm lượng 30%” là đặt mức tuyệt đối
+const VOL_RE = /(?:^|\s)(?:tang|giam|dat|chinh|de|cho|keo|van|set|change|turn|increase|decrease|raise|lower)?\s*(?:\S+\s+){0,2}?(?:am luong|volume|loa|tieng)\s+(?:\S+\s+){0,2}?(?:len|xuong|thanh|ve|o|muc|bang|to|=|:)?\s*(\d{1,3})\s*(?:%|phan tram|percent)?(?=\s|$)/;
+const ABS_BEFORE = new Set(['len', 'xuong', 've', 'thanh', 'muc', 'bang', 'to', '=', ':', 'o', 'at']);
+const REL_BEFORE = new Set(['them', 'bot', 'by', 'tang', 'giam', 'up', 'down', 'increase', 'decrease', 'raise', 'lower', 'nua', 'khoang']);
+function volumeParse(query) {
   for (const c of clauses(query)) {
-    const m = /(?:^|\s)(?:tang|giam|dat|chinh|de|cho|keo|van|set|change|turn)?\s*(?:\S+\s+){0,2}?(?:am luong|volume|loa|tieng)\s+(?:\S+\s+){0,2}?(?:len|xuong|thanh|ve|o|muc|bang|to|=|:)?\s*(\d{1,3})\s*(?:%|phan tram|percent)?(?=\s|$)/.exec(c);
-    if (!m) continue;
-    const before = c.slice(0, m.index); if (NEG.test(before.split(/\s+/).slice(-4).join(' ')) || QUESTION.test(c)) continue;
-    const n = Number(m[1]); if (n >= 0 && n <= 100) return n;
+    const m = VOL_RE.exec(c); if (!m) continue;
+    // phủ định: VOL_RE có thể bắt đầu khớp từ chính chữ “đừng/không” (phần đệm) → xét cả đoạn tới động từ
+    const before = c.slice(0, m.index + m[0].search(/am luong|volume|loa|tieng/)); if (NEG.test(before.split(/\s+/).slice(-5).join(' ')) || QUESTION.test(c)) continue;
+    const n = Number(m[1]); if (!(n >= 0 && n <= 100)) continue;
+    const head = c.slice(0, m.index + m[0].lastIndexOf(m[1])).trim(); const pre = head.split(/\s+/).pop() || '';
+    const up = /(?:^|\s)(?:tang|them|to len|lon len|increase|raise|up|turn up)(?=\s|$)/.test(head), down = /(?:^|\s)(?:giam|bot|nho lai|ha|decrease|lower|down|turn down)(?=\s|$)/.test(head);
+    const setVerb = /(?:^|\s)(?:dat|chinh|set|de)(?=\s|$)/.test(head);
+    const rel = !setVerb && (REL_BEFORE.has(pre) || (!ABS_BEFORE.has(pre) && (up || down)) || ((up || down) && /(?:^|\s)(?:them|bot|by|nua)(?=\s)/.test(head)));
+    if (rel && (up || down) && !(up && down)) return { delta: up ? n : -n };
+    return { level: n };
   }
   return null;
 }
+function volumeLevel(query) { const v = volumeParse(query); return v && v.level != null ? v.level : null; }
+function volumeDelta(query) { const v = volumeParse(query); return v && v.delta != null ? v.delta : null; }
 // B44: câu CHỈ là một lệnh hệ thống rõ ràng, không phải bước của việc khác → làm ngay, không cần mô hình (mô hình nhỏ hay in lệnh ra chữ thay vì gọi)
 const DIRECT_OK = ['volume_up', 'volume_down', 'mute', 'lock', 'show_desktop', 'open_settings'];
 function directSys(query) {
   const raw = String(query || '').trim(); if (!raw || raw.length > 80) return null;
+  const dv = volumeDelta(raw); if (dv != null) return { action: 'volume_change', level: dv };
   const lv = volumeLevel(raw); if (lv != null) return { action: 'volume_set', level: lv };
   const hits = DIRECT_OK.filter(a => sysAsked(a, raw)); if (hits.length !== 1) return null;
   // còn việc khác trong câu (“tăng âm lượng rồi mở YouTube”) → để mô hình làm cả chuỗi
   if (clauses(raw).filter(c => !Object.keys(RULES).some(a => clauseAsks(a, c)) && !/^(?:giup|ho|di|nhe|nha|voi|please|cho (?:toi|minh|em)|ok|nao|len|xuong|ngay|luon)(?:\s|$)/.test(c)).length) return null;
   return { action: hits[0] };
 }
-module.exports = { sysAsked, clauses, clauseAsks, RULES, volumeLevel, directSys };
+module.exports = { sysAsked, clauses, clauseAsks, RULES, volumeLevel, volumeDelta, volumeParse, directSys };

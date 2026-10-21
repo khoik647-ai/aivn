@@ -817,7 +817,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       onStep({ ...step }); logTool(step); calls++;
       deps.log && deps.log(`[aivn agent] lệnh hệ thống rõ ràng → làm ngay: ${JSON.stringify(args)} · ${step.status}`);
       const txt = out.refused ? 'Mình chưa làm vì bạn không cho phép.' : out.error ? `Mình chưa làm được: ${String(out.summary || out.error).slice(0, 160)}.` : `Đã làm: ${out.summary}.`;
-      return { text: txt, steps, usage, finishReason: 'stop', urls: [], memories: sys.memories.map(m => m.text), tools: names, warning: null };
+      return { text: txt, steps, usage, finishReason: 'stop', urls: [], memories: sys.memories.map(m => m.text), tools: names, warning: null, outcome: out.refused ? 'blocked' : out.error ? 'failed' : 'done', fast: 'system_action' };
     }
     // yêu cầu thao tác trên máy mà chưa có bước thật nào thành công → lượt đầu BẮT BUỘC gọi công cụ (hoặc cannot_do)
     const forceFirst = !headless && names.some(n => COMP.includes(n)) && !(autoOpen && autoOpen.ok) && (!!intent || actAsk || /^\s*(?:(?:hãy|giúp (?:tôi|mình|em)|làm ơn|vui lòng|bạn)\s+)*(mở|khởi động|gửi tin|nhắn tin|nhắn cho|gửi cho|đóng|tắt ứng dụng)(?=\s|$)/iu.test(query));
@@ -970,7 +970,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         }
         Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', check: step.check || null, summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, ms: Date.now() - step.startedAt });
         logTool(step);
-        cyc.push(call.name, args, { error: out.error, refused: out.refused, bad: !!step.check, summary: out.summary, verified: !!(out.verify && out.verify.sent) });
+        cyc.push(call.name, args, { error: out.error, refused: out.refused, bad: !!step.check, summary: out.summary, verified: !!(out.verify && out.verify.sent), sig: out.sig || (out.raw && out.raw.sig) || null });
         onStep({ ...step });
         msgs.push({ role: 'tool', tool_call_id: call.id, content: typeof out.forModel === 'string' && out.forModel ? out.forModel : String(out.forModel ?? out.message ?? out.summary ?? JSON.stringify(out)) || '(không có kết quả)' });
         // B49/B36: công cụ yêu cầu DỪNG (chặn người nhận 3 lần) hoặc tin đã bị GỬI NHẦM → dừng thật, không để mô hình làm tiếp

@@ -7,7 +7,7 @@
 // Mã thoát: 0 = done · 2 = failed/blocked · 3 = asked_user.
 const fs = require('fs'); const path = require('path');
 
-const FLAGS = { '--agent-task': 'task', '--qa-ui': 'script', '--profile': 'profile', '--model': 'model', '--out': 'out', '--shots': 'shots', '--timeout': 'timeout', '--lang': 'lang', '--qa-input-diag': 'inputDiag' };
+const FLAGS = { '--agent-task': 'task', '--qa-ui': 'script', '--profile': 'profile', '--model': 'model', '--out': 'out', '--shots': 'shots', '--timeout': 'timeout', '--lang': 'lang', '--qa-input-diag': 'inputDiag', '--agent-settings-from': 'agentFrom' };
 const BOOL = new Set(['--qa-input-diag']); // cờ không nhận giá trị
 const LANGS = ['vi', 'en', 'zh'];
 // lệnh nói rõ “chỉ soạn, đừng gửi”: lời từ chối mang lý do đó để AIVN AGENT dừng trước bước gửi (vẫn KHÔNG cho phép)
@@ -36,7 +36,11 @@ function validate(a, { cwd = process.cwd() } = {}) {
   const out = path.resolve(cwd, a.out); const shots = a.shots ? path.resolve(cwd, a.shots) : null;
   let timeout = a.timeout ? Number(a.timeout) : 600; if (!(timeout > 0)) return { ok: false, error: '--timeout phải là số giây > 0' }; timeout = Math.min(timeout, 3600);
   const lang = a.lang ? String(a.lang).toLowerCase() : null; if (lang && !LANGS.includes(lang)) return { ok: false, error: '--lang chỉ nhận vi, en hoặc zh' };
-  return { ok: true, args: { task, model: a.model ? String(a.model).trim() : null, out, shots, timeout, lang, profile: a.profile ? path.resolve(cwd, a.profile) : null } };
+  // B84: --agent-settings-from main — hồ sơ QA mới (--profile) chép cài đặt AIVN AGENT (agent*) từ hồ sơ thật (CHỈ ĐỌC hồ sơ thật)
+  const agentFrom = a.agentFrom != null ? String(a.agentFrom).trim().toLowerCase() : null;
+  if (agentFrom != null && agentFrom !== 'main') return { ok: false, error: '--agent-settings-from chỉ nhận "main"' };
+  if (agentFrom && !a.profile) return { ok: false, error: '--agent-settings-from main chỉ dùng kèm --profile <thư mục> (không có --profile thì đã dùng cài đặt thật)' };
+  return { ok: true, args: { task, model: a.model ? String(a.model).trim() : null, out, shots, timeout, lang, profile: a.profile ? path.resolve(cwd, a.profile) : null, agentFrom } };
 }
 // cổng bật: AIVN_QA_MODE=1 VÀ có cờ. Trả { enabled, args, warn }
 function fromArgv(argv, env = process.env, opts) {
@@ -50,12 +54,19 @@ function fromArgv(argv, env = process.env, opts) {
 }
 function validateKind(kind, raw, opts) { return kind === 'qa-ui' ? require('./qa-ui').validate(raw, opts) : kind === 'input-diag' ? require('./qa-input-diag').validate(raw, opts) : validate(raw, opts); }
 // 2b/4b/8b → Qwen3-VL Instruct đã có trên máy; còn lại: đúng id / tên tệp
+// B83 (máy thật): tệp chính hãng “Qwen3VL-8B-Instruct-Q4_K_M.gguf” (id qwen3vl-8b-instruct-q4_k_m) không khớp mẫu “qwen3-vl-8b-instruct”
+// → so theo tên đã CHUẨN HOÁ (bỏ dấu nối/gạch/chấm, chữ thường: qwen3-vl == qwen3vl == Qwen3VL) và theo id danh mục
+const normName = (x) => String(x || '').toLowerCase().replace(/\.gguf$/, '').replace(/[^a-z0-9]/g, '');
 function resolveModel(want, models = []) {
-  if (!want) return null; const w = String(want).toLowerCase();
+  if (!want) return null; const w = String(want).toLowerCase().trim();
+  const keys = (m) => [m.id, m.file, m.catalog && m.catalog.id].filter(Boolean).map(normName);
   const alias = /^(2|4|8)b$/.exec(w);
-  if (alias) { const re = new RegExp(`qwen3-vl-${alias[1]}b-instruct`, 'i'); return models.find(m => re.test(m.id) || re.test(m.file || '')) || null; }
+  if (alias) { const k = `qwen3vl${alias[1]}binstruct`; const hits = models.filter(m => keys(m).some(x => x.includes(k)));
+    return hits.sort((a, b) => (/q4km/.test(normName(b.file || b.id)) - /q4km/.test(normName(a.file || a.id))))[0] || null; }
+  const nw = normName(w);
   return models.find(m => String(m.id).toLowerCase() === w) || models.find(m => String(m.file || '').toLowerCase() === w || String(m.file || '').toLowerCase() === w + '.gguf')
-    || models.find(m => m.catalog && String(m.catalog.id).toLowerCase() === w) || null;
+    || models.find(m => m.catalog && String(m.catalog.id).toLowerCase() === w)
+    || (nw ? models.find(m => keys(m).some(x => x === nw)) || models.find(m => nw.length >= 6 && keys(m).some(x => x.startsWith(nw))) : null) || null;
 }
 const isRiskyAsk = (req = {}) => !!req.risk || RISK_RE.test([req.title, req.desc, req.text, req.label, req.tool, req.message].filter(Boolean).join(' '));
 // thẻ xin phép bất kỳ trong chế độ QA → luôn từ chối bước quan trọng; bước thường (không rủi ro) của lớp phủ màn hình được làm như bài đo
@@ -64,15 +75,23 @@ function answerFor(req, { draft }) {
   return { ok: true, reason: '' };
 }
 // trạng thái trung thực từ kết quả AIVN AGENT
-function statusOf(r, { denied = 0, draft = false, error = null, timedOut = false } = {}) {
+// B84: câu trả lời cuối NÓI là chưa làm được / không thể → không bao giờ là “done”
+const FAIL_CLAIM = /(?:chưa (?:làm (?:được|xong)|gửi (?:được|đi)|mở được|thể)|không (?:thể|làm được|điều khiển được|gửi được|mở được|có quyền điều khiển)|cannot|can['’]t|couldn['’]t|could not|unable to|not able to|failed to|无法|不能|没能|未能|没有办法)/iu;
+const SEND_TASK = /(?:^|[^\p{L}])(?:nhắn|gửi (?:tin|email|mail|thư)|send|text|message|reply|trả lời)(?![\p{L}])|发消息|发送|回复/iu;
+function statusOf(r, { denied = 0, draft = false, error = null, timedOut = false, task = '' } = {}) {
   if (timedOut) return { status: 'failed', reason: 'hết thời gian (--timeout)' };
-  if (error) return { status: error.code === 'AGENT_GATE' || error.code === 'NOT_ACTIVATED' || error.code === 'NO_MODEL' ? 'blocked' : 'failed', reason: String(error.message || error) };
+  if (error) return { status: ['AGENT_GATE', 'NOT_ACTIVATED', 'NO_MODEL', 'SCREEN_OFF'].includes(error.code) ? 'blocked' : 'failed', reason: String(error.message || error) };
   if (!r) return { status: 'failed', reason: 'không có kết quả' };
   if (r.outcome === 'asked_user' || r.asked) return { status: 'asked_user', question: String(r.text || ''), reason: r.asked ? String(r.asked) : 'hỏi lại người dùng' };
   if (r.finishReason === 'abort') return { status: 'failed', reason: 'bị dừng' };
   if (denied > 0 && !draft) return { status: 'blocked', reason: `${denied} bước cần xin phép đã bị tự từ chối (chế độ QA không bao giờ tự cho phép)` };
   if (r.outcome === 'blocked') return { status: 'blocked', reason: String(r.warning || r.text || '').slice(0, 300) };
   if (r.outcome === 'failed') return { status: 'failed', reason: String(r.text || '').slice(0, 300) };
+  // B84: KHÔNG mặc định “done” — chỉ khi AIVN AGENT báo done, câu trả lời không nói thất bại, và (việc gửi tin) có bước ĐÃ KIỂM CHỨNG gửi
+  if (r.outcome !== 'done') return { status: 'failed', reason: `không rõ kết quả (outcome=${r.outcome == null ? 'không có' : r.outcome})` };
+  if (FAIL_CLAIM.test(String(r.text || ''))) return { status: 'failed', reason: 'câu trả lời cuối nói chưa làm được: ' + String(r.text || '').slice(0, 240) };
+  const sendTask = !draft && SEND_TASK.test(String(task || '')) && !/(?:âm lượng|volume|音量)/iu.test(String(task || ''));
+  if (sendTask && !(r.steps || []).some(x => x && x.verify && x.verify.sent)) return { status: 'failed', reason: 'việc gửi tin nhưng không có bước nào kiểm chứng được là ĐÃ GỬI đúng người' };
   return { status: 'done' };
 }
 const exitCodeOf = (status) => status === 'done' ? 0 : status === 'asked_user' ? 3 : 2;
@@ -93,6 +112,14 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
   const ask = (kind, req = {}) => { const risk = kind !== 'desk' || isRiskyAsk(req); const a = risk ? answerFor({ ...req, risk: true }, { draft }) : { ok: true, reason: '' }; if (!a.ok) denied++;
     res.approvals.push({ kind, at: Date.now() - t0, title: req.title || req.label || req.kind || null, tool: req.tool || null, risk, recipient: req.recipient || null, desc: String(req.desc || req.message || req.text || '').slice(0, 300), answer: a.ok ? 'allowed (không rủi ro)' : 'denied' });
     deps.LOG && deps.LOG.log('qa', `QA tự trả lời thẻ ${kind}: ${a.ok ? 'làm (không rủi ro)' : 'TỪ CHỐI'} — ${req.title || req.desc || req.kind || ''}`); return a; };
+  let n = 0; const pendingSteps = [];
+  async function onStep1(s) {
+          if (s.status === 'running' || s.status === 'pending') { open.set(s.id, { i0: lines.length, t: Date.now() }); return; }
+          const o = open.get(s.id) || { i0: lines.length, t: Date.now() }; open.delete(s.id); n++;
+          const step = { n, id: s.id, auto: !!s.auto, tool: s.name, args: s.args || null, status: s.status, summary: s.summary || null, verification: s.verify || s.check || null, durationMs: s.ms ?? (Date.now() - o.t), debug: lines.slice(o.i0).filter(l => DEBUG_LINE.test(l)).slice(0, 40), shot: null };
+          if (args.shots && deps.capture) { try { const c = await deps.capture({ maxW: 1920 }); const f = path.join(args.shots, `step-${String(n).padStart(2, '0')}-${String(s.name || 'step').replace(/[^\w-]/g, '_')}.jpg`); fs.writeFileSync(f, Buffer.from(c.dataUrl.split(',')[1], 'base64')); step.shot = f; } catch (e) { step.shot = null; step.shotError = String(e.message || e).slice(0, 200); } }
+          res.steps.push(step);
+  }
   try {
     if (deps.activated && !deps.activated()) { const e = new Error('Máy chưa kích hoạt AIVN'); e.code = 'NOT_ACTIVATED'; throw e; }
     if (args.lang && deps.setLang) restoreLang = deps.setLang(args.lang);
@@ -102,25 +129,25 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
       const st0 = deps.engine.status(); if (!(st0.loaded && st0.path === m.path)) await deps.loadById(m.id, { reason: 'qa-runner' });
     }
     const st = deps.engine.status(); if (!st.loaded) { const e = new Error('Chưa nạp mô hình nào (dùng --model)'); e.code = 'NO_MODEL'; throw e; }
+    // B84: điều khiển màn hình đang TẮT (thường do --profile mới) → dừng ngay, nói rõ, thay vì chạy “què” rồi báo done
+    { const sc = deps.screenControl ? deps.screenControl() : null; if (sc && !sc.on) { const e = new Error(`Điều khiển màn hình đang TẮT trong hồ sơ này (${sc.why}). Bật trong Cài đặt → AIVN AGENT, hoặc chạy kèm --agent-settings-from main để chép cài đặt AIVN AGENT từ hồ sơ thật.`); e.code = 'SCREEN_OFF'; throw e; } }
     res.model = { id: st.id, file: st.path ? path.basename(st.path) : null, mode: st.mode || null, contextSize: st.contextSize || null, gpuLayers: st.gpuLayers ?? null, totalLayers: st.totalLayers ?? null, gpu: st.gpu || null };
     res.timings.modelLoadMs = Date.now() - tl;
     if (args.shots) fs.mkdirSync(args.shots, { recursive: true });
     if (deps.desk && deps.desk.setBenchAnswer) deps.desk.setBenchAnswer((req) => ask('desk', req));
-    const tr = Date.now(); let n = 0;
+    const tr = Date.now();
     r = await deps.runAgentTurn({ reqId: null, convoId: 'qa-' + runId, messages: [{ role: 'user', content: args.task }], headless: false, signal: ac.signal,
       qa: { confirm: async (req) => { ask('confirm', req); return false; }, confirmScreen: async (req) => { ask('screen', req); return { ok: false }; },
         approve: async (card) => { const x = ask('approve', card); return { ok: false, reason: x.reason }; },
-        onStep: async (s) => {
-          if (s.status === 'running' || s.status === 'pending') { open.set(s.id, { i0: lines.length, t: Date.now() }); return; }
-          const o = open.get(s.id) || { i0: lines.length, t: Date.now() }; open.delete(s.id); n++;
-          const step = { n, tool: s.name, args: s.args || null, status: s.status, summary: s.summary || null, verification: s.verify || s.check || null, durationMs: s.ms ?? (Date.now() - o.t), debug: lines.slice(o.i0).filter(l => DEBUG_LINE.test(l)).slice(0, 40), shot: null };
-          if (args.shots && deps.capture) { try { const c = await deps.capture({ maxW: 1920 }); const f = path.join(args.shots, `step-${String(n).padStart(2, '0')}-${String(s.name || 'step').replace(/[^\w-]/g, '_')}.jpg`); fs.writeFileSync(f, Buffer.from(c.dataUrl.split(',')[1], 'base64')); step.shot = f; } catch (e) { step.shot = null; step.shotError = String(e.message || e).slice(0, 200); } }
-          res.steps.push(step);
-        } } });
+        onStep: (s) => { const p = onStep1(s); pendingSteps.push(p); return p; } } });
+    // B89: onStep chụp ảnh (bất đồng bộ) rồi mới ghi bước — đường tắt (lệnh hệ thống) trả kết quả ngay → phải chờ hết trước khi viết result.json
+    await Promise.allSettled(pendingSteps);
+    if (r && Array.isArray(r.steps)) for (const s of r.steps) if (s && s.status !== 'running' && !res.steps.some(x => x.id === s.id)) res.steps.push({ n: res.steps.length + 1, id: s.id, tool: s.name, args: s.args || null, status: s.status, summary: s.summary || null, verification: s.verify || s.check || null, durationMs: s.ms ?? null, debug: [], shot: null, auto: !!s.auto });
+    res.steps.sort((a, b) => a.n - b.n);
     res.timings.agentMs = Date.now() - tr;
   } catch (e) { error = e; }
   finally { clearTimeout(timer); untap(); if (deps.desk && deps.desk.setBenchAnswer) deps.desk.setBenchAnswer(null); if (restoreLang) { try { restoreLang(); } catch {} } }
-  const s = statusOf(r, { denied, draft, error: timedOut ? null : error, timedOut });
+  const s = statusOf(r, { denied, draft, error: timedOut ? null : error, timedOut, task: args.task });
   Object.assign(res, { status: s.status, reason: s.reason || null, question: s.question || null, finalAnswer: r ? r.text || '' : null, warning: r ? r.warning || null : null, draftOnly: draft, deniedApprovals: denied, exitCode: exitCodeOf(s.status) });
   res.timings.totalMs = Date.now() - t0; res.timings.finishedAt = new Date().toISOString();
   res.log = lines.slice(-600);

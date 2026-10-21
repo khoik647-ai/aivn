@@ -51,7 +51,7 @@ const QA_PROFILE = (() => { try { const q = require('./qa-runner').fromArgv(proc
   const real = app.getPath('userData'); const dir = q.args.profile; if (path.resolve(dir) === path.resolve(real)) return null;
   fs.mkdirSync(dir, { recursive: true }); app.setPath('userData', dir);
   try { const lf = path.join(real, 'license.json'); if (fs.existsSync(lf)) { fs.copyFileSync(lf, path.join(dir, 'license.json')); } } catch {}
-  return { dir, real, models: path.join(real, 'models') }; } catch { return null; } })();
+  return { dir, real, models: path.join(real, 'models'), agentFrom: q.args.agentFrom || null }; } catch { return null; } })();
 const LOG = require('./logger');
 LOG.init(path.join(app.getPath('userData'), 'logs'));
 { const os_ = require('os'); LOG.block('app', `Khởi động AIVN ${app.getVersion()}${app.isPackaged ? '' : ' (mã nguồn)'}`, [`Hệ điều hành: ${process.platform} ${process.arch} ${os_.release()}${process.getSystemVersion ? ' (' + process.getSystemVersion() + ')' : ''}`, `CPU: ${(os_.cpus()[0] || {}).model || '?'} · ${os_.cpus().length} luồng`, `RAM: ${(os_.totalmem() / 1024 ** 3).toFixed(1)} GB (trống ${(os_.freemem() / 1024 ** 3).toFixed(1)} GB)`, `Electron ${process.versions.electron} · thư mục dữ liệu: ${app.getPath('userData')}`]); }
@@ -189,6 +189,9 @@ function initStores() {
   });
   // thư mục mô hình do người dùng chọn (Cài đặt → Chung / Mô hình của tôi → Đổi thư mục); ổ đã rút / không ghi được → về mặc định, báo trong nhật ký
   if (!QA_PROFILE && settings.data.modelsDir) { const v = require('./models-dir').validateTarget(settings.data.modelsDir); if (v.ok) paths.models = v.dir; else { modelsDirProblem = `${settings.data.modelsDir}: ${v.error}`; LOG.log('app', 'Thư mục mô hình đã chọn không dùng được, tạm dùng thư mục mặc định: ' + modelsDirProblem); } }
+  // B84: --agent-settings-from main — chép cài đặt AIVN AGENT (agent*) từ hồ sơ thật sang hồ sơ QA; hồ sơ thật chỉ ĐỌC
+  if (QA_PROFILE && QA_PROFILE.agentFrom === 'main') { try { const real = JSON.parse(fs.readFileSync(path.join(QA_PROFILE.real, 'settings.json'), 'utf8')); const ks = Object.keys(real).filter(k => /^agent/.test(k));
+    for (const k of ks) settings.data[k] = real[k]; settings.save(); LOG.log('qa', `Hồ sơ QA: đã chép ${ks.length} cài đặt AIVN AGENT từ hồ sơ thật (chỉ đọc): ${ks.join(', ')}`); } catch (e) { LOG.log('qa', 'Hồ sơ QA: không chép được cài đặt AIVN AGENT từ hồ sơ thật: ' + e.message); } }
   if (!settings.data.perfMigrated) { if (settings.data.contextSize === 4096) settings.data.contextSize = 0; settings.data.perfMigrated = 1; settings.save(); } // 4096 là mặc định cũ → chuyển sang Tự động theo mức máy
   Object.assign(process.env, Object.fromEntries(Object.entries(engineEnv()).filter(([k, v]) => v && !process.env[k]))); // bộ máy (tiến trình riêng) kế thừa các biến này khi khởi động
   convos = new JsonStore(path.join(ud, 'conversations.json'), { list: [] });
@@ -2235,6 +2238,31 @@ list(''); open('Nhóm Lớp K27');
       await step('b70-click-send', { action: 'click', element: 'Gửi' });
       out.final = await st(); throw null;
     }
+    if (process.env.AIVN_QA_B21_MODE === 'b85') { // B85 (máy thật, Zalo 3 cột): “Cloud của tôi” nay là “My Documents” (kết quả ghi “Tên cũ: Cloud của tôi”), bảng “Thông tin hội thoại” bên phải
+      const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:210px 1fr 190px;height:100vh}
+#l{border-right:1px solid #ccc;padding:8px}#q{width:180px;font-size:20px;padding:5px}.it{padding:8px 4px;cursor:pointer}.it small{display:block;font-size:17px;color:#333}
+#c{display:flex;flex-direction:column;border-right:1px solid #ccc}#h{font-weight:bold;padding:12px 16px;border-bottom:1px solid #ccc}#m{flex:1;padding:16px}#comp{font-size:20px;margin:10px;padding:8px}#comp::placeholder{color:#222}
+#r{padding:10px;text-align:center}#r b{display:block;margin-bottom:40px}</style>
+<div id=l><input id=q placeholder="Tìm kiếm"><div id=list></div></div><div id=c><div id=h></div><div id=m></div><input id=comp></div><div id=r><b>Thông tin hội thoại</b><div id=rn></div></div>
+<script>const chats=[{n:'Nhóm Lớp K27'},{n:'My Documents',old:'Cloud của tôi'},{n:'Trần Văn Bình'}];window.S={cur:'',sent:[]};
+const fold=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').toLowerCase();
+function list(f){const el=document.getElementById('list');el.innerHTML='';for(const c of chats.filter(c=>!f||fold(c.n+' '+(c.old||'')).includes(fold(f)))){const d=document.createElement('div');d.className='it';d.innerHTML='<span></span>'+(f&&c.old?'<small></small>':'');d.firstChild.textContent=c.n;if(f&&c.old)d.lastChild.textContent='Tên cũ: '+c.old;d.onclick=()=>open(c.n);el.appendChild(d);}}
+function open(n){S.cur=n;h.textContent=n;rn.textContent=n;comp.placeholder='Nhập @, tin nhắn tới '+n;m.innerHTML='';q.value='';list('');comp.focus();}
+comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sent.push({to:S.cur,text:comp.value});const b=document.createElement('div');b.textContent=comp.value;m.appendChild(b);comp.value='';}});
+q.addEventListener('input',e=>list(q.value));list('');open('Nhóm Lớp K27');</script>`;
+      await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(zh)); t.setTitle('Zalo'); t.focus(); t.webContents.focus(); await sleep(700);
+      const q5 = 'Mở Zalo và gửi tin "AIVN test - thử beta.3" cho Cloud của tôi. Không cần hỏi lại.';
+      const c5 = { ...ctx, userQuery: q5, auto: require('./agent/autonomy').forTurn({ setting: false, query: q5 }) };
+      const step5 = async (name, a) => { qaAsks.length = 0; let r; try { r = await d.act(a, c5); } catch (e) { r = { error: String(e.message || e) }; } await sleep(600);
+        out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 2500), asks: qaAsks.slice(), state: await st() }); save(); return r; };
+      await d.look({ window: 'Zalo' }, c5);
+      await step5('b85-before-open', { action: 'type_text', text: 'AIVN test - thử beta.3', submit: true });
+      await step5('b85-click-search', { action: 'click', element: 'Tìm kiếm' });
+      await step5('b85-type-search', { action: 'type_text', text: 'Cloud của tôi' });
+      await step5('b85-click-result', { action: 'click', element: 'Tên cũ: Cloud của tôi' });
+      await step5('b85-send', { action: 'type_text', text: 'AIVN test - thử beta.3', submit: true });
+      out.final = await st(); throw null;
+    }
     if (process.env.AIVN_QA_B21_MODE === 'b76') { // B76 (QA lượt 8, Outlook o10): nội dung thư bị gõ vào ô Tiêu đề 3 lần (id đổi theo chữ trong ô)
       const ol = `<!doctype html><meta charset=utf-8><title>Thư mới - Outlook</title><style>body{font:16px sans-serif;margin:20px}input,textarea{display:block;width:700px;font:26px sans-serif;margin:18px 0;padding:10px;border:1px solid #888}textarea{height:220px}::placeholder{color:#222;opacity:1}</style>
 <input id=to placeholder="Người nhận"><input id=subj placeholder="Thêm tiêu đề"><textarea id=body placeholder="Nhập nội dung thư tại đây"></textarea>
@@ -2939,6 +2967,7 @@ async function qaRun(req) {
       hookDialogs: (h) => U.hookDialogs(dialog, h), setMainClock: U.setMainClock, notifyModel: () => send('model:status', engine.status()), hw: () => engine.hardwareInfo(),
       metrics: () => ({ appMemMB: Math.round(app.getAppMetrics().reduce((s, x) => s + (x.memory ? x.memory.workingSetSize : 0), 0) / 1024) }) }, { runId }); }
     return await QAR.run(args, { version: app.getVersion(), commit: qaCommit(), engine, listModels, loadById, runAgentTurn, desk: getDesk(), displays: qaDisplays, LOG, activated,
+      screenControl: () => { const d = settings.data; const why = d.agentComputer === false ? 'agentComputer = tắt' : !d.agentScreen ? 'agentScreen = tắt' : ''; return { on: !why, why }; },
       capture: (o) => require('./screen-control').capture(o),
       setLang: (l) => { const old = settings.data.uiLang; settings.data.uiLang = l; send('settings:changed', { uiLang: l }); return () => { settings.data.uiLang = old; send('settings:changed', { uiLang: old }); }; } }, { runId });
   } finally { qaBusy = false; }
