@@ -66,7 +66,8 @@ const ADD_COLUMNS = {
   invoices: [['tax_rounding', 'TEXT'], ['ref', 'TEXT'], ['po_id', 'TEXT']],
   invoice_lines: [['vat_pct', 'REAL'], ['po_line_id', 'TEXT']],
   pickings: [['po_id', 'TEXT']],
-  moves: [['po_line_id', 'TEXT']],
+  // B54/N3: hàng xuất khi tồn âm — phần chưa có giá (vacuum_qty) và số đã định giá lại (reval) khi hàng về (Odoo: stock.valuation.layer remaining_qty < 0)
+  moves: [['po_line_id', 'TEXT'], ['vacuum_qty', 'REAL DEFAULT 0'], ['reval', 'INTEGER DEFAULT 0']],
   payments: [['payment_type', "TEXT DEFAULT 'inbound'"]],
 };
 const VERSION = 3;

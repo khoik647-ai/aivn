@@ -149,10 +149,28 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
     db.tx(() => {
       const rest = [];
       for (const { m, done } of plan) {
-        if (pk.kind === 'in' && done > EPS && (product(m.product_id) || {}).type === 'product') { // giá vốn bình quân (AVCO), chỉ hàng lưu kho
-          const pr = product(m.product_id); const h = Math.max(0, onHand(m.product_id));
-          const cost = h + done > EPS ? Math.round(((pr.cost || 0) * h + (m.unit_cost || 0) * done) / (h + done)) : m.unit_cost || 0;
-          db.run('UPDATE products SET cost = ?, updated_at = ? WHERE id = ?', [cost, now(), m.product_id]);
+        const pr = product(m.product_id);
+        if (pr && pr.type === 'product' && Math.abs(done) > EPS) {
+          const h0 = onHand(m.product_id);
+          const inQ = pk.kind === 'in' ? done : pk.kind === 'adj' && done > 0 ? done : 0;
+          const outQ = pk.kind === 'out' ? done : pk.kind === 'adj' && done < 0 ? -done : 0;
+          if (inQ > EPS) {
+            const price = pk.kind === 'in' ? m.unit_cost || 0 : pr.cost || 0;
+            // B54/N3 (QA lượt 6–8): hàng về khi tồn đang âm → phần đã xuất “chưa có hàng” được định giá lại theo giá hàng về, cũ trước mới trước (Odoo vacuum)
+            if (h0 < -EPS) {
+              let cover = Math.min(-h0, inQ);
+              for (const v of db.all("SELECT id, vacuum_qty, unit_cost FROM moves WHERE product_id = ? AND state = 'done' AND vacuum_qty > 0 ORDER BY done_at, created_at, id", [m.product_id])) {
+                if (cover <= EPS) break; const t = T.round3(Math.min(cover, v.vacuum_qty)); cover = T.round3(cover - t);
+                db.run('UPDATE moves SET vacuum_qty = ?, reval = COALESCE(reval, 0) + ? WHERE id = ?', [T.round3(v.vacuum_qty - t), Math.round(t * (price - (v.unit_cost || 0))), v.id]);
+              }
+            }
+            if (pk.kind === 'in') { // giá vốn bình quân (AVCO); tồn ≤ 0 → giá vốn mới = giá hàng về (như Odoo)
+              const h = Math.max(0, h0);
+              const cost = h + done > EPS ? Math.round(((pr.cost || 0) * h + price * done) / (h + done)) : price;
+              db.run('UPDATE products SET cost = ?, updated_at = ? WHERE id = ?', [cost, now(), m.product_id]);
+            }
+          }
+          if (outQ > EPS) db.run('UPDATE moves SET unit_cost = ?, vacuum_qty = ? WHERE id = ?', [pr.cost || 0, T.round3(Math.max(0, outQ - Math.max(0, h0))), m.id]); // hàng xuất định giá lúc hoàn tất
         }
         if (pk.kind !== 'adj' && done + EPS < m.qty) rest.push({ product_id: m.product_id, qty: +(m.qty - done).toFixed(6), unit_cost: m.unit_cost, so_line_id: m.so_line_id, po_line_id: m.po_line_id });
         if (done > EPS || pk.kind === 'adj') db.run("UPDATE moves SET qty_done = ?, qty = ?, state = 'done', done_at = ? WHERE id = ?", [done, pk.kind === 'adj' ? m.qty : done, now(), m.id]);
