@@ -44,10 +44,13 @@ const CJK = /[\u3400-\u9fff]/;
 const KEEP = /NGUYỄN NGỌC KHÔI|SINH VIÊN VLU|Tiếng Việt|AIVN|Khôi/i; // tên riêng / tên ngôn ngữ trong ô chọn ngôn ngữ
 function i18nIssues(texts, lang) {
   const out = [];
-  for (const t0 of texts) { const t = String(t0).trim(); if (!t || KEEP.test(t)) continue;
+  // B87: KEEP chỉ BỎ phần tên riêng rồi xét phần còn lại (trước đây bỏ cả dòng — đường dẫn …\AIVN\models làm sót “ổ C: còn trống … mô hình đang chiếm …”)
+  for (const t0 of texts) { const t = String(t0).trim(); if (!t) continue; const rest = t.replace(new RegExp(KEEP.source, 'gi'), ' ').trim(); if (!rest) continue;
+    if (lang !== 'vi' && /\d,\d{1,3}\s?(?:[KMGT]?B|%|tok\/s|GHz|MHz)\b/.test(t)) out.push({ kind: 'vi-number-in-' + lang, text: t.slice(0, 160) }); // “170,42 GB” trong en/zh
+    if (/[\p{L}\d]::(?:\s|$)/u.test(t) && !/https?:|::\w/.test(t)) out.push({ kind: 'double-colon', text: t.slice(0, 160) }); // “drive C:: ”
+    if (lang !== 'vi' && VI_CH.test(rest)) { out.push({ kind: 'vi-in-' + lang, text: t.slice(0, 160) }); if (out.length >= 60) break; continue; }
     if (/^[a-z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9_-]+){1,4}$/.test(t) && !/\.(gguf|json|csv|pdf|xlsx|png|jpg|exe|dmg|md|txt|com|vn|io|org|net|ai)$/i.test(t)) out.push({ kind: 'raw-key', text: t });
     else if (/\{\d+\}|\$\{|\bundefined\b|\bNaN\b|\[object Object\]/.test(t)) out.push({ kind: 'placeholder', text: t.slice(0, 160) });
-    else if (lang !== 'vi' && VI_CH.test(t)) out.push({ kind: 'vi-in-' + lang, text: t.slice(0, 160) });
     else if (lang !== 'zh' && CJK.test(t)) out.push({ kind: 'zh-in-' + lang, text: t.slice(0, 160) });
     if (out.length >= 60) break; }
   return out;

@@ -59,7 +59,8 @@ function show(view, opts = {}) {
 const VIEW_TITLES = { chat: 'Trò chuyện', agent: 'AIVN AGENT', server: 'Nhà phát triển', models: 'Mô hình của tôi', discover: 'Khám phá', schedule: 'Lịch tự động', memory: 'Ghi nhớ', settings: 'Cài đặt', crm: 'Khách hàng' };
 $$('.nav-item').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
 // đổi ngôn ngữ: vẽ lại màn hình đang mở để số/ngày theo định dạng mới (chữ thì I18N đã dịch ngay); khung chat giữ nguyên
-window.addEventListener('aivn-lang', () => { if (isAgent() && !(state.current && state.current.messages.length)) A.agentInfo().then(i => { state.agent = i; renderMessages(); }).catch(() => {}); const v = show.cur; if (v && v !== 'chat' && v !== 'agent') { try { show(v, v === 'settings' ? { tab: setTab.cur } : {}); } catch {} } });
+window.addEventListener('aivn-lang', () => { try { if (typeof mdirRefresh === 'function' && $('#mdirInfo')) mdirRefresh().catch(() => {}); } catch {} // B87: số định dạng lại theo ngôn ngữ mới (170,42 → 170.42)
+ if (isAgent() && !(state.current && state.current.messages.length)) A.agentInfo().then(i => { state.agent = i; renderMessages(); }).catch(() => {}); const v = show.cur; if (v && v !== 'chat' && v !== 'agent') { try { show(v, v === 'settings' ? { tab: setTab.cur } : {}); } catch {} } });
 document.addEventListener('click', (e) => { const g = e.target.closest('[data-goto]'); if (g) show(g.dataset.goto); });
 // Trò chuyện thường và AIVN AGENT dùng chung khung chat; mỗi chế độ có danh sách cuộc trò chuyện riêng
 function setMode(mode) {
@@ -2125,7 +2126,7 @@ async function refreshSecurity() {
     <div class="kv"><span>Mã máy</span><b><code id="secMachine">${esc(l.machineCode)}</code> <button class="btn sm" id="secCopyMc">Sao chép</button></b>
     <span>Trạng thái</span><b>${l.status === 'ok' ? 'Đã kích hoạt' : esc(l.message || l.status)}${l.name ? ' · cấp cho ' + esc(l.name) : ''}</b>
     <span>Hạn dùng</span><b>${l.expiresAt ? 'đến ' + fmtDate(l.expiresAt) : 'vĩnh viễn'}</b>
-    <span>Kiểm tra thu hồi</span><b>${l.lastCheckOk ? 'lần cuối ' + new Date(l.lastCheckOk).toLocaleString(LOC()) : 'chưa kiểm tra được'}${l.graceLeftMs != null ? ` · còn dùng ngoại tuyến ${Math.max(0, Math.floor(l.graceLeftMs / 864e5))} ngày` : ''}</b></div>
+    <span>Kiểm tra thu hồi</span><b>${l.lastCheckOk ? `lần cuối ${new Date(l.lastCheckOk).toLocaleString(LOC())}` : 'chưa kiểm tra được'}${l.graceLeftMs != null ? ` · còn dùng ngoại tuyến ${Math.max(0, Math.floor(l.graceLeftMs / 864e5))} ngày` : ''}</b></div>
     <div class="row"><button class="btn sm" id="secRecheck">Kiểm tra lại qua Internet</button></div>`;
   const k = await A.lockInfo();
   $('#lockState').innerHTML = k.enabled ? '🔒 Khoá ứng dụng đang <b>bật</b>.' : 'Khoá ứng dụng đang <b>tắt</b>.';
@@ -2381,7 +2382,8 @@ $('#setNav').addEventListener('keydown', (e) => {
 $('#setKeys').addEventListener('click', openKeys);
 // ---------- Thư mục mô hình (beta.3): đổi ổ khi ổ C: sắp đầy — chuyển mô hình có tiến độ, hoặc chỉ trỏ sang thư mục mới ----------
 async function mdirRefresh() {
-  const d = await A.modelsDirInfo(); if (!d) return;
+  const d0 = await A.modelsDirInfo(); if (!d0) return;
+  const d = { ...d0, drive: String(d0.drive || '').replace(/:$/, '') }; // B87: “ổ C” / “drive C: …” / “C 盘”, không còn “drive C::”
   $('#mdirInfo').textContent = `${d.dir} · ổ ${d.drive} còn trống ${d.free == null ? 'không rõ' : fmtBytes(d.free)} · mô hình đang chiếm ${fmtBytes(d.bytes)}`;
   $('#mdirReset').hidden = d.isDefault || d.moving; $('#mdirChange').disabled = d.moving || d.qaProfile; $('#modelsDirChange').hidden = d.qaProfile;
   const w = $('#mdirWarn'); w.hidden = !d.problem; w.textContent = d.problem ? `Thư mục đã chọn không dùng được, đang dùng thư mục mặc định: ${d.problem}` : '';
@@ -2392,6 +2394,7 @@ async function mdirChange() {
   const r = await A.modelsDirPick(); if (!r || r.canceled) return; if (!r.ok) { toast(r.error, true); return; }
   const cur = r.current; let mode = null;
   if (cur.files > 0) {
+    r.drive = String(r.drive || '').replace(/:$/, '');
     const move = await modalAsk({ icon: '📂', title: 'Chuyển mô hình sang thư mục mới?', message: `Chuyển ${cur.files} tệp (${fmtBytes(cur.bytes)}) từ ${cur.dir} sang ${r.dir} (ổ ${r.drive} còn trống ${r.free == null ? 'không rõ' : fmtBytes(r.free)}). Mô hình đang nạp sẽ được gỡ ra trong lúc chuyển.`, okLabel: 'Chuyển mô hình', noLabel: 'Không chuyển' });
     if (move) { if (!r.fits) { toast(`Không đủ dung lượng trống: cần ${fmtBytes(cur.bytes)}, ổ ${r.drive} chỉ còn ${fmtBytes(r.free)}. Hãy chọn ổ khác.`, true); return; } mode = 'move'; }
     else if (await modalAsk({ icon: '📁', title: 'Chỉ dùng thư mục mới?', message: `Mô hình tải về sau sẽ lưu ở ${r.dir}. Các mô hình đã có vẫn ở ${cur.dir} và vẫn dùng được.`, okLabel: 'Dùng thư mục mới', noLabel: 'Huỷ' })) mode = 'point';
@@ -2404,7 +2407,7 @@ async function mdirChange() {
   else toast(mode === 'move' ? `Đã chuyển ${x.moved + (x.skipped || 0)} tệp sang ${r.dir} ✓` : `Đã đổi thư mục mô hình sang ${r.dir} ✓`);
   await mdirRefresh(); refreshModels();
 }
-A.onModelsDirProgress((p) => { if (!p || p.finished) return; $('#mdirProg').hidden = false; $('#mdirBar').value = p.bytesTotal ? p.bytesDone / p.bytesTotal : p.done / Math.max(1, p.total); $('#mdirProgTxt').textContent = `${p.done}/${p.total} tệp · ${fmtBytes(p.bytesDone)} / ${fmtBytes(p.bytesTotal)} · ${String(p.file || '').split(/[\\/]/).pop()}`; });
+A.onModelsDirProgress((p) => { if (!p || p.finished) return; $('#mdirProg').hidden = false; $('#mdirBar').value = p.bytesTotal ? p.bytesDone / p.bytesTotal : p.done / Math.max(1, p.total); const fn = document.createElement('span'); fn.dataset.noi18n = ''; fn.textContent = String(p.file || '').split(/[\\/]/).pop(); $('#mdirProgTxt').replaceChildren(document.createTextNode(`${p.done}/${p.total} tệp · ${fmtBytes(p.bytesDone)} / ${fmtBytes(p.bytesTotal)}`), document.createTextNode(' · '), fn); }); // B87: chỉ tên tệp không dịch
 $('#mdirChange').addEventListener('click', mdirChange); $('#modelsDirChange').addEventListener('click', mdirChange);
 $('#mdirCancel').addEventListener('click', () => A.modelsDirCancel());
 $('#mdirReset').addEventListener('click', async () => { const x = await A.modelsDirReset(); if (x && x.ok) toast('Đã về thư mục mô hình mặc định ✓'); await mdirRefresh(); refreshModels(); });
@@ -2427,8 +2430,9 @@ function paintSbModel(st) {
   else el.innerHTML = '<i class="sb-dot off"></i><span>Chưa nạp mô hình</span>';
   el.title = el.textContent;
 }
+let lastSbSpeed = null;
 function paintSbSpeed(u) {
-  const el = $('#sbSpeed'); if (!el || !u || !u.tokensPerSecond) return;
+  const el = $('#sbSpeed'); if (!el || !u || !u.tokensPerSecond) return; lastSbSpeed = u;
   el.hidden = false; el.textContent = `${u.tokensPerSecond.toFixed(1).replace('.', DEC())} token/giây`;
   el.title = `Câu trả lời gần nhất: ${u.completion_tokens} token trong ${u.seconds.toFixed(1)} giây`;
 }
@@ -2442,6 +2446,7 @@ async function pollSb() {
   } catch {}
 }
 pollSb(); setInterval(() => { if (!document.hidden) pollSb(); }, 2000);
+window.addEventListener('aivn-lang', () => { pollSb(); if (lastSbSpeed) paintSbSpeed(lastSbSpeed); }); // B87: số trên thanh trạng thái theo dấu thập phân của ngôn ngữ mới ngay, không chờ 2 giây
 // 0.15.2: lỗi thiếu ngữ cảnh → nút "Tăng ngữ cảnh": nạp lại mô hình đang dùng với ngữ cảnh gấp đôi (tối đa 32768)
 const CTX_ERR_UI = /cần nhiều ngữ cảnh hơn|ngữ cảnh[^.]*quá nhỏ/i;
 document.addEventListener('click', async (e) => {
