@@ -117,10 +117,10 @@ function decodeText(buf) {
 const OFFICE_EXT = new Set(['xlsx', 'xlsm', 'pptx', 'odt', 'ods', 'odp']);
 const ARCHIVE_EXT = new Set(['zip']);
 // B14 (QA lượt 2): MỘT danh sách loại tệp đọc được, dùng cho vùng thả tệp, nút 📎, bộ chọn tệp, mô tả công cụ read_file và thông báo lỗi.
-// Âm thanh/video CHƯA đọc được (chưa có đường xử lý trong giao diện) → không liệt kê, không cho chọn.
-const SUPPORTED_TEXT = 'PDF (kể cả bản scan, đọc bằng OCR) · Word DOCX/ODT · Excel XLSX/ODS · PowerPoint PPTX/ODP · ZIP · TXT/MD/CSV/JSON · mã nguồn · ảnh PNG/JPG/WEBP/GIF/BMP (đọc chữ bằng OCR) · tối đa 20 MB';
-const SUPPORTED_SENTENCE = 'AIVN đọc được PDF (kể cả bản scan), Word (DOCX/ODT), Excel (XLSX/ODS), PowerPoint (PPTX/ODP), ZIP, ảnh (đọc chữ bằng OCR), TXT/MD/CSV/JSON và tệp mã nguồn.';
-const AV_NOT_YET = (name, kind) => `"${name}" là ${kind}: AIVN chưa đọc được âm thanh/video. Nếu có bản chép lời hoặc phụ đề (TXT, SRT, VTT), hãy gửi tệp đó.`;
+// Âm thanh/video (0.16): chép lời bằng bộ nghe Whisper ở tiến trình chính (src/media.js), không qua bộ đọc tài liệu này.
+const SUPPORTED_TEXT = 'PDF (kể cả bản scan, đọc bằng OCR) · Word DOCX/ODT · Excel XLSX/ODS · PowerPoint PPTX/ODP · ZIP · TXT/MD/CSV/JSON · mã nguồn · ảnh PNG/JPG/WEBP/GIF/BMP (đọc chữ bằng OCR) · âm thanh/video MP3/WAV/M4A/OGG/FLAC/MP4/WEBM/MOV (chép lời trên máy) · tài liệu tối đa 20 MB, âm thanh/video tối đa 1 GB';
+const SUPPORTED_SENTENCE = 'AIVN đọc được PDF (kể cả bản scan), Word (DOCX/ODT), Excel (XLSX/ODS), PowerPoint (PPTX/ODP), ZIP, ảnh (đọc chữ bằng OCR), âm thanh/video (chép lời trên máy), TXT/MD/CSV/JSON và tệp mã nguồn.';
+const AV_NOT_YET = (name, kind) => `"${name}" là ${kind}: AIVN chép lời tệp này bằng bộ nghe (đính kèm trực tiếp vào khung trò chuyện).`;
 const AUDIO_EXT = new Set(['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'flac', 'weba']);
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'm4v', 'mkv', 'ogv']);
 const LEGACY = { doc: 'docx', xls: 'xlsx', ppt: 'pptx' };
@@ -237,5 +237,5 @@ function buildUserContent(question, packedBlock) {
   return `Dưới đây là nội dung tài liệu người dùng gửi kèm. Hãy dựa vào tài liệu để trả lời; nếu tài liệu không có thông tin, hãy nói rõ. Phần chữ đọc từ ảnh (OCR) có thể có lỗi chính tả nhỏ.\n\n${packedBlock}\n\nCâu hỏi: ${question}`;
 }
 
-const PICKER_EXT = [...new Set(['pdf', 'docx', ...OFFICE_EXT, ...ARCHIVE_EXT, ...OCR_EXT, ...TEXT_EXT])];
+const PICKER_EXT = [...new Set(['pdf', 'docx', ...OFFICE_EXT, ...ARCHIVE_EXT, ...OCR_EXT, ...AUDIO_EXT, ...VIDEO_EXT, ...TEXT_EXT])];
 module.exports = { SUPPORTED_TEXT, SUPPORTED_SENTENCE, PICKER_EXT, OCR_EXT, OFFICE_EXT, AUDIO_EXT, VIDEO_EXT, ARCHIVE_EXT, extOf, extractBuffer, extractFile, packDocuments, buildUserContent, keywords, scoreChunk, chunkText, DocError, MAX_FILE_BYTES, IMAGE_EXT, TEXT_EXT };

@@ -68,7 +68,7 @@ const CLAIMS = {
     d('screen', S.qvl25_7, 'capable of computer use and phone use')],
   'ui-tars-1.5-7b-q4_k_m': [v('vision', 'v0143-nhin-anh', 'Đọc đúng chữ và màu trên ảnh thử.'), v('gui', 'v0143-nhin-anh', 'Chỉ đúng nút Gửi trên ảnh chụp Zalo.'), x('tools', 'v0143-nhin-anh', 'Không gọi được công cụ mở ứng dụng.'),
     d('screen', S.uitars, 'Computer Use … OSworld')],
-  'qwen3-vl-2b-instruct-q8_0': [v('vision', 'v0143-nhin-anh', 'Đọc đúng chữ và màu trên ảnh thử.'), v('tools', 'v0143-nhin-anh', 'Mở được ứng dụng Máy tính bằng công cụ.'),
+  'qwen3-vl-2b-instruct-q8_0': [v('vision', 'v0143-nhin-anh', 'Đọc đúng chữ và màu trên ảnh thử.'), x('tools', 'v016-goi-cong-cu', 'Gọi đúng công cụ 13/25 lần với câu lệnh thật (Zalo, Outlook, âm lượng) — dưới ngưỡng 23/25 của AIVN AGENT; vẫn dùng được để trò chuyện.'),
     v('vi', 'v0153-agent', 'Làm “mắt nhìn” mô tả màn hình Zalo giả lập bằng tiếng Việt trong bài thử tìm và mở liên hệ.'), d('gui', S.qvl3_2, 'Visual Agent: Operates PC/mobile GUIs—recognizes elements')],
   'smolvlm-500m-instruct-q8_0': [d('vision', S.smolvlm, 'image-text-to-text')],
   'google_gemma-3-12b-it-q4_k_m': [d('multilingual', S.gemma3, 'multilingual support in over 140 languages'), d('long', S.gemma3, '128K context window')],

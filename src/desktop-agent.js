@@ -6,6 +6,9 @@ const path = require('path');
 const SV = require('./agent/send-verify');
 const { BrowserWindow, screen, globalShortcut, nativeImage, ipcMain } = require('electron');
 const SC = require('./screen-control');
+const D = require('./agent/dpi');
+const PD = require('./agent/pixdiff');
+const SMALL_RE = /(?:^|[^0-9.])(?:0\.\d|[1-4](?:\.\d)?)\s*b(?:[^a-z]|$)/i; // mô hình ≤ 4B
 const U = require('./agent/uitree');
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -17,15 +20,15 @@ function createDesktopAgent(deps) {
   const S = () => deps.getSettings();
   let overlay = null, overlayReady = null, session = null, askSeq = 0; const asks = new Map();
   const display = () => screen.getPrimaryDisplay();
+  // T1a: hiệu chỉnh chuột đo được trên máy này (giữ qua các lượt; đổi màn hình/tỉ lệ → đo lại)
+  let calib = { cal: null, mode: 'libnut', checks: 0, fixes: 0, misses: 0, last: null };
+  const resetCalib = () => { calib = { cal: null, mode: 'libnut', checks: 0, fixes: 0, misses: 0, last: null }; };
+  try { for (const ev of ['display-metrics-changed', 'display-added', 'display-removed']) screen.on(ev, resetCalib); } catch {}
 
-  // ---------- toạ độ: gốc (native) ↔ chuẩn hoá 0..1 của màn hình chính ----------
-  function nativeToNorm(x, y) {
-    const d = display(); const b = d.bounds; let p = { x, y };
-    if (process.platform === 'win32' && screen.screenToDipPoint) p = screen.screenToDipPoint({ x, y });
-    else if (process.platform === 'linux') p = { x: x / d.scaleFactor, y: y / d.scaleFactor };
-    return { nx: (p.x - b.x) / b.width, ny: (p.y - b.y) / b.height };
-  }
-  const normToNative = (nx, ny) => SC.toNut(nx, ny, display());
+  // ---------- toạ độ: gốc (native = vật lý) ↔ chuẩn hoá 0..1 của ẢNH CHỤP màn hình đang làm việc (theo từng màn hình, xem agent/dpi.js) ----------
+  const curGeo = () => (session && session.geo) || D.primaryOf(SC.geos());
+  function nativeToNorm(x, y) { return D.physToNorm(curGeo(), x, y); }
+  const normToNative = (nx, ny) => D.normToPhys(curGeo(), nx, ny);
   const to1000 = (x, y) => { const n = nativeToNorm(x, y); return { x: Math.round(n.nx * 1000), y: Math.round(n.ny * 1000) }; };
   const rectNorm = (b) => { const a = nativeToNorm(b[0], b[1]), c = nativeToNorm(b[0] + b[2], b[1] + b[3]); return { x1: a.nx, y1: a.ny, x2: c.nx, y2: c.ny }; };
 
@@ -69,6 +72,7 @@ function createDesktopAgent(deps) {
     await overlayShow(); ov('start', { stopKey: process.platform === 'darwin' ? '⌘⌥Q' : 'Ctrl+Alt+Q' });
     registerEsc(true);
     deps.log && deps.log('desk', 'Bắt đầu điều khiển máy tính');
+    try { const di = SC.displayInfo(); session.diag = { displays: di.text, nutSize: di.nutSize, calib: calib.cal }; deps.log && deps.log('desk', `Màn hình (tự nhận tỉ lệ): ${di.text} · bộ điều khiển chuột thấy màn hình chính ${di.nutSize || '?'}${calib.cal ? ` · hiệu chỉnh chuột đã đo: ×${calib.cal.kx.toFixed(3)}/×${calib.cal.ky.toFixed(3)}` : ''}${calib.mode !== 'libnut' ? ' · đặt con trỏ bằng ' + calib.mode : ''}`); } catch (e) { deps.log && deps.log('desk', 'Không đọc được thông tin màn hình: ' + e.message); }
     return session;
   }
   function end(reason = 'xong lượt') {
@@ -85,9 +89,23 @@ function createDesktopAgent(deps) {
   // ---------- chụp + quan sát ----------
   async function capture() {
     if (deps.fakeScreen) return deps.fakeScreen();
-    return withOverlayHidden(() => SC.capture({ maxW: 1920 }));
+    const s = session; const shot = await withOverlayHidden(() => SC.capture({ maxW: 1920, geo: s && s.geo }));
+    if (s && shot.geo) {
+      s.geo = shot.geo;
+      if (shot.full && Math.abs(shot.full.width - shot.geo.phys.width) > 2 && !s.sizeWarned) { s.sizeWarned = true; deps.log && deps.log('desk', `Cảnh báo: ảnh chụp ${shot.full.width}×${shot.full.height} khác kích thước vật lý ${shot.geo.phys.width}×${shot.geo.phys.height} của màn hình — toạ độ vẫn quy theo tỉ lệ ảnh`); }
+    }
+    return shot;
   }
   const imgOf = (shot) => nativeImage.createFromDataURL(shot.dataUrl);
+  function shotDiff(a, b, region, scope = null) {
+    try {
+      if (!a || !b || a === b || a.width !== b.width || a.height !== b.height || (a.geo && b.geo && String(a.geo.id) !== String(b.geo.id))) return null;
+      const W = 320; const ia = imgOf(a).resize({ width: W, quality: 'good' }), ib = imgOf(b).resize({ width: W, quality: 'good' });
+      const sa = ia.getSize(), sb = ib.getSize(); if (sa.width !== sb.width || sa.height !== sb.height) return null;
+      if (process.env.AIVN_QA_DIFF_DUMP) { const fs = require('fs'); const n = Date.now(); fs.writeFileSync(`${process.env.AIVN_QA_DIFF_DUMP}/${n}-a.png`, imgOf(a).toPNG()); fs.writeFileSync(`${process.env.AIVN_QA_DIFF_DUMP}/${n}-b.png`, imgOf(b).toPNG()); }
+      return PD.diffBitmaps(ia.toBitmap(), ib.toBitmap(), sa.width, sa.height, region, 32, scope);
+    } catch { return null; }
+  }
   function thumbOf(shot, box) {
     let img = imgOf(shot); img = img.resize({ width: 360, quality: 'good' });
     const t = 'data:image/jpeg;base64,' + img.toJPEG(60).toString('base64');
@@ -124,7 +142,14 @@ function createDesktopAgent(deps) {
     // hộp thoại của chính ứng dụng (Lưu thành…, Mở…) đang ở trước: quan sát hộp thoại đó thay vì cửa sổ chính
     let hw = s.target && s.target.hwnd ? s.target.hwnd : 0; s.dialog = null;
     if (hw && process.platform !== 'darwin') { try { const d = U.activeDialogOf(await U.windows(), s.target); if (d) { hw = d.hwnd; s.dialog = d.title || 'hộp thoại'; deps.log && deps.log('desk', `Đang có hộp thoại “${d.title}” của cùng ứng dụng — quan sát hộp thoại`); } } catch {} }
-    const [shot, raw] = await Promise.all([capture(), U.tree({ hwnd: hw, app: s.target && s.target.proc ? s.target.proc : '' }).catch(e => ({ error: e.message, els: [] }))]);
+    let [shot, raw] = await Promise.all([capture(), U.tree({ hwnd: hw, app: s.target && s.target.proc ? s.target.proc : '' }).catch(e => ({ error: e.message, els: [] }))]);
+    if (process.platform === 'win32' && raw && raw.dpi && !deps.fakeScreen) { // UIA trong PowerShell không nhận DPI → khung logic: đổi về vật lý
+      const k = U.uiaScale(raw, D.primaryOf(SC.geos())); if (k !== 1) { U.rescaleTree(raw, k); if (!s.uiaWarned) { s.uiaWarned = true; deps.log && deps.log('desk', `Trợ năng (UIA) trả toạ độ logic (màn hình chính ${raw.dpi.cx}×${raw.dpi.cy}) — đã nhân ×${k.toFixed(3)} về điểm ảnh vật lý`); } }
+    }
+    // cửa sổ đích nằm ở màn hình khác ảnh vừa chụp (nhiều màn hình) → chụp lại đúng màn hình đó
+    if (!deps.fakeScreen && raw && raw.win && Array.isArray(raw.win.b) && shot.geo) {
+      const G = SC.geos(); if (G.length > 1) { const g = D.displayForRect(G, raw.win.b); if (g && String(g.id) !== String(shot.geo.id)) { s.geo = g; shot = await capture(); deps.log && deps.log('desk', `Cửa sổ “${raw.win.title || ''}” ở màn hình ${g.phys.width}×${g.phys.height} @${Math.round(g.scale * 100)}% — chụp màn hình đó`); } }
+    }
     if (raw && raw.win && raw.win.hwnd && !s.target) s.target = { hwnd: raw.win.hwnd, pid: raw.win.pid, proc: raw.win.proc, title: raw.win.title };
     const named = (Array.isArray(raw.els) ? raw.els : []).filter(x => x && x.n && U.INTERACTIVE.has(x.r)).length;
     let ocrLines = [];
@@ -143,7 +168,10 @@ function createDesktopAgent(deps) {
     s.obs = obs; s.shot = shot;
     let list = obs.elements;
     if (query) { const fq = U.fold(query); const hit = list.filter(e => U.fold(e.name).includes(fq) || (e.value && U.fold(e.value).includes(fq))); list = hit.length ? [...hit, ...list.filter(e => !hit.includes(e))] : list; }
-    const text = U.formatForModel({ win: obs.win, elements: list }, { toNorm: to1000, limit: query ? 60 : 110 });
+    // B40: mô hình nhỏ (≤ 4B) đọc danh sách dài 72+ phần tử rồi quan sát lại mãi: gửi danh sách GỌN, xếp theo mức liên quan tới việc (đích của việc lên đầu)
+    const st0 = deps.engine.status() || {}; const small = SMALL_RE.test(String(st0.id || st0.path || '').split(/[\\/]/).pop());
+    if (!query && ctx && ctx.userQuery) list = U.rankForTask(list, ctx.userQuery);
+    const text = U.formatForModel({ win: obs.win, elements: list }, { toNorm: to1000, limit: small ? 30 : query ? 60 : 110 });
     // cây giao diện nghèo (Zalo, ứng dụng Electron…): tự chuyển sang ảnh chụp + mô hình nhìn ảnh
     let seen = '', eyesKind = null;
     if ((poor || question) && vision !== 'off') {
@@ -159,6 +187,8 @@ function createDesktopAgent(deps) {
     deps.log && deps.log('desk', `Quan sát: "${obs.win ? obs.win.title : '?'}" · ${obs.elements.length} phần tử (${src}) · ${Date.now() - t0} ms`);
     status(`Đã quan sát: ${obs.elements.length} phần tử`);
     let text2 = text;
+    const ak = U.appKeys(proc, obs.win ? obs.win.title : '');
+    if (ak && ak.search && poor) text2 += `\nPhím tắt của ${ak.name}: hotkey "${ak.search}" = mở ô tìm kiếm (chắc chắn hơn bấm chữ “Tìm kiếm” đọc bằng OCR); sau đó type_text KHÔNG kèm element.`;
     if (seen) text2 += `\nMô tả màn hình (${eyesKind} nhìn ảnh chụp, có thể chưa chính xác):\n${seen.slice(0, 2500)}`;
     else if (poor && s.needEyes && vision !== 'off') text2 += `\nLƯU Ý: ứng dụng ${proc || 'này'} gần như không cho đọc nút/ô (chỉ có chữ OCR) và mô hình hiện tại KHÔNG nhìn được ảnh. Đừng kết luận "không có/không tìm thấy" chỉ dựa vào danh sách này; báo người dùng bấm "Nạp thêm mắt nhìn" để AIVN nhìn được màn hình.`;
     return { obs, text: text2, src, shot, thumb: thumb ? thumbOf(shot) : null, poor, seen };
@@ -187,6 +217,8 @@ function createDesktopAgent(deps) {
   // ---------- thao tác ----------
   function resolveTarget(a) {
     const s = session; const q = String(a.element || a.target || '').trim();
+    // bấm theo TÊN đúng kết quả tìm kiếm vừa ghi nhận → dùng đúng phần tử kết quả đó (không phải chữ cùng tên trong ô tìm kiếm)
+    if (q && s && s.obs && s.foundHit && s.foundHit.id && !/^\[?e\d+\]?$/i.test(q) && U.fold(q).trim() === U.fold(s.foundHit.name || '').trim()) { const el = s.obs.elements.find(e => e.id === s.foundHit.id); if (el && el.b) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' }; }
     if (q && s && s.obs) { const el = U.findElement(s.obs.elements, q); if (el) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' }; }
     if (Number.isFinite(Number(a.x)) && Number.isFinite(Number(a.y)) && a.x !== '' && a.y !== '' && a.x != null && a.y != null && !(Number(a.x) === 0 && Number(a.y) === 0)) { const p = normToNative(Math.min(1, Math.max(0, a.x / 1000)), Math.min(1, Math.max(0, a.y / 1000))); return { el: null, x: p.x, y: p.y, via: 'toạ độ' }; }
     return q ? { el: null, query: q } : null;
@@ -199,16 +231,44 @@ function createDesktopAgent(deps) {
     const modelId = g ? g.id : (st.path || st.id || ''); const eng = g ? g.engine : deps.engine;
     status(`Đang tìm “${query}” bằng ${g ? 'mô hình định vị' : 'mô hình nhìn ảnh'}…`);
     const fi = SC.familyInfo(modelId);
-    const shot = await withOverlayHidden(() => deps.fakeScreen ? deps.fakeScreen() : SC.capture({ maxW: 1280, align: fi.align }));
+    const shot = await withOverlayHidden(() => deps.fakeScreen ? deps.fakeScreen() : SC.capture({ maxW: 1280, align: fi.align, geo: session && session.geo }));
     const r = await SC.locate(eng, shot, query, { signal: ctx.signal, modelId });
     deps.log && deps.log('desk', `Định vị "${query}" bằng ${g ? 'mô hình định vị ' : ''}${modelId.split(/[\\/]/).pop()}: ${r.box && r.box.found ? 'thấy' : 'không thấy'} · ${String(r.raw || '').slice(0, 120)}`);
     if (!r.box || !r.box.found) return null;
     const p = normToNative((r.box.x1 + r.box.x2) / 2, (r.box.y1 + r.box.y2) / 2);
     return { el: null, x: p.x, y: p.y, via: g ? 'mô hình định vị' : 'mô hình nhìn ảnh', box: r.box };
   }
+  // T1a: đưa chuột tới (x, y) vật lý rồi ĐỌC LẠI vị trí con trỏ thật. Lệch (DPI/tỉ lệ/nhiều màn hình) → tự đo hệ số và sửa,
+  // vẫn lệch → (Windows) đặt con trỏ bằng SetCursorPos. Không bao giờ bấm “mù” ở chỗ khác mà không báo.
+  async function moveTo(x, y) {
+    const n = SC.libnut(); const want = { x: Math.round(x), y: Math.round(y) };
+    const read = deps.cursorPhys || SC.cursorPhys;
+    const put = async (p) => { if (calib.mode === 'SetCursorPos') await U.setCursor(p.x, p.y); else n.moveMouse(p.x, p.y); await sleep(60); return read(); };
+    const b0 = read();
+    let sent = calib.mode === 'SetCursorPos' ? want : D.applyCal(calib.cal, want);
+    let got = await put(sent); calib.checks++;
+    if (!got || D.near(got, want, 3)) { calib.last = { want, got, ok: true }; return { ok: true, got }; }
+    // con trỏ “đứng yên” đúng chỗ cũ: hệ thống không cho đọc vị trí (Wayland…) → không kết luận được, làm như trước
+    if (b0 && got.x === b0.x && got.y === b0.y) { await sleep(150); const g2 = read(); if (g2 && g2.x === b0.x && g2.y === b0.y) { calib.last = { want, got, ok: true, unverified: true }; deps.log && deps.log('desk', 'Không đọc lại được vị trí con trỏ (hệ thống không báo) — bỏ qua bước kiểm tra chuột'); return { ok: true, got, unverified: true }; } got = g2; if (D.near(got, want, 3)) return { ok: true, got }; }
+    deps.log && deps.log('desk', `Con trỏ lệch: cần (${want.x}, ${want.y}) nhưng đang ở (${got.x}, ${got.y}) — đo lại hệ số`);
+    if (calib.mode !== 'SetCursorPos') {
+      const c = D.calibrate(sent, got); // hệ số thực = vị trí thật / toạ độ đã gửi (so với toạ độ thô của libnut)
+      const total = c && calib.cal ? { kx: c.kx * calib.cal.kx, ky: c.ky * calib.cal.ky } : c;
+      if (total) {
+        sent = D.applyCal(total, want); got = await put(sent);
+        if (got && D.near(got, want, 3)) { calib.cal = total; calib.fixes++; calib.last = { want, got, ok: true }; if (session && session.diag) session.diag.calib = total; deps.log && deps.log('desk', `Đã hiệu chỉnh chuột cho màn hình này: ×${total.kx.toFixed(3)} / ×${total.ky.toFixed(3)} (tỉ lệ màn hình ${Math.round(curGeo().scale * 100)}%)`); return { ok: true, got, calibrated: total }; }
+      }
+    }
+    if (process.platform === 'win32') {
+      try { await U.setCursor(want.x, want.y); await sleep(60); got = read(); if (got && D.near(got, want, 3)) { calib.mode = 'SetCursorPos'; calib.fixes++; deps.log && deps.log('desk', 'Bộ điều khiển chuột lệch toạ độ — chuyển sang đặt con trỏ bằng SetCursorPos'); return { ok: true, got }; } } catch (e) { deps.log && deps.log('desk', 'SetCursorPos lỗi: ' + e.message); }
+    }
+    calib.misses++; calib.last = { want, got, ok: false };
+    deps.log && deps.log('desk', `Không đưa được chuột tới đúng chỗ: cần (${want.x}, ${want.y}), con trỏ ở (${got.x}, ${got.y})`);
+    return { ok: false, got, want };
+  }
   async function performAt(action, x, y, a) {
     const n = SC.libnut();
-    if (x != null) { n.moveMouse(Math.round(x), Math.round(y)); await sleep(140); }
+    if (x != null) { const m = await moveTo(x, y); a.__moved = m; if (!m.ok) { const e = new Error(`Chuột không tới được đúng chỗ cần bấm (cần ${m.want.x},${m.want.y}; con trỏ ở ${m.got.x},${m.got.y}) — AIVN không bấm để tránh bấm nhầm.`); e.code = 'CURSOR_OFF'; throw e; } await sleep(80); }
     if (action === 'click') n.mouseClick('left', false);
     if (action === 'double_click') n.mouseClick('left', true);
     if (action === 'right_click') n.mouseClick('right', false);
@@ -366,7 +426,7 @@ function createDesktopAgent(deps) {
     } else { await sleep(450); } // để người dùng kịp thấy khung đỏ
     if (ctx.signal && ctx.signal.aborted) throw new Error('Đã dừng.');
     status(desc.charAt(0).toUpperCase() + desc.slice(1) + '…');
-    const before = s.obs; const beforeDialog = s.dialog || null;
+    const before = s.obs; const beforeDialog = s.dialog || null; const beforeShot = s.shot;
     // trong hộp thoại Lưu/Mở, "ctrl+s"/"ctrl+o" không có nghĩa: hiểu là xác nhận hộp thoại (Enter)
     if (action === 'hotkey' && s.dialog && /^(ctrl|cmd|command|meta)\+(shift\+)?[so]$/i.test(String(a.keys || '').replace(/\s/g, ''))) { deps.log && deps.log('desk', `Đang ở hộp thoại “${s.dialog}”: đổi ${a.keys} → enter (xác nhận)`); a = { ...a, keys: 'enter' }; }
     if (action === 'type_text') {
@@ -378,6 +438,7 @@ function createDesktopAgent(deps) {
       const shortLine = !/\n/.test(String(a.text)) && String(a.text).length <= 80 && !(el && /document|tài liệu/i.test(`${el.role || ''} ${el.kind || ''}`));
       a = { ...a, __submit: !!a.submit, __replace: (a.replace === true && (single || (shortLine && !(el && el.editable)))) || (afterSave && !(el && /document|tài liệu/i.test(`${el.role || ''} ${el.kind || ''}`))) };
     }
+    if (['hotkey', 'type_text'].includes(action) && !(t && t.x != null)) await refocus(); // phím/dán đi vào cửa sổ đang ở trước: phải đúng ứng dụng
     await performAt(action, t && t.x != null ? t.x : null, t && t.x != null ? t.y : null, a);
     const prevAction = s.lastAction;
     // bấm vào kết quả tìm kiếm khớp người nhận → coi như đã mở cuộc trò chuyện (kiểm lại tiêu đề ngay bên dưới)
@@ -397,8 +458,15 @@ function createDesktopAgent(deps) {
     ov('target', { box: null });
     await sleep(action === 'type_text' ? 500 : 700);
     // kiểm tra lại
-    const o = await observe(ctx, { ocr: s.ocrUsed ? 'auto' : 'auto' });
+    let o = await observe(ctx, { ocr: s.ocrUsed ? 'auto' : 'auto' });
     const checks = [];
+    // T1a: so ảnh trước/sau (quanh chỗ bấm + toàn màn hình); ứng dụng Electron/CEF (Zalo) có hiệu ứng chuyển cảnh → chờ thêm rồi so lại
+    const isClickAct = ['click', 'double_click', 'right_click'].includes(action);
+    const winScope = () => { const w = (o.obs && o.obs.win && Array.isArray(o.obs.win.b) && o.obs.win.b[2] > 100) ? o.obs.win.b : (before && before.win && Array.isArray(before.win.b) && before.win.b[2] > 100 ? before.win.b : null); return w ? rectNorm(w) : null; };
+    let pd = shotDiff(beforeShot, s.shot, PD.around(box), winScope());
+    if (pd && !PD.changed(pd) && isClickAct && o.poor && !(ctx.signal && ctx.signal.aborted)) { await sleep(900); o = await observe(ctx, { ocr: 'auto' }); pd = shotDiff(beforeShot, s.shot, PD.around(box), winScope()); }
+    if (pd) deps.log && deps.log('desk', `So ảnh trước/sau: ${PD.describe(pd)}${a.__moved && a.__moved.calibrated ? ' · chuột đã hiệu chỉnh' : ''}`);
+    const pixChanged = PD.changed(pd);
     if (before && before.win && o.obs.win && before.win.title !== o.obs.win.title) checks.push(`Cửa sổ đổi thành "${o.obs.win.title}".`);
     if (openPending) {
       const R = SV.regionsOf(o.obs); const hdr = [o.obs.win ? o.obs.win.title : '', ...(R ? R.header : [])].filter(Boolean);
@@ -443,7 +511,9 @@ function createDesktopAgent(deps) {
         if (verdict === 'yes') {
           // kết quả nằm dưới ô tìm kiếm: chọn phần tử khớp gần ô nhất, tức kết quả đầu tiên (không phải chính chữ trong ô)
           const boxEl = el && el.b ? el : prevAction && prevAction.el && prevAction.el.b && Date.now() - prevAction.at < 300000 ? prevAction.el : null; // ô tìm kiếm = ô đang chọn, hoặc chỗ vừa bấm (gợi ý “Tìm kiếm…” chỉ thấy qua OCR)
-          const boxY = boxEl ? boxEl.b[1] + Math.max(0, (boxEl.b[3] || 0) - 8) : (t && t.y != null ? t.y : -1);
+          let boxY = boxEl ? boxEl.b[1] + Math.max(0, (boxEl.b[3] || 0) - 8) : (t && t.y != null ? t.y : -1);
+          // ô tìm kiếm mở bằng phím tắt (Ctrl+F…): không biết chỗ ô → chữ vừa gõ trong ô là dòng khớp NẰM TRÊN CÙNG, kết quả nằm dưới nó
+          if (boxY < 0) { const ms = matches(o2).filter(e => e.b && e.ocr).sort((x, y) => x.b[1] - y.b[1]); if (ms.length >= 2 && U.fold(ms[0].name).replace(/[^\p{L}\p{N} ]/gu, '').trim() === fq.replace(/[^\p{L}\p{N} ]/gu, '').trim()) boxY = ms[0].b[1] + Math.max(0, ms[0].b[3] - 8); }
           const below = matches(o2).filter(e => !e.b || e.b[1] > boxY + 4).sort((x, y) => (x.b ? x.b[1] : 0) - (y.b ? y.b[1] : 0)); const m = below[0];
           // B20 / quyết định của Khôi: hai người cùng họ tên (hoặc cùng tên kèm chú thích khác nhau) → HỎI người dùng, không tự chọn
           const rcpQ = ctx && ctx.userQuery ? SV.recipientOf(ctx.userQuery) : null; const distinct = rcpQ ? SV.sameNameCandidates(rcpQ, below.map(e => e.name)) : [];
@@ -482,8 +552,20 @@ function createDesktopAgent(deps) {
     if (before && o.obs.elements.length && Math.abs(o.obs.elements.length - before.elements.length) > 3) checks.push(`Số phần tử: ${before.elements.length} → ${o.obs.elements.length}.`);
     // B34 (QA lượt 5): bấm vào Ô NHẬP (ô tìm kiếm…) thường chỉ đặt con trỏ, màn hình gần như không đổi — đó vẫn là có tác dụng
     const clickedInput = ['click', 'double_click'].includes(action) && ((t && t.el && (t.el.editable || U.inputLike(t.el))) || /tìm|tim kiem|search|find/iu.test(`${t && t.el ? t.el.name || '' : ''} ${t && t.query ? t.query : ''}`));
+    // T1a: chữ “Tìm kiếm” (OCR) bấm mà màn hình không đổi + ứng dụng có phím tắt tìm kiếm (Zalo Ctrl+F…) → tự bấm phím tắt
+    const ak = U.appKeys((o.obs && o.obs.win && o.obs.win.proc) || (s.target && s.target.proc) || '', o.obs && o.obs.win ? o.obs.win.title : '');
+    if (isClickAct && pixChanged === false && ak && ak.search && clickSearchy && !(t && t.el && t.el.editable && !t.el.ocr)) {
+      try {
+        await refocus(); await performAt('hotkey', null, null, { keys: ak.search }); await sleep(500);
+        s.lastAction = { action: 'hotkey', keys: ak.search, at: Date.now(), query: 'Tìm kiếm' };
+        o = await observe(ctx, { ocr: 'auto' }); o2 = o;
+        deps.log && deps.log('desk', `Bấm “Tìm kiếm” không đổi màn hình → dùng phím tắt ${ak.search} của ${ak.name}`);
+        checks.push(`Bấm chữ “Tìm kiếm” không làm màn hình đổi nên AIVN đã bấm phím tắt ${ak.search} của ${ak.name} để mở ô tìm kiếm. Bước tiếp: type_text KHÔNG kèm element (gõ tên cần tìm).`);
+      } catch (e) { deps.log && deps.log('desk', 'Phím tắt tìm kiếm lỗi: ' + e.message); }
+    }
+    if (pixChanged && !checks.some(c => /Cửa sổ đổi|Đã mở cuộc trò chuyện|Ô tìm kiếm|KIỂM CHỨNG|GỬI NHẦM|phím tắt/.test(c))) checks.push(`Màn hình đã thay đổi sau thao tác (${PD.describe(pd)}) — xem danh sách mới bên dưới để biết đã mở/chọn gì.`);
     if (!checks.length && clickedInput) checks.push(`Đã đặt con trỏ vào ô “${String((t && t.el && t.el.name) || (t && t.query) || '').slice(0, 40)}” (ô nhập thường không đổi hình khi được chọn). Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.`);
-    if (!checks.length) checks.push('Màn hình không thay đổi rõ ràng — nếu cần, thử cách khác.');
+    if (!checks.length) checks.push(pd ? `Màn hình không thay đổi rõ ràng (so ảnh trước/sau: ${PD.describe(pd)}) — nếu cần, thử cách khác${ak && ak.search ? `; với ${ak.name} có thể dùng phím tắt ${ak.search} để mở ô tìm kiếm` : ''}.` : 'Màn hình không thay đổi rõ ràng — nếu cần, thử cách khác.');
     return { ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
   }
 
@@ -542,7 +624,7 @@ function createDesktopAgent(deps) {
   }
   // kết quả tìm kiếm đã hiện nhưng chưa bấm vào (mô hình nhỏ hay dừng lại hỏi thay vì mở)
   function searchFound() { const s = session; return s && s.inSearch && s.foundHit ? s.foundHit : null; }
-  return { searchFound, searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
+  return { likely: (q) => (session && session.obs ? U.likelyTarget(session.obs.elements, q) : null), diag: () => ({ calib: { ...calib }, displays: session && session.diag ? session.diag.displays : SC.displayInfo().text }), searchFound, searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
 }
 
 module.exports = { createDesktopAgent };

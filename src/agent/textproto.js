@@ -83,7 +83,7 @@ function normalizeMessages(messages, { tools = [] } = {}) {
 }
 
 // Tách các khối <tool_call>{…}</tool_call> (và vài biến thể hay gặp) khỏi câu trả lời
-function parseToolCalls(text, allowed = null) {
+function parseToolCalls(text, allowed = null, schemas = null) {
   const calls = []; let rest = String(text || '');
   const take = (raw) => {
     let j; try { j = JSON.parse(raw); } catch { const m = raw.match(/\{[\s\S]*\}/); if (!m) return false; try { j = JSON.parse(m[0]); } catch { return false; } }
@@ -97,7 +97,47 @@ function parseToolCalls(text, allowed = null) {
   rest = rest.replace(/<tool_call>\s*([\s\S]*?)\s*(?:<\/tool_call>|$)/g, (all, raw) => take(raw) ? '' : all);
   if (!calls.length) rest = rest.replace(/```(?:json|tool_call|tool)?\s*(\{[\s\S]*?"(?:name|tool)"[\s\S]*?\})\s*```/g, (all, raw) => take(raw) ? '' : all);
   if (!calls.length) { const t = rest.trim(); if (/^\{[\s\S]*"name"[\s\S]*\}$/.test(t) && take(t)) rest = ''; }
+  if (!calls.length && allowed && allowed.length) rest = salvage(rest, allowed, schemas, calls);
   return { text: rest.replace(/<\/?tool_call>/g, '').trim(), toolCalls: calls };
+}
+// B44: mô hình nhỏ IN lời gọi công cụ ra chữ thay vì gọi: `system_action action="volume_up" amount=100`, system_action(action="volume_up"),
+// screen_act({"action":"click"}), <system_action><action>volume_up</action></system_action>, <function=open_app>{"name":"Zalo"}</function>.
+// Chỉ nhận khi đúng tên công cụ đang bật và tham số khớp lược đồ (tên tham số có thật, giá trị enum hợp lệ); tham số lạ bị bỏ.
+function coerceArgs(raw, schema) {
+  const props = schema && schema.properties ? schema.properties : null; const out = {};
+  for (const [k, v0] of Object.entries(raw || {})) {
+    if (props && !props[k]) continue; let v = v0; const t = props && props[k] && props[k].type;
+    if ((t === 'integer' || t === 'number') && typeof v === 'string' && /^-?\d+(?:\.\d+)?$/.test(v)) v = Number(v);
+    if (t === 'boolean' && typeof v === 'string') v = /^(true|1|yes)$/i.test(v);
+    if (props && props[k] && Array.isArray(props[k].enum) && !props[k].enum.includes(v)) return null;
+    out[k] = v;
+  }
+  const req = schema && Array.isArray(schema.required) ? schema.required : [];
+  if (req.some(k => out[k] == null || out[k] === '')) return null;
+  return out;
+}
+function kvArgs(str) {
+  const o = {}; const re = /([A-Za-z_][\w]*)\s*[=:]\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|“([^”]*)”|([^\s,)]+))/g; let m, n = 0;
+  while ((m = re.exec(str))) { o[m[1]] = m[2] ?? m[3] ?? m[4] ?? m[5]; n++; }
+  return n ? o : null;
+}
+function salvage(text, allowed, schemas, calls) {
+  const names = allowed.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'); if (!names) return text;
+  const push = (name, args) => { const sc = schemas && schemas[name]; const a = coerceArgs(args || {}, sc); if (!a) return false; calls.push({ id: 'call_' + Math.random().toString(36).slice(2, 12), name, arguments: a, salvaged: true }); return true; };
+  let rest = text;
+  // XML-ish
+  rest = rest.replace(new RegExp(`<function=(${names})>\\s*(\\{[\\s\\S]*?\\})\\s*</function>`, 'g'), (all, n, j) => { try { return push(n, JSON.parse(j)) ? '' : all; } catch { return all; } });
+  rest = rest.replace(new RegExp(`<(${names})>([\\s\\S]*?)</\\1>`, 'g'), (all, n, body) => { const o = {}; body.replace(/<(\w+)>([\s\S]*?)<\/\1>/g, (_, k, v) => { o[k] = v.trim(); return ''; }); return Object.keys(o).length && push(n, o) ? '' : all; });
+  // name({json}) / name(k=v, …) / name k=v … (trong ``` ``` hoặc ` ` hoặc đứng riêng một dòng)
+  rest = rest.replace(new RegExp(`(\`{1,3}[a-z]*\\s*)?\\b(${names})\\s*(?:\\(\\s*(\\{[\\s\\S]*?\\})\\s*\\)|\\(([^)\\n]*)\\)|((?:[ \\t]+[A-Za-z_]\\w*\\s*[=:]\\s*(?:"[^"\\n]*"|'[^'\\n]*'|“[^”\\n]*”|[^\\s,)\`]+))+))\\s*(\`{1,3})?`, 'g'), (all, open, n, json, inner, kv) => {
+    let args = null;
+    if (json) { try { args = JSON.parse(json); } catch { args = null; } }
+    else if (inner != null) args = kvArgs(inner) || (inner.trim() ? null : {});
+    else if (kv) args = kvArgs(kv);
+    if (!args) return all;
+    return push(n, args) ? '' : all;
+  });
+  return rest.replace(/```\s*```/g, '').replace(/`\s*`/g, '');
 }
 
 // Lọc luồng chữ: không hiện khối <tool_call> đang được sinh ra cho người dùng

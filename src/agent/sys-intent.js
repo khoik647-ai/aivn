@@ -60,4 +60,24 @@ function sysAsked(action, query) {
   const qParts = new Set(); fold(raw).split(/(?<=[?.!;\n])/).forEach(seg => { if (/\?\s*$/.test(seg)) clauses(seg).forEach(c => qParts.add(c)); });
   return cl.some(c => !isQ(c, qParts.has(c) ? '?' : '') && clauseAsks(action, c)) && !!all;
 }
-module.exports = { sysAsked, clauses, clauseAsks, RULES };
+// B44: “tăng âm lượng lên 100”, “đặt âm lượng 30%”, “chỉnh âm lượng về 50”, “set volume to 40” → mức âm lượng 0..100
+function volumeLevel(query) {
+  for (const c of clauses(query)) {
+    const m = /(?:^|\s)(?:tang|giam|dat|chinh|de|cho|keo|van|set|change|turn)?\s*(?:\S+\s+){0,2}?(?:am luong|volume|loa|tieng)\s+(?:\S+\s+){0,2}?(?:len|xuong|thanh|ve|o|muc|bang|to|=|:)?\s*(\d{1,3})\s*(?:%|phan tram|percent)?(?=\s|$)/.exec(c);
+    if (!m) continue;
+    const before = c.slice(0, m.index); if (NEG.test(before.split(/\s+/).slice(-4).join(' ')) || QUESTION.test(c)) continue;
+    const n = Number(m[1]); if (n >= 0 && n <= 100) return n;
+  }
+  return null;
+}
+// B44: câu CHỈ là một lệnh hệ thống rõ ràng, không phải bước của việc khác → làm ngay, không cần mô hình (mô hình nhỏ hay in lệnh ra chữ thay vì gọi)
+const DIRECT_OK = ['volume_up', 'volume_down', 'mute', 'lock', 'show_desktop', 'open_settings'];
+function directSys(query) {
+  const raw = String(query || '').trim(); if (!raw || raw.length > 80) return null;
+  const lv = volumeLevel(raw); if (lv != null) return { action: 'volume_set', level: lv };
+  const hits = DIRECT_OK.filter(a => sysAsked(a, raw)); if (hits.length !== 1) return null;
+  // còn việc khác trong câu (“tăng âm lượng rồi mở YouTube”) → để mô hình làm cả chuỗi
+  if (clauses(raw).filter(c => !Object.keys(RULES).some(a => clauseAsks(a, c)) && !/^(?:giup|ho|di|nhe|nha|voi|please|cho (?:toi|minh|em)|ok|nao|len|xuong|ngay|luon)(?:\s|$)/.test(c)).length) return null;
+  return { action: hits[0] };
+}
+module.exports = { sysAsked, clauses, clauseAsks, RULES, volumeLevel, directSys };

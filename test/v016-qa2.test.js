@@ -211,18 +211,18 @@ test('B19: “Đa ngôn ngữ” ghi rõ khi nhà phát triển không nêu ti�
 });
 
 // ---------- B14: chữ hướng dẫn đính kèm khớp với loại tệp đọc được thật ----------
-test('B14: vùng thả tệp, nút 📎, bộ chọn tệp, read_file và thông báo lỗi khớp đúng loại tệp đọc được; không hứa âm thanh/video', async () => {
+test('B14: vùng thả tệp, nút 📎, bộ chọn tệp, read_file và thông báo lỗi khớp đúng loại tệp đọc được (0.16: có âm thanh/video — chép lời)', async () => {
   const D = require('../src/docs'); const html = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/index.html'), 'utf8');
   assert.ok(html.includes(`<span>${D.SUPPORTED_TEXT}</span>`), 'vùng thả tệp'); assert.ok(html.includes(`title="Đính kèm tệp: ${D.SUPPORTED_TEXT}"`), 'nút 📎');
   for (const e of ['xlsx', 'pptx', 'odt', 'ods', 'odp', 'zip', 'pdf', 'docx', 'png', 'txt']) assert.ok(D.PICKER_EXT.includes(e), e);
-  for (const e of ['mp3', 'wav', 'mp4', 'mov']) assert.ok(!D.PICKER_EXT.includes(e), 'bộ chọn không cho chọn ' + e);
-  assert.ok(!/âm thanh|video/i.test(D.SUPPORTED_TEXT + D.SUPPORTED_SENTENCE));
+  for (const e of ['mp3', 'wav', 'mp4', 'mov']) assert.ok(D.PICKER_EXT.includes(e), 'bộ chọn cho chọn ' + e);
+  assert.match(D.SUPPORTED_TEXT, /âm thanh\/video .*chép lời/); assert.match(D.SUPPORTED_SENTENCE, /âm thanh\/video \(chép lời trên máy\)/);
   const main = fs.readFileSync(path.join(__dirname, '..', 'src/main.js'), 'utf8'); assert.match(main, /extensions: require\('\.\/docs'\)\.PICKER_EXT/);
-  const A = require('../src/agent/agent'); assert.match(A.DEFS.read_file.description, /XLSX/); assert.match(A.DEFS.read_file.description, /không đọc âm thanh\/video/);
-  // mỗi loại trong danh sách đọc được thật (hành vi), âm thanh báo rõ là chưa hỗ trợ
+  const A = require('../src/agent/agent'); assert.match(A.DEFS.read_file.description, /XLSX/); assert.match(A.DEFS.read_file.description, /âm thanh\/video .*bản chép lời/);
+  // mỗi loại trong danh sách đọc được thật (hành vi); âm thanh không đi qua bộ đọc tài liệu mà qua bộ nghe (src/media.js)
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b14-'));
   fs.writeFileSync(path.join(tmp, 'a.wav'), Buffer.alloc(64)); fs.writeFileSync(path.join(tmp, 'a.xyz'), 'x');
-  await assert.rejects(D.extractFile(path.join(tmp, 'a.wav')), /chưa đọc được âm thanh\/video/);
+  await assert.rejects(D.extractFile(path.join(tmp, 'a.wav')), /bộ nghe/);
   await assert.rejects(D.extractFile(path.join(tmp, 'a.xyz')), (e) => e.message.includes(D.SUPPORTED_SENTENCE));
   fs.writeFileSync(path.join(tmp, 'n.md'), '# Ghi chú\nxin chào'); assert.match((await D.extractFile(path.join(tmp, 'n.md'))).text, /xin chào/);
 });

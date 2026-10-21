@@ -309,6 +309,7 @@ const SYS = {
   restart: { label: 'Khởi động lại máy', confirm: true, danger: true, ask: /khoi dong lai|restart|reboot/ },
   volume_up: { label: 'Tăng âm lượng', confirm: false, ask: /(tang|to len|lon len|vặn to|van to).{0,20}(am luong|tieng|loa)|(am luong|tieng|loa).{0,12}(to|lon) (len|hon)|volume up/ },
   volume_down: { label: 'Giảm âm lượng', confirm: false, ask: /(giam|nho lai|van nho|ha).{0,20}(am luong|tieng|loa)|(am luong|tieng|loa).{0,12}nho (lai|xuong|hon)|volume down/ },
+  volume_set: { label: 'Đặt âm lượng', confirm: false, ask: /(am luong|volume|loa).{0,20}\d{1,3}/ },
   mute: { label: 'Tắt/bật tiếng', confirm: false, ask: /(tat|bat|mo) (tieng|am thanh|loa)|im lang|mute|unmute/ },
   open_settings: { label: 'Mở Cài đặt hệ thống', confirm: false, ask: /cai dat|settings|thiet lap/ },
   show_desktop: { label: 'Hiện màn hình chính (thu nhỏ mọi cửa sổ)', confirm: false, ask: /man hinh chinh|desktop|thu nho (het|tat ca|moi)/ },
@@ -316,8 +317,26 @@ const SYS = {
 };
 // người dùng có yêu cầu đúng thao tác hệ thống này trong câu của lượt hiện tại không
 // B16: nhận ý định theo cấu trúc từng mệnh đề (phủ định, câu hỏi, chuỗi lệnh, đối tượng hẹp) — xem sys-intent.js
-const sysAsked = (action, query) => !!SYS[action] && require('./sys-intent').sysAsked(action, query);
-async function systemAction(action, { platform = process.platform, keyTap = null, openExternal = null } = {}) {
+const sysAsked = (action, query) => !!SYS[action] && (action === 'volume_set' ? require('./sys-intent').volumeLevel(query) != null : require('./sys-intent').sysAsked(action, query));
+// B44: đặt âm lượng chính xác N% — Windows: Core Audio (IAudioEndpointVolume) qua PowerShell
+const PS_VOLUME = (level) => String.raw`$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IAudioEndpointVolume { int f(); int g(); int h(); int i(); int SetMasterVolumeLevelScalar(float fLevel, Guid ctx); int j(); int GetMasterVolumeLevelScalar(out float pfLevel); int k(); int l(); int m(); int n(); int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, Guid ctx); int GetMute(out bool pbMute); }
+[Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDevice { int Activate(ref Guid id, int clsCtx, int activationParams, out IAudioEndpointVolume aev); }
+[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IMMDeviceEnumerator { int f(); int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice endpoint); }
+[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorComObject { }
+public static class AivnVol {
+  static IAudioEndpointVolume V() { var e = new MMDeviceEnumeratorComObject() as IMMDeviceEnumerator; IMMDevice d = null; Marshal.ThrowExceptionForHR(e.GetDefaultAudioEndpoint(0, 1, out d)); IAudioEndpointVolume v = null; var id = typeof(IAudioEndpointVolume).GUID; Marshal.ThrowExceptionForHR(d.Activate(ref id, 23, 0, out v)); return v; }
+  public static int Set(int pct) { var v = V(); Marshal.ThrowExceptionForHR(v.SetMute(false, Guid.Empty)); Marshal.ThrowExceptionForHR(v.SetMasterVolumeLevelScalar(pct / 100f, Guid.Empty)); float r; v.GetMasterVolumeLevelScalar(out r); return (int)Math.Round(r * 100); }
+}
+"@
+[AivnVol]::Set(${Math.max(0, Math.min(100, Math.round(Number(level) || 0)))})
+`;
+async function systemAction(action, { platform = process.platform, keyTap = null, openExternal = null, level = null } = {}) {
   const win = platform === 'win32', mac = platform === 'darwin';
   const ps = (c) => run('powershell.exe', ['-NoProfile', '-Command', c]);
   const osa = (c) => run('osascript', ['-e', c]);
@@ -332,6 +351,15 @@ async function systemAction(action, { platform = process.platform, keyTap = null
       else if (keyTap) { const k = { volume_up: 'audio_vol_up', volume_down: 'audio_vol_down', mute: 'audio_mute' }[action]; for (let i = 0; i < (action === 'mute' ? 1 : 5); i++) keyTap(k); r = { ok: true }; }
       else r = await ps(`$w = New-Object -ComObject WScript.Shell; 1..5 | % { $w.SendKeys([char]${action === 'volume_up' ? 175 : action === 'volume_down' ? 174 : 173}) }`);
       break;
+    case 'volume_set': {
+      const n = Math.max(0, Math.min(100, Math.round(Number(level))));
+      if (!Number.isFinite(n)) throw new Error('Thiếu mức âm lượng (0–100).');
+      if (win) r = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', psEncoded(PS_VOLUME(n))]);
+      else if (mac) r = await osa(`set volume output volume ${n} without output muted`);
+      else { r = await run('pactl', ['set-sink-volume', '@DEFAULT_SINK@', n + '%']); if (!r.ok) r = await run('amixer', ['-q', 'set', 'Master', n + '%', 'unmute']); }
+      if (r.ok) return `Đặt âm lượng ${n}%`;
+      break;
+    }
     case 'open_settings': if (openExternal && win) { await openExternal('ms-settings:'); r = { ok: true }; } else r = mac ? await run('open', ['x-apple.systempreferences:']) : await run('gnome-control-center', []); break;
     case 'show_desktop': r = win ? await ps('(New-Object -ComObject Shell.Application).MinimizeAll()') : mac ? await osa('tell application "System Events" to key code 103') : { ok: false, err: 'Chưa hỗ trợ trên Linux' }; break;
     case 'empty_trash': r = win ? await ps('Clear-RecycleBin -Force -ErrorAction SilentlyContinue') : mac ? await osa('tell application "Finder" to empty trash') : { ok: false, err: 'Chưa hỗ trợ trên Linux' }; break;
@@ -341,4 +369,4 @@ async function systemAction(action, { platform = process.platform, keyTap = null
   return SYS[action].label;
 }
 
-module.exports = { lnkTarget, winDirs, psEncoded, PS_APPS, deepApps, parseWinApps, macSpotlight, mergeApps, exeFromIcon, checkCommand, listApps, findApp, score, fold, expandPath, knownFolder, EXEC_EXT, runCommand, runningApps, matchRunning, closeApp, systemAction, SYS, sysAsked, WIN_BUILTIN, PROTECTED, BLOCK };
+module.exports = { PS_VOLUME, lnkTarget, winDirs, psEncoded, PS_APPS, deepApps, parseWinApps, macSpotlight, mergeApps, exeFromIcon, checkCommand, listApps, findApp, score, fold, expandPath, knownFolder, EXEC_EXT, runCommand, runningApps, matchRunning, closeApp, systemAction, SYS, sysAsked, WIN_BUILTIN, PROTECTED, BLOCK };

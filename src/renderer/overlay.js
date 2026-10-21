@@ -4,6 +4,12 @@ let cur = null; let reasonMode = false;
 // chuột: chỉ nhận chuột khi ở trên thanh Dừng hoặc thẻ; còn lại xuyên qua để không cản thao tác
 for (const el of [$('bar'), $('card')]) { el.addEventListener('mouseenter', () => A.overlayMouse(true)); el.addEventListener('mouseleave', () => A.overlayMouse(false)); }
 $('stop').addEventListener('click', () => A.overlayStop());
+// B42: thanh nằm ở góc dưới (không che hàng thẻ của trình duyệt), thu gọn được; né chỗ AIVN sắp bấm (sang góc kia)
+$('fold').addEventListener('click', () => { const c = $('bar').classList.toggle('collapsed'); $('fold').textContent = c ? '+' : '–'; });
+function avoid(p) {
+  if (!p) return; const r = $('bar').getBoundingClientRect(); const x = p.x * innerWidth, y = p.y * innerHeight; const m = 40;
+  if (x >= r.left - m && x <= r.right + m && y >= r.top - m && y <= r.bottom + m) { $('bar').classList.toggle('left'); $('status').style.right = $('bar').classList.contains('left') ? 'auto' : '16px'; $('status').style.left = $('bar').classList.contains('left') ? '16px' : 'auto'; }
+}
 function place(box) {
   const t = $('target');
   if (!box) { t.style.display = 'none'; return; }
@@ -38,7 +44,8 @@ addEventListener('keydown', (e) => {
 A.overlayOn((m) => {
   if (m.type === 'start') { $('hk').textContent = ` · Esc hoặc ${m.stopKey} để dừng`; $('status').hidden = true; }
   if (m.type === 'status') { $('status').hidden = !m.text; $('status').textContent = m.text || ''; }
-  if (m.type === 'target') { place(m.box); if (m.label) $('target').querySelector('span').textContent = m.label; }
+  if (m.type === 'avoid') avoid(m.p);
+  if (m.type === 'target') { place(m.box); if (m.box) avoid({ x: (m.box.x1 + m.box.x2) / 2, y: (m.box.y1 + m.box.y2) / 2 }); if (m.label) $('target').querySelector('span').textContent = m.label; }
   if (m.type === 'end') { place(null); $('card').style.display = 'none'; cur = null; }
   if (m.type === 'asked' && cur && cur.id === m.id) { $('card').style.display = 'none'; cur = null; }
   if (m.type === 'ask') {

@@ -135,7 +135,7 @@ const DEFS = {
   read_multiple_files: { label: 'Đọc nhiều tệp', icon: '📚', description: 'Đọc cùng lúc nhiều tệp (tối đa 10) trong thư mục được phép; mỗi tệp trả phần đầu nội dung, tệp lỗi được báo riêng mà không làm hỏng các tệp khác.',
     parameters: O({ paths: { type: 'array', items: { type: 'string' }, description: 'Danh sách đường dẫn tệp' } }, ['paths']) },
   list_allowed_directories: { label: 'Thư mục được phép', icon: '🗂', description: 'Liệt kê các thư mục người dùng cho phép AIVN AGENT đọc/ghi. Ngoài các thư mục này mọi truy cập đều bị từ chối.', parameters: { type: 'object', properties: {} } },
-  read_file: { label: 'Đọc tệp', icon: '📖', description: 'Đọc nội dung chữ của một tệp trong thư mục được phép (TXT, MD, CSV, JSON, mã nguồn, PDF có lớp chữ, Word DOCX/ODT, Excel XLSX/ODS, PowerPoint PPTX/ODP, ZIP; không đọc âm thanh/video). Tệp dài trả về từng phần; dùng offset để đọc tiếp.',
+  read_file: { label: 'Đọc tệp', icon: '📖', description: 'Đọc nội dung chữ của một tệp trong thư mục được phép (TXT, MD, CSV, JSON, mã nguồn, PDF có lớp chữ, Word DOCX/ODT, Excel XLSX/ODS, PowerPoint PPTX/ODP, ZIP; âm thanh/video MP3/WAV/M4A/MP4/WEBM/MOV → bản chép lời có mốc thời gian). Tệp dài trả về từng phần; dùng offset để đọc tiếp.',
     parameters: O({ path: S('Đường dẫn tệp'), offset: { type: 'integer', description: 'Vị trí ký tự bắt đầu đọc (mặc định 0)' } }, ['path']) },
   write_file: { label: 'Ghi tệp', icon: '✍️', description: 'Tạo hoặc ghi một tệp văn bản (TXT, MD, CSV, JSON, HTML, mã nguồn…) trong thư mục được phép. Nếu tệp đã tồn tại và mode không phải append, AIVN sẽ hỏi người dùng trước khi ghi đè.',
     parameters: O({ path: S('Đường dẫn tệp cần ghi, ví dụ tom-tat.md'), content: S('Toàn bộ nội dung cần ghi'), mode: { type: 'string', enum: ['create', 'overwrite', 'append'], description: 'create: tạo mới (mặc định); overwrite: ghi đè; append: thêm vào cuối' } }, ['path', 'content']) },
@@ -145,7 +145,7 @@ const DEFS = {
     parameters: O({ query: S('Từ khoá tìm kiếm') }) },
   fetch_url: { label: 'Mở trang web', icon: '🌐', description: 'Tải một trang web công khai (http/https) và trả về phần chữ chính của trang.',
     parameters: O({ url: S('Địa chỉ trang, bắt đầu bằng http:// hoặc https://') }) },
-  run_javascript: { label: 'Chạy JavaScript', icon: '⚙️', description: 'Chạy một đoạn JavaScript ngắn trong hộp cát (không có require, mạng hay quyền đọc tệp; tối đa 3 giây). Kết quả là giá trị biểu thức cuối cùng và những gì in bằng console.log (nên console.log từng kết quả). Hợp cho tính toán nhiều bước, thống kê, xử lý bảng CSV. Muốn xử lý một tệp trong thư mục được phép, đặt input_file: nội dung chữ của tệp có sẵn trong biến chuỗi INPUT, không cần chép lại dữ liệu.',
+  run_javascript: { label: 'Chạy JavaScript', icon: '⚙️', description: 'Chạy một đoạn JavaScript ngắn trong hộp cát của AIVN để TÍNH TOÁN/XỬ LÝ DỮ LIỆU (không có require, mạng hay quyền đọc tệp; tối đa 3 giây). KHÔNG chạy trong trang web hay ứng dụng: không có document/window/DOM, không đọc hay bấm được gì trên màn hình — muốn thao tác trang web/ứng dụng thì dùng screen_look/screen_act. Kết quả là giá trị biểu thức cuối cùng và những gì in bằng console.log (nên console.log từng kết quả). Hợp cho tính toán nhiều bước, thống kê, xử lý bảng CSV. Muốn xử lý một tệp trong thư mục được phép, đặt input_file: nội dung chữ của tệp có sẵn trong biến chuỗi INPUT, không cần chép lại dữ liệu.',
     parameters: O({ code: S('Mã JavaScript'), input_file: S('(Không bắt buộc) tên tệp trong thư mục được phép, vd. du-lieu.csv; nội dung tệp có sẵn trong biến INPUT') }, ['code']) },
   run_python: { label: 'Chạy Python', icon: '🐍', description: 'Chạy một đoạn Python 3 ngắn trên máy (thư mục tạm, không có mạng, tối đa 10 giây). In kết quả bằng print().',
     parameters: O({ code: S('Mã Python') }) },
@@ -319,9 +319,32 @@ const CHIPS_RE = /(?:\[[^\]\n]{1,32}\]\s*[,·|→>-]?\s*){3,}/u;
 const CHIP_LINE_RE = /^\s*[-*]?\s*(?:\[[^\]\n]{1,32}\]\s*[,·|→>-]?\s*){2,}\s*$/u;
 const stripFake = (t) => String(t || '').split('\n').filter(l => !/^\s*[-*]?\s*\[\s*(screen|tool|open_app|open_url|screen_act|screen_look|run_command|close_app|action)[^\]]*\]/i.test(l) && !CHIP_LINE_RE.test(l)).join('\n').replace(CHIPS_RE, '').trim();
 // Người dùng nhờ LÀM một việc trên máy (kể cả câu nối tiếp "hãy làm cho tôi", "làm đi", "ok thực hiện đi")
-const ACT_RE = /^\s*(?:(?:ok(?:e|ay)?|ừ|ừm|vâng|dạ|có|được|tôi muốn|mình muốn|em muốn|hãy|giúp (?:tôi|mình|em)|làm ơn|vui lòng|bạn|(?:aivn (?:bot|agent)),?)[\s,]+)*(mở|khởi động|gửi|nhắn|bấm|nhấn|gõ|đóng|tắt ứng dụng|chụp)(?=\s|$)/iu;
+const ACT_RE = /^\s*(?:(?:ok(?:e|ay)?|ừ|ừm|vâng|dạ|có|được|tôi muốn|mình muốn|em muốn|hãy|giúp (?:tôi|mình|em)|làm ơn|vui lòng|bạn|(?:aivn (?:bot|agent)),?)[\s,]+)*(mở|khởi động|gửi|nhắn|bấm|nhấn|gõ|đóng|tắt ứng dụng|chụp|tăng|giảm|chỉnh|khoá|kh\u00f3a|soạn)(?=\s|$)/iu;
 const FOLLOW_RE = /^\s*(?:(?:ok(?:e|ay)?|ừ|ừm|vâng|dạ|có|được|rồi|tôi muốn|mình muốn|em muốn|hãy|bạn|vậy|thì)[\s,!.]*)*(?:hãy\s+)?(?:(?:tự\s+)?(?:làm|thực hiện|tiến hành|tiếp tục)(?:\s+(?:luôn|đi|nó|việc (?:đó|này)|các bước (?:đó|này)|hộ|giùm|giúp|cho|toàn bộ|hết|ngay))*(?:\s+(?:tôi|mình|em))?(?:\s+(?:luôn|đi|nhé|nha|ngay|với))*|(?:do it|go ahead|yes))[\s!.]*$/iu;
-const isActAsk = (q) => ACT_RE.test(String(q || '')) || FOLLOW_RE.test(String(q || ''));
+// B43: nêu TÊN ứng dụng/trang + động từ làm việc (“soạn email trên Outlook web…”, “đặt lịch trong Google Calendar”) = thao tác ứng dụng đó.
+// “chỉ soạn, không gửi” chỉ có nghĩa là DỪNG TRƯỚC nút Gửi, không phải “viết ra khung chat”.
+const APP_NAMES = String.raw`outlook(?:\s+web)?|gmail|zalo|messenger|facebook|instagram|teams|slack|discord|telegram|whatsapp|viber|word|excel|powerpoint|google\s+(?:docs|sheets|slides|drive|calendar|lịch|meet|forms)|notion|canva|chrome|edge|firefox|cốc cốc|coc coc|youtube|shopee|lazada|tiktok|onedrive|one\s*drive|lịch google|thunderbird|libreoffice(?:\s+\w+)?|writer|calc|paint|notepad|file explorer|vs ?code|trình duyệt`;
+const APP_TASK_RE = new RegExp(String.raw`(?:^|[\s,.(])(soạn|viết|tạo|đặt|lên lịch|đăng|điền|gửi|nhắn|trả lời|chuyển tiếp|tải lên|đính kèm|tìm|xoá|xóa|sửa|đổi|thêm|mở|compose|write|draft|send|create|post|reply|forward|schedule|upload|fill)(?=\s)[^
+]{0,160}?(?:trên|trong|bằng|qua|ở|vào|tại|on|in|using|via)\s+(?:ứng dụng\s+|app\s+|trang\s+|web\s+)?(?:${APP_NAMES})(?=[\s,.:;!?"“”)]|$)`, 'iu');
+const APP_OF_RE = new RegExp(String.raw`(?:trên|trong|bằng|qua|ở|vào|tại|on|in|using|via)\s+(?:ứng dụng\s+|app\s+|trang\s+|web\s+)?(${APP_NAMES})`, 'iu');
+const HOWTO_RE = /^\s*(?:giải thích|cho (?:tôi|mình|em) biết|hướng dẫn|chỉ (?:tôi|mình|em)|làm (?:sao|thế nào)|tại sao|vì sao|cách|có cách|how|what|why|explain|can you explain)\b|(?:là gì|như thế nào|thế nào|ra sao|được không|không vậy)\s*\??\s*$|\?\s*$/iu;
+const isAppTask = (q) => { const t = String(q || ''); return APP_TASK_RE.test(t) && !HOWTO_RE.test(t); };
+const appOf = (q) => { const m = APP_OF_RE.exec(String(q || '')); return m ? m[1].replace(/\s+/g, ' ').trim() : ''; };
+const NO_APP_ACTION_WARN = (app) => `⚠ AIVN AGENT CHƯA thao tác gì trên ${app || 'ứng dụng'} trong lượt này (không có bước nào được làm) — nội dung ở trên chỉ là chữ trong khung chat, chưa được soạn/gửi trong ${app || 'ứng dụng'}. Bạn giao lại việc hoặc chọn mô hình mạnh hơn nhé.`;
+// B44: tên công cụ/tham số nội bộ → chữ thường ngày (theo nhãn của công cụ)
+const SYS_WORDS = { volume_up: 'tăng âm lượng', volume_down: 'giảm âm lượng', volume_set: 'đặt âm lượng', mute: 'tắt/bật tiếng', lock: 'khoá màn hình', sleep: 'cho máy ngủ', shutdown: 'tắt máy', restart: 'khởi động lại', open_settings: 'mở Cài đặt', show_desktop: 'hiện màn hình chính', empty_trash: 'dọn Thùng rác', type_text: 'gõ chữ', double_click: 'bấm đúp', right_click: 'bấm chuột phải', focus_window: 'chuyển cửa sổ' };
+function scrubToolNames(text, names = [], defOf = () => null) {
+  let t = String(text || ''); if (!t) return t;
+  const words = { ...SYS_WORDS }; for (const n of names) { const d = defOf(n); if (d && d.label && /_/.test(n)) words[n] = String(d.label).toLowerCase(); }
+  const keys = Object.keys(words).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (!keys.length) return t;
+  // dòng/khối mã chỉ là một “lời gọi” in ra (action="…" level=…) → bỏ hẳn
+  t = t.replace(new RegExp('```[a-z]*\\s*(?:' + keys.join('|') + ')\\b[^`]*```', 'gi'), '').replace(new RegExp('`(?:' + keys.join('|') + ')\\b[^`\\n]*`', 'gi'), (m) => { const k = m.replace(/`/g, '').split(/[\s(]/)[0]; return /[=(]/.test(m) ? '' : words[k] || words[k.toLowerCase()] || ''; });
+  const snake = keys.filter(k => /_/.test(k)); // chữ thường (lock, mute, restart…) chỉ đổi khi nằm trong `…`
+  if (snake.length) t = t.replace(new RegExp('\\b(?:' + snake.join('|') + ')\\b', 'g'), (m) => words[m] || m);
+  return t.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trim();
+}
+const isActAsk = (q) => ACT_RE.test(String(q || '')) || FOLLOW_RE.test(String(q || '')) || isAppTask(q);
 // Từ chối / chỉ hướng dẫn tay / hỏi lại thay vì làm (khi công cụ máy tính đang bật)
 const REFUSE_RE = /((do|vì|bởi)\s+(những\s+)?(giới hạn|hạn chế)[^.\n]{0,60}(công cụ|khả năng|hệ thống)|(tôi|mình|em)\s+(hiện\s+)?(không thể|không có khả năng|chưa thể)\s+(tự\s+)?(động\s+)?(thực hiện|thao tác|điều khiển|truy cập|mở|gửi|nhấp|bấm)|(tôi|mình|em)\s+(chỉ\s+)?(có thể\s+)?hướng dẫn|(bạn\s+)?(hãy|có thể|vui lòng)\s+(tự\s+)?(làm|thực hiện)\s+theo|(làm|thực hiện)\s+theo\s+(các\s+)?bước\s+(sau|dưới)|bạn có muốn (tôi|mình|em) (thực hiện|làm|giúp|tiến hành)|nếu bạn muốn,?\s+(tôi|mình|em)\s+(sẽ|có thể)|i (can't|cannot|am unable to|am not able to)|as an ai)/iu;
 const MANUAL_RE = /(^|\n)\s*(?:\d+[.)]|[-*•]|bước\s*\d+:?)\s*\**\s*(mở|nhấp|nhấn|bấm|chọn|gõ|nhập|tìm|vào|click)/giu;
@@ -625,7 +648,8 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const att = (runStore.getStore() || {}).attachments || [];
     if (att.length && !names.includes('read_file') && !(s.agentToolsOff || []).includes('files')) names.push('read_file'); // đọc tệp đính kèm
     // 0.15.2: ngữ cảnh < 16k → mô tả công cụ gọn (tiết kiệm ~40% token); chỉ gửi công cụ đang bật (activeTools)
-    const tools = (Number((deps.engine.status() || {}).contextSize) || 8192) < 16384 ? TP.leanTools(specs(names)) : specs(names);
+    const mkTools = () => ((Number((deps.engine.status() || {}).contextSize) || 8192) < 16384 ? TP.leanTools(specs(names)) : specs(names));
+    let tools = mkTools();
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
     let query = lastUser ? (typeof lastUser.content === 'string' ? lastUser.content : (lastUser.content || []).map(x => x.text || '').join(' ')) : '';
     const compOn = names.some(n => COMP.includes(n)) && !headless;
@@ -639,6 +663,8 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       }
     }
     const actAsk = compOn && isActAsk(query);
+    // B41: việc trên trang web/ứng dụng → ẩn “Chạy JavaScript” (chạy trong hộp cát Node, không chạm được trang: mô hình nhỏ tưởng nó điều khiển được trang → “document is not defined”)
+    if (!headless && names.includes('run_javascript') && (isAppTask(query) || /(trang web|website|\bweb\b|trình duyệt|outlook|gmail|zalo|messenger|facebook|youtube|shopee)/iu.test(query))) { while (names.includes('run_javascript')) names.splice(names.indexOf('run_javascript'), 1); tools = mkTools(); deps.log && deps.log('[aivn agent] việc trên trang web/ứng dụng: ẩn công cụ Chạy JavaScript'); }
     onStatus({ stage: 'prepare' });
     const sys = await systemPrompt({ query, names, headless });
     // B28: cửa sổ đang mở liên quan tới câu lệnh (để không bao giờ nói “chưa cài” khi cửa sổ đang mở)
@@ -646,7 +672,18 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const san = sanitizeHistory(messages, { act: actAsk });
     if (san.hidden) deps.log && deps.log(`[aivn agent] ẩn ${san.hidden} câu trả lời cũ khẳng định ứng dụng chưa cài`);
     if (san.guides) deps.log && deps.log(`[aivn agent] ẩn ${san.guides} câu trả lời cũ chỉ hướng dẫn/hỏi lại (không gọi công cụ)`);
-    const msgs = [{ role: 'system', content: sys.text }, ...san.messages];
+    const appTask = compOn && isAppTask(query) ? appOf(query) : '';
+    const DRAFT_RE = /(chỉ soạn|soạn sẵn|không gửi|đừng gửi|chưa gửi|don't send|do not send|draft only)/iu;
+    const appHint = appTask ? `\n\n(Việc này phải LÀM TRÊN ${appTask} bằng công cụ: mở ${appTask} (open_app/open_url), quan sát màn hình (screen_look) rồi thao tác (screen_act). KHÔNG viết nội dung vào khung chat thay cho việc làm.${DRAFT_RE.test(query) ? ` “Chỉ soạn/không gửi” nghĩa là làm tới khi soạn xong trong ${appTask} rồi DỪNG TRƯỚC nút Gửi.` : ''})` : '';
+    // beta.2: việc MỚI trên máy (không phải câu nối tiếp, không nhắc tới “nó/đó/vừa rồi…”) → bắt đầu với ngữ cảnh sạch: không mang các bước/câu trả lời của việc trước
+    // (mô hình nhỏ hay làm tiếp việc cũ hoặc chép lại câu trả lời cũ)
+    const REF_RE = /(?:^|[\s,.])(nó|đó|này|vừa rồi|vừa nãy|lúc nãy|ở trên|như trên|tiếp|lại|cũng vậy|it|that|this|previous|above|again|same)(?=[\s,.!?]|$)/iu;
+    let histMsgs = san.messages;
+    if (actAsk && !FOLLOW_RE.test(query) && !REF_RE.test(query) && histMsgs.length > 1) {
+      const lastU = [...histMsgs].reverse().find(m => m.role === 'user'); const dropped = histMsgs.length - 1;
+      histMsgs = lastU ? [lastU] : histMsgs; deps.log && deps.log(`[aivn agent] việc mới: bắt đầu ngữ cảnh sạch (bỏ ${dropped} tin của việc trước)`);
+    }
+    const msgs = [{ role: 'system', content: sys.text + appHint }, ...histMsgs];
     const st = deps.engine.status();
     // 0.16: tự thu gọn lịch sử + ảnh TRƯỚC MỖI lần gọi mô hình (không còn hỏng vì hết ngữ cảnh giữa lượt dài)
     const tc = (x) => (deps.engine.countTokens ? deps.engine.countTokens(x) : Math.ceil(String(x).length / 3));
@@ -655,7 +692,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const fitMsgs = (useTools, { extra = 0, tag = '' } = {}) => {
       const cs = (deps.engine.status() || {}).contextSize || st.contextSize || 0;
       const r = CP.compact(msgs, { contextSize: cs, count: tc, toolTok: toolTokOf(useTools), reserve: reserveOf() + extra });
-      if (r.actions.length) { msgs.splice(0, msgs.length, ...r.messages); deps.log && deps.log(`[aivn agent] thu gọn${tag ? ' (' + tag + ')' : ''}: ${r.actions.join(', ')} → ~${r.tokens}/${r.budget} token`); }
+      if (r.actions.length) { msgs.splice(0, msgs.length, ...r.messages); deps.log && deps.log(`[aivn agent] thu gọn${tag ? ' (' + tag + ')' : ''}: ${r.actions.join('; ')} → ~${r.tokens}/${r.budget} token`); }
       return r;
     };
     // gọi mô hình: thu gọn trước; nếu bộ máy vẫn báo hết ngữ cảnh → thu gọn mạnh hơn rồi thử lại (tối đa 2 lần)
@@ -680,6 +717,8 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const auto = AU.forTurn({ setting: !headless && S_().agentAutonomy === true, query });
     const ctx = { signal, convoId, userQuery: query, auto, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
     const steps = [], seen = new Map(); const retry = RT.createRetryTracker();
+    const look = { same: 0, sig: '', hint: '', blocked: 0 }; // B40
+    const honestOf = (reason) => { let rcp = null; try { rcp = require('./send-verify').recipientOf(query); } catch {} const m = /\b(zalo|messenger|telegram|teams|slack|discord|whatsapp|viber)\b/i.exec(String(query || '')); return RT.honestStatus({ query, tracker: retry, steps, reason, recipient: rcp, app: m ? m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() : '' }); };
     (runStore.getStore() || {}).steps = steps;
     let text = '', finishReason = 'stop', calls = 0, searchNudged = false, openNudged = false, nudged = false, deskNudged = false, forcedTried = false, warning = null, fakeSeen = false, emptyNudged = false, loopRetried = false;
     const smp = SMP.samplingFor(st.id || '', 'agent', { temperature: typeof s.agentTemperature === 'number' && s.agentTemperature !== 0.2 ? s.agentTemperature : null }); // 0.2 = mặc định cũ (dễ lặp) → tự động theo mô hình
@@ -697,7 +736,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       steps.push(step); onStep({ ...step }); onStatus({ stage: 'tools', round: 0, pre: '' });
       let out;
       try { out = await exec('open_app', call.arguments, ctx); }
-      catch (e) { const msg = (e && e.message) || String(e); out = { error: msg, forModel: `Lỗi: ${msg}`, summary: msg }; }
+      catch (e) { const msg = (e && e.message) || String(e); out = { error: msg, forModel: `Lỗi: ${msg}`, summary: String(msg).split(/\s(?=Bước tiếp:|Gần giống:)/)[0] }; /* B33b: thẻ bước chỉ hiện câu đầu; hướng dẫn cho mô hình vẫn ở chi tiết */ }
       Object.assign(step, { status: out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, ms: Date.now() - step.startedAt });
       onStep({ ...step }); logTool(step); calls++;
       seen.set('open_app:' + JSON.stringify(call.arguments), out);
@@ -707,6 +746,21 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       if (autoOpen.ok && !intent.rest) { // chỉ cần mở ứng dụng: xong, không cần mô hình
         return { text: `Đã mở ${out.summary ? out.summary.replace(/^Đã mở\s*/, '') : intent.name}.`, steps, usage, finishReason: 'stop', urls: [], memories: sys.memories.map(m => m.text), tools: names, warning: null };
       }
+    }
+    // B44: câu chỉ là MỘT lệnh hệ thống rõ ràng (“tăng âm lượng lên”, “âm lượng 100”, “khoá màn hình”) → làm ngay bằng công cụ thật, không qua mô hình
+    // (mô hình nhỏ hay in “system_action action=…” ra chữ). Lệnh rõ ràng không cần hỏi lại (quyết định B1); vẫn qua đúng đường kiểm tra của công cụ.
+    const sysD = !headless && !intent && names.includes('system_action') ? require('./sys-intent').directSys(query) : null;
+    if (sysD) {
+      const args = sysD.level != null ? { action: sysD.action, level: sysD.level } : { action: sysD.action };
+      const def = defOf('system_action'); const id = 'auto_sys_' + Date.now().toString(36);
+      const step = { id, name: 'system_action', label: def.label, icon: def.icon, args, status: 'running', startedAt: Date.now(), round: 0, pre: '', auto: true };
+      steps.push(step); onStep({ ...step }); onStatus({ stage: 'tools', round: 0, pre: '' });
+      let out; try { out = await exec('system_action', args, ctx); } catch (e) { const msg = (e && e.message) || String(e); out = { error: msg, forModel: `Lỗi: ${msg}`, summary: String(msg).split(/\s(?=Bước tiếp:|Gần giống:)/)[0] }; /* B33b: thẻ bước chỉ hiện câu đầu; hướng dẫn cho mô hình vẫn ở chi tiết */ }
+      Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, ms: Date.now() - step.startedAt });
+      onStep({ ...step }); logTool(step); calls++;
+      deps.log && deps.log(`[aivn agent] lệnh hệ thống rõ ràng → làm ngay: ${JSON.stringify(args)} · ${step.status}`);
+      const txt = out.refused ? 'Mình chưa làm vì bạn không cho phép.' : out.error ? `Mình chưa làm được: ${String(out.summary || out.error).slice(0, 160)}.` : `Đã làm: ${out.summary}.`;
+      return { text: txt, steps, usage, finishReason: 'stop', urls: [], memories: sys.memories.map(m => m.text), tools: names, warning: null };
     }
     // yêu cầu thao tác trên máy mà chưa có bước thật nào thành công → lượt đầu BẮT BUỘC gọi công cụ (hoặc cannot_do)
     const forceFirst = !headless && names.some(n => COMP.includes(n)) && !(autoOpen && autoOpen.ok) && (!!intent || actAsk || /^\s*(?:(?:hãy|giúp (?:tôi|mình|em)|làm ơn|vui lòng|bạn)\s+)*(mở|khởi động|gửi tin|nhắn tin|nhắn cho|gửi cho|đóng|tắt ứng dụng)(?=\s|$)/iu.test(query));
@@ -745,9 +799,13 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       if (signal?.aborted || r.finishReason === 'abort') { text = r.text || streamed; finishReason = 'abort'; break; }
       if (usage.completion_tokens >= turnBudget && (!r.toolCalls || !r.toolCalls.length)) { text = RG.trimLoop(stripFake(r.text || '')).text; warning = warning || BUDGET_WARN; finishReason = 'length'; break; }
       if (forcing && r.toolCalls && r.toolCalls[0] && r.toolCalls[0].name === 'cannot_do') { const why = r.toolCalls[0].arguments && r.toolCalls[0].arguments.reason; text = 'Mình chưa làm được việc này' + (why ? ': ' + String(why) : '.'); finishReason = 'stop'; break; }
-      if ((!r.toolCalls || !r.toolCalls.length) && r.finishReason !== 'abort' && /<tool_call>|"name"\s*:/.test(r.text || '')) {
-        // mô hình viết lời gọi công cụ dạng văn bản (vd. SmolVLM qua llama-server, Qwen nhỏ): tự tách thành lời gọi thật
-        const p = TP.parseToolCalls(r.text, names);
+      const escN = names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')); const toolNameRe = names.length ? new RegExp(`\\b(?:${escN.join('|')})\\b\\s*(?:[({<]|[A-Za-z_]\\w*\\s*[=:])|<(?:${escN.join('|')})>|<function=`) : null;
+      if ((!r.toolCalls || !r.toolCalls.length) && r.finishReason !== 'abort' && (/<tool_call>|"name"\s*:/.test(r.text || '') || (toolNameRe && toolNameRe.test(r.text || '')))) {
+        // mô hình viết lời gọi công cụ dạng văn bản (vd. SmolVLM qua llama-server, Qwen nhỏ; B44: `system_action action="volume_up"`): tự tách thành lời gọi thật,
+        // kiểm tra theo lược đồ công cụ rồi chạy qua ĐÚNG đường xin phép như lời gọi thường
+        const schemas = Object.fromEntries(names.map(n => { const d = defOf(n); return [n, d && d.parameters]; }));
+        const p = TP.parseToolCalls(r.text, names, schemas);
+        if (p.toolCalls.some(c => c.salvaged)) deps.log && deps.log(`[aivn agent] tách lời gọi công cụ mô hình in ra chữ: ${p.toolCalls.map(c => c.name + ' ' + JSON.stringify(c.arguments)).join('; ')}`);
         if (p.toolCalls.length) {
           const sigOf = (c) => c.name + ':' + JSON.stringify(Object.fromEntries(Object.entries(c.arguments && typeof c.arguments === 'object' ? c.arguments : {}).filter(([, v]) => v !== null)));
           const fresh = p.toolCalls.filter(c => !seen.has(sigOf(c)));
@@ -825,17 +883,28 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
                 step.status = 'running'; onStep({ ...step }); onStatus({ stage: 'act', round, tool: call.name });
               }
             }
-            const pre = !refusedOut && call.name === 'screen_act' ? retry.before(args) : null;
+            let pre = !refusedOut && call.name === 'screen_act' ? retry.before(args) : null;
+            // B40: quan sát lại màn hình không đổi lần thứ 3 trở đi → không quan sát nữa, bắt làm bước tiếp theo (gợi ý đích của việc)
+            if (!refusedOut && call.name === 'screen_look' && look.same >= 2 && !args.window) { look.blocked++; pre = { forModel: `(Kiểm tra tự động của AIVN) KHÔNG quan sát lại: màn hình đã được quan sát ${look.same} lần liền và KHÔNG đổi. Danh sách phần tử ở lần quan sát trước vẫn đúng. Làm bước tiếp theo NGAY bằng screen_act${look.hint}. Nếu không làm được thì dừng và nói rõ đã làm tới đâu.`, summary: 'không quan sát lại (màn hình không đổi)' }; }
             if (refusedOut) out = refusedOut;
             else if (pre) { out = pre; deps.log && deps.log(`[aivn agent] chặn làm lại cách đã hỏng 2 lần: ${RT.describe(args)}`); }
             else { out = await exec(call.name, args, ctxRun); seen.set(sig, out); if (out && out.auto) step.auto = out.auto; }
+            if (call.name === 'screen_look' && !pre && out && !out.error) {
+              const sigL = String(out.forModel || '').replace(/\[e\d+\]/g, '').replace(/@\d+,\d+/g, '').slice(0, 6000);
+              look.same = sigL === look.sig ? look.same + 1 : 1; look.sig = sigL;
+              const tgt = deps.computer && deps.computer.likelyTarget ? deps.computer.likelyTarget(query) : null;
+              look.hint = tgt ? ` — bước tiếp theo nhiều khả năng là bấm [${tgt.id}] “${tgt.name}” (screen_act click element "${tgt.id}")` : '';
+              if (look.same >= 2) out = { ...out, forModel: String(out.forModel || '') + `\n(Kiểm tra tự động của AIVN) Màn hình KHÔNG đổi so với lần quan sát trước. Đừng gọi screen_look nữa — làm bước tiếp theo bằng screen_act${look.hint}.` };
+              else if (tgt) out = { ...out, forModel: String(out.forModel || '') + `\nGợi ý bước tiếp theo cho việc này: bấm [${tgt.id}] “${tgt.name}”.` };
+            }
+            if (call.name === 'screen_act' || (call.name === 'screen_look' && args.window)) { if (call.name === 'screen_act') { look.same = 0; look.sig = ''; } }
             // 0.16: kiểm tra sau mỗi thao tác màn hình; chưa có tác dụng → gợi ý đổi cách (lần 3 cùng cách thì không làm)
             if (call.name === 'screen_act' && !pre && !refusedOut) { const rr = retry.after(args, out); if (rr.bad) { out = { ...out, forModel: String(out.forModel || out.summary || '') + rr.hint, summary: String(out.summary || '') + ' · chưa có tác dụng' }; step.check = rr.bad; } }
           }
         } catch (e) {
           const userErr = e instanceof ToolError || (deps.computer && e instanceof deps.computer.CompError);
           const msg = userErr ? e.message : (e && e.message) || String(e);
-          out = { error: msg, forModel: `Lỗi: ${msg}`, summary: msg };
+          out = { error: msg, forModel: `Lỗi: ${msg}`, summary: String(msg).split(/\s(?=Bước tiếp:|Gần giống:)/)[0] }; /* B33b: thẻ bước chỉ hiện câu đầu; hướng dẫn cho mô hình vẫn ở chi tiết */
           if (!userErr) deps.log && deps.log(`[aivn agent] ${call.name} lỗi: ${msg}`);
         }
         Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', check: step.check || null, summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, ms: Date.now() - step.startedAt });
@@ -845,6 +914,9 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         if (signal?.aborted) break;
       }
       if (signal?.aborted) { finishReason = 'abort'; break; }
+      // B39: cùng một cách đã hỏng mà mô hình cứ quay lại (bị chặn 2–3 lần) → dừng sớm, báo trung thực những gì đã thử
+      if (look.blocked >= 2) { text = honestOf('quan sát màn hình nhiều lần liền mà mô hình không làm bước nào'); warning = null; finishReason = 'stop'; deps.log && deps.log('[aivn agent] dừng sớm (B40): quan sát lặp lại'); break; }
+      { const gu = retry.giveUp(); if (gu) { text = honestOf(gu.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng sớm (B39): ${gu.why}`); break; } }
     }
     // mô hình nhỏ hay chép nguyên kết quả lỗi của công cụ (kèm chỉ dẫn dành cho mô hình) làm câu trả lời → nói lại cho người dùng
     if (/^\s*Lỗi:/.test(text || '') && steps.some(x => x.status === 'error')) {
@@ -865,15 +937,25 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     // B25: tin đã bị gửi NHẦM chỗ → luôn báo rõ cho người dùng (dù mô hình có nói hay không)
     const wrong = steps.filter(x => x.verify && x.verify.wrongChat);
     if (wrong.length) { const w = wrong[wrong.length - 1].verify; const note = `⚠ Tin nhắn đã bị GỬI NHẦM: ${w.why}. Hãy mở cuộc trò chuyện “${w.wrongTo || 'đó'}” để thu hồi/xoá tin nếu cần.`; if (!String(text).includes('GỬI NHẦM')) text = `${note}\n\n${text}`.trim(); warning = note; }
+    // B43: việc trên ứng dụng (nêu tên ứng dụng) mà cả lượt không có bước công cụ nào làm được → nói thẳng là chưa làm gì trong ứng dụng
+    if (finishReason !== 'abort' && compOn && isAppTask(query) && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) { warning = NO_APP_ACTION_WARN(appOf(query)); deps.log && deps.log(`[aivn agent] việc trên ứng dụng nhưng không có bước nào làm được → cảnh báo`); }
+    // B39: không bao giờ kết thúc lượt bằng lời hứa ở thì tương lai (“tôi sẽ thử…”) — lượt đã hết, sẽ không có gì được làm tiếp
+    if (finishReason !== 'abort' && RT.promiseEnding(text) && steps.some(x => COMP.includes(x.name))) {
+      const verified = steps.some(x => x.verify && x.verify.sent) && !retry.lastBad();
+      deps.log && deps.log(`[aivn agent] câu trả lời kết thúc bằng lời hứa → thay bằng trạng thái thật: ${String(text).slice(-120)}`);
+      text = verified ? String(text).split(/\n+/).filter(l => !RT.promiseEnding(l)).join('\n').trim() || 'Đã làm xong và kiểm chứng trên màn hình.' : honestOf('mô hình định làm tiếp nhưng lượt đã kết thúc');
+    }
     if (finishReason !== 'abort') { const fc = RT.finalCheck(text, retry); if (fc) warning = warning || fc; }
     usage.seconds = (Date.now() - t0) / 1000;
     usage.tokensPerSecond = usage.seconds ? usage.completion_tokens / usage.seconds : 0;
     const urls = steps.flatMap(x => x.urls || []);
     text = stripIntro((text || '').trim(), query, { history: messages.slice(0, -1) });
+    // B44: không bao giờ để lộ tên công cụ nội bộ (system_action, volume_up, screen_look…) trong câu trả lời cho người dùng
+    text = scrubToolNames(text, names, defOf);
     return { text: (text || '').trim(), steps, usage, finishReason, urls, memories: sys.memories.map(m => m.text), tools: names, warning };
   }
 
   return { run, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck, localizeText };
 }
 
-module.exports = { noActionWarn, NO_ACTION_WARN, NO_ACTION_OK_WARN, EMPTY_ANSWER, editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };
+module.exports = { scrubToolNames, isAppTask, appOf, NO_APP_ACTION_WARN, noActionWarn, NO_ACTION_WARN, NO_ACTION_OK_WARN, EMPTY_ANSWER, editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };

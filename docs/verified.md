@@ -76,3 +76,22 @@ Mô hình chính **Qwen3 4B Instruct 2507** (Q4_K_M), máy không GPU, ngữ c�
 | Holo1.5 7B (định vị giao diện) | 1/10 | 173 giây (đầu ra JSON hỏng, ví dụ `{"x": 70, 451}`; AIVN đã thêm ràng buộc JSON và sẽ đo lại) |
 
 AIVN AGENT chỉ nhận mô hình có điểm định vị từ 6/10 trở lên, nhìn được màn hình và gọi công cụ ổn định (đã kiểm chứng ở các mục trên).
+
+<a id="v016-goi-cong-cu"></a>
+## 0.16 beta.2 — Gọi công cụ với câu lệnh thật (2B / 4B / 8B)
+
+Bài đo lại sau lỗi trên máy thật (Zalo, Outlook web, âm lượng). Mỗi câu chạy 5 lần (nhiệt độ 0,7) qua llama-server `--jinja` với đủ định nghĩa công cụ của AIVN AGENT; đạt khi lời gọi đầu tiên là đúng công cụ với đúng tham số.
+
+| Câu lệnh | Qwen3-VL 2B Q8_0 | Qwen3-VL 4B Q4_K_M | Qwen3-VL 8B Q4_K_M |
+|---|---|---|---|
+| Nhắn Zalo vào nhóm `AIVN test`: `AIVN test 1` | 3/5 | 5/5 | 5/5 |
+| Soạn email trên Outlook web, chỉ soạn, không gửi (bước đầu) | 5/5 | 5/5 | 5/5 |
+| Tăng âm lượng lên | 5/5 | 5/5 | 5/5 |
+| Tăng âm lượng lên 100 (đặt mức) | 0/5 | 5/5 | 5/5 |
+| Outlook bước 2: bấm “Thư mới” trong danh sách phần tử | 0/5 | 5/5 | 5/5 |
+| **Tổng** | **13/25** | **25/25** | **25/25** |
+
+Ngưỡng của AIVN AGENT: 23/25. Kết luận:
+- Qwen3-VL 2B bị bỏ khỏi bộ chọn mô hình của AIVN AGENT (vẫn dùng để trò chuyện). Lỗi chính: gọi lại `open_app` thay vì bấm nút đã thấy, và gọi `volume_up` kèm mức thay vì đặt mức (AIVN nay tự đổi thành đặt mức, nhưng lỗi bước 2 vẫn còn).
+- Máy 12 GB VRAM: mặc định là mô hình mạnh nhất chạy mượt và đạt bài này (Qwen3-VL 8B).
+- Laptop GPU 4 GB: Qwen3-VL 4B (có thể hiện “Chạy chậm” khi phải tràn sang RAM).

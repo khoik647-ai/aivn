@@ -41,7 +41,10 @@ function bestFor(list, scores = {}, { allowSlow = false, maxSpill = Infinity } =
   // mô hình chạy chậm: điểm định vị nhân hệ số tốc độ (dưới 20 token/giây bị trừ) — tránh chọn mô hình mạnh nhưng mỗi bước mất cả phút
   const val = (m) => { const f = fitOf(m); const slow = f && f.level === 'slow'; return sc(m) * (slow ? Math.min(1, (f.tps || 0) / 20) : 1); };
   return list.map(m => ({ m, e: eligibility({ ...m, fit: fitOf(m) }, { shipped: m.catalog && (scores.shipped || {})[m.catalog.id], local: (scores.local || {})[m.id], allowSlow, maxSpill }) })).filter(x => x.e.ok)
-    .sort((a, b) => (!!b.e.slow === !!a.e.slow ? 0 : a.e.slow ? 1 : -1) || (!!b.m.installed - !!a.m.installed) || (val(b.m) - val(a.m)) || ((a.m.size || 0) - (b.m.size || 0))).map(x => x.m)[0] || null;
+    .sort((a, b) => (!!b.e.slow === !!a.e.slow ? 0 : a.e.slow ? 1 : -1)
+      // 0.16 beta.2 (máy thật 12 GB chọn 2B vì đã cài sẵn): chạy mượt thì chọn mô hình MẠNH NHẤT (lớn nhất) trước, đã cài chỉ để phân định khi ngang nhau
+      || (a.e.slow ? (val(b.m) - val(a.m)) : ((b.m.size || 0) - (a.m.size || 0)))
+      || (!!b.m.installed - !!a.m.installed) || (val(b.m) - val(a.m))).map(x => x.m)[0] || null;
 }
 // có mô hình nào dùng được cho AIVN AGENT mà chạy MƯỢT trên máy này không (xét cả Khám phá) — không có thì cho phép "Chạy chậm"
 function needSlowAllowance(entries, scores = {}) {

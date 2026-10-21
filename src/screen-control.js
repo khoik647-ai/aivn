@@ -1,6 +1,7 @@
 // Điều khiển màn hình (cấp 2, THỬ NGHIỆM): chụp màn hình → mô hình nhìn ảnh đề xuất vị trí → thẻ duyệt có khung đỏ →
 // chỉ thao tác chuột/bàn phím sau khi người dùng đồng ý. Chỉ màn hình chính. Chuột/bàn phím qua libnut (Apache-2.0).
 const path = require('path');
+const D = require('./agent/dpi');
 const { desktopCapturer, screen, systemPreferences, clipboard } = require('electron');
 
 let nut = null, nutErr = null;
@@ -11,6 +12,9 @@ function libnut() {
     const dir = path.dirname(require.resolve(`@nut-tree-fork/${pkg}/package.json`)).replace('app.asar' + path.sep, 'app.asar.unpacked' + path.sep);
     nut = require(path.join(dir, 'build', 'Release', 'libnut.node'));
     nut.setMouseDelay && nut.setMouseDelay(30); nut.setKeyboardDelay && nut.setKeyboardDelay(20);
+    // Kiểm thử (chỉ khi phát triển): giả lập luồng gửi chuột KHÔNG nhận DPI như máy Windows 125% — toạ độ bị nhân AIVN_FAKE_INPUT_SCALE
+    const k = Number(process.env.AIVN_FAKE_INPUT_SCALE); let packaged = true; try { packaged = require('electron').app.isPackaged; } catch {}
+    if (k && !packaged) { const real = nut; nut = Object.assign(Object.create(real), { moveMouse: (x, y) => real.moveMouse(Math.round(x * k), Math.round(y * k)), getScreenSize: () => { const z = real.getScreenSize(); return { width: Math.round(z.width / k), height: Math.round(z.height / k) }; } }); }
     return nut;
   } catch (e) { nutErr = new Error('Không nạp được bộ điều khiển chuột/bàn phím (' + e.message + ')'); throw nutErr; }
 }
@@ -25,11 +29,30 @@ function permissions({ prompt = false } = {}) {
 const PERM_URLS = { screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture', accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility' };
 
 // Chụp màn hình chính; trả ảnh JPEG (≤ maxW) + thông tin quy đổi toạ độ
-async function capture({ maxW = 1280, align = 0 } = {}) {
-  const d = screen.getPrimaryDisplay();
-  const phys = { width: Math.round(d.size.width * d.scaleFactor), height: Math.round(d.size.height * d.scaleFactor) };
+// ---------- màn hình: tỉ lệ & toạ độ theo từng màn hình (xem agent/dpi.js) ----------
+function geos() {
+  let prim = null; try { prim = screen.getPrimaryDisplay().id; } catch {}
+  return D.geometry(screen.getAllDisplays(), { primaryId: prim, dipToScreenRect: process.platform === 'win32' && screen.dipToScreenRect ? (b) => screen.dipToScreenRect(null, b) : null });
+}
+// vị trí con trỏ THẬT (vật lý) — để kiểm tra chuột đã tới đúng chỗ chưa
+function cursorPhys() {
+  try {
+    const p = screen.getCursorScreenPoint();
+    if (process.platform === 'win32' && screen.dipToScreenPoint) return screen.dipToScreenPoint(p);
+    return D.dipToPhys(geos(), p.x, p.y);
+  } catch { return null; }
+}
+function displayInfo() {
+  const g = geos(); let nutSize = null; try { const z = libnut().getScreenSize(); nutSize = `${z.width}×${z.height}`; } catch {}
+  return { displays: g, text: D.describe(g), nutSize, platform: process.platform };
+}
+async function capture({ maxW = 1280, align = 0, geo = null } = {}) {
+  const G = geos(); const g = (geo && G.find(x => String(x.id) === String(geo.id))) || D.primaryOf(G);
+  const d = screen.getAllDisplays().find(x => String(x.id) === String(g.id)) || screen.getPrimaryDisplay();
+  // thumbnailSize áp cho MỌI màn hình: lấy kích thước vật lý lớn nhất để màn hình nào cũng không bị thu nhỏ
+  const phys = { width: Math.max(...G.map(x => Math.round(x.dip.width * x.scale))), height: Math.max(...G.map(x => Math.round(x.dip.height * x.scale))) };
   const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: phys });
-  const src = sources.find(s => String(s.display_id) === String(d.id)) || sources[0];
+  const src = sources.find(s => String(s.display_id) === String(d.id)) || (G.length === 1 ? sources[0] : null) || sources[0];
   if (!src || src.thumbnail.isEmpty()) throw new Error(process.platform === 'darwin' ? 'Không chụp được màn hình: hãy cấp quyền Ghi màn hình cho AIVN (Cài đặt hệ thống → Quyền riêng tư & Bảo mật → Ghi màn hình), rồi mở lại AIVN.' : 'Không chụp được màn hình.');
   let img = src.thumbnail; const full = img.getSize();
   if (full.width > maxW) img = img.resize({ width: maxW, quality: 'good' });
@@ -37,7 +60,7 @@ async function capture({ maxW = 1280, align = 0 } = {}) {
   // để toạ độ mô hình trả về khớp đúng ảnh AIVN đã gửi (quy đổi theo từng trục ở parseBox)
   if (align > 1) { const s0 = img.getSize(); const w = Math.max(align, Math.round(s0.width / align) * align), h = Math.max(align, Math.round(s0.height / align) * align); if (w !== s0.width || h !== s0.height) img = img.resize({ width: w, height: h, quality: 'good' }); }
   const sz = img.getSize();
-  return { dataUrl: 'data:image/jpeg;base64,' + img.toJPEG(80).toString('base64'), width: sz.width, height: sz.height, display: { id: d.id, bounds: d.bounds, scaleFactor: d.scaleFactor } };
+  return { dataUrl: 'data:image/jpeg;base64,' + img.toJPEG(80).toString('base64'), width: sz.width, height: sz.height, full, geo: g, display: { id: d.id, bounds: d.bounds, scaleFactor: d.scaleFactor } };
 }
 
 // Mỗi họ mô hình định vị theo cách riêng: Qwen2.5-VL & UI-TARS-1.5 trả điểm ảnh tuyệt đối (ảnh đã chia ô 28),
@@ -128,10 +151,9 @@ async function describe(engine, shot, question, { signal } = {}) {
 
 // Toạ độ chuẩn hoá (0..1 trên màn hình chính) → toạ độ libnut
 function toNut(nx, ny, display) {
-  const b = display.bounds; const dip = { x: Math.round(b.x + nx * b.width), y: Math.round(b.y + ny * b.height) };
-  if (process.platform === 'win32' && screen.dipToScreenPoint) return screen.dipToScreenPoint(dip); // Windows: điểm ảnh vật lý
-  if (process.platform === 'linux') return { x: Math.round(dip.x * display.scaleFactor), y: Math.round(dip.y * display.scaleFactor) };
-  return dip; // macOS: điểm (point)
+  // ảnh chụp chuẩn hoá 0..1 của màn hình `display` → toạ độ vật lý theo đúng màn hình đó (tỉ lệ riêng, gốc riêng, kể cả toạ độ âm)
+  const G = geos(); const g = (display && G.find(x => String(x.id) === String(display.id))) || D.primaryOf(G);
+  return D.normToPhys(g, nx, ny);
 }
 const KEYMAP = { ctrl: 'control', control: 'control', cmd: 'command', command: 'command', win: 'command', meta: 'command', alt: 'alt', option: 'alt', shift: 'shift', enter: 'enter', return: 'enter', esc: 'escape', escape: 'escape', tab: 'tab', space: 'space', backspace: 'backspace', delete: 'delete', del: 'delete', up: 'up', down: 'down', left: 'left', right: 'right', home: 'home', end: 'end', pageup: 'pageup', pagedown: 'pagedown' };
 function parseKeys(combo) {
@@ -167,4 +189,4 @@ async function perform({ action, nx, ny, text, keys, display, amount }) {
   if (action === 'scroll') { const a = Math.max(-20, Math.min(20, Math.round(Number(amount) || -5))); n.scrollMouse(0, process.platform === 'win32' ? a * 120 : a); await sleep(150); }
 }
 
-module.exports = { groundingFamily, familyInfo, FAMILY, permissions, PERM_URLS, capture, locate, describe, parseBox, parseKeys, perform, toNut, libnut, LOCATE_PROMPT };
+module.exports = { geos, cursorPhys, displayInfo, groundingFamily, familyInfo, FAMILY, permissions, PERM_URLS, capture, locate, describe, parseBox, parseKeys, perform, toNut, libnut, LOCATE_PROMPT };

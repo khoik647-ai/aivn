@@ -34,6 +34,8 @@
         out = p.val.replace(/\{(\d+)\}/g, (_, n) => { const i = p.order.indexOf(Number(n)); const g = i < 0 ? '' : m[i + 1]; if (!(depth < 2 && VI.test(g))) return g; const w = /^(\s*)([\s\S]*?)(\s*)$/.exec(g); const x = trCore(w[2], lang, depth + 1) ?? (depth < 1 ? trSeg(w[2], lang) : null); return x == null ? g : w[1] + x + w[3]; });
         break;
       }
+      // số nhiều tiếng Anh: bản dịch viết “{0} turn{s}” → “1 turn”, “2 turns” (B45: “đã huỷ 1 turns”)
+      if (out != null && out.includes('{s}')) out = out.replace(/(\d+(?:[.,]\d+)?)([^\d{]*?)\{s\}/g, (_, n, w) => n + w + (Number(String(n).replace(',', '.')) === 1 ? '' : 's')).replace(/\{s\}/g, 's');
       if (c.cache.size > 4000) c.cache.clear();
       c.cache.set(key, out); return out;
     }

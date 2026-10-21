@@ -37,18 +37,26 @@ function alternatives(a = {}) {
   return ['screen_look để xem lại màn hình rồi chọn cách khác'];
 }
 function createRetryTracker() {
-  const tries = new Map(); const log = [];
+  const tries = new Map(); const log = []; const blocked = new Map(); let blockedTotal = 0, badStreak = 0;
   return {
     // trước khi làm: cách này đã hỏng 2 lần → trả kết quả thay thế (không làm lại)
-    before(a) { const k = key(a); const t = tries.get(k); if (t && t.fails >= 2) return { error: 'cách này đã thử 2 lần không có tác dụng', forModel: `(Kiểm tra tự động của AIVN) KHÔNG làm lại: ${describe(a)} đã thử ${t.fails} lần và đều chưa có tác dụng (${t.why}). Hãy đổi cách: ${alternatives(a).join('; ')}. Nếu đã thử hết mà vẫn không được thì dừng và báo người dùng rõ là CHƯA làm được bước này.`, summary: 'bỏ qua — cách này đã hỏng 2 lần, cần đổi cách' }; return null; },
+    before(a) { const k = key(a); const t = tries.get(k); if (t && t.fails >= 2) { blocked.set(k, (blocked.get(k) || 0) + 1); blockedTotal++; } if (t && t.fails >= 2) return { error: 'cách này đã thử 2 lần không có tác dụng', forModel: `(Kiểm tra tự động của AIVN) KHÔNG làm lại: ${describe(a)} đã thử ${t.fails} lần và đều chưa có tác dụng (${t.why}). Hãy đổi cách: ${alternatives(a).join('; ')}. Nếu đã thử hết mà vẫn không được thì dừng và báo người dùng rõ là CHƯA làm được bước này.`, summary: 'bỏ qua — cách này đã hỏng 2 lần, cần đổi cách' }; return null; },
     // sau khi làm: ghi nhận; hỏng lần đầu → thêm gợi ý đổi cách vào kết quả
     after(a, out) {
       const why = outcome(out); const k = key(a); const t = tries.get(k) || { fails: 0, why: '' };
-      if (!why) { t.fails = 0; tries.set(k, t); log.push({ a, ok: true }); return { bad: null }; }
-      t.fails++; t.why = why; tries.set(k, t); log.push({ a, ok: false, why });
+      if (!why) { t.fails = 0; badStreak = 0; tries.set(k, t); log.push({ a, ok: true }); return { bad: null }; }
+      badStreak++; t.fails++; t.why = why; tries.set(k, t); log.push({ a, ok: false, why });
       const hint = t.fails === 1 ? `\n(Kiểm tra tự động của AIVN) Bước này CHƯA có tác dụng (${why}). Chụp lại/xem kết quả kiểm tra ở trên; nếu thử lại thì đổi cách: ${alternatives(a).slice(0, 3).join('; ')}.` : `\n(Kiểm tra tự động của AIVN) Đã hỏng ${t.fails} lần với cùng cách này (${why}) — BẮT BUỘC đổi cách: ${alternatives(a).join('; ')}.`;
       return { bad: why, hint };
     },
+    // B39: mô hình cứ quay lại cách đã bị chặn (cùng một ý 2 lần, hoặc 3 lần bị chặn bất kỳ), hoặc 10 bước liền không có tác dụng → DỪNG SỚM
+    giveUp() {
+      const same = [...blocked.values()].some(n => n >= 2);
+      if (same || blockedTotal >= 3) return { why: same ? 'lặp lại cách đã hỏng' : 'nhiều cách đã hỏng bị thử lại', blockedTotal };
+      if (badStreak >= 10) return { why: `${badStreak} bước liền chưa có tác dụng`, blockedTotal };
+      return null;
+    },
+    failures() { const m = new Map(); for (const l of log) if (!l.ok) { const k = describe(l.a); const x = m.get(k) || { what: k, n: 0, why: l.why }; x.n++; x.why = l.why; m.set(k, x); } return [...m.values()]; },
     lastBad() { const l = log[log.length - 1]; return l && !l.ok ? l : null; },
     stats() { return { tries: log.length, bad: log.filter(x => !x.ok).length }; },
   };
@@ -61,4 +69,23 @@ function finalCheck(text, tracker) {
   if (!DONE_RE.test(String(text || ''))) return null;
   return `AIVN chưa kiểm chứng được bước cuối trên màn hình (${describe(l.a)}: ${l.why}). Hãy xem lại màn hình trước khi tin là đã xong.`;
 }
-module.exports = { createRetryTracker, outcome, key, alternatives, finalCheck, describe, DONE_RE };
+// B39: câu trả lời cuối là LỜI HỨA ở thì tương lai (“Tôi sẽ thử bấm…”) — lượt đã kết thúc nên sẽ không có gì được làm tiếp
+const PROMISE_RE = /(?:^|[.!?\n:]\s*)(?:(?:bây giờ|tiếp theo|tiếp đến|sau đó|giờ|ok|được rồi|vâng)[, ]+)?(?:tôi|mình|em|aivn(?: agent)?)\s+(?:sẽ|xin phép|đang chuẩn bị|chuẩn bị|tiếp tục)\s+(?:thử|thực hiện|tiếp tục|bấm|nhấn|nhấp|gõ|nhập|mở|tìm|làm|gửi|chọn|chuyển|kiểm tra|quay lại|di chuyển|cuộn|dùng|sử dụng)|\b(?:i'll|i will|let me|i am going to|i'm going to|next,? i)\s+(?:now\s+)?(?:try|click|open|type|search|proceed|perform|do|send|select|use|check)|我(?:将|会|现在|接下来)(?:尝试|点击|打开|输入|执行|搜索|发送|选择)/iu;
+function promiseEnding(text) {
+  const t = String(text || '').trim(); if (!t) return false;
+  const tail = t.split(/\n+/).filter(Boolean).slice(-2).join('\n').slice(-320); // chỉ xét phần cuối câu trả lời
+  return PROMISE_RE.test(tail);
+}
+// B39: báo trung thực khi dừng sớm / khi mô hình kết thúc bằng lời hứa
+function honestStatus({ query = '', tracker = null, steps = [], reason = '', recipient = null, app = '' } = {}) {
+  const fails = tracker ? tracker.failures() : [];
+  const okN = steps.filter(x => x.status === 'ok' && !x.check).length;
+  const lines = [`Mình chưa làm xong việc này${reason ? ` (${reason})` : ''}, nên dừng lại thay vì thử mãi một cách đã hỏng.`];
+  if (fails.length) lines.push('Đã thử:\n' + fails.slice(-6).map(f => `- ${f.what}: ${f.n} lần, ${f.why}`).join('\n'));
+  else if (okN) lines.push(`Đã làm ${okN} bước nhưng chưa kiểm chứng được là xong.`);
+  lines.push(recipient
+    ? `Bạn giúp mình mở sẵn cuộc trò chuyện “${recipient}”${app ? ` trong ${app}` : ''} rồi giao lại việc (hoặc tự gửi tin) nhé.`
+    : 'Bạn có thể mở sẵn đúng cửa sổ/màn hình cần dùng rồi giao lại việc, hoặc tự làm bước này.');
+  return lines.join('\n\n');
+}
+module.exports = { PROMISE_RE, promiseEnding, honestStatus, createRetryTracker, outcome, key, alternatives, finalCheck, describe, DONE_RE };

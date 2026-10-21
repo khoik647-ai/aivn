@@ -59,6 +59,9 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
   step "Tải llama.cpp chính thức (llama-server, MIT) cho chế độ nhìn ảnh, kiểm SHA-256"
   node build/fetch-llama.cjs win-x64 darwin-arm64 darwin-x64
 
+  step "Đóng gói bộ nghe (chép lời âm thanh/video): transformers.js + lõi WASM onnxruntime-web"
+  node build/media-bundle.cjs || die "không đóng gói được bộ nghe (npm install đủ devDependencies chưa?)"
+
   step "Build Windows (NSIS) → dist/AIVN-Setup-$VERSION.exe + latest.yml + blockmap"
   rm -rf dist
   npx electron-builder --win nsis --x64 --publish never

@@ -10,6 +10,24 @@ const net = require('net');
 const crypto = require('crypto');
 
 const EXE = process.platform === 'win32' ? 'llama-server.exe' : 'llama-server';
+// Đọc luồng SSE theo BYTE: giữ phần byte dở của một chữ UTF-8 nhiều byte (tiếng Việt 2–3 byte) sang gói sau (TextDecoder stream:true)
+// và phần dòng dở sang lần sau. Trả các đối tượng JSON của từng dòng "data:".
+function sseParser() {
+  const dec = new TextDecoder('utf-8'); let buf = '';
+  return {
+    push(chunk) {
+      buf += typeof chunk === 'string' ? chunk : dec.decode(chunk, { stream: true });
+      const out = []; let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim(); if (data === '[DONE]') continue;
+        try { out.push(JSON.parse(data)); } catch {}
+      }
+      return out;
+    },
+  };
+}
 // Windows: STATUS_DLL_NOT_FOUND khi thiếu Microsoft Visual C++ Redistributable
 const DLL_NOT_FOUND = [3221225781, -1073741515];
 
@@ -108,18 +126,14 @@ function createVisionServer({ log = () => {} } = {}) {
     if (!res.ok) { const t = await res.text().catch(() => ''); let m = t; try { m = JSON.parse(t).error.message; } catch {} throw new Error('Mô hình nhìn ảnh báo lỗi: ' + String(m).slice(0, 300)); }
     let text = '', finishReason = 'stop', usage = null, buf = '';
     const calls = []; // gom tool_calls theo index
-    const dec = new TextDecoder();
+    const sse = sseParser(); let fffd = 0;
     try {
       for await (const chunk of res.body) {
-        buf += dec.decode(chunk, { stream: true });
-        let i;
-        while ((i = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
-          if (!line.startsWith('data:')) continue;
-          const data = line.slice(5).trim(); if (data === '[DONE]') continue;
-          let j; try { j = JSON.parse(data); } catch { continue; }
+        for (const j of sse.push(chunk)) {
           const c = j.choices && j.choices[0];
-          const piece = c?.delta?.content; const rpiece = c?.delta?.reasoning_content;
+          // ký tự thay thế U+FFFD: máy chủ cắt một chữ UTF-8 nhiều byte giữa hai token (“thư thử�”) — chữ thật không bao giờ là U+FFFD
+          const clean = (x) => { if (typeof x !== 'string' || !x.includes('\ufffd')) return x; fffd++; return x.replace(/\ufffd/g, ''); };
+          const piece = clean(c?.delta?.content); const rpiece = clean(c?.delta?.reasoning_content);
           if ((piece || rpiece) && ttft == null) ttft = (Date.now() - t0) / 1000;
           if (rpiece) { thought += rpiece; if (!extra.response_format) onToken && onToken(rpiece, 'think'); }
           if (piece) { text += piece; if (!extra.response_format) onToken && onToken(piece); }
@@ -135,6 +149,7 @@ function createVisionServer({ log = () => {} } = {}) {
         }
       }
     } catch (e) { if (!signal?.aborted) throw e; finishReason = 'abort'; }
+    if (fffd) log && log(`[vision] bỏ ${fffd} ký tự U+FFFD (chữ UTF-8 bị cắt giữa hai token) trong luồng của llama-server`);
     if (signal?.aborted) finishReason = 'abort';
     const secs = (Date.now() - t0) / 1000;
     const ct = usage?.completion_tokens ?? Math.ceil(text.length / 3.5);
@@ -208,4 +223,4 @@ function createVisionServer({ log = () => {} } = {}) {
   return { start, stop, generate, chatStep, countTokens, status: () => info, available: () => !!findServer() };
 }
 
-module.exports = { createVisionServer, findServer, VisionError, killAllSync, LIVE, HOOKS };
+module.exports = { sseParser, createVisionServer, findServer, VisionError, killAllSync, LIVE, HOOKS };

@@ -11,7 +11,7 @@
 const PLANNERS = ['qwen_qwen3-8b-q4_k_m', 'qwen3-4b-instruct-2507-q4_k_m'];
 const GROUNDERS = ['holo1.5-3b-q4_k_m', 'qwen3-vl-4b-instruct-q4_k_m', 'qwen2.5-vl-3b-instruct-q4_k_m', 'qwen3-vl-2b-instruct-q8_0', 'ui-tars-1.5-7b-q4_k_m', 'qwen3-vl-8b-instruct-q4_k_m', 'qwen2.5-vl-7b-instruct-q4_k_m'];
 const VISION_SOLO = [ // theo thứ tự ưu tiên, kèm VRAM tối thiểu (GB) để chạy trọn trên GPU
-  { id: 'qwen3-vl-8b-instruct-q4_k_m', vram: 7.5 }, { id: 'qwen3-vl-4b-instruct-q4_k_m', vram: 3.5 }, { id: 'qwen3-vl-2b-instruct-q8_0', vram: 0 }];
+  { id: 'qwen3-vl-8b-instruct-q4_k_m', vram: 7.5 }, { id: 'qwen3-vl-4b-instruct-q4_k_m', vram: 0 }]; // beta.2: 2B bỏ khỏi AIVN AGENT (gọi công cụ 13/25, docs/verified.md#v016-goi-cong-cu); máy yếu → 4B “Chạy chậm”
 const PAIR_GROUNDER = [ // mắt nhìn cho cặp: ưu tiên mô hình chuyên điều khiển máy
   { id: 'ui-tars-1.5-7b-q4_k_m', vram: 10 }, { id: 'holo1.5-3b-q4_k_m', vram: 0 }, { id: 'qwen3-vl-2b-instruct-q8_0', vram: 0 }];
 const VISION_IDS = new Set([...VISION_SOLO, ...PAIR_GROUNDER].map(x => x.id).concat(GROUNDERS));

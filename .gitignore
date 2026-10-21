@@ -23,3 +23,6 @@ build/llama/
 # Khoá quản trị (khoá riêng Ed25519) — tuyệt đối không đưa lên git
 *admin-key*.json
 aivn-admin/
+
+# Bộ nghe: tạo bằng node build/media-bundle.cjs (tệp .wasm lớn)
+src/media/vendor/

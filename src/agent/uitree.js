@@ -32,6 +32,8 @@ public static class AivnW {
   [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr v);
+  [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
 }
 "@
 }
@@ -65,7 +67,7 @@ while ($q.Count -gt 0 -and $out.Count -lt $max -and $seen -lt 2500 -and ([DateTi
 }
 $rc = $root.Current; $rb = $rc.BoundingRectangle
 $pn = ''; try { $pn = (Get-Process -Id $rc.ProcessId).ProcessName } catch {}
-[ordered]@{ win = [ordered]@{ title = $rc.Name; pid = $rc.ProcessId; proc = $pn; hwnd = $h; b = @([int]$rb.X, [int]$rb.Y, [int]$rb.Width, [int]$rb.Height) }; els = $out; seen = $seen } | ConvertTo-Json -Depth 6 -Compress
+[ordered]@{ win = [ordered]@{ title = $rc.Name; pid = $rc.ProcessId; proc = $pn; hwnd = $h; b = @([int]$rb.X, [int]$rb.Y, [int]$rb.Width, [int]$rb.Height) }; els = $out; seen = $seen; dpi = @{ cx = [AivnW]::GetSystemMetrics(0); cy = [AivnW]::GetSystemMetrics(1) } } | ConvertTo-Json -Depth 6 -Compress
 `;
 const PS_WINDOWS = PS_PRELUDE + String.raw`
 $fg = [AivnW]::GetForegroundWindow().ToInt64()
@@ -85,6 +87,24 @@ if ([AivnW]::IsIconic($h)) { [void][AivnW]::ShowWindowAsync($h, 9) }
 Start-Sleep -Milliseconds 150
 [ordered]@{ ok = ([AivnW]::GetForegroundWindow() -eq $h) } | ConvertTo-Json -Compress
 `;
+
+// Đặt con trỏ bằng SetCursorPos (PowerShell per-monitor-v2: toạ độ vật lý, mọi màn hình) — đường dự phòng khi chuột của libnut lệch
+const PS_SETCURSOR = PS_PRELUDE + String.raw`
+[void][AivnW]::SetCursorPos([int]$env:AIVN_X, [int]$env:AIVN_Y)
+'ok'
+`;
+async function setCursor(x, y) { if (process.platform !== 'win32') return false; const o = await ps(PS_SETCURSOR, { AIVN_X: String(Math.round(x)), AIVN_Y: String(Math.round(y)) }, 10000); return /ok/.test(o); }
+// UIA đọc trong tiến trình PowerShell KHÔNG nhận DPI → khung phần tử là toạ độ logic (nhỏ hơn thật 1,25 lần ở 125%): đổi về vật lý
+function uiaScale(raw, primaryGeo) {
+  const cx = raw && raw.dpi && Number(raw.dpi.cx); if (!cx || !primaryGeo) return 1;
+  const k = primaryGeo.phys.width / cx; return Math.abs(k - 1) < 0.02 ? 1 : (k > 0.4 && k < 3.5 ? k : 1);
+}
+function rescaleTree(raw, k) {
+  if (!raw || !k || k === 1) return raw; const m = (b) => Array.isArray(b) ? b.map(v => Math.round(v * k)) : b;
+  if (raw.win && raw.win.b) raw.win.b = m(raw.win.b);
+  for (const e of raw.els || []) if (e && e.b) e.b = m(e.b);
+  raw.dpiScaled = k; return raw;
+}
 
 // ---------- macOS: Accessibility qua JXA ----------
 const JXA_TREE = String.raw`
@@ -179,6 +199,25 @@ function normalize(raw, { max = 150, ocr = [] } = {}) {
 }
 
 // toạ độ gốc → thang 0..1000 của màn hình (để mô hình hình dung vị trí; khớp tham số x,y của screen_act)
+// B40: phần tử có khả năng là BƯỚC TIẾP THEO của việc (Outlook “Thư mới”, Zalo “Tìm kiếm”…), theo câu lệnh của người dùng
+const TASK_TARGETS = [
+  [/\b(soan|viet|gui|tao)\b.{0,30}\b(email|e-mail|mail|thu)\b|\b(compose|new (?:mail|email|message)|write (?:an )?email|draft)\b/, ['Thư mới', 'New mail', 'New message', 'Soạn thư', 'Viết thư', 'Compose', 'Tin nhắn mới', 'Thư điện tử mới', 'New email']],
+  [/\b(nhan|gui)\b.{0,40}\b(cho|toi|den|vao)\b|\b(message|text|dm)\b/, ['Tìm kiếm', 'Search', 'Tìm', 'Find']],
+  [/\b(tao|dat|them)\b.{0,20}\b(lich|su kien|cuoc hop|meeting|event)\b/, ['Sự kiện mới', 'New event', 'Tạo', 'Create', 'Cuộc họp mới', 'New meeting']],
+  [/\b(tao|mo)\b.{0,20}\b(tai lieu|van ban|bang tinh|trang tinh|trinh chieu|document|spreadsheet|presentation)\b/, ['Tài liệu trống', 'Blank document', 'Trống', 'Blank', 'Mới', 'New']],
+  [/\b(tim|search|tra)\b/, ['Tìm kiếm', 'Search']],
+];
+function taskTargets(query) { const f = fold(query); const out = []; for (const [re, names] of TASK_TARGETS) if (re.test(f)) out.push(...names); return [...new Set(out)]; }
+// xếp phần tử theo mức liên quan tới việc: khớp đích của việc > chứa từ trong câu lệnh > nút/ô nhập > còn lại (giữ thứ tự gốc trong mỗi nhóm)
+function rankForTask(elements, query) {
+  const tg = taskTargets(query).map(fold); const words = fold(query).split(/[^a-z0-9]+/).filter(w => w.length >= 3 && !/^(cho|tren|trong|nhung|khong|chi|gui|soan|email|mail|voi|cua|mot|cac|nay|the|and|for|with)$/.test(w));
+  const score = (e) => { const n = fold(`${e.name || ''} ${e.value || ''}`); if (!n.trim()) return 0;
+    if (tg.some(t => n === t || n.startsWith(t + ' ') || n.includes(t))) return 3;
+    if (words.some(w => n.includes(w))) return 2;
+    return INTERACTIVE.has(e.role) || e.editable || /nút|ô nhập|liên kết|mục/.test(e.kind || '') ? 1 : 0; };
+  return elements.map((e, i) => ({ e, i, s: score(e) })).sort((a, b) => b.s - a.s || a.i - b.i).map(x => x.e);
+}
+function likelyTarget(elements, query) { const tg = taskTargets(query).map(fold); for (const t of tg) { const e = elements.find(x => { const n = fold(x.name || ''); return n === t || n.startsWith(t + ' ') || n.includes(t); }); if (e) return e; } return null; }
 function formatForModel(obs, { toNorm, limit = 120 } = {}) {
   const lines = [];
   if (obs.win) lines.push(`Cửa sổ đang dùng: "${obs.win.title || '(không tên)'}"${obs.win.proc ? ` (${obs.win.proc})` : ''}`);
@@ -270,6 +309,20 @@ function shortcutFor(query) {
   return null;
 }
 
+// T1a: phím tắt RIÊNG của từng ứng dụng (cây giao diện nghèo → bấm chữ OCR dễ trượt; phím tắt chắc chắn hơn)
+const APP_KEYS = [
+  [/^(zalo|zalopc)$/i, { search: `${MOD}+f`, name: 'Zalo' }],
+  [/^slack$/i, { search: `${MOD}+k`, name: 'Slack' }],
+  [/^discord$/i, { search: `${MOD}+k`, name: 'Discord' }],
+  [/^(teams|ms-teams|msteams)$/i, { search: `${MOD}+e`, name: 'Teams' }],
+  [/^(chrome|msedge|firefox|brave|opera|vivaldi|coccoc|browser)$/i, { address: `${MOD}+l`, name: 'trình duyệt' }],
+];
+function appKeys(proc, title = '') {
+  const p = String(proc || '').replace(/\.exe$/i, '').trim(); const m = APP_KEYS.find(([re]) => re.test(p)); if (m) return m[1];
+  // tiến trình không rõ tên (vỏ Electron…) nhưng cửa sổ tên ĐÚNG “Zalo”: vẫn là Zalo (không áp cho tab trình duyệt “Zalo - Chrome”)
+  if (/^\s*zalo\s*$/i.test(String(title || ''))) return APP_KEYS[0][1];
+  return null;
+}
 // Ứng dụng Electron/Chromium (Zalo, Slack, Teams, VS Code…) gần như không cho đọc nút/ô qua Trợ năng: cần ảnh chụp + mô hình nhìn ảnh
 const POOR_TREE_APPS = /^(zalo|zalopc|electron|code|cursor|slack|discord|teams|ms-teams|msteams|notion|figma|whatsapp|whatsapp\.root|messenger|spotify|skype|obsidian|postman|signal|lark|feishu|telegram|viber|line|kakaotalk|wechat|weixin)$/i;
 const poorTreeApp = (proc) => POOR_TREE_APPS.test(String(proc || '').replace(/\.exe$/i, '').trim());
@@ -287,4 +340,4 @@ function searchVariants(text) {
 // Chữ OCR trông như ô nhập (chữ gợi ý "Tìm kiếm", "Nhập tin nhắn…"): ở ứng dụng không đọc được qua Trợ năng (Zalo…), đó là ô nhập thật
 const INPUT_HINT = /(^|\s)(tìm|tim|search|find|nhập|nhap|soạn|soan|gõ|type|write|enter)(\s|$|…|\.)|tìm kiếm|tim kiem|tin nhắn|tin nhan|message|aa$/i;
 const inputLike = (el) => !!(el && !el.editable && el.ocr && String(el.name || '').trim().length <= 40 && INPUT_HINT.test(String(el.name || '').trim()));
-module.exports = { inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };
+module.exports = { taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };

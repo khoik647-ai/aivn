@@ -27,6 +27,7 @@
 
   <main class="content">
     <header class="topbar">
+      <button type="button" class="btn sm ghost convos-btn" id="convosBtn" title="Danh sách trò chuyện" aria-label="Danh sách trò chuyện" aria-expanded="false" aria-controls="convoList">☰</button>
       <div class="model-picker">
         <select id="modelSelect" hidden aria-hidden="true" tabindex="-1"><option value="">— Chọn mô hình để nạp —</option></select>
         <div class="ld-pill" id="ldPill">
@@ -62,7 +63,7 @@
           <button type="button" class="auto-pill" id="autoPill" aria-pressed="false" title="Bật: AIVN AGENT tự làm các bước thường mà không hỏi. Vẫn hỏi khi gửi nội dung khác lời bạn, xoá, thanh toán, chạy lệnh.">⚡ Tự làm không hỏi: <span id="autoPillState">tắt</span></button>
         </div>
         <div class="doc-warn agent-warn only-agent" id="agentWarn" hidden></div>
-        <div class="dropzone" id="dropzone"><div><b>Thả tệp vào đây</b><span>PDF (kể cả bản scan, đọc bằng OCR) · Word DOCX/ODT · Excel XLSX/ODS · PowerPoint PPTX/ODP · ZIP · TXT/MD/CSV/JSON · mã nguồn · ảnh PNG/JPG/WEBP/GIF/BMP (đọc chữ bằng OCR) · tối đa 20 MB</span></div></div>
+        <div class="dropzone" id="dropzone"><div><b>Thả tệp vào đây</b><span>PDF (kể cả bản scan, đọc bằng OCR) · Word DOCX/ODT · Excel XLSX/ODS · PowerPoint PPTX/ODP · ZIP · TXT/MD/CSV/JSON · mã nguồn · ảnh PNG/JPG/WEBP/GIF/BMP (đọc chữ bằng OCR) · âm thanh/video MP3/WAV/M4A/OGG/FLAC/MP4/WEBM/MOV (chép lời trên máy) · tài liệu tối đa 20 MB, âm thanh/video tối đa 1 GB</span></div></div>
         <div class="messages" id="messages"></div>
         <div class="doc-warn offer rag-offer" id="sysNotice" hidden></div>
         <div class="doc-warn offer rag-offer" id="ragOffer" hidden></div>
@@ -85,10 +86,10 @@
         </section>
         <div class="slash-pop" id="slashPop" role="listbox" aria-label="Lệnh nhanh" hidden></div>
         <form class="composer" id="composer">
-          <button type="button" class="btn icon" id="attachBtn" title="Đính kèm tệp: PDF (kể cả bản scan, đọc bằng OCR) · Word DOCX/ODT · Excel XLSX/ODS · PowerPoint PPTX/ODP · ZIP · TXT/MD/CSV/JSON · mã nguồn · ảnh PNG/JPG/WEBP/GIF/BMP (đọc chữ bằng OCR) · tối đa 20 MB" aria-label="Đính kèm tệp">
+          <button type="button" class="btn icon" id="attachBtn" title="Đính kèm tệp: PDF (kể cả bản scan, đọc bằng OCR) · Word DOCX/ODT · Excel XLSX/ODS · PowerPoint PPTX/ODP · ZIP · TXT/MD/CSV/JSON · mã nguồn · ảnh PNG/JPG/WEBP/GIF/BMP (đọc chữ bằng OCR) · âm thanh/video MP3/WAV/M4A/OGG/FLAC/MP4/WEBM/MOV (chép lời trên máy) · tài liệu tối đa 20 MB, âm thanh/video tối đa 1 GB" aria-label="Đính kèm tệp">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.4 11.6-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
           </button>
-          <textarea id="input" rows="1" placeholder="Nhập tin nhắn… (Enter gửi · Shift+Enter xuống dòng · kéo thả hoặc dán tệp, ảnh)"></textarea>
+          <textarea id="input" rows="1" placeholder="Nhập tin nhắn…" title="Nhập tin nhắn… (Enter gửi · Shift+Enter xuống dòng · kéo thả hoặc dán tệp, ảnh)"></textarea>
           <button type="button" class="btn danger" id="stopBtn" hidden>■ Dừng</button>
           <button type="submit" class="btn primary" id="sendBtn">Gửi ↑</button>
         </form>
