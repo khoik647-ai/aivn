@@ -143,7 +143,7 @@ const hasX = spawnSync('which', ['xvfb-run']).status === 0 && fs.existsSync(path
 // Tên sản phẩm/khách/đơn vị là dữ liệu người dùng nhập — không dịch.
 const USER_DATA = new Set(['Bàn làm việc gỗ sồi', 'Ghế xoay lưới', 'Lắp đặt tại nhà', 'Nội thất', 'Công ty TNHH Sen Vàng']); // đơn vị tính (cái, lần) nay dịch: Units/件, Times/次
 const userData = (s) => USER_DATA.has(s);
-for (const lang of ['vi', 'en']) {
+for (const lang of ['vi', 'en', 'zh']) {
   test(`Kinh doanh — giao diện thật (${lang}): nhập kho → báo giá → xác nhận → giao một phần (phiếu chờ) → hoá đơn → thu một phần → báo cáo`, { skip: !hasX && 'cần xvfb-run + electron' }, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-qabiz-')); const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-qabiz-ud-'));
     const env = Object.assign({}, process.env, { AIVN_USER_DATA: ud, AIVN_SKIP_ACTIVATION: '1', AIVN_QA_BIZ: dir, AIVN_QA_BIZ_LANG: lang });
@@ -158,7 +158,8 @@ for (const lang of ['vi', 'en']) {
     assert.strictEqual(d.backorder, 'WH/OUT/00002');
     assert.strictEqual(d.db.receivable, 3800000); assert.strictEqual(d.db.salesMonth, 8000000); assert.strictEqual(d.db.deliveriesReady, 1);
     if (lang === 'vi') { assert.strictEqual(d.invoice.ribbon, 'THANH TOÁN MỘT PHẦN'); assert.strictEqual(d.order.total, '8.800.000 ₫'); }
-    else { assert.strictEqual(d.invoice.ribbon, 'PARTIALLY PAID'); assert.strictEqual(d.order.total, '8,800,000 ₫'); assert.match(d.steps['10-don-xac-nhan'].toasts.join(' '), /Order BG-\d{4}-\d{4} confirmed · delivery created/); }
+    else if (lang === 'en') { assert.strictEqual(d.invoice.ribbon, 'PARTIALLY PAID'); assert.strictEqual(d.order.total, '8,800,000 ₫'); assert.match(d.steps['10-don-xac-nhan'].toasts.join(' '), /Order BG-\d{4}-\d{4} confirmed · delivery created/); }
+    else assert.strictEqual(d.order.total, '8,800,000 ₫');
   });
 }
 
