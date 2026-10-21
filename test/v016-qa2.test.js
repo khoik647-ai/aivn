@@ -65,8 +65,9 @@ test('Chat: không được gõ tin vào cuộc trò chuyện đang mở sẵn k
   const q = 'Nhắn tin cho Trần Quỳnh Anh trên Messenger nội dung "Mai 8h họp nhóm nhé". Không cần hỏi lại.';
   const g = SV.chatGate({ query: q, text: 'Mai 8h họp nhóm nhé', proc: 'Messenger', title: 'Messenger - Nhóm Lớp K27', state: {}, header: ['Nhóm Lớp K27'] });
   assert.match(g, /TÌM và MỞ/); assert.match(g, /Nhóm Lớp K27/);
-  // dù tiêu đề đang đúng người, vẫn phải tìm và mở trong lượt này
-  assert.ok(SV.chatGate({ query: q, text: 'Mai 8h họp nhóm nhé', proc: 'Messenger', state: {}, header: ['Trần Quỳnh Anh'] }));
+  // B90 (máy thật beta.2.1): tiêu đề khung giữa KHỚP CHẶT đúng người (đã mở sẵn) → cho gõ, không bắt tìm lại; khớp lỏng vẫn chặn
+  assert.strictEqual(SV.chatGate({ query: q, text: 'Mai 8h họp nhóm nhé', proc: 'Messenger', state: {}, header: ['Trần Quỳnh Anh'] }), null);
+  assert.ok(SV.chatGate({ query: q, text: 'Mai 8h họp nhóm nhé', proc: 'Messenger', state: {}, header: ['Trần Quỳnh Anh và 3 người khác'] }));
   // gõ tên vào ô tìm kiếm ĐÃ XÁC NHẬN thì được (kể cả không dấu / một phần)
   assert.strictEqual(SV.chatGate({ query: q, text: 'Tran Quynh Anh', searchField: true, proc: 'Messenger', state: {} }), null);
   assert.strictEqual(SV.chatGate({ query: q, text: 'Quỳnh Anh', searchField: true, proc: 'Messenger', state: {} }), null);

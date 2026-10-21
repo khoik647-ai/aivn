@@ -2240,7 +2240,7 @@ list(''); open('Nhóm Lớp K27');
       await step('b70-click-send', { action: 'click', element: 'Gửi' });
       out.final = await st(); throw null;
     }
-    if (process.env.AIVN_QA_B21_MODE === 'b85') { // B85 (máy thật, Zalo 3 cột): “Cloud của tôi” nay là “My Documents” (kết quả ghi “Tên cũ: Cloud của tôi”), bảng “Thông tin hội thoại” bên phải
+    if (process.env.AIVN_QA_B21_MODE === 'b85' || process.env.AIVN_QA_B21_MODE === 'b90') { const B90 = process.env.AIVN_QA_B21_MODE === 'b90'; // B85 (máy thật, Zalo 3 cột): “Cloud của tôi” nay là “My Documents” (kết quả ghi “Tên cũ: Cloud của tôi”), bảng “Thông tin hội thoại” bên phải
       const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:210px 1fr 190px;height:100vh}
 #l{border-right:1px solid #ccc;padding:8px}#q{width:180px;font-size:20px;padding:5px}.it{padding:8px 4px;cursor:pointer}.it small{display:block;font-size:17px;color:#333}
 #c{display:flex;flex-direction:column;border-right:1px solid #ccc}#h{font-weight:bold;padding:12px 16px;border-bottom:1px solid #ccc}#m{flex:1;padding:16px}#comp{font-size:20px;margin:10px;padding:8px}#comp::placeholder{color:#222}
@@ -2251,13 +2251,21 @@ const fold=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'
 function list(f){const el=document.getElementById('list');el.innerHTML='';for(const c of chats.filter(c=>!f||fold(c.n+' '+(c.old||'')).includes(fold(f)))){const d=document.createElement('div');d.className='it';d.innerHTML='<span></span>'+(f&&c.old?'<small></small>':'');d.firstChild.textContent=c.n;if(f&&c.old)d.lastChild.textContent='Tên cũ: '+c.old;d.onclick=()=>open(c.n);el.appendChild(d);}}
 function open(n){S.cur=n;h.textContent=n;rn.textContent=n;comp.placeholder='Nhập @, tin nhắn tới '+n;m.innerHTML='';q.value='';list('');comp.focus();}
 comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sent.push({to:S.cur,text:comp.value});const b=document.createElement('div');b.textContent=comp.value;m.appendChild(b);comp.value='';}});
-q.addEventListener('input',e=>list(q.value));list('');open('Nhóm Lớp K27');</script>`;
+q.addEventListener('input',e=>list(q.value));list('');open(${B90 ? "'My Documents'" : "'Nhóm Lớp K27'"});</script>`;
       await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(zh)); t.setTitle('Zalo'); t.focus(); t.webContents.focus(); await sleep(700);
       const q5 = 'Mở Zalo và gửi tin "AIVN test - thử beta.3" cho Cloud của tôi. Không cần hỏi lại.';
       const c5 = { ...ctx, userQuery: q5, auto: require('./agent/autonomy').forTurn({ setting: false, query: q5 }) };
       const step5 = async (name, a) => { qaAsks.length = 0; let r; try { r = await d.act(a, c5); } catch (e) { r = { error: String(e.message || e) }; } await sleep(600);
         out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 2500), asks: qaAsks.slice(), state: await st() }); save(); return r; };
       await d.look({ window: 'Zalo' }, c5);
+      if (B90) { // B90 (máy thật beta.2.1, agent-send1): “My Documents” ĐÃ mở sẵn → gõ thẳng phải được (không cần tìm); sang chat khác thì chặn và bảo TÌM
+        const q9 = 'gửi tin "AIVN test beta.2.2 - bỏ qua" cho Cloud của tôi trên Zalo'; c5.userQuery = q9; c5.auto = require('./agent/autonomy').forTurn({ setting: false, query: q9 + ' Không cần hỏi lại.' });
+        await step5('b90-open-send', { action: 'type_text', text: 'AIVN test beta.2.2 - bỏ qua', submit: true });
+        await t.webContents.executeJavaScript("open('Nhóm Lớp K27')"); await sleep(400); await d.look({ window: 'Zalo' }, c5);
+        const d2 = c5; d2.userQuery = 'gửi tin "lần hai" cho Cloud của tôi trên Zalo';
+        await step5('b90-wrong-open', { action: 'type_text', text: 'lần hai', submit: true });
+        out.final = await st(); throw null;
+      }
       await step5('b85-before-open', { action: 'type_text', text: 'AIVN test - thử beta.3', submit: true });
       await step5('b85-click-search', { action: 'click', element: 'Tìm kiếm' });
       await step5('b85-type-search', { action: 'type_text', text: 'Cloud của tôi' });

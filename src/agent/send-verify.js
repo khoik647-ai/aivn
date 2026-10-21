@@ -302,7 +302,18 @@ function answerWho(prevTask, reply) {
   if (YES_CURRENT.test(r) || CURRENT_CHAT.test(r)) return `${prevTask}\n(gửi vào cuộc trò chuyện hiện tại)`;
   return `${prevTask}\n(người nhận: ${r.replace(/^(?:cho|gửi cho|to|send to|给)\s+/iu, '').slice(0, 80)})`;
 }
-function chatGate({ query, text, searchField = false, submit = false, proc = '', title = '', state = {}, header = [], ocrHeader = null, seenHeader = null }) {
+// B90: chữ gợi ý của ô soạn nêu tên cuộc trò chuyện đang mở: Zalo “Nhập @, tin nhắn tới X”, en “Type @ to mention, message to X” / “Message X”, zh “输入 @，发送消息给 X”
+const COMPOSER_TO = [
+  /^[|\s]*(?:nhập|nhap)\s*@?\s*[,，]?\s*(?:để nhắc tên\s*[,，]?\s*)?tin nhắn (?:tới|đến|gửi tới|cho)\s+(.+?)[\s.…]*$/iu,
+  /^[|\s]*(?:type|enter|write|send)\b[^,]{0,30}[,，]?\s*(?:a\s+)?message (?:to|for)\s+(.+?)[\s.…]*$/iu,
+  /^[|\s]*message\s+@?(.+?)[\s.…]*$/iu,
+  /^[|\s]*(?:输入\s*@?\s*[^，,]{0,8}[，,]\s*)?(?:发送)?消息(?:发送)?(?:给|至|到)\s*(.+?)[\s。…]*$/u,
+  /^[|\s]*(?:发消息给|发送给|发给)\s*(.+?)[\s。…]*$/u,
+];
+function composerTarget(texts = []) { for (const t of texts) { const x = String(t || '').trim(); if (!x || x.length > 120) continue; for (const re of COMPOSER_TO) { const m = re.exec(x); if (m && m[1] && m[1].length <= 60) return m[1].trim(); } } return null; }
+// tên khớp CHẶT (cả cụm, không chỉ chứa từ) — dùng khi lượt này CHƯA tìm người nhận
+const exactName = (names, x) => { const kx = nameKey(x); return !!kx && names.some(n => nameKey(n) === kx); };
+function chatGate({ query, text, searchField = false, submit = false, proc = '', title = '', state = {}, header = [], ocrHeader = null, seenHeader = null, composer = [] }) {
   if (!isChatContext(query, proc, title)) return null;
   if (CURRENT_CHAT.test(String(query || ''))) {
     if (searchField) return null;
@@ -334,13 +345,22 @@ function chatGate({ query, text, searchField = false, submit = false, proc = '',
   // tiêu đề cửa sổ (do hệ điều hành báo) là bằng chứng chắc; chữ OCR ở đầu khung chỉ được tin khi lượt này ĐÃ tìm người nhận (có thể là chữ khác lọt vào vùng đầu khung)
   const al = state.aliases || [];
   if (chatShown(recipient, title, [], al) || (state.lastSearch && chatShown(recipient, title, hdr, al))) { state.chatOpen = k; return null; }
+  // B90 (máy thật beta.2.1): đúng cuộc trò chuyện ĐÃ mở sẵn (không tìm trong lượt này) — tiêu đề khung giữa hoặc chữ gợi ý ô soạn
+  // trùng KHỚP CHẶT với người nhận / tên khác (Cloud của tôi = My Documents = My Cloud…) → cho gõ
+  const names = namesFor(recipient, al); const ct = composerTarget(composer);
+  if (!ct || exactName(names, ct)) {
+    const hit = hdr.find(h => exactName(names, h)) || (ct && exactName(names, ct) ? ct : null);
+    if (hit) { state.chatOpen = k; state.openedBy = hdr.includes(hit) ? 'header' : 'composer'; state.gateNote = `cuộc trò chuyện “${hit}” đã mở sẵn (${state.openedBy === 'header' ? 'tiêu đề khung giữa' : 'chữ gợi ý ô soạn'}) = “${recipient}”`; return null; }
+  }
+  // ô soạn ghi rõ đang nhắn cho NGƯỜI KHÁC → nói thẳng, bảo TÌM (bấm ô soạn không đổi được người nhận)
+  if (ct && !exactName(names, ct) && !nearName) return `CHƯA gõ tin: ô soạn đang ghi “tin nhắn tới ${String(ct).slice(0, 40)}” — cuộc trò chuyện đang mở là “${String(ct).slice(0, 40)}”, KHÔNG phải “${recipient}”. ĐỪNG bấm vào ô soạn (bấm ô soạn không đổi người nhận). Làm lần lượt: 1) screen_act click vào ô Tìm kiếm của ứng dụng; 2) type_text "${recipient}"; 3) click vào kết quả đúng tên “${recipient}”; 4) rồi mới gõ tin.`;
   if (state.chatOpen === k) {
     // đã mở đúng người, nhưng nếu tiêu đề đọc được mà lại là người khác (vd. ứng dụng tự nhảy cuộc trò chuyện) thì vẫn chặn
     if (hdr.length && !hdr.some(h => namesFor(recipient, al).some(n => headerMatches(n, h)))) return `Tiêu đề cuộc trò chuyện hiện là “${String(hdr[0]).slice(0, 40)}”, không phải “${recipient}”. Tìm lại “${recipient}” trong ô tìm kiếm của ứng dụng, bấm vào đúng kết quả rồi mới gõ tin.`;
     return null;
   }
   if (nearName) { return `KHÔNG gõ “${String(text).slice(0, 40)}”: ô đang nhận chữ CHƯA được xác nhận là ô Tìm kiếm (có thể là ô soạn tin của cuộc trò chuyện đang mở${header.filter(Boolean).length ? ` “${String(header.filter(Boolean)[0]).slice(0, 40)}”` : ''} — gõ tên + Enter ở đó sẽ GỬI tên thành tin nhắn). Làm lần lượt: 1) screen_act click vào ô/chữ “Tìm kiếm” của ứng dụng; 2) type_text "${recipient}" với element là CHÍNH ô tìm kiếm đó; 3) bấm vào kết quả đúng tên “${recipient}”. Nếu tên “${recipient}” đã hiện sẵn trong danh sách bên trái, bấm thẳng vào tên đó thay vì gõ.`; }
-  return `CHƯA gõ tin: AIVN AGENT phải TÌM và MỞ cuộc trò chuyện với “${recipient}” trước, không gõ vào cuộc trò chuyện đang mở sẵn${hdr.length ? ` (đang mở: “${String(hdr[0]).slice(0, 40)}”)` : ''}. Làm lần lượt: 1) screen_act click vào ô Tìm kiếm của ứng dụng; 2) type_text "${recipient}"; 3) click vào kết quả đúng tên “${recipient}”; 4) rồi mới gõ tin nhắn.`;
+  return `CHƯA gõ tin: AIVN AGENT phải TÌM và MỞ cuộc trò chuyện với “${recipient}” trước (bấm vào ô soạn tin KHÔNG đổi được người nhận — đừng bấm ô soạn), không gõ vào cuộc trò chuyện đang mở sẵn${hdr.length ? ` (đang mở: “${String(hdr[0]).slice(0, 40)}”)` : ''}. Làm lần lượt: 1) screen_act click vào ô Tìm kiếm của ứng dụng; 2) type_text "${recipient}"; 3) click vào kết quả đúng tên “${recipient}”; 4) rồi mới gõ tin nhắn.`;
 }
 const SEEN_QUESTION = 'Trả lời đúng định dạng, chép đúng chữ trên màn hình:\nTÊN: <tên người/nhóm ở đầu khung trò chuyện đang mở>\nÔ SOẠN: <chữ còn trong ô soạn tin, hoặc TRỐNG>\nTIN: <tin nhắn cuối cùng trong khung trò chuyện>\nTIN: <tin nhắn trước đó>';
-module.exports = { namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };
+module.exports = { composerTarget, COMPOSER_TO, namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };

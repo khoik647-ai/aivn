@@ -556,7 +556,8 @@ function createDesktopAgent(deps) {
     if (action === 'type_text' && ctx && ctx.userQuery) {
       const searchField = searchConfirmed(t, focusedEl, a);
       const R = SV.regionsOf(s.obs); const P = SV.parseSeen(s.lastSeen || '');
-      const g = SV.chatGate({ query: ctx.userQuery, text: a.text, searchField, submit: !!a.submit, proc: s.obs && s.obs.win ? s.obs.win.proc : (s.target && s.target.proc) || '', title: s.obs && s.obs.win ? s.obs.win.title : '', state: s, header: [...(R ? R.header : []), P.header].filter(Boolean), ocrHeader: R ? R.header : [], seenHeader: P.header || null });
+      const g = SV.chatGate({ query: ctx.userQuery, text: a.text, searchField, submit: !!a.submit, proc: s.obs && s.obs.win ? s.obs.win.proc : (s.target && s.target.proc) || '', title: s.obs && s.obs.win ? s.obs.win.title : '', state: s, header: [...(R ? R.header : []), P.header].filter(Boolean), ocrHeader: R ? R.header : [], seenHeader: P.header || null, composer: [...(R ? R.composer : []), ...((s.obs && s.obs.elements) || []).flatMap(e => [e.placeholder, e.name])].filter(Boolean) });
+      if (!g && s.gateNote) { deps.log && deps.log('desk', `Chốt người nhận (B90): ${s.gateNote}`); s.gateNote = null; }
       if (g && s.askWho) { const q = s.askWho; s.askWho = null; deps.log && deps.log('desk', 'Chưa rõ người nhận → hỏi người dùng “Gửi cho ai?”'); return { error: 'chưa rõ người nhận', stop: true, ask: q, forModel: g, summary: 'chưa rõ người nhận — hỏi bạn' }; }
       if (g) {
         // B27: không để lặp vô tận — lần chặn thứ 3 trong lượt: dừng và báo người dùng (nêu những gì thấy trên màn hình)
