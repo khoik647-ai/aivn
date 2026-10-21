@@ -67,3 +67,10 @@ Dùng cho giao diện ứng dụng, trang web, ghi chú phát hành và lời AI
 
 - Tiếng Việt: `hunspell -d vi_VN`; tiếng Anh: `hunspell -d en_US`; tiếng Trung: soát thủ công (dấu câu toàn khổ, giản thể).
 - Từ đúng mà từ điển không biết (tên riêng, thuật ngữ kỹ thuật) ghi vào `docs/spelling-allow.txt`, mỗi dòng một từ. Mọi lỗi còn lại phải sửa trước khi phát hành.
+
+## Giao diện nhiều ngôn ngữ (0.16)
+
+- Cài đặt → Chung → **Ngôn ngữ**: Tiếng Việt / English / 中文（简体）. Đổi ngay, không cần khởi động lại; menu, hộp thoại, khay hệ thống và lời chào của AIVN AGENT đổi theo, mô hình được dặn trả lời bằng ngôn ngữ đó (trừ khi người dùng viết ngôn ngữ khác).
+- Khoá dịch là chính câu tiếng Việt. Mã giao diện vẫn viết tiếng Việt; `src/renderer/i18n-dom.js` dịch khi hiển thị. Nội dung người dùng/mô hình (tin nhắn, ô nhập, mã) không bao giờ bị dịch; phần tử có `data-noi18n` cũng vậy.
+- Thêm/sửa chữ giao diện → `node build/i18n-extract.cjs` (cập nhật `src/i18n/strings*.json`) rồi thêm bản dịch vào `src/i18n/en.js` và `src/i18n/zh.js`. `test/v016-i18n.test.js` báo khoá thiếu, lệch `{n}`, và quét mọi màn hình en/zh tìm chữ tiếng Việt còn sót.
+- Đừng ghép chuỗi bằng `+` cho câu hiển thị; dùng chuỗi mẫu `` `Đã lưu ${x} ✓` `` để trích được khoá `Đã lưu {0} ✓`.

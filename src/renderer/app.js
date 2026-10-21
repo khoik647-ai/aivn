@@ -5,7 +5,11 @@ const A = window.aivn;
 const state = { settings: null, models: [], status: { loaded: false }, convos: [], current: null, generating: null, catalog: [], mode: 'chat', lastByMode: {}, agent: null };
 const isAgent = () => state.mode === 'agent';
 
-const fmtBytes = (b) => { if (!b) return '0 B'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; const i = Math.min(4, Math.floor(Math.log(b) / Math.log(1024))); return (b / 1024 ** i).toFixed(i >= 3 ? 2 : 0).replace('.', ',') + ' ' + u[i]; };
+// 0.16 i18n: định dạng số/ngày theo ngôn ngữ giao diện (vi: 1.234,5 · en: 1,234.5 · zh: 1,234.5)
+const UIL = () => (window.I18N && I18N.lang) || 'vi';
+const LOC = () => ({ en: 'en-US', zh: 'zh-CN' })[UIL()] || 'vi-VN';
+const DEC = () => (UIL() === 'vi' ? ',' : '.');
+const fmtBytes = (b) => { if (!b) return '0 B'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; const i = Math.min(4, Math.floor(Math.log(b) / Math.log(1024))); return (b / 1024 ** i).toFixed(i >= 3 ? 2 : 0).replace('.', DEC()) + ' ' + u[i]; };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 let toastTimer;
@@ -38,7 +42,7 @@ function md(src) {
 function show(view, opts = {}) {
   const rt = document.querySelector('.rail-tip'); if (rt) rt.hidden = true;
   if (view === 'security') { opts = { ...opts, tab: 'security' }; view = 'settings'; }
-  clearInfoToasts();
+  clearInfoToasts(); show.cur = view;
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   const target = view === 'agent' ? 'chat' : view;
   $$('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + target));
@@ -54,6 +58,8 @@ function show(view, opts = {}) {
 }
 const VIEW_TITLES = { chat: 'Trò chuyện', agent: 'AIVN AGENT', server: 'Nhà phát triển', models: 'Mô hình của tôi', discover: 'Khám phá', schedule: 'Lịch tự động', memory: 'Ghi nhớ', settings: 'Cài đặt', crm: 'Khách hàng' };
 $$('.nav-item').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
+// đổi ngôn ngữ: vẽ lại màn hình đang mở để số/ngày theo định dạng mới (chữ thì I18N đã dịch ngay); khung chat giữ nguyên
+window.addEventListener('aivn-lang', () => { if (isAgent() && !(state.current && state.current.messages.length)) A.agentInfo().then(i => { state.agent = i; renderMessages(); }).catch(() => {}); const v = show.cur; if (v && v !== 'chat' && v !== 'agent') { try { show(v, v === 'settings' ? { tab: setTab.cur } : {}); } catch {} } });
 document.addEventListener('click', (e) => { const g = e.target.closest('[data-goto]'); if (g) show(g.dataset.goto); });
 // Trò chuyện thường và AIVN AGENT dùng chung khung chat; mỗi chế độ có danh sách cuộc trò chuyện riêng
 function setMode(mode) {
@@ -115,7 +121,7 @@ const MM_COLS = [
   ['tps', 'Đo được', (m) => (m.usage && m.usage.tps) || 0],
   ['lastUsed', 'Dùng lần cuối', (m) => (m.usage && m.usage.lastUsed) || (m.mtime || 0) / 1e6],
 ];
-const fmtUsedAgo = (t) => { if (!t) return '—'; const d = (Date.now() - t) / 1000; return d < 90 ? 'vừa xong' : d < 3600 ? Math.round(d / 60) + ' phút trước' : d < 86400 ? Math.round(d / 3600) + ' giờ trước' : d < 86400 * 30 ? Math.round(d / 86400) + ' ngày trước' : new Date(t).toLocaleDateString('vi-VN'); };
+const fmtUsedAgo = (t) => { if (!t) return '—'; const d = (Date.now() - t) / 1000; return d < 90 ? 'vừa xong' : d < 3600 ? Math.round(d / 60) + ' phút trước' : d < 86400 ? Math.round(d / 3600) + ' giờ trước' : d < 86400 * 30 ? Math.round(d / 86400) + ' ngày trước' : new Date(t).toLocaleDateString(LOC()); };
 function mmVisible() {
   const q = foldVi($('#mmFilter').value.trim()); const k = $('#mmKind').value;
   return (state.models || []).filter(m => {
@@ -137,7 +143,7 @@ function renderModelTable() {
   t.innerHTML = `<div class="tr head" role="row">${head}<span role="columnheader">Thao tác</span></div>` + (list.length ? list.map(m => `<div class="tr" role="row" data-id="${esc(m.id)}">
       <span title="${esc(m.path)}"><b>${esc(m.catalog ? m.catalog.name : m.file)}</b>${m.loaded ? '<span class="badge">Đang nạp</span>' : ''}${m.vision ? '<span class="badge vis" title="Có tệp thị giác (mmproj) cạnh mô hình">👁 Nhìn được ảnh</span>' : ''}${m.agent && m.agent.ok ? '<span class="badge" title="Dùng được cho AIVN AGENT">🤖</span>' : ''}<div class="muted" style="font-size:11.5px">${esc([m.params && m.params + ' tham số', m.source === 'imported' ? 'đã nhập' : 'đã tải', m.id].filter(Boolean).join(' · '))}</div></span>
       <span>${esc(m.quant || '—')}</span><span>${fmtBytes(m.size)}</span><span>${fitBadge(m.fit)}</span>
-      <span title="Tốc độ sinh chữ đo được khi bạn dùng mô hình này trên máy này (trung bình gần đây)">${m.usage && m.usage.tps ? `${String(m.usage.tps).replace('.', ',')} token/giây` : '<span class="muted">chưa đo</span>'}</span>
+      <span title="Tốc độ sinh chữ đo được khi bạn dùng mô hình này trên máy này (trung bình gần đây)">${m.usage && m.usage.tps ? `${String(m.usage.tps).replace('.', DEC())} token/giây` : '<span class="muted">chưa đo</span>'}</span>
       <span>${m.usage && m.usage.lastUsed ? fmtUsedAgo(m.usage.lastUsed) + (m.usage.uses ? `<div class="muted small">${m.usage.uses} lượt</div>` : '') : '<span class="muted">chưa dùng</span>'}</span>
       <span class="acts">${m.loaded ? '<button class="btn sm" data-act="unload">Gỡ khỏi bộ nhớ</button>' : '<button class="btn sm primary" data-act="load">Nạp</button>'}
         <button class="btn sm" data-act="params" title="Tham số nạp cho mô hình này" aria-label="Tham số nạp">⚙</button><button class="btn sm" data-act="reveal" title="Hiện trong thư mục" aria-label="Hiện trong thư mục">📁</button><button class="btn sm danger" data-act="delete" title="Xoá" aria-label="Xoá">🗑</button></span></div>`).join('') : '<div class="tr"><span class="muted">Không có mô hình nào khớp bộ lọc.</span></div>');
@@ -201,7 +207,7 @@ $('#openDir').addEventListener('click', () => A.reveal());
 // ---------- Hộp nạp mô hình (0.16, bố cục kiểu LM Studio): danh sách bên trái, tham số nạp theo từng mô hình bên phải ----------
 const ld = { sel: null, metas: new Map(), form: null, est: null, estSeq: 0 };
 const mName = (m) => m ? (m.catalog ? m.catalog.name : (m.file || m.id).replace(/\.gguf$/i, '').replace(/-0000\d-of-0000\d$/i, '')) : '';
-const fmtTok = (n) => Number(n || 0).toLocaleString('vi-VN');
+const fmtTok = (n) => Number(n || 0).toLocaleString(LOC());
 function paintPill(st) {
   const m = (state.models || []).find(x => x.id === st.id);
   $('#ldDot').className = 'dot' + (st.loading ? ' busy' : st.loaded ? '' : ' off');
@@ -312,7 +318,7 @@ async function ldEstimate() {
   const e = await A.modelEstimate(id, { ctx: f.contextSize, gpuLayers: f.gpuLayers, kvType: f.kvCache === 'q8_0' ? 'q8_0' : 'f16' }).catch(() => null);
   if (seq !== ld.estSeq || $('#loader').hidden || !$('#ldBars')) return; ld.est = e;
   if (!e) { $('#ldVerdict').textContent = 'Không ước lượng được'; $('#ldVerdict').className = 'ld-verdict'; $('#ldBars').innerHTML = ''; return; }
-  const h = e.hw || {}; const gb = (b) => (b / 1024 ** 3).toFixed(1).replace('.', ',') + ' GB';
+  const h = e.hw || {}; const gb = (b) => (b / 1024 ** 3).toFixed(1).replace('.', DEC()) + ' GB';
   const lvl = (p) => p < 0.85 ? 'ok' : p < 1 ? 'warn' : 'bad';
   const bar = (label, used, total, note) => { const p = total ? used / total : 0; return `<div class="ld-bar ${lvl(p)}"><div class="ld-bar-h small"><span>${label}</span><span><b>${gb(used)}</b>${total ? ' / ' + gb(total) : ''}${note ? ' · ' + note : ''}</span></div><div class="ld-track"><div style="width:${Math.min(100, p * 100).toFixed(1)}%"></div></div></div>`; };
   const vt = h.vram && h.vram.total || 0; let html = '', worst = 0;
@@ -395,13 +401,13 @@ A.onModelStatus(st => { setStatus(st); if (!st.loading) { refreshModels(); refre
 
 const jobs = new Map(); // id -> snapshot
 const disc = { fam: 'all', results: null, repo: null, lastQuery: null };
-const fmtNum = (n) => n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' Tr' : n >= 1e3 ? (n / 1e3).toFixed(1).replace('.', ',') + ' N' : String(n || 0);
+const fmtNum = (n) => n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', DEC()) + (UIL() === 'vi' ? ' Tr' : 'M') : n >= 1e3 ? (n / 1e3).toFixed(1).replace('.', DEC()) + (UIL() === 'vi' ? ' N' : 'K') : String(n || 0);
 const fmtEta = (s) => s == null ? '' : s < 60 ? Math.ceil(s) + ' giây' : s < 3600 ? Math.ceil(s / 60) + ' phút' : Math.floor(s / 3600) + ' giờ ' + Math.round((s % 3600) / 60) + ' phút';
 const fmtAgo = (iso) => { if (!iso) return ''; const d = (Date.now() - new Date(iso)) / 864e5; return d < 1 ? 'hôm nay' : d < 30 ? Math.floor(d) + ' ngày trước' : d < 365 ? Math.floor(d / 30) + ' tháng trước' : Math.floor(d / 365) + ' năm trước'; };
-const fmtParams = (n) => !n ? '' : n >= 1e9 ? (n / 1e9).toFixed(n >= 1e10 ? 0 : 1).replace('.', ',') + 'B tham số' : Math.round(n / 1e6) + 'M tham số';
+const fmtParams = (n) => !n ? '' : n >= 1e9 ? (n / 1e9).toFixed(n >= 1e10 ? 0 : 1).replace('.', DEC()) + 'B tham số' : Math.round(n / 1e6) + 'M tham số';
 const cleanErr = (m) => String(m).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 // Mức chạy trên máy này (src/fit.js): Chạy mượt (trọn trong VRAM) · Chạy chậm (tràn sang RAM) · Không chạy được — kèm tốc độ và bộ nhớ ước tính
-const fitBadge = (f) => f ? `<span class="fit ${f.level}" title="${esc(f.hint + (f.ctx ? ` · tính với ngữ cảnh ${Number(f.ctx).toLocaleString('vi-VN')} token` : '') + ' · số liệu ước tính')}">${esc(f.label)}${f.text ? ` <small>· ${esc(f.text)}</small>` : ''}</span>` : '';
+const fitBadge = (f) => f ? `<span class="fit ${f.level}" title="${esc(f.hint + (f.ctx ? ` · tính với ngữ cảnh ${Number(f.ctx).toLocaleString(LOC())} token` : '') + ' · số liệu ước tính')}">${esc(f.label)}${f.text ? ` <small>· ${esc(f.text)}</small>` : ''}</span>` : '';
 const FIT_GROUPS = [['smooth', 'Chạy mượt', 'nằm trọn trong VRAM, mạnh trước'], ['slow', 'Chạy chậm', 'tràn sang RAM, mạnh trước'], ['no', 'Không chạy được', 'lớn hơn VRAM + RAM của máy này']];
 const fitGroupOf = (f) => (f && (f.group || ({ fit: 'smooth', slow: 'slow', big: 'no' })[f.level])) || 'slow';
 // xếp: Chạy mượt → Chạy chậm → Không chạy được, trong mỗi nhóm mạnh trước
@@ -421,7 +427,7 @@ function progressHtml(j) {
   const info = j.status === 'queued' ? 'Đang chờ trong hàng đợi…'
     : j.status === 'paused' ? `Đã tạm dừng · ${fmtBytes(j.received)} / ${fmtBytes(j.total)}`
     : j.status === 'error' ? esc(j.error || 'Lỗi tải')
-    : `${pct.toFixed(1).replace('.', ',')}% · ${fmtBytes(j.received)} / ${fmtBytes(j.total)}${j.speed ? ' · ' + fmtBytes(j.speed) + '/s' : ''}${j.eta ? ' · còn ' + fmtEta(j.eta) : ''}${j.parts > 1 ? ` · phần ${j.part || 1}/${j.parts}` : ''}`;
+    : `${pct.toFixed(1).replace('.', DEC())}% · ${fmtBytes(j.received)} / ${fmtBytes(j.total)}${j.speed ? ' · ' + fmtBytes(j.speed) + '/s' : ''}${j.eta ? ' · còn ' + fmtEta(j.eta) : ''}${j.parts > 1 ? ` · phần ${j.part || 1}/${j.parts}` : ''}`;
   return `<div class="dl-wrap"><div class="dl-row"><div class="progress${j.status === 'error' ? ' bad' : ''}"><div style="width:${pct.toFixed(1)}%"></div></div>
     ${active ? `<button class="btn sm" data-act="pause" data-jid="${esc(j.id)}" title="Tạm dừng">⏸</button>` : `<button class="btn sm primary" data-act="resume" data-jid="${esc(j.id)}">Tiếp tục</button>`}
     <button class="btn sm danger" data-act="remove" data-jid="${esc(j.id)}" title="Huỷ và xoá phần đã tải">Huỷ</button></div>
@@ -445,14 +451,14 @@ async function renderCatalog() {
   const comp = list.filter(c => c.agentCheck && c.agentCheck.code !== 'text' && c.agentCheck.code !== 'tools' && c.agentCheck.code !== 'ground' && c.agentCheck.code !== 'unknown');
   $('#screenArea').hidden = !comp.length;
   $('#screenCards').innerHTML = fitSections(comp, (c) => catCard(c, true), (c) => c.agentFit || c.fit);
-  const ctxNote = comp.find(c => c.agentCtx) ? comp.find(c => c.agentCtx).agentCtx : 0; const pn = $('#screenCtxNote'); if (pn) pn.textContent = ctxNote && ctxNote < 16384 ? `Mức chạy ở mục này tính với ngữ cảnh AIVN AGENT ${ctxNote.toLocaleString('vi-VN')} token: máy này không có mô hình AIVN AGENT nào nằm trọn VRAM ở 16K, nên AIVN dùng 12K (lịch sử và ảnh màn hình được tự thu gọn).` : (ctxNote ? `Mức chạy ở mục này tính với ngữ cảnh AIVN AGENT ${ctxNote.toLocaleString('vi-VN')} token.` : '');
+  const ctxNote = comp.find(c => c.agentCtx) ? comp.find(c => c.agentCtx).agentCtx : 0; const pn = $('#screenCtxNote'); if (pn) pn.textContent = ctxNote && ctxNote < 16384 ? `Mức chạy ở mục này tính với ngữ cảnh AIVN AGENT ${ctxNote.toLocaleString(LOC())} token: máy này không có mô hình AIVN AGENT nào nằm trọn VRAM ở 16K, nên AIVN dùng 12K (lịch sử và ảnh màn hình được tự thu gọn).` : (ctxNote ? `Mức chạy ở mục này tính với ngữ cảnh AIVN AGENT ${ctxNote.toLocaleString(LOC())} token.` : '');
   $('#catalog').innerHTML = fitSections(list.filter(c => !comp.includes(c)), catCard);
 }
 const roleTag = (c) => c.role === 'planner' ? '<span class="tag" title="Mô hình này chỉ đọc chữ, không nhìn được màn hình nên không dùng được cho AIVN AGENT. Dùng tốt trong Trò chuyện.">Chỉ dùng cho Trò chuyện</span>': c.role === 'grounder' ? '<span class="tag comp" title="Nhìn được ảnh chụp màn hình: đọc màn hình và chỉ ra toạ độ cần bấm, kể cả với Zalo/ứng dụng Electron không cho đọc nút/ô.">🎯 Nhìn màn hình</span>' : '';
 function benchTag(c) {
   const b = c.bench; if (!c.role && !b) return '';
   const out = [];
-  if (b && b.done === 10) out.push(`<span class="tag bench ${b.score >= 7 ? 'good' : 'low'}" title="${esc(`Đo trên ${b.where}${b.date ? ' ngày ' + new Date(b.date).toLocaleDateString('vi-VN') : ''}: 10 việc có kịch bản (mở ứng dụng, bấm nút có tên, gõ tiếng Việt, đọc chữ, nhấp đúp…). An toàn (hỏi trước khi gửi): ${b.safety === null ? 'chưa đo' : b.safety ? 'đạt' : 'KHÔNG đạt'}. ${b.seconds ? 'Tổng ' + Math.round(b.seconds / 60) + ' phút.' : ''}`)}">Điểm tác vụ: ${b.score}/10</span>`);
+  if (b && b.done === 10) out.push(`<span class="tag bench ${b.score >= 7 ? 'good' : 'low'}" title="${esc(`Đo trên ${b.where}${b.date ? ' ngày ' + new Date(b.date).toLocaleDateString(LOC()) : ''}: 10 việc có kịch bản (mở ứng dụng, bấm nút có tên, gõ tiếng Việt, đọc chữ, nhấp đúp…). An toàn (hỏi trước khi gửi): ${b.safety === null ? 'chưa đo' : b.safety ? 'đạt' : 'KHÔNG đạt'}. ${b.seconds ? 'Tổng ' + Math.round(b.seconds / 60) + ' phút.' : ''}`)}">Điểm tác vụ: ${b.score}/10</span>`);
   if (b && b.grounding) out.push(`<span class="tag bench ${b.grounding.score >= 7 ? 'good' : 'low'}" title="${esc(`Bài đo định vị: chỉ đúng ${b.grounding.score}/10 nút trên ảnh chụp cửa sổ AIVN Bench (đo trên ${b.where}).`)}">Điểm định vị: ${b.grounding.score}/10</span>`);
   else if (c.role === 'grounder') out.push('<span class="tag bench" title="Chưa đo trên máy nào; chưa được gắn nhãn Gợi ý.">Điểm định vị: chưa đo</span>');
   return out.join('');
@@ -633,7 +639,7 @@ function renderMessages() {
     const srcs = m.role === 'assistant' && Array.isArray(m.sources) && m.sources.length ? `<div class="sources">${m.sources.map(x => `<div class="src" title="${esc(x.preview || '')}">📎 Trích từ: <b>${esc(x.file)}</b>, đoạn ${x.chunk}${x.page ? ` · trang ${x.page}${x.pageEnd && x.pageEnd !== x.page ? '–' + x.pageEnd : ''}` : ''}</div>`).join('')}</div>` : '';
     const ag = m.role === 'assistant' && (m.steps || m.agent);
     const extra = m.role === 'assistant' ? webSrcHtml(m) + (m.memories && m.memories.length ? `<div class="mem-used" title="${esc(m.memories.join('\n'))}">🧠 Đã dùng ${m.memories.length} ghi nhớ liên quan</div>` : '') : '';
-    const sched = m.scheduled ? `<div class="sched-tag">⏰ Lịch tự động · ${new Date(m.scheduled.at).toLocaleString('vi-VN')}${m.scheduled.late ? ' · chạy bù (trễ)' : ''}${m.scheduled.manual ? ' · chạy thủ công' : ''}</div>` : '';
+    const sched = m.scheduled ? `<div class="sched-tag">⏰ Lịch tự động · ${new Date(m.scheduled.at).toLocaleString(LOC())}${m.scheduled.late ? ' · chạy bù (trễ)' : ''}${m.scheduled.manual ? ' · chạy thủ công' : ''}</div>` : '';
     return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN AGENT' : 'AIVN'}${m.model ? ' · ' + esc(modelLabel(m.model)) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}${think}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions">${/cần nhiều ngữ cảnh hơn|ngữ cảnh[^.]*quá nhỏ/i.test(m.content || '') ? '<button type="button" class="btn sm primary" data-ctx-grow="1">Tăng ngữ cảnh</button>' : ''}<button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning && m.warning !== 'blocked' ? warnBox(m.warning) : ''}${srcs}${extra}${sched}${stats}${copyBtn}</div>${warn}`;
   }).join('');
   box.scrollTop = box.scrollHeight;
@@ -834,9 +840,9 @@ async function runTurn(conv, userMsg, reply, { docsToSend = [], directImgs = [] 
       d.querySelector('summary').textContent = thinkEnd ? `Đã suy nghĩ ${fmtSec((thinkEnd - thinkStart) / 1000)}` : 'Đang suy nghĩ…'; d.querySelector('.think-body').textContent = reply.thought; }
     bodyEl.innerHTML = md(reply.content); const box = $('#messages'); if (box.scrollHeight - box.scrollTop - box.clientHeight < 160) box.scrollTop = box.scrollHeight; };
   const queue = () => { if (!rafPending) { rafPending = true; requestAnimationFrame(paint); } };
-  const off = A.onToken(({ reqId: r, t }) => { if (r !== reqId) return; if (thinkStart && !thinkEnd) thinkEnd = Date.now(); reply.content += t; if ($('#genStats').textContent === 'Đang suy nghĩ…') $('#genStats').textContent = 'Đang trả lời…'; queue(); });
+  const off = A.onToken(({ reqId: r, t }) => { if (r !== reqId) return; if (thinkStart && !thinkEnd) thinkEnd = Date.now(); reply.content += t; if (I18N.is($('#genStats').textContent, 'Đang suy nghĩ…')) $('#genStats').textContent = 'Đang trả lời…'; queue(); });
   const offThink = A.onThink(({ reqId: r, t }) => { if (r !== reqId) return; if (!thinkStart) thinkStart = Date.now(); reply.thought = (reply.thought || '') + t; queue(); });
-  const offRec = A.onChatRecover((x) => { if (x.reqId !== reqId) return; reply.content = ''; reply.thought = ''; bodyEl.innerHTML = ''; $('#genStats').textContent = x.grow ? `Ngữ cảnh chưa đủ — đang nạp lại mô hình với ngữ cảnh ${Number(x.ctx).toLocaleString('vi-VN')}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${x.ctx}) và thử lại…`; });
+  const offRec = A.onChatRecover((x) => { if (x.reqId !== reqId) return; reply.content = ''; reply.thought = ''; bodyEl.innerHTML = ''; $('#genStats').textContent = x.grow ? `Ngữ cảnh chưa đủ — đang nạp lại mô hình với ngữ cảnh ${Number(x.ctx).toLocaleString(LOC())}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${x.ctx}) và thử lại…`; });
   try {
     const r = await A.generate({ reqId, convoId: conv.id, messages: history, temperature: cp.temperature, maxTokens: cp.maxTokens, params: cp,
       docs: docsToSend.filter(a => !(vision && a.kind === 'image' && a.vis)).map(a => ({ name: a.name, text: a.text, kind: a.kind, pages: a.pages })),
@@ -859,13 +865,13 @@ async function runTurn(conv, userMsg, reply, { docsToSend = [], directImgs = [] 
     conv.updatedAt = Date.now(); await A.saveConvo(conv); await loadConvos(); renderMessages();
   }
 }
-const fmtSec = (x) => (x < 10 ? x.toFixed(1) : Math.round(x)).toString().replace('.', ',') + ' giây';
+const fmtSec = (x) => (x < 10 ? x.toFixed(1) : Math.round(x)).toString().replace('.', DEC()) + ' giây';
 const STOP_LABEL = { eogToken: 'hết câu (EOS)', stop: 'hết câu', eos: 'hết câu (EOS)', maxTokens: 'chạm giới hạn token', length: 'chạm giới hạn token', customStopTrigger: 'gặp chuỗi dừng', stopGenerationTrigger: 'gặp chuỗi dừng', abort: 'đã dừng', functionCalls: 'gọi công cụ' };
 const OVERFLOW_LABEL = { 'trim-middle': 'Cắt phần giữa', rolling: 'Trượt (bỏ tin cũ nhất)', stop: 'Dừng lại' };
 const snapAlt = (m) => ({ content: m.content, thought: m.thought || null, thinkSecs: m.thinkSecs || null, stats: m.stats || null, model: m.model || null, sources: m.sources || null, error: !!m.error });
 function statsHtml(st) {
   if (!st) return '';
-  const parts = [st.tps ? `${st.tps.toFixed(1).replace('.', ',')} token/giây` : null, st.tokens != null ? `${st.tokens} token` : null,
+  const parts = [st.tps ? `${st.tps.toFixed(1).replace('.', DEC())} token/giây` : null, st.tokens != null ? `${st.tokens} token` : null,
     st.ttft != null ? `${fmtSec(st.ttft)} tới token đầu` : null, st.stop ? `Dừng: ${STOP_LABEL[st.stop] || st.stop}` : null, st.preset ? `Preset: ${st.preset}` : null];
   return `<div class="msg-stats">${parts.filter(Boolean).map(esc).join(' · ')}</div>`;
 }
@@ -875,7 +881,7 @@ function paintCtxBar(st) {
   if (!size || used == null || isAgent()) { el.hidden = true; return; }
   const p = Math.min(100, used / size * 100); el.hidden = false;
   el.className = 'ctx-bar' + (p > 90 ? ' bad' : p > 70 ? ' warn' : '');
-  el.title = `Ngữ cảnh đã dùng: ${used.toLocaleString('vi-VN')} / ${size.toLocaleString('vi-VN')} token`;
+  el.title = `Ngữ cảnh đã dùng: ${used.toLocaleString(LOC())} / ${size.toLocaleString(LOC())} token`;
   el.innerHTML = `<div class="ctx-track"><div style="width:${p.toFixed(1)}%"></div></div><span>${p < 1 && used ? '<1' : Math.round(p)}% ngữ cảnh</span>`;
 }
 function lastStats(conv) { if (!conv) return null; for (let i = conv.messages.length - 1; i >= 0; i--) if (conv.messages[i].stats) return conv.messages[i].stats; return null; }
@@ -971,13 +977,13 @@ function paintCp() {
   $('#temp').value = s.temperature; $('#tempN').value = s.temperature; $('#tempOut').textContent = s.temperature;
   $('#maxTok').value = s.maxTokens; $('#overflowSel').value = q.overflow || 'trim-middle';
   const d = cp.defaults || {};
-  $('#prmList').innerHTML = PRM.map(p => { const v = q[p.k]; const def = p.noDefault ? '' : d[p.k] != null ? String(d[p.k]).replace('.', ',') : '';
+  $('#prmList').innerHTML = PRM.map(p => { const v = q[p.k]; const def = p.noDefault ? '' : d[p.k] != null ? String(d[p.k]).replace('.', DEC()) : '';
     return `<div class="prm${v != null ? ' set' : ''}" data-k="${p.k}"><div class="prm-h"><label for="prm-${p.k}">${p.label}</label><span class="prm-r"><input type="number" class="prm-n" id="prm-${p.k}" min="${p.min}" max="${p.max}" step="${p.step}" value="${v ?? ''}" placeholder="${p.noDefault ? 'ngẫu nhiên' : def ? 'mô hình: ' + def : 'mặc định'}"><button type="button" class="prm-reset" data-reset="${p.k}" title="Về mặc định của mô hình" aria-label="Đặt lại ${p.label}" ${v == null ? 'hidden' : ''}>↺</button></span></div><small>${p.hint}</small></div>`; }).join('');
   $('#stopChips').innerHTML = (q.stop || []).map((x, i) => `<span class="stop-chip"><code>${esc(JSON.stringify(x).slice(1, -1))}</code><button type="button" data-stop-del="${i}" aria-label="Bỏ chuỗi dừng">✕</button></span>`).join('');
   $('#jsonOn').checked = !!q.jsonOn; $('#jsonSchema').hidden = !q.jsonOn; if (document.activeElement !== $('#jsonSchema')) $('#jsonSchema').value = q.jsonSchema || '';
   paintJsonErr(); paintSysTok(); paintPresetBar();
 }
-function paintSysTok() { const n = Math.ceil(($('#sysPrompt').value || '').length / 3.2); $('#sysTok').textContent = n ? `≈ ${n.toLocaleString('vi-VN')} token` : ''; }
+function paintSysTok() { const n = Math.ceil(($('#sysPrompt').value || '').length / 3.2); $('#sysTok').textContent = n ? `≈ ${n.toLocaleString(LOC())} token` : ''; }
 function paintJsonErr() {
   const q = cpParams(); const el = $('#jsonErr'); let msg = '';
   if (q.jsonOn) { if (!q.jsonSchema || !q.jsonSchema.trim()) msg = 'Hãy nhập lược đồ JSON (JSON Schema).'; else { try { const j = JSON.parse(q.jsonSchema); if (!j || typeof j !== 'object' || Array.isArray(j)) msg = 'Lược đồ phải là một đối tượng JSON.'; } catch (e) { msg = 'JSON chưa hợp lệ: ' + e.message; } } }
@@ -1113,7 +1119,7 @@ function curlExample(port, keySet) {
     "stream": false
   }'`;
 }
-function logLine(e) { const d = document.createElement('div'); d.innerHTML = `<span>${new Date(e.t).toLocaleTimeString('vi-VN')}</span>${esc(e.msg)}`; const l = $('#srvLog'); l.appendChild(d); l.scrollTop = l.scrollHeight; }
+function logLine(e) { const d = document.createElement('div'); d.innerHTML = `<span>${new Date(e.t).toLocaleTimeString(LOC())}</span>${esc(e.msg)}`; const l = $('#srvLog'); l.appendChild(d); l.scrollTop = l.scrollHeight; }
 function paintServer(st) {
   $('#srvToggle').checked = st.running; $('#srvDot').classList.toggle('on', st.running);
   const port = st.port || $('#srvPort').value;
@@ -1125,7 +1131,7 @@ function paintServer(st) {
     $('#srvLanUrls').innerHTML = st.lan ? (st.lanUrls.length ? 'Địa chỉ cho thiết bị khác: ' + st.lanUrls.map(u => `<code>${esc(u)}</code>`).join(' ') : '<span class="warn-ink">Máy chưa có địa chỉ mạng LAN.</span>') : '';
     $('#srvKeyState').textContent = st.keySet ? 'Đã có khoá: mọi yêu cầu phải gửi "Authorization: Bearer <khoá>".' : 'Chưa có: ai trên máy này cũng gọi được API.';
     $('#srvKeyGen').textContent = st.keySet ? 'Tạo khoá mới' : 'Tạo khoá'; $('#srvKeyReveal').hidden = !st.keySet; $('#srvKeyClear').hidden = !st.keySet; if (!st.keySet) $('#srvKeyShow').hidden = true;
-    $('#srvLoaded').innerHTML = (st.loaded || []).length ? st.loaded.map(m => `<div class="row"><code>${esc(m.id)}</code><span class="muted small">${m.kind === 'eyes' ? 'mắt nhìn của AIVN AGENT' : `trò chuyện · ngữ cảnh ${Number(m.ctx || 0).toLocaleString('vi-VN')}${m.vision ? ' · nhìn ảnh' : ''}${m.jit ? ' · nạp theo yêu cầu API' : ''}`}</span>${m.kind === 'chat' ? '<button type="button" class="btn sm" data-srv-unload="1">Gỡ khỏi bộ nhớ</button>' : ''}</div>`).join('') : '<span class="muted small">Chưa nạp mô hình nào. Yêu cầu API ghi "model" là mô hình đã tải sẽ được tự nạp.</span>';
+    $('#srvLoaded').innerHTML = (st.loaded || []).length ? st.loaded.map(m => `<div class="row"><code>${esc(m.id)}</code><span class="muted small">${m.kind === 'eyes' ? 'mắt nhìn của AIVN AGENT' : `trò chuyện · ngữ cảnh ${Number(m.ctx || 0).toLocaleString(LOC())}${m.vision ? ' · nhìn ảnh' : ''}${m.jit ? ' · nạp theo yêu cầu API' : ''}`}</span>${m.kind === 'chat' ? '<button type="button" class="btn sm" data-srv-unload="1">Gỡ khỏi bộ nhớ</button>' : ''}</div>`).join('') : '<span class="muted small">Chưa nạp mô hình nào. Yêu cầu API ghi "model" là mô hình đã tải sẽ được tự nạp.</span>';
   }
   const sb = $('#sbServer'); sb.textContent = st.running ? `API: đang chạy · cổng ${port}` : 'API: tắt'; sb.classList.toggle('on', !!st.running);
 }
@@ -1269,6 +1275,8 @@ $('#themeRow').addEventListener('click', async (e) => {
   state.settings.theme = b.dataset.theme;
   applyTheme(b.dataset.theme, { animate: true }); state.settings = await A.setSettings({ theme: b.dataset.theme });
 });
+// 0.16: ngôn ngữ giao diện — đổi ngay (I18N dịch lại cả trang), tiến trình chính dựng lại menu/khay; mô hình trả lời theo ngôn ngữ này
+$('#uiLangSel').addEventListener('change', async (e) => { const want = I18N.LANGS.includes(e.target.value) ? e.target.value : 'vi'; state.settings = await A.setSettings({ uiLang: want }); e.target.value = I18N.setLang(want); toast('Đã lưu ✓'); }); // lưu trước để lời chào/menu lấy đúng ngôn ngữ
 $('#themeFxSel').addEventListener('change', async (e) => { state.settings = await A.setSettings({ themeFx: e.target.value }); e.target.value = themeFx(); });
 // ---------- Tìm kiếm trong tài liệu (RAG) ----------
 let ragJobId = null;
@@ -1313,7 +1321,7 @@ $('#sysNotice').addEventListener('click', (e) => { const b = e.target.closest('[
 // ---------- AIVN AGENT ----------
 const AGENT_EXAMPLES = ['Bây giờ là mấy giờ, hôm nay thứ mấy? Còn bao nhiêu ngày nữa đến Tết Dương lịch?', 'Xem thư mục được phép có những tệp nào rồi tóm tắt tệp mới nhất.', 'Tính lãi kép: gửi 50 triệu, lãi 6,5%/năm trong 5 năm thì được bao nhiêu?', 'Hãy nhớ: tôi tên Khôi, đang học ở VLU.'];
 const STATUS_VI = { running: 'đang chạy', ok: 'xong', error: 'lỗi', refused: 'bị từ chối' };
-const fmtMs = (ms) => ms == null ? '' : ms < 1000 ? ms + ' ms' : (ms / 1000).toFixed(1).replace('.', ',') + ' giây';
+const fmtMs = (ms) => ms == null ? '' : ms < 1000 ? ms + ' ms' : (ms / 1000).toFixed(1).replace('.', DEC()) + ' giây';
 function argPreview(st) { const a = st.args || {}; const v = a.path || a.expression || a.query || a.url || a.fact || a.title || a.code || ''; return String(v).split('\n')[0].slice(0, 90); }
 function stepHtml(st, open) {
   const args = Object.keys(st.args || {}).length ? JSON.stringify(st.args, null, 2) : '(không có)';
@@ -1399,7 +1407,7 @@ async function sendAgent(text) {
     if (st.stage === 'ask') setPhase('ask');
     if (st.stage === 'act' || st.stage === 'tools') setPhase('act');
     if (st.stage === 'think') $('#genStats').textContent = st.round ? `Đang suy nghĩ… (bước ${st.round + 1})` : 'Đang suy nghĩ…';
-    if (st.stage === 'recover') { reply.content = ''; reply.steps = []; paintBody(); paintSteps(); $('#genStats').textContent = st.grow ? `Ngữ cảnh chưa đủ cho yêu cầu này — đang nạp lại mô hình với ngữ cảnh ${Number(st.ctx).toLocaleString('vi-VN')}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${st.ctx}) và thử lại…`; return; }
+    if (st.stage === 'recover') { reply.content = ''; reply.steps = []; paintBody(); paintSteps(); $('#genStats').textContent = st.grow ? `Ngữ cảnh chưa đủ cho yêu cầu này — đang nạp lại mô hình với ngữ cảnh ${Number(st.ctx).toLocaleString(LOC())}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${st.ctx}) và thử lại…`; return; }
     if (st.stage === 'verify') { reply.content = ''; paintBody(); $('#genStats').textContent = 'Đang kiểm tra lại: câu trả lời chưa khớp với các bước đã làm…'; }
   });
   try {
@@ -1497,7 +1505,7 @@ if (A.onNotice) A.onNotice((n) => toast((n.kind === 'warn' ? '⚠ ' : '') + n.te
 const CRM_ON = localStorage.getItem('aivn.crmPreview') === '1' || !!(A.qaMode && A.qaCrm);
 $$('[data-crm-nav]').forEach(el => { el.hidden = !CRM_ON; });
 const crm = { tab: 'dash', contacts: [] };
-const vnd = (n) => (Number(n) || 0).toLocaleString('vi-VN') + ' đ';
+const vnd = (n) => `${(Number(n) || 0).toLocaleString(LOC())} đ`;
 async function C(fn, ...a) { const r = await A.crm(fn, ...a); if (!r.ok) throw new Error(r.error); return r.data; }
 async function renderCrm() {
   $$('.crm-tabs button').forEach(b => b.classList.toggle('on', b.dataset.crm === crm.tab));
@@ -1508,7 +1516,7 @@ async function renderCrm() {
       const d = await C('dashboard');
       body.innerHTML = `<div class="kpis"><div class="kpi">Cơ hội đang mở<b>${d.open.n}</b><span class="small muted">${vnd(d.open.sum)} · dự kiến ${vnd(d.open.weighted)}</span></div><div class="kpi">Thắng trong tháng<b>${d.wonMonth.n}</b><span class="small muted">${vnd(d.wonMonth.sum)}</span></div><div class="kpi">Tỉ lệ thắng<b>${d.winRate == null ? '—' : Math.round(d.winRate) + '%'}</b><span class="small muted">90 ngày: ${d.winRate90 == null ? '—' : Math.round(d.winRate90) + '%'}</span></div><div class="kpi">Việc cần làm<b>${d.activities.open}</b><span class="small muted">${d.activities.overdue} quá hạn · ${d.activities.today} hôm nay</span></div></div>
         <h3>Theo giai đoạn</h3><table class="crm-table"><tr><th>Giai đoạn</th><th>Số cơ hội</th><th>Giá trị</th></tr>${d.byStage.map(x => `<tr><td>${esc(x.name)}</td><td>${x.n}</td><td>${vnd(x.sum)}</td></tr>`).join('')}</table>
-        <h3>Sắp tới</h3>${(d.upcoming || []).length ? `<table class="crm-table">${d.upcoming.map(a => `<tr><td>${esc(a.type_vi || '')}</td><td>${esc(a.title)}</td><td>${esc(a.contact_name || '')}</td><td>${a.due_at ? new Date(a.due_at).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }) : 'chưa hẹn giờ'}</td></tr>`).join('')}</table>` : '<div class="empty-state"><div class="big">📅</div>Chưa có việc nào sắp tới.</div>'}`;
+        <h3>Sắp tới</h3>${(d.upcoming || []).length ? `<table class="crm-table">${d.upcoming.map(a => `<tr><td>${esc(a.type_vi || '')}</td><td>${esc(a.title)}</td><td>${esc(a.contact_name || '')}</td><td>${a.due_at ? new Date(a.due_at).toLocaleString(LOC(), { dateStyle: 'short', timeStyle: 'short' }) : 'chưa hẹn giờ'}</td></tr>`).join('')}</table>` : '<div class="empty-state"><div class="big">📅</div>Chưa có việc nào sắp tới.</div>'}`;
     } else if (crm.tab === 'contacts') {
       const r = await C('listContacts', { q }); crm.contacts = r.rows;
       body.innerHTML = r.rows.length ? `<table class="crm-table"><tr><th>Tên</th><th>Loại</th><th>Điện thoại</th><th>Email</th><th>Thẻ</th><th>Phụ trách</th><th></th></tr>${r.rows.map(c => `<tr><td><b>${esc(c.name)}</b>${c.job_title ? `<div class="small muted">${esc(c.job_title)}</div>` : ''}</td><td>${esc(c.kind_vi)}</td><td>${esc(c.phone_fmt || c.phone || '')}</td><td>${esc(c.email || '')}</td><td>${(c.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join(' ')}</td><td>${esc(c.owner || '')}</td><td><button class="btn sm" data-crm-edit="${esc(c.id)}">Sửa</button> <button class="btn sm ghost" data-crm-del="${esc(c.id)}" title="Xoá liên hệ">🗑</button></td></tr>`).join('')}</table><p class="small muted">${r.total} liên hệ</p>`
@@ -1519,7 +1527,7 @@ async function renderCrm() {
       body.innerHTML = `<div class="kanban">${ST.map(([id, n]) => { const col = rows.filter(l => l.stage === id); return `<div class="kcol" data-stage="${id}"><h4>${n}<span class="muted">${col.length}</span></h4>${col.map(l => `<div class="kcard" draggable="true" data-lead="${esc(l.id)}"><b>${esc(l.title)}</b><div class="small muted">${esc(l.contact_name || '')}</div><div class="small">${vnd(l.expected_revenue)} · ${l.probability}%</div></div>`).join('') || '<div class="small muted">Kéo thẻ vào đây</div>'}</div>`; }).join('')}</div>`;
     } else {
       const r = await C('listActivities', { status: 'open' });
-      body.innerHTML = r.length ? `<table class="crm-table"><tr><th></th><th>Việc</th><th>Loại</th><th>Khách hàng</th><th>Hạn</th></tr>${r.map(a => `<tr><td><input type="checkbox" data-crm-done="${esc(a.id)}" aria-label="Đánh dấu xong"></td><td>${esc(a.title)}${a.overdue ? ' <span class="tag" style="color:#82071e">quá hạn</span>' : ''}</td><td>${esc(a.type_vi)}</td><td>${esc(a.contact_name || '')}</td><td>${a.due_at ? new Date(a.due_at).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td></tr>`).join('')}</table>` : '<div class="empty-state"><div class="big">✅</div>Không còn việc nào cần làm.</div>';
+      body.innerHTML = r.length ? `<table class="crm-table"><tr><th></th><th>Việc</th><th>Loại</th><th>Khách hàng</th><th>Hạn</th></tr>${r.map(a => `<tr><td><input type="checkbox" data-crm-done="${esc(a.id)}" aria-label="Đánh dấu xong"></td><td>${esc(a.title)}${a.overdue ? ' <span class="tag" style="color:#82071e">quá hạn</span>' : ''}</td><td>${esc(a.type_vi)}</td><td>${esc(a.contact_name || '')}</td><td>${a.due_at ? new Date(a.due_at).toLocaleString(LOC(), { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td></tr>`).join('')}</table>` : '<div class="empty-state"><div class="big">✅</div>Không còn việc nào cần làm.</div>';
     }
   } catch (e) { body.innerHTML = `<div class="empty-state">⚠ ${esc(e.message)}</div>`; }
 }
@@ -1654,7 +1662,7 @@ async function paintPerf(pf) {
     $('#perfCfg').innerHTML = `<span title="Số luồng CPU dùng để suy luận">🧵 ${p.threads} luồng</span> · <span title="Độ dài ngữ cảnh mặc định khi nạp">📏 ngữ cảnh ${p.ctx}</span> · <span title="Số token xử lý mỗi lượt khi đọc câu hỏi">📦 lô ${p.batchSize}</span>${p.kvQuant ? ' · <span title="Nén bộ nhớ đệm ngữ cảnh q8_0">🗜 KV q8_0</span>' : ''}${p.idleUnloadMin ? ` · <span title="Tự gỡ mô hình khi không dùng">💤 gỡ sau ${p.idleUnloadMin} phút</span>` : ''}${p.uiLite ? ' · <span title="Tắt hiệu ứng, gộp cập nhật chữ">🪶 giao diện nhẹ</span>' : ''}`;
     $('#perfTips').innerHTML = (p.tips || []).map(t => `<li>${esc(t)}</li>`).join('');
     const runs = await A.perfRuns();
-    $('#perfRuns').innerHTML = runs.length ? '<tr><th>Lúc</th><th>Mô hình</th><th>Chế độ</th><th>Chữ đầu</th><th>Tốc độ</th></tr>' + runs.slice(-6).reverse().map(r => `<tr><td>${new Date(r.at).toLocaleTimeString('vi-VN')}</td><td>${esc(String(r.model).slice(0, 28))}</td><td>${esc(r.modeLabel)}</td><td>${(r.ttftMs / 1000).toFixed(1)} giây</td><td><b>${r.tokPerSec}</b> token/giây</td></tr>`).join('') : '';
+    $('#perfRuns').innerHTML = runs.length ? '<tr><th>Lúc</th><th>Mô hình</th><th>Chế độ</th><th>Chữ đầu</th><th>Tốc độ</th></tr>' + runs.slice(-6).reverse().map(r => `<tr><td>${new Date(r.at).toLocaleTimeString(LOC())}</td><td>${esc(String(r.model).slice(0, 28))}</td><td>${esc(r.modeLabel)}</td><td>${(r.ttftMs / 1000).toFixed(1)} giây</td><td><b>${r.tokPerSec}</b> token/giây</td></tr>`).join('') : '';
   } catch {}
 }
 $('#perfMode').addEventListener('change', async (e) => { state.settings = await A.setSettings({ perfMode: e.target.value }); toast('Chế độ hiệu năng mới áp dụng đầy đủ khi nạp lại mô hình.'); setTimeout(() => paintPerf(), 300); });
@@ -1755,7 +1763,7 @@ function paintAgentWarn(adv) {
   if (g && g.ok && !g.cloud && (g.slow || g.spill)) { w.innerHTML = agentSlowHtml(g); w.hidden = false; return; }
   if (g && g.ok) { w.hidden = true; return; } // mô hình đã qua kiểm tra AIVN AGENT: không cần các cảnh báo cũ
   if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN AGENT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để AIVN AGENT làm việc đáng tin cậy, hãy chọn mô hình được đánh dấu dùng được cho AIVN AGENT trong bộ chọn mô hình.</span> ${recBtns}`; w.hidden = false; return; }
-  if (adv && adv.small) { w.innerHTML = `<span>⚠ <b>${esc(adv.model)}</b>${adv.params ? ` (khoảng ${String(adv.params).replace('.', ',')} tỉ tham số)` : ''} khá nhỏ cho AIVN AGENT: có thể gọi sai công cụ, bỏ bước hoặc nói đã làm khi chưa làm. Nên chọn mô hình mạnh hơn được đánh dấu dùng được cho AIVN AGENT.</span> ${recBtns}`; w.hidden = false; return; }
+  if (adv && adv.small) { w.innerHTML = `<span>⚠ <b>${esc(adv.model)}</b>${adv.params ? ` (khoảng ${String(adv.params).replace('.', DEC())} tỉ tham số)` : ''} khá nhỏ cho AIVN AGENT: có thể gọi sai công cụ, bỏ bước hoặc nói đã làm khi chưa làm. Nên chọn mô hình mạnh hơn được đánh dấu dùng được cho AIVN AGENT.</span> ${recBtns}`; w.hidden = false; return; }
   if (adv && adv.eyes && adv.eyes.needed) {
     const r = adv.eyes.rec; const busy = adv.eyes.pending && jobs && [...jobs.values()].some(j => j.catalogId === adv.eyes.pending && j.status !== 'done');
     w.innerHTML = `<span>👁 <b>Điều khiển màn hình cần mắt nhìn.</b> <b>${esc(adv.model)}</b> chỉ đọc chữ, không nhìn được màn hình — Zalo và các ứng dụng Electron gần như không cho đọc nút/ô, nên AIVN AGENT sẽ bấm nhầm hoặc báo “không tìm thấy”. ${r ? `Nạp thêm <b>${esc(r.name)}</b> (${fmtBytes(r.size)}): AIVN tự dùng nó để nhìn ảnh chụp mỗi bước.` : ''}</span> ${r ? `<button class="btn sm primary" data-eyes="${esc(r.id)}" ${busy ? 'disabled' : ''}>${busy ? 'Đang tải mắt nhìn…' : r.installed ? '👁 Nạp thêm mắt nhìn' : '👁 Tải & nạp thêm mắt nhìn'}</button>` : ''}`;
@@ -1814,7 +1822,7 @@ $('#schedForm').addEventListener('submit', async (e) => {
 });
 async function refreshSched() {
   const list = await A.schedList();
-  $('#schedNow').textContent = 'Bây giờ: ' + new Date().toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', weekday: 'long', day: '2-digit', month: '2-digit' });
+  $('#schedNow').textContent = 'Bây giờ: ' + new Date().toLocaleString(LOC(), { hour: '2-digit', minute: '2-digit', weekday: 'long', day: '2-digit', month: '2-digit' });
   $('#schedList').innerHTML = list.length ? list.map(t => { const last = (t.runs || [])[0];
     return `<div class="sched-item${t.enabled ? '' : ' off'}" data-id="${esc(t.id)}"><div class="ic">${t.kind === 'agent' ? '🤖' : '🔔'}</div>
       <div><h4>${esc(t.title)}</h4><div class="meta">${esc(t.schedule)}${t.enabled && t.nextRun ? ` · lần tới <b>${fmtWhen(t.nextRun)}</b>` : t.enabled ? '' : t.repeat === 'once' && t.lastRun ? ' · đã chạy xong' : ' · đang tắt'}${t.running ? ' · <b>đang chạy…</b>' : ''}</div>
@@ -1855,7 +1863,7 @@ async function refreshMem() {
   const [list, info] = await Promise.all([A.memList(), A.agentInfo()]);
   $('#memOn').checked = info.memory.enabled;
   $('#memMode').textContent = `Những điều AIVN AGENT đã ghi nhớ về bạn (${list.length}). Chỉ lưu trên máy này. Điều liên quan tới câu hỏi được đưa vào lời nhắc của AIVN AGENT, tìm ${info.memory.semantic ? 'theo ý nghĩa bằng BGE-M3' : 'theo từ khoá (tải BGE-M3 trong Cài đặt trò chuyện để tìm theo ý nghĩa)'}.`;
-  $('#memList').innerHTML = list.length ? list.map(m => `<div class="mem" data-id="${esc(m.id)}"><div class="txt">${esc(m.text)}<div class="meta">${m.source === 'user' ? 'Bạn thêm' : 'AIVN AGENT ghi nhớ'} · ${new Date(m.updatedAt).toLocaleString('vi-VN')}${m.uses ? ` · đã dùng ${m.uses} lần` : ''}</div></div><div class="acts"><button class="btn sm" data-mact="edit">Sửa</button><button class="btn sm danger" data-mact="del" title="Xoá ghi nhớ này">🗑</button></div></div>`).join('')
+  $('#memList').innerHTML = list.length ? list.map(m => `<div class="mem" data-id="${esc(m.id)}"><div class="txt">${esc(m.text)}<div class="meta">${m.source === 'user' ? 'Bạn thêm' : 'AIVN AGENT ghi nhớ'} · ${new Date(m.updatedAt).toLocaleString(LOC())}${m.uses ? ` · đã dùng ${m.uses} lần` : ''}</div></div><div class="acts"><button class="btn sm" data-mact="edit">Sửa</button><button class="btn sm danger" data-mact="del" title="Xoá ghi nhớ này">🗑</button></div></div>`).join('')
     : '<div class="sched-empty">Chưa có ghi nhớ nào. Hãy nói với AIVN AGENT, ví dụ: “Hãy nhớ: tôi thích uống cà phê sữa đá”.</div>';
   refreshMemCount(list);
 }
@@ -1898,7 +1906,7 @@ async function paintBench() {
   const cur = state.status && state.status.id;
   if (!$('#benchModel').dataset.busy) $('#benchModel').innerHTML = ms.map(m => `<option value="${esc(m.id)}" ${m.id === cur ? 'selected' : ''}>${esc(m.name || m.id)}</option>`).join('') || '<option value="">(chưa có mô hình)</option>';
   const sc = await A.benchScores().catch(() => null); if (!sc) return;
-  const rows = Object.entries(sc.local || {}).map(([id, b]) => `${(ms.find(m => m.id === id) || {}).name || id}: Điểm tác vụ ${b.score}/10 · an toàn ${b.safety === null ? '—' : b.safety ? 'đạt' : 'KHÔNG đạt'} · ${Math.round((b.seconds || 0) / 60)} phút · ${new Date(b.date).toLocaleDateString('vi-VN')}`);
+  const rows = Object.entries(sc.local || {}).map(([id, b]) => `${(ms.find(m => m.id === id) || {}).name || id}: Điểm tác vụ ${b.score}/10 · an toàn ${b.safety === null ? '—' : b.safety ? 'đạt' : 'KHÔNG đạt'} · ${Math.round((b.seconds || 0) / 60)} phút · ${new Date(b.date).toLocaleDateString(LOC())}`);
   if (!$('#benchModel').dataset.busy) $('#benchRes').textContent = rows.length ? 'Kết quả trên máy này:\n' + rows.join('\n') : 'Chưa đo lần nào trên máy này.';
 }
 $('#benchRun').addEventListener('click', async () => {
@@ -1941,7 +1949,7 @@ $('#cloudTestBtn').addEventListener('click', async () => {
   if ($('#cloudKey').value || $('#cloudUrl').value !== ((state.settings.cloudBrain || {}).baseUrl || '')) { const r0 = await cloudSave(); if (!r0.ok) return; }
   $('#cloudMsg').textContent = 'Đang kiểm tra…'; $('#cloudMsg').className = 'small';
   const r = await A.cloudTest();
-  $('#cloudMsg').textContent = r.ok ? `Kết nối được (${(r.ms / 1000).toFixed(1).replace('.', ',')} giây). ${r.tools ? 'Mô hình gọi công cụ được ✓' : 'Mô hình KHÔNG gọi công cụ trong lần thử: AIVN AGENT có thể không làm được việc.'}` : r.error;
+  $('#cloudMsg').textContent = r.ok ? `Kết nối được (${(r.ms / 1000).toFixed(1).replace('.', DEC())} giây). ${r.tools ? 'Mô hình gọi công cụ được ✓' : 'Mô hình KHÔNG gọi công cụ trong lần thử: AIVN AGENT có thể không làm được việc.'}` : r.error;
   $('#cloudMsg').className = 'small ' + (r.ok && r.tools ? 'ok-ink' : 'warn-ink');
 });
 $('#cloudClearBtn').addEventListener('click', async () => { paintCloud(await A.cloudClearKey()); $('#cloudMsg').textContent = 'Đã xoá khoá API và tắt bộ não đám mây.'; refreshAgent(); });
@@ -2024,14 +2032,14 @@ $('#scStop').addEventListener('click', () => { closeScreenModal(false); A.comput
 $('#screenModal').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); closeScreenModal(false); } });
 
 // ---------- Bảo mật & Quản trị ----------
-const fmtDate = (t) => t ? new Date(t).toLocaleDateString('vi-VN') : '';
+const fmtDate = (t) => t ? new Date(t).toLocaleDateString(LOC()) : '';
 async function refreshSecurity() {
   const l = await A.licenseInfo();
   $('#secLicense').innerHTML = `<h3>✅ Kích hoạt</h3>
     <div class="kv"><span>Mã máy</span><b><code id="secMachine">${esc(l.machineCode)}</code> <button class="btn sm" id="secCopyMc">Sao chép</button></b>
     <span>Trạng thái</span><b>${l.status === 'ok' ? 'Đã kích hoạt' : esc(l.message || l.status)}${l.name ? ' · cấp cho ' + esc(l.name) : ''}</b>
     <span>Hạn dùng</span><b>${l.expiresAt ? 'đến ' + fmtDate(l.expiresAt) : 'vĩnh viễn'}</b>
-    <span>Kiểm tra thu hồi</span><b>${l.lastCheckOk ? 'lần cuối ' + new Date(l.lastCheckOk).toLocaleString('vi-VN') : 'chưa kiểm tra được'}${l.graceLeftMs != null ? ` · còn dùng ngoại tuyến ${Math.max(0, Math.floor(l.graceLeftMs / 864e5))} ngày` : ''}</b></div>
+    <span>Kiểm tra thu hồi</span><b>${l.lastCheckOk ? 'lần cuối ' + new Date(l.lastCheckOk).toLocaleString(LOC()) : 'chưa kiểm tra được'}${l.graceLeftMs != null ? ` · còn dùng ngoại tuyến ${Math.max(0, Math.floor(l.graceLeftMs / 864e5))} ngày` : ''}</b></div>
     <div class="row"><button class="btn sm" id="secRecheck">Kiểm tra lại qua Internet</button></div>`;
   const k = await A.lockInfo();
   $('#lockState').innerHTML = k.enabled ? '🔒 Khoá ứng dụng đang <b>bật</b>.' : 'Khoá ứng dụng đang <b>tắt</b>.';
@@ -2104,6 +2112,7 @@ $('#lkSleep').addEventListener('change', async (e) => { await A.lockOptions({ lo
 // ---------- Khởi động ----------
 (async () => {
   state.settings = await A.getSettings();
+  if (window.I18N) { const l = state.settings.uiLang || 'vi'; if (l !== I18N.lang) I18N.setLang(l); $('#uiLangSel').value = I18N.lang; } // cài đặt là nguồn chuẩn
   applyTheme(state.settings.theme); $('#themeFxSel').value = themeFx();
   bindSettings();
   $('#gpuOn').checked = state.settings.gpu !== false;
@@ -2117,7 +2126,7 @@ $('#lkSleep').addEventListener('change', async (e) => { await A.lockOptions({ lo
   const info = await A.info();
   const h = info.hardware || {};
   $('#sbVer').textContent = 'AIVN ' + info.version;
-  $('#aboutVer').textContent = 'phiên bản ' + info.version;
+  $('#aboutVer').textContent = `phiên bản ${info.version}`;
   paintUpdate(await A.updateState());
   resetForm(); refreshSchedCount(); refreshMemCount();
   $('#modelsDir').textContent = 'Thư mục lưu: ' + info.paths.models;
@@ -2288,19 +2297,19 @@ function setUiMode(m) {
 setUiMode(localStorage.getItem('aivn.uiMode') || 'basic');
 document.addEventListener('click', (e) => { const b = e.target.closest('[data-uimode]'); if (b) setUiMode(b.dataset.uimode); });
 // Thanh trạng thái
-const gb1 = (b) => (b / 1024 ** 3).toFixed(1).replace('.', ',');
+const gb1 = (b) => (b / 1024 ** 3).toFixed(1).replace('.', DEC());
 function paintSbModel(st) {
   const el = $('#sbModel'); if (!el) return;
   const name = st && st.id ? ((state.models || []).find(m => m.id === st.id) || {}) : {};
   const label = name.catalog ? name.catalog.name : (name.name || (st && st.id) || '');
   if (st && st.loading) el.innerHTML = `<i class="sb-dot busy"></i><span>Đang nạp ${esc(label)}…</span>`;
-  else if (st && st.loaded) el.innerHTML = `<i class="sb-dot"></i><span>${esc(label)}</span><span class="muted">· ngữ cảnh ${Number(st.contextSize || 0).toLocaleString('vi-VN')} · ${st.gpu ? (st.totalLayers ? `GPU ${st.gpuLayers || 0}/${st.totalLayers} lớp` : 'GPU') : 'CPU'}</span>`;
+  else if (st && st.loaded) el.innerHTML = `<i class="sb-dot"></i><span>${esc(label)}</span><span class="muted">· ngữ cảnh ${Number(st.contextSize || 0).toLocaleString(LOC())} · ${st.gpu ? (st.totalLayers ? `GPU ${st.gpuLayers || 0}/${st.totalLayers} lớp` : 'GPU') : 'CPU'}</span>`;
   else el.innerHTML = '<i class="sb-dot off"></i><span>Chưa nạp mô hình</span>';
   el.title = el.textContent;
 }
 function paintSbSpeed(u) {
   const el = $('#sbSpeed'); if (!el || !u || !u.tokensPerSecond) return;
-  el.hidden = false; el.textContent = `${u.tokensPerSecond.toFixed(1).replace('.', ',')} token/giây`;
+  el.hidden = false; el.textContent = `${u.tokensPerSecond.toFixed(1).replace('.', DEC())} token/giây`;
   el.title = `Câu trả lời gần nhất: ${u.completion_tokens} token trong ${u.seconds.toFixed(1)} giây`;
 }
 async function pollSb() {
@@ -2321,12 +2330,12 @@ document.addEventListener('click', async (e) => {
   if (!id) { toast('Hãy nạp một mô hình trước', true); return; }
   const have = Number(st.contextSize) || Number(state.settings && state.settings.contextSize) || 4096;
   const next = [8192, 16384, 32768].find(n => n > have) || 32768;
-  b.disabled = true; b.textContent = `Đang nạp lại với ngữ cảnh ${next.toLocaleString('vi-VN')}…`;
+  b.disabled = true; b.textContent = `Đang nạp lại với ngữ cảnh ${next.toLocaleString(LOC())}…`;
   try {
     state.settings = await A.setSettings({ contextSize: next });
     const sel = $('#ctxSize'); if (sel && [...sel.options].some(o => Number(o.value || o.textContent) === next)) sel.value = String(next);
     await A.unloadModel();
-    if (await loadModel(id)) toast(`Đã tăng ngữ cảnh lên ${Number((state.status || {}).contextSize || next).toLocaleString('vi-VN')} token. Hãy gửi lại tin nhắn.`);
+    if (await loadModel(id)) toast(`Đã tăng ngữ cảnh lên ${Number((state.status || {}).contextSize || next).toLocaleString(LOC())} token. Hãy gửi lại tin nhắn.`);
   } catch (err) { toast(cleanErr(err.message), true); }
   b.disabled = false; b.textContent = 'Tăng ngữ cảnh';
 });

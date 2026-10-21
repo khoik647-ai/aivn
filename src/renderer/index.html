@@ -350,6 +350,7 @@
         <div class="set-body" id="setBody">
           <section class="set-pane on" data-spane="general" role="tabpanel"><h3 class="pane-title">Chung</h3>
             <div class="set-row"><div><b>Giao diện</b><small>Sáng, tối, hoặc theo hệ điều hành.</small></div><div id="themeSlot"><div class="theme-row" id="themeRow" role="group" aria-label="Giao diện"><button type="button" data-theme="light" title="Giao diện sáng">☀ Sáng</button><button type="button" data-theme="dark" title="Giao diện tối">☾ Tối</button><button type="button" data-theme="system" title="Theo hệ điều hành">Tự động</button></div></div></div>
+            <div class="set-row"><div><b>Ngôn ngữ</b><small>Ngôn ngữ của giao diện và của câu trả lời. Đổi ngay, không cần khởi động lại.</small></div><select id="uiLangSel" aria-label="Ngôn ngữ"><option value="vi" data-noi18n>Tiếng Việt</option><option value="en" data-noi18n>English</option><option value="zh" data-noi18n>中文（简体）</option></select></div>
             <div class="set-row"><div><b>Hiệu ứng chuyển giao diện</b><small>Logo rồng và vòng màu lan ra khi đổi sáng/tối. "Đầy đủ" vẫn chạy khi Windows tắt hiệu ứng động.</small></div><select id="themeFxSel" aria-label="Hiệu ứng chuyển giao diện"><option value="full">Đầy đủ (mặc định)</option><option value="os">Theo hệ điều hành</option><option value="off">Tắt</option></select></div>
             <div class="set-row"><div><b>Mức hiển thị</b><small>Cơ bản ẩn các tham số kỹ thuật (lớp GPU, batch, DRY…). Nâng cao hiện đầy đủ.</small></div><div class="seg" id="uiModeSeg" role="radiogroup" aria-label="Mức hiển thị"><button type="button" role="radio" data-uimode="basic">Cơ bản</button><button type="button" role="radio" data-uimode="advanced">Nâng cao</button></div></div>
             <div class="set-row"><div><b>Thanh điều hướng thu gọn</b><small>Chỉ hiện biểu tượng (Ctrl+B).</small></div><label class="switch"><input type="checkbox" id="railCompactChk"><span></span></label></div>
@@ -484,6 +485,10 @@
 </div>
 <div class="toast" id="toast"></div>
 <div class="theme-veil" id="themeVeil" aria-hidden="true"><img src="dragon-red.svg" alt=""></div>
+<script src="../i18n/core.js"></script>
+<script src="../i18n/en.js"></script>
+<script src="../i18n/zh.js"></script>
+<script src="i18n-dom.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

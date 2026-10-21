@@ -1,4 +1,15 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu, Notification, Tray, nativeImage, globalShortcut, powerMonitor, net, clipboard } = require('electron');
+// 0.16: ngôn ngữ giao diện (vi/en/zh) — menu, hộp thoại, khay, thông báo của tiến trình chính dịch theo cài đặt uiLang (khoá = câu tiếng Việt, src/i18n)
+const I18N_CORE = require('./i18n/core');
+const I18N = I18N_CORE.create({ en: require('./i18n/en'), zh: require('./i18n/zh') });
+const uiLang = () => { const l = settings && settings.data && settings.data.uiLang; return I18N_CORE.LANGS.includes(l) ? l : 'vi'; };
+const T = (s) => I18N.tr(s, uiLang());
+const TO = (o) => I18N.trOpts(o, uiLang());
+for (const k of ['showOpenDialog', 'showSaveDialog', 'showMessageBox', 'showOpenDialogSync', 'showSaveDialogSync', 'showMessageBoxSync']) {
+  const f = dialog[k].bind(dialog); dialog[k] = (a, b) => (b === undefined ? f(TO(a)) : f(a, TO(b)));
+}
+{ const ebox = dialog.showErrorBox.bind(dialog); dialog.showErrorBox = (t, c) => ebox(T(t), T(c)); }
+{ const bft = Menu.buildFromTemplate.bind(Menu); Menu.buildFromTemplate = (tpl) => bft(TO(tpl)); }
 // Giao diện tiếng Việt: ô ngày/giờ và hộp thoại mặc định của Chromium theo vi-VN
 app.commandLine.appendSwitch('lang', 'vi');
 const path = require('path');
@@ -163,7 +174,7 @@ function initStores() {
   fs.mkdirSync(paths.models, { recursive: true });
   settings = new JsonStore(path.join(ud, 'settings.json'), {
     systemPrompt: 'Bạn là AIVN, một trợ lý AI thân thiện. Hãy trả lời bằng tiếng Việt, rõ ràng và chính xác.',
-    temperature: 0.7, maxTokens: 1024, contextSize: 0, perfMode: 'auto', apiPort: 1234, apiAutoStart: false, apiLan: false, apiCors: false, apiKey: '', apiTtlMin: 0, imported: [], lastModel: null, hfToken: '', theme: 'light', themeFx: 'full', rag: true, vision: true,
+    temperature: 0.7, maxTokens: 1024, contextSize: 0, perfMode: 'auto', apiPort: 1234, apiAutoStart: false, apiLan: false, apiCors: false, apiKey: '', apiTtlMin: 0, imported: [], lastModel: null, hfToken: '', uiLang: 'vi', theme: 'light', themeFx: 'full', rag: true, vision: true,
     agentFolders: [], agentWeb: false, agentPython: false, agentMemory: true, agentTemperature: 0.2, agentComputer: true, agentScreen: false, agentScreenMode: 'each', agentAutonomy: false, agentScreenBudget: 40, agentAutoReadOnly: false, keepInTray: false, openAtLogin: false,
   });
   if (!settings.data.perfMigrated) { if (settings.data.contextSize === 4096) settings.data.contextSize = 0; settings.data.perfMigrated = 1; settings.save(); } // 4096 là mặc định cũ → chuyển sang Tự động theo mức máy
@@ -551,7 +562,7 @@ function agentInfo() {
   const py = sandbox.findPython();
   return { folders: (settings.data.agentFolders || []).map(f => ({ path: f, name: path.basename(f), exists: (() => { try { return fs.statSync(f).isDirectory(); } catch { return false; } })() })),
     web: !!settings.data.agentWeb, python: { enabled: !!settings.data.agentPython, available: !!py, version: py ? py.version : null }, memory: { enabled: settings.data.agentMemory !== false, count: memory.count(), semantic: ragActive() },
-    tools: agent.activeTools().map(n => ({ name: n, label: agent.defs[n].label, icon: agent.defs[n].icon })), computer: computerInfo(), toolsOff: settings.data.agentToolsOff || [], alwaysAllow: (settings.data.agentAlwaysAllow || []).map(n => ({ name: n, label: (agent.defs[n] && agent.defs[n].label) || n })), welcome: (() => { const st = engine.status(); return welcomeFor({ loaded: !!st.loaded || cloudBrainOn(), vision: !!st.vision, agentOk: lastGateOk !== false, cloud: cloudBrainOn() ? { model: cloudCfg().model, host: (() => { try { return new URL(cloudCfg().baseUrl).host; } catch { return ''; } })() } : null }); })(), advice: agentAdvice(), keepInTray: !!settings.data.keepInTray, openAtLogin: !!settings.data.openAtLogin };
+    tools: agent.activeTools().map(n => ({ name: n, label: agent.defs[n].label, icon: agent.defs[n].icon })), computer: computerInfo(), toolsOff: settings.data.agentToolsOff || [], alwaysAllow: (settings.data.agentAlwaysAllow || []).map(n => ({ name: n, label: (agent.defs[n] && agent.defs[n].label) || n })), welcome: (() => { const st = engine.status(); return welcomeFor({ lang: uiLang(), loaded: !!st.loaded || cloudBrainOn(), vision: !!st.vision, agentOk: lastGateOk !== false, cloud: cloudBrainOn() ? { model: cloudCfg().model, host: (() => { try { return new URL(cloudCfg().baseUrl).host; } catch { return ''; } })() } : null }); })(), advice: agentAdvice(), keepInTray: !!settings.data.keepInTray, openAtLogin: !!settings.data.openAtLogin };
 }
 // Xác nhận xoá/ghi đè: hộp thoại tiếng Việt trong cửa sổ AIVN; không trả lời trong 5 phút = từ chối
 const confirms = new Map();
@@ -743,7 +754,7 @@ function computerInfo() {
 // ---------- Lịch tự động ----------
 let lastNotice = null;
 function notify(title, body, convoId) {
-  if (gated()) { title = 'AIVN'; body = 'Có thông báo mới. Mở khoá AIVN để xem.'; convoId = null; } // không lộ nội dung khi đang khoá
+  if (gated()) { title = 'AIVN'; body = T('Có thông báo mới. Mở khoá AIVN để xem.'); convoId = null; } // không lộ nội dung khi đang khoá
   lastNotice = { title, body, at: Date.now(), supported: Notification.isSupported(), shown: false };
   if (!Notification.isSupported()) return;
   const n = new Notification({ title, body: String(body || '').slice(0, 240), icon: path.join(__dirname, '..', 'build', 'icons', '128x128.png') });
@@ -784,12 +795,16 @@ async function onScheduleFire(t, { late, manual }) {
 
 // ---------- Chạy nền (khay hệ thống) và mở cùng hệ điều hành ----------
 function showWindow() { if (!win || win.isDestroyed()) createWindow(); else { if (!win.isVisible()) win.show(); if (win.isMinimized()) win.restore(); win.focus(); } }
+function paintTray() {
+  if (!tray) return;
+  tray.setToolTip(T('AIVN · Lịch tự động vẫn chạy'));
+  tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Mở AIVN', click: showWindow }, { type: 'separator' }, { label: 'Thoát AIVN', click: () => { quitting = true; app.quit(); } }]));
+}
 function applyBackgroundPrefs() {
   if (settings.data.keepInTray && !tray) {
     const img = nativeImage.createFromPath(path.join(__dirname, '..', 'build', 'icons', process.platform === 'darwin' ? '16x16.png' : '32x32.png'));
     tray = new Tray(img);
-    tray.setToolTip('AIVN · Lịch tự động vẫn chạy');
-    tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Mở AIVN', click: showWindow }, { type: 'separator' }, { label: 'Thoát AIVN', click: () => { quitting = true; app.quit(); } }]));
+    paintTray();
     tray.on('click', showWindow);
   } else if (!settings.data.keepInTray && tray) { tray.destroy(); tray = null; }
   // mở cùng hệ điều hành: Windows/macOS dùng API của Electron, Linux ghi tệp ~/.config/autostart (chỉ bản đã đóng gói)
@@ -972,6 +987,7 @@ function registerIpc() {
     if (typeof hfToken === 'string') settings.data.hfToken = hfToken.trim().slice(0, 300);
     if ('perfMode' in rest) { settings.data.perfMode = PERF.MODE_VI[rest.perfMode] ? rest.perfMode : 'auto'; perfProfile().then(p => send('perf:changed', p)).catch(() => {}); }
     if ('contextSize' in rest) settings.data.contextSize = [0, 2048, 4096, 8192, 16384, 32768].includes(Number(rest.contextSize)) ? Number(rest.contextSize) : 0;
+    if ('uiLang' in rest) { settings.data.uiLang = I18N_CORE.LANGS.includes(rest.uiLang) ? rest.uiLang : 'vi'; try { buildMenus(); paintTray(); } catch {} }
     if (['light', 'dark', 'system'].includes(settings.data.theme)) require('electron').nativeTheme.themeSource = settings.data.theme;
     if ('theme' in rest && win && !win.isDestroyed()) win.setBackgroundColor(windowBg());
     if ('themeFx' in rest) settings.data.themeFx = ['full', 'os', 'off'].includes(rest.themeFx) ? rest.themeFx : 'full';
@@ -1135,6 +1151,8 @@ function registerIpc() {
 
   ipcMain.handle('chat:generate', async (_e, { reqId, messages, temperature, maxTokens, docs: attached, convoId, images, params = null }) => {
     const P = cleanChatParams(params);
+    { const dir = I18N_CORE.replyDirective(uiLang()); // giao diện en/zh → mô hình trả lời bằng ngôn ngữ đó
+      if (dir && Array.isArray(messages)) messages = messages[0] && messages[0].role === 'system' && typeof messages[0].content === 'string' ? [{ ...messages[0], content: `${messages[0].content}\n${dir}` }, ...messages.slice(1)] : [{ role: 'system', content: dir }, ...messages]; }
     if (P.jsonSchema) { const se = require('./chatfit').schemaError(P.jsonSchema); if (se) throw new Error('Lược đồ JSON chưa hợp lệ — ' + se + '. Sửa ở thẻ “Đầu ra” bên phải.'); }
     const ac = new AbortController();
     generations.set(reqId, ac);
@@ -1658,6 +1676,37 @@ async function qaUI() {
     out.agentWarn = await js('(w => w && !w.hidden ? w.innerText : null)(document.querySelector("#agentWarn"))');
     await shot('016-agent-gate');
     fs.writeFileSync(path.join(dir, 'qa016fit.json'), JSON.stringify(out, null, 2)); app.exit(0); return;
+  }
+  if (process.env.AIVN_QAUI_I18N) { // 0.16 i18n: duyệt mọi màn hình/thẻ cài đặt/hộp thoại ở en và zh, tìm chữ tiếng Việt còn sót; đổi về vi phải khôi phục y nguyên
+    await js('document.querySelectorAll(".modal-back").forEach(m => m.hidden = true); 1');
+    const scan = (tag) => js(`(() => { const VI = /[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i; const SK = 'pre, code, textarea, script, style, [data-noi18n], .msg:not(.welcome) .body, .msg .think-body, [contenteditable="true"], #convoList';
+      const vis = (e) => !!(e && (e.offsetWidth || e.offsetHeight || e.getClientRects().length)); const h = [];
+      const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) { const p = n.parentElement; if (!p || p.closest(SK)) continue; const t = n.nodeValue.trim(); if (t && VI.test(t)) h.push({ at: ${JSON.stringify(tag)}, vis: vis(p), t: t.slice(0, 600) }); }
+      const SKA = 'pre, code, script, style, [data-noi18n], .msg:not(.welcome) .body, .msg .think-body, #convoList';
+      for (const e of document.querySelectorAll('[title],[aria-label],[data-tip],[placeholder],[alt]')) { if (e.closest(SKA)) continue; for (const k of ['title', 'aria-label', 'data-tip', 'placeholder', 'alt']) { const x = e.getAttribute(k); if (x && VI.test(x)) h.push({ at: ${JSON.stringify(tag)} + ' @' + k, vis: vis(e), t: x.slice(0, 600) }); } }
+      return h; })()`);
+    const snapshot = () => js('JSON.stringify([document.title, document.querySelector("#newChat") && document.querySelector("#newChat").textContent.trim(), ...[...document.querySelectorAll(".nav-item[data-view]")].map(b => [b.getAttribute("aria-label"), b.dataset.tip]), ...[...document.querySelectorAll("#setNav [data-stab]")].map(b => b.textContent.trim()), document.querySelector("#input") && document.querySelector("#input").placeholder])');
+    const views = await js('[...document.querySelectorAll(".nav-item[data-view]")].map(b => b.dataset.view)');
+    const stabs = await js('[...document.querySelectorAll("#setNav [data-stab]")].map(b => b.dataset.stab)');
+    await js('show("chat"); 1'); await sleep(400); const viBefore = await snapshot();
+    out.langs = {};
+    for (const l of ['en', 'zh']) {
+      const r = out.langs[l] = { hits: [], menu: null, title: null };
+      await js(`(() => { const s = document.querySelector('#uiLangSel'); s.value = ${JSON.stringify(l)}; s.dispatchEvent(new Event('change')); return 1; })()`); await sleep(800);
+      for (const v of views) { await js(`show(${JSON.stringify(v)}); 1`); await sleep(350); r.hits.push(...await scan(v)); if (v === 'chat' || v === 'discover' || v === 'agent') await shot(`i18n-${l}-${v}`); }
+      await js('show("settings"); 1'); await sleep(300);
+      for (const t of stabs) { await js(`document.querySelector('#setNav [data-stab="${t}"]').click(); 1`); await sleep(250); r.hits.push(...await scan('settings/' + t)); if (t === 'general') await shot(`i18n-${l}-settings`); }
+      for (const [k, code] of [['palette', 'document.querySelector("#paletteBtn") && document.querySelector("#paletteBtn").click()'], ['keys', 'document.querySelector("#keysModal") && (document.querySelector("#keysModal").hidden = false)']]) {
+        await js('show("chat"); 1'); await sleep(200); await js(`(${code}, 1)`); await sleep(300); r.hits.push(...await scan('modal/' + k));
+        await js('document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); document.querySelectorAll(".modal-back").forEach(m => m.hidden = true); 1'); await sleep(150);
+      }
+      const menu = Menu.getApplicationMenu(); r.menu = menu ? menu.items.map(i => i.label) : null;
+      r.title = await js('document.title'); r.htmlLang = await js('document.documentElement.lang');
+      r.liveSample = await js('[document.querySelector(\'.nav-item[data-view="discover"]\').getAttribute("aria-label"), document.querySelector("#newChat") && document.querySelector("#newChat").textContent.trim()]');
+    }
+    await js('(() => { const s = document.querySelector("#uiLangSel"); s.value = "vi"; s.dispatchEvent(new Event("change")); show("chat"); return 1; })()'); await sleep(800);
+    out.viRestored = { before: viBefore, after: await snapshot(), same: viBefore === await snapshot(), discover: await js('document.querySelector(\'.nav-item[data-view="discover"]\').getAttribute("aria-label")'), menu: (Menu.getApplicationMenu() || { items: [] }).items.map(i => i.label) };
+    fs.writeFileSync(path.join(dir, 'qai18n.json'), JSON.stringify(out, null, 2)); app.exit(0); return;
   }
   if (process.env.AIVN_QAUI_BEHAV) { // test hành vi giao diện thật (QA lượt 2: thay test chỉ dò chuỗi cho B4, B11, B12)
     await js('document.querySelectorAll(".modal-back").forEach(m => m.hidden = true); 1');

@@ -37,17 +37,42 @@ const IDENTITY = [
   'Không bao giờ nói mình là sản phẩm khác hay do công ty AI nào tạo ra. Nếu được hỏi về mô hình bên dưới, nói rằng bạn là AIVN AGENT chạy trên mô hình mã nguồn mở mà người dùng đã chọn nạp trong AIVN.',
 ].join('\n');
 // B17 (QA lượt 2): lời chào chỉ kể việc mô hình ĐANG NẠP làm được — mô hình chỉ đọc chữ thì không hứa đọc ảnh hay điều khiển màn hình
-function welcomeFor({ loaded = true, vision = true, agentOk = true, cloud = null } = {}) {
-  const lines = [cloud ? `- Trò chuyện, giải thích, viết và dịch bằng mô hình ${cloud.model} trên máy chủ ${cloud.host} (bộ não đám mây bạn đã bật)` : '- Trò chuyện, giải thích, viết và dịch bằng mô hình AI chạy trên máy'];
-  lines.push(vision ? '- Đọc ảnh bạn dán và tìm trong tài liệu của bạn' : '- Tìm trong tài liệu của bạn');
-  lines.push('- Dùng công cụ: máy tính, đọc/ghi tệp trong thư mục bạn cho phép, tìm trên web, chạy mã', '- Ghi nhớ điều bạn dặn và tạo lịch nhắc tự động',
-    '- Mở ứng dụng, tệp, trang web và chạy lệnh trên máy, nhưng chỉ khi bạn đồng ý trên thẻ duyệt');
-  if (vision && agentOk) lines.push('- Điều khiển màn hình (thử nghiệm): bạn duyệt từng cú bấm');
-  const note = !loaded ? '\n\nHãy chọn một mô hình ở thanh phía trên để bắt đầu.'
-    : !vision ? '\n\nMô hình đang nạp chỉ đọc chữ: mình **chưa nhìn được ảnh hay màn hình**. Muốn mình bấm/gõ trong ứng dụng (Zalo, Messenger…), hãy chọn mô hình có 👁 được đánh dấu dùng được cho AIVN AGENT.'
-    : !agentOk ? '\n\nMô hình đang nạp chưa dùng được cho AIVN AGENT (xem thanh cảnh báo phía trên), nên mình chưa điều khiển màn hình.' : '';
-  const intro = cloud ? `Xin chào! Mình là **AIVN AGENT**, trợ lý có sẵn trong AIVN. Bạn đang bật **bộ não đám mây** (${cloud.model}): yêu cầu của bạn, kết quả công cụ và chữ đọc được trên màn hình được gửi tới ${cloud.host}; ảnh chụp màn hình thì không.` : 'Xin chào! Mình là **AIVN AGENT**, trợ lý có sẵn trong AIVN, chạy ngay trên máy tính của bạn, không gửi dữ liệu đi đâu cả.';
-  return intro + '\n\nMình có thể:\n' + lines.join('\n') + note + '\n\nCha đỡ đầu của mình là **anh Nguyễn Ngọc Khôi**, sinh viên Văn Lang University. Bạn muốn mình giúp gì nào?';
+// 0.16 i18n: lời chào theo ngôn ngữ giao diện (vi/en/zh); tên AIVN AGENT và cha đỡ đầu giữ nguyên
+const WEL = {
+  vi: { chat: '- Trò chuyện, giải thích, viết và dịch bằng mô hình AI chạy trên máy', chatCloud: (c) => `- Trò chuyện, giải thích, viết và dịch bằng mô hình ${c.model} trên máy chủ ${c.host} (bộ não đám mây bạn đã bật)`,
+    img: '- Đọc ảnh bạn dán và tìm trong tài liệu của bạn', docs: '- Tìm trong tài liệu của bạn', tools: '- Dùng công cụ: máy tính, đọc/ghi tệp trong thư mục bạn cho phép, tìm trên web, chạy mã', mem: '- Ghi nhớ điều bạn dặn và tạo lịch nhắc tự động',
+    open: '- Mở ứng dụng, tệp, trang web và chạy lệnh trên máy, nhưng chỉ khi bạn đồng ý trên thẻ duyệt', screen: '- Điều khiển màn hình (thử nghiệm): bạn duyệt từng cú bấm',
+    noModel: 'Hãy chọn một mô hình ở thanh phía trên để bắt đầu.', noVision: 'Mô hình đang nạp chỉ đọc chữ: mình **chưa nhìn được ảnh hay màn hình**. Muốn mình bấm/gõ trong ứng dụng (Zalo, Messenger…), hãy chọn mô hình có 👁 được đánh dấu dùng được cho AIVN AGENT.',
+    noAgent: 'Mô hình đang nạp chưa dùng được cho AIVN AGENT (xem thanh cảnh báo phía trên), nên mình chưa điều khiển màn hình.',
+    intro: 'Xin chào! Mình là **AIVN AGENT**, trợ lý có sẵn trong AIVN, chạy ngay trên máy tính của bạn, không gửi dữ liệu đi đâu cả.',
+    introCloud: (c) => `Xin chào! Mình là **AIVN AGENT**, trợ lý có sẵn trong AIVN. Bạn đang bật **bộ não đám mây** (${c.model}): yêu cầu của bạn, kết quả công cụ và chữ đọc được trên màn hình được gửi tới ${c.host}; ảnh chụp màn hình thì không.`,
+    can: 'Mình có thể:', outro: 'Cha đỡ đầu của mình là **anh Nguyễn Ngọc Khôi**, sinh viên Văn Lang University. Bạn muốn mình giúp gì nào?' },
+  en: { chat: '- Chat, explain, write and translate with an AI model running on this computer', chatCloud: (c) => `- Chat, explain, write and translate with the ${c.model} model on ${c.host} (the cloud brain you turned on)`,
+    img: '- Read images you paste and search your documents', docs: '- Search your documents', tools: '- Use tools: calculator, read/write files in folders you allow, search the web, run code', mem: '- Remember what you tell me and create automatic reminders',
+    open: '- Open apps, files and web pages and run commands on this computer, but only when you approve on the approval card', screen: '- Control the screen (experimental): you approve every click',
+    noModel: 'Choose a model in the top bar to get started.', noVision: 'The loaded model only reads text: I **cannot see images or the screen yet**. If you want me to click/type in apps (Zalo, Messenger…), pick a model with 👁 marked as usable for AIVN AGENT.',
+    noAgent: 'The loaded model is not usable for AIVN AGENT yet (see the warning bar above), so I cannot control the screen.',
+    intro: "Hi! I'm **AIVN AGENT**, the assistant built into AIVN. I run right on your computer and never send your data anywhere.",
+    introCloud: (c) => `Hi! I'm **AIVN AGENT**, the assistant built into AIVN. You have the **cloud brain** on (${c.model}): your requests, tool results and text read from the screen are sent to ${c.host}; screenshots are not.`,
+    can: 'I can:', outro: 'My godfather is **Nguyễn Ngọc Khôi**, a student at Van Lang University. What can I help you with?' },
+  zh: { chat: '- 使用在本机运行的 AI 模型进行对话、解释、写作和翻译', chatCloud: (c) => `- 使用 ${c.host} 上的 ${c.model} 模型进行对话、解释、写作和翻译（你已开启云端大脑）`,
+    img: '- 读取你粘贴的图片，并在你的文档中搜索', docs: '- 在你的文档中搜索', tools: '- 使用工具：计算器、在你允许的文件夹中读写文件、网络搜索、运行代码', mem: '- 记住你的嘱咐，并创建自动提醒',
+    open: '- 在本机打开应用、文件、网页和运行命令，但仅在你于批准卡片上同意之后', screen: '- 控制屏幕（实验性）：每次点击都由你批准',
+    noModel: '请在顶部栏选择一个模型以开始。', noVision: '当前加载的模型只能读取文字：我**还无法查看图片或屏幕**。如需我在应用中点击/输入（Zalo、Messenger…），请选择带 👁 且标记为可用于 AIVN AGENT 的模型。',
+    noAgent: '当前加载的模型暂不能用于 AIVN AGENT（见上方警告栏），因此我还不能控制屏幕。',
+    intro: '你好！我是 **AIVN AGENT**，AIVN 内置的助手，直接在你的电脑上运行，不会把数据发送到任何地方。',
+    introCloud: (c) => `你好！我是 **AIVN AGENT**，AIVN 内置的助手。你已开启**云端大脑**（${c.model}）：你的请求、工具结果和从屏幕识别的文字会发送到 ${c.host}；截图不会发送。`,
+    can: '我可以：', outro: '我的教父是 **Nguyễn Ngọc Khôi**，文朗大学（Van Lang University）的学生。有什么可以帮你的吗？' },
+};
+function welcomeFor({ loaded = true, vision = true, agentOk = true, cloud = null, lang = 'vi' } = {}) {
+  const W = WEL[lang] || WEL.vi;
+  const lines = [cloud ? W.chatCloud(cloud) : W.chat];
+  lines.push(vision ? W.img : W.docs);
+  lines.push(W.tools, W.mem, W.open);
+  if (vision && agentOk) lines.push(W.screen);
+  const note = !loaded ? '\n\n' + W.noModel : !vision ? '\n\n' + W.noVision : !agentOk ? '\n\n' + W.noAgent : '';
+  const intro = cloud ? W.introCloud(cloud) : W.intro;
+  return intro + '\n\n' + W.can + '\n' + lines.join('\n') + note + '\n\n' + W.outro;
 }
 const WELCOME = welcomeFor();
 
@@ -523,8 +548,9 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const fs_ = folders();
     let mem = { items: [] };
     if (s.agentMemory !== false && deps.memory.count()) mem = await deps.memory.retrieve(query, { ...(await deps.embedForMemory()), k: 6 }).catch(() => ({ items: [] }));
+    const RI = require('../i18n/core').REPLY_IN[s.uiLang]; // giao diện en/zh → trả lời bằng ngôn ngữ đó
     const lines = [
-      IDENTITY,
+      s.uiLang && s.uiLang !== 'vi' && RI ? IDENTITY.replace('Luôn trả lời bằng tiếng Việt,', `Luôn trả lời bằng ${RI} (ngôn ngữ giao diện), trừ khi người dùng viết bằng ngôn ngữ khác;`) : IDENTITY,
       `Thời điểm hiện tại: ${nowVi()} (${tz()}).`,
       '',
       'Nguyên tắc làm việc:',
