@@ -35,7 +35,7 @@ test('B33: mọi chữ động của AIVN AGENT (nhãn bước, tóm tắt, cả
   for (const l of ['en', 'zh']) assert.ok(!CORE.VI.test(T.tr(AG.EMPTY_ANSWER(30), l)), l);
   assert.match(T.tr(AG.EMPTY_ANSWER(30), 'en'), /empty reply after 30 s/);
   // câu do mô hình viết bằng tiếng Việt không bị dịch nửa vời
-  const src = rd('src/agent/agent.js'); assert.match(src, /then\(localizeResult\)/);
+  const src = rd('src/agent/agent.js'); assert.match(src, /then\(\(r\) => finishLang\(r, args\)\)/); assert.match(src, /r\.text = localizeText\(r\.text, lang\)/); // B57: dịch theo ngôn ngữ của người dùng (finishLang)
   // tiêu đề cột: mũi tên sắp xếp tách khỏi nhãn (để nhãn dịch được); ví dụ curl theo ngôn ngữ
   const app = rd('src/renderer/app.js'); assert.match(app, /<span>\$\{esc\(label\)\}<\/span>/); assert.match(app, /en: 'Hello!', zh: '你好！'/);
 });

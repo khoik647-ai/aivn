@@ -114,3 +114,20 @@ test('“Rất chậm”: thời gian chờ mỗi bước ×3 (desktop-agent), b
   assert.match(rd('src/renderer/app.js'), /Rất chậm \(tràn RAM\) — bạn đã tự bật/);
   assert.match(rd('src/renderer/index.html'), /id="agVerySlow"/);
 });
+
+test('build/bench-import.cjs đọc tệp kết quả và in bảng cho docs/verified.md (không ghi khi thiếu --write)', () => {
+  const os = require('os'); const { spawnSync } = require('child_process');
+  const R = { kind: 'aivn-agent-bench', format: 1, app: '0.16.0-beta.2', started: '2026-10-22T01:00:00.000Z', thresholds: FB.THRESH,
+    machine: { platform: 'win32', os: '10.0.26100', cpu: 'Intel i7', ram: 32 * 1024 ** 3, gpu: 'cuda', vram: 12 * 1024 ** 3, displays: [{ px: '2560x1440', scale: 1.25 }] },
+    models: [{ model: { id: 'x', size: '8B', file: 'Qwen3VL-8B-Instruct-Q4_K_M.gguf', quant: 'Q4_K_M' }, started: '2026-10-22T01:00:00.000Z', load: { ms: 9000, mode: 'gpu', ctx: 16384, gpuLayers: 37 },
+      tools: { score: 30, total: 33, rate: 0.909, items: [{ id: 'mute', direct: true, seed: 0, pass: false, call: { name: 'system_action', arguments: { action: 'shutdown' } } }] },
+      grounding: { score: 9, total: 10, seconds: 40 }, apps: { score: 6, total: 6, wrongRecipient: 0, items: [] }, tasks: { score: 9, total: 10, done: 10, safety: true, items: [] }, sandbox: { violations: [] }, seconds: 900, verdict: { agentOk: false } }] };
+  const p = path.join(os.tmpdir(), `aivn-bench-${process.pid}.json`); fs.writeFileSync(p, JSON.stringify(R));
+  const before = rd('docs/verified.md');
+  const o = spawnSync(process.execPath, [path.join(root, 'build/bench-import.cjs'), p], { encoding: 'utf8' });
+  assert.strictEqual(o.status, 0, o.stderr);
+  assert.match(o.stdout, /\| 8B Q4_K_M \| gpu · 16384 tok · 37 lớp GPU \| 30\/33 \(91%\)/);
+  assert.match(o.stdout, /2560x1440 @125%/); assert.match(o.stdout, /`mute`.*shutdown/);
+  assert.strictEqual(rd('docs/verified.md'), before);
+  fs.unlinkSync(p);
+});

@@ -237,13 +237,12 @@ function createDesktopAgent(deps) {
   function resolveTarget(a) {
     const s = session; const q = String(a.element || a.target || '').trim();
     // bấm theo TÊN đúng kết quả tìm kiếm vừa ghi nhận → dùng đúng phần tử kết quả đó (không phải chữ cùng tên trong ô tìm kiếm)
-    if (q && s && s.obs && s.foundHit && s.foundHit.id && !/^\[?e\d+\]?$/i.test(q) && U.fold(q).trim() === U.fold(s.foundHit.name || '').trim()) { const el = s.obs.elements.find(e => e.id === s.foundHit.id); if (el && el.b) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' }; }
+    if (q && s && s.obs && s.foundHit && s.foundHit.id && !U.isIdRef(q) && U.fold(q).trim() === U.fold(s.foundHit.name || '').trim()) { const el = s.obs.elements.find(e => e.id === s.foundHit.id); if (el && el.b) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' }; }
     // B55: “e11 Tiêu đề” / “e11 (Tiêu đề)” — id kèm nhãn: nhãn phải khớp phần tử hiện tại, không thì từ chối (không đoán)
-    { const m = /^\[?(e\d+)\]?\s*[:\-–(“"']*\s*(.+?)\s*[)”"']*$/iu.exec(q);
-      if (m && s && s.obs) { const id = m[1].toLowerCase(); const el = s.obs.elements.find(e => e.id === id); const lab = U.fold(m[2]).trim();
-        if (el && lab && el.name && !U.fold(el.name).includes(lab) && !lab.includes(U.fold(el.name))) return { el: null, query: q, labelChanged: { id, now: el, want: m[2] } };
-        if (el) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' }; } }
-    { const m = /^\[?(e\d+)\]?$/i.exec(q); if (m && s && s.obs && !s.obs.elements.some(e => e.id === m[1].toLowerCase())) { const inf = s.idReg && s.idReg.info ? s.idReg.info.get(m[1].toLowerCase()) : null; if (inf) return { el: null, query: q, goneId: { id: m[1].toLowerCase(), inf } }; } }
+    // B60: id đọc bằng U.parseIdRef (không quay lui “e10” → e1 + “0”); nhãn không bắt buộc
+    if (s && s.obs) { const R = U.resolveIdRef(s.obs.elements, q, s.idReg && s.idReg.info);
+      if (R && R.el) return { el: R.el, x: R.el.b[0] + R.el.b[2] / 2, y: R.el.b[1] + R.el.b[3] / 2, via: R.el.ocr ? 'OCR' : 'cây giao diện' };
+      if (R) return { el: null, query: q, ...R }; }
     if (q && s && s.obs) { const el = U.findElementAny(s.obs.elements, q); if (el) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' }; }
     if (Number.isFinite(Number(a.x)) && Number.isFinite(Number(a.y)) && a.x !== '' && a.y !== '' && a.x != null && a.y != null && !(Number(a.x) === 0 && Number(a.y) === 0)) { const p = normToNative(Math.min(1, Math.max(0, a.x / 1000)), Math.min(1, Math.max(0, a.y / 1000))); return { el: null, x: p.x, y: p.y, via: 'toạ độ' }; }
     return q ? { el: null, query: q } : null;
@@ -340,7 +339,7 @@ function createDesktopAgent(deps) {
     const s = session; const SEARCHY = /tìm|tim kiem|search|find/iu;
     const named = (el) => !!el && SEARCHY.test(`${el.name || ''} ${el.autoId || ''} ${el.placeholder || ''}`);
     if (t && t.el) return named(t.el);
-    if (t && t.x != null) return SEARCHY.test(String(a.element || a.target || '')) && !/^\[?e\d+\]?$/i.test(String(a.element || a.target || ''));
+    if (t && t.x != null) return SEARCHY.test(String(a.element || a.target || '')) && !U.isIdRef(String(a.element || a.target || ''));
     if (focusedEl && (focusedEl.editable || focusedEl.focused) && !focusedEl.ocr) return named(focusedEl);
     const la = s && s.lastAction; const recent = la && Date.now() - la.at < 60000;
     if (recent && (/^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(la.keys || '').replace(/\s/g, '')) || (['click', 'double_click'].includes(la.action) && SEARCHY.test(`${la.query || ''} ${la.el ? la.el.name || '' : ''}`)))) return true;
@@ -389,10 +388,10 @@ function createDesktopAgent(deps) {
       if (action === 'type_text' && justSearch && t && t.el && !t.el.editable && !U.inputLike(t.el) && !/tìm|tim kiem|search|find/iu.test(`${t.el.name || ''} ${t.el.placeholder || ''}`)) { staleEl = t.el; t = null; needPoint = false; } }
     if (needPoint && (!t || t.x == null)) {
       const q = t && t.query ? t.query : '';
-      if (q && !/^\[?e\d+\]?$/i.test(q)) t = await groundWithVision(q, ctx) || t;
+      if (q && !U.isIdRef(q)) t = await groundWithVision(q, ctx) || t;
       if (!t || t.x == null) {
         const near = q ? s.obs.elements.filter(e => U.fold(e.name).split(' ').some(w => w.length > 2 && U.fold(q).includes(w))).slice(0, 8) : [];
-        return { error: 'không thấy phần tử', forModel: `Không thấy phần tử "${q || '(trống)'}" trong lần quan sát mới nhất${/^\[?e\d+\]?$/i.test(q) ? ' (id cũ? hãy dùng id từ danh sách MỚI NHẤT)' : ''}. ${near.length ? 'Phần tử gần giống: ' + near.map(e => `[${e.id}] ${e.kind} "${e.name}"`).join('; ') + '.' : ''} Hãy gọi screen_look (có thể kèm query) để xem lại, hoặc cuộn (scroll) nếu phần tử nằm ngoài màn hình.`, summary: 'không thấy ' + (q || 'phần tử') };
+        return { error: 'không thấy phần tử', forModel: `Không thấy phần tử "${q || '(trống)'}" trong lần quan sát mới nhất${U.isIdRef(q) ? ' (id cũ? hãy dùng id từ danh sách MỚI NHẤT)' : ''}. ${near.length ? 'Phần tử gần giống: ' + near.map(e => `[${e.id}] ${e.kind} "${e.name}"`).join('; ') + '.' : ''} Hãy gọi screen_look (có thể kèm query) để xem lại, hoặc cuộn (scroll) nếu phần tử nằm ngoài màn hình.`, summary: 'không thấy ' + (q || 'phần tử') };
       }
     }
     // mô hình nhỏ hay chép sai chữ hoa/dấu của đoạn người dùng đưa trong ngoặc kép: dùng đúng nguyên văn của người dùng
@@ -609,7 +608,7 @@ function createDesktopAgent(deps) {
       } catch (e) { deps.log && deps.log('desk', 'Phím tắt tìm kiếm lỗi: ' + e.message); }
     }
     if (pixChanged && !checks.some(c => /Cửa sổ đổi|Đã mở cuộc trò chuyện|Ô tìm kiếm|KIỂM CHỨNG|GỬI NHẦM|phím tắt|chữ MỚI/.test(c))) checks.push(`Màn hình đã thay đổi sau thao tác (${PD.describe(pd)}) — xem danh sách mới bên dưới để biết đã mở/chọn gì.`);
-    if (clickedInput && !checks.some(c => /Cửa sổ đổi|Đã mở cuộc trò chuyện|KIỂM CHỨNG|GỬI NHẦM|phím tắt|Hộp thoại/.test(c))) { const nm = String((t && t.el && (t.el.name || t.el.placeholder)) || (t && t.query && !/^\[?e\d+\]?$/i.test(t.query) ? t.query : '') || '').trim().slice(0, 40); checks.unshift(nm ? `Đã đặt con trỏ vào ô “${nm}”${t && t.el && t.el.id ? ` (${t.el.id})` : ''} — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.` : `Đã đặt con trỏ vào ô nhập${t && t.el && t.el.id ? ` ${t.el.id}` : ''} — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.`); }
+    if (clickedInput && !checks.some(c => /Cửa sổ đổi|Đã mở cuộc trò chuyện|KIỂM CHỨNG|GỬI NHẦM|phím tắt|Hộp thoại/.test(c))) { const nm = String((t && t.el && (t.el.name || t.el.placeholder)) || (t && t.query && !U.isIdRef(t.query) ? t.query : '') || '').trim().slice(0, 40); checks.unshift(nm ? `Đã đặt con trỏ vào ô “${nm}”${t && t.el && t.el.id ? ` (${t.el.id})` : ''} — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.` : `Đã đặt con trỏ vào ô nhập${t && t.el && t.el.id ? ` ${t.el.id}` : ''} — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.`); }
     if (!checks.length) checks.push(pd ? `Màn hình không thay đổi rõ ràng (so ảnh trước/sau: ${PD.describe(pd)}) — nếu cần, thử cách khác${ak && ak.search ? `; với ${ak.name} có thể dùng phím tắt ${ak.search} để mở ô tìm kiếm` : ''}.` : 'Màn hình không thay đổi rõ ràng — nếu cần, thử cách khác.');
     return { ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
   }

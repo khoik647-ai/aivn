@@ -392,4 +392,22 @@ function searchVariants(text) {
 // Chữ OCR trông như ô nhập (chữ gợi ý "Tìm kiếm", "Nhập tin nhắn…"): ở ứng dụng không đọc được qua Trợ năng (Zalo…), đó là ô nhập thật
 const INPUT_HINT = /(^|\s)(tìm|tim|search|find|nhập|nhap|soạn|soan|gõ|type|write|enter)(\s|$|…|\.)|tìm kiếm|tim kiem|tin nhắn|tin nhan|message|aa$/i;
 const inputLike = (el) => !!(el && !el.editable && el.ocr && String(el.name || '').trim().length <= 40 && INPUT_HINT.test(String(el.name || '').trim()));
-module.exports = { queryVariants, findElementAny, stabilizeIds, isButtonish, taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };
+// B60 (QA lượt 7): tham chiếu id phần tử do mô hình viết: “e10”, “[e12]”, “e10 Trần Quỳnh Anh”, “e3: "Send"”, “e11 (Tiêu đề)”.
+// (?!\d) chặn quay lui: “e10” KHÔNG được hiểu thành e1 + nhãn “0”, “e22” không thành e2 + “2”; nhãn không bắt buộc.
+const ID_REF = /^\[?(e\d+)(?!\d)\]?(?:(?:\s*[:\-–(“"']+\s*|\s+)(.*?))?\s*[)”"'\]]*$/iu;
+function parseIdRef(q) {
+  const m = ID_REF.exec(String(q == null ? '' : q).trim()); if (!m) return null;
+  const label = String(m[2] || '').replace(/^[\s:\-–(“"'\[]+|[\s)”"'\]]+$/gu, '').trim();
+  return { id: m[1].toLowerCase(), label: /[\p{L}\p{N}]/u.test(label) ? label : null };
+}
+// B55/B60: phần tử theo id (+ nhãn nếu có) trong lần quan sát mới nhất. Trả { el } | { labelChanged } | { goneId } | null (không phải id / không biết id)
+function resolveIdRef(elements, q, info = null) {
+  const ref = parseIdRef(q); if (!ref) return null;
+  const el = (elements || []).find(e => e.id === ref.id); const lab = ref.label ? fold(ref.label).trim() : '';
+  if (el && lab && el.name && !fold(el.name).includes(lab) && !lab.includes(fold(el.name))) return { labelChanged: { id: ref.id, now: el, want: ref.label } };
+  if (el) return { el };
+  const inf = info && info.get ? info.get(ref.id) : null; if (inf) return { goneId: { id: ref.id, inf } };
+  return null;
+}
+const isIdRef = (q) => { const r = parseIdRef(q); return !!(r && !r.label); };
+module.exports = { parseIdRef, isIdRef, resolveIdRef, ID_REF, queryVariants, findElementAny, stabilizeIds, isButtonish, taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };
