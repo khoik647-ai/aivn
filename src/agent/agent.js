@@ -14,6 +14,7 @@ const sandbox = require('./sandbox');
 const web = require('./web');
 const { DAY_VI } = require('./scheduler');
 const CP = require('./compact');
+const RT = require('./retry');
 const TP = require('./textproto');
 
 const MAX_ROUNDS = 20, MAX_CALLS = 32; // 0.15: 8 vòng không đủ cho việc nhiều tệp (6 ghi chú = 8 lời gọi) — giới hạn token mỗi lượt vẫn chặn chạy mãi
@@ -607,7 +608,7 @@ function createAgent(deps) {
       // chỉ khi riêng lời nhắc hệ thống + công cụ + yêu cầu hiện tại đã không vừa: báo cần ngữ cảnh lớn hơn (bên ngoài tự tăng ngữ cảnh)
       if (!r.fits && st.contextSize) { const need = r.tokens + toolTokOf(tools) + reserveOf(); const e = new Error(`Lời nhắc cần khoảng ${need} token nhưng ngữ cảnh chỉ có ${st.contextSize}.`); e.code = 'CTX_SMALL'; e.need = need; e.have = st.contextSize; throw e; } }
     const ctx = { signal, convoId, userQuery: query, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
-    const steps = [], seen = new Map();
+    const steps = [], seen = new Map(); const retry = RT.createRetryTracker();
     (runStore.getStore() || {}).steps = steps;
     let text = '', finishReason = 'stop', calls = 0, searchNudged = false, openNudged = false, nudged = false, deskNudged = false, forcedTried = false, warning = null, fakeSeen = false, emptyNudged = false, loopRetried = false;
     const smp = SMP.samplingFor(st.id || '', 'agent', { temperature: typeof s.agentTemperature === 'number' && s.agentTemperature !== 0.2 ? s.agentTemperature : null }); // 0.2 = mặc định cũ (dễ lặp) → tự động theo mô hình
@@ -749,8 +750,12 @@ function createAgent(deps) {
                 step.status = 'running'; onStep({ ...step }); onStatus({ stage: 'act', round, tool: call.name });
               }
             }
+            const pre = !refusedOut && call.name === 'screen_act' ? retry.before(args) : null;
             if (refusedOut) out = refusedOut;
+            else if (pre) { out = pre; deps.log && deps.log(`[aivn agent] chặn làm lại cách đã hỏng 2 lần: ${RT.describe(args)}`); }
             else { out = await exec(call.name, args, ctxRun); seen.set(sig, out); }
+            // 0.16: kiểm tra sau mỗi thao tác màn hình; chưa có tác dụng → gợi ý đổi cách (lần 3 cùng cách thì không làm)
+            if (call.name === 'screen_act' && !pre && !refusedOut) { const rr = retry.after(args, out); if (rr.bad) { out = { ...out, forModel: String(out.forModel || out.summary || '') + rr.hint, summary: String(out.summary || '') + ' · chưa có tác dụng' }; step.check = rr.bad; } }
           }
         } catch (e) {
           const userErr = e instanceof ToolError || (deps.computer && e instanceof deps.computer.CompError);
@@ -758,7 +763,7 @@ function createAgent(deps) {
           out = { error: msg, forModel: `Lỗi: ${msg}`, summary: msg };
           if (!userErr) deps.log && deps.log(`[aivn agent] ${call.name} lỗi: ${msg}`);
         }
-        Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, ms: Date.now() - step.startedAt });
+        Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', check: step.check || null, summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, ms: Date.now() - step.startedAt });
         logTool(step);
         onStep({ ...step });
         msgs.push({ role: 'tool', tool_call_id: call.id, content: typeof out.forModel === 'string' && out.forModel ? out.forModel : String(out.forModel ?? out.message ?? out.summary ?? JSON.stringify(out)) || '(không có kết quả)' });
@@ -779,6 +784,7 @@ function createAgent(deps) {
     }
     if (fakeSeen && !warning && finishReason !== 'abort' && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) warning = noActionWarn(steps);
     if (finishReason !== 'abort') { const g = guardClaims(text, steps); text = tidyAnswer(g.text, steps); if (g.warning) warning = warning || g.warning; }
+    if (finishReason !== 'abort') { const fc = RT.finalCheck(text, retry); if (fc) warning = warning || fc; }
     usage.seconds = (Date.now() - t0) / 1000;
     usage.tokensPerSecond = usage.seconds ? usage.completion_tokens / usage.seconds : 0;
     const urls = steps.flatMap(x => x.urls || []);
