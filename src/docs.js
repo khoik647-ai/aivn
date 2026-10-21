@@ -1,4 +1,4 @@
-// Đọc tệp đính kèm (PDF có lớp chữ, DOCX, văn bản/mã nguồn) và đóng gói vào prompt. Chạy hoàn toàn cục bộ.
+// Đọc tệp đính kèm (PDF, Office, ZIP, ảnh qua OCR, văn bản/mã nguồn) và đóng gói vào prompt. Chạy hoàn toàn cục bộ.
 const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
@@ -116,6 +116,11 @@ function decodeText(buf) {
 
 const OFFICE_EXT = new Set(['xlsx', 'xlsm', 'pptx', 'odt', 'ods', 'odp']);
 const ARCHIVE_EXT = new Set(['zip']);
+// B14 (QA lượt 2): MỘT danh sách loại tệp đọc được, dùng cho vùng thả tệp, nút 📎, bộ chọn tệp, mô tả công cụ read_file và thông báo lỗi.
+// Âm thanh/video CHƯA đọc được (chưa có đường xử lý trong giao diện) → không liệt kê, không cho chọn.
+const SUPPORTED_TEXT = 'PDF (kể cả bản scan, đọc bằng OCR) · Word DOCX/ODT · Excel XLSX/ODS · PowerPoint PPTX/ODP · ZIP · TXT/MD/CSV/JSON · mã nguồn · ảnh PNG/JPG/WEBP/GIF/BMP (đọc chữ bằng OCR) · tối đa 20 MB';
+const SUPPORTED_SENTENCE = 'AIVN đọc được PDF (kể cả bản scan), Word (DOCX/ODT), Excel (XLSX/ODS), PowerPoint (PPTX/ODP), ZIP, ảnh (đọc chữ bằng OCR), TXT/MD/CSV/JSON và tệp mã nguồn.';
+const AV_NOT_YET = (name, kind) => `"${name}" là ${kind}: AIVN chưa đọc được âm thanh/video. Nếu có bản chép lời hoặc phụ đề (TXT, SRT, VTT), hãy gửi tệp đó.`;
 const AUDIO_EXT = new Set(['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'flac', 'weba']);
 const VIDEO_EXT = new Set(['mp4', 'webm', 'mov', 'm4v', 'mkv', 'ogv']);
 const LEGACY = { doc: 'docx', xls: 'xlsx', ppt: 'pptx' };
@@ -139,7 +144,7 @@ async function extractBuffer(name, ext, buf, { depth = 0 } = {}) {
   }
   if (LEGACY[ext]) throw new DocError(`Định dạng .${ext} cũ chưa được hỗ trợ. Hãy lưu "${name}" thành .${LEGACY[ext]} rồi gửi lại.`);
   if (TEXT_EXT.has(ext) || ext === '') return { text: decodeText(buf) };
-  throw new DocError(`Định dạng .${ext} chưa được hỗ trợ. AIVN đọc được PDF (kể cả bản scan), Word (DOCX/ODT), Excel (XLSX/ODS), PowerPoint (PPTX/ODP), ZIP, âm thanh, video, ảnh, TXT/MD/CSV/JSON và tệp mã nguồn.`);
+  throw new DocError(`Định dạng .${ext} chưa được hỗ trợ. ${SUPPORTED_SENTENCE}`);
 }
 
 async function extractFile(file) {
@@ -149,7 +154,7 @@ async function extractFile(file) {
   try { st = fs.statSync(file); } catch { throw new DocError(`Không mở được tệp "${name}".`); }
   if (!st.isFile()) throw new DocError(`"${name}" không phải là tệp.`);
   if (IMAGE_EXT.has(ext)) throw new DocError(OCR_EXT.has(ext) ? `"${name}" là ảnh, AIVN sẽ đọc chữ trong ảnh bằng OCR.` : `AIVN chưa đọc được định dạng ảnh .${ext} ("${name}"). Hãy dùng PNG, JPG, WEBP, GIF hoặc BMP.`);
-  if (AUDIO_EXT.has(ext) || VIDEO_EXT.has(ext)) throw new DocError(`"${name}" là ${AUDIO_EXT.has(ext) ? 'âm thanh' : 'video'}: AIVN xử lý bằng mô hình nghe.`);
+  if (AUDIO_EXT.has(ext) || VIDEO_EXT.has(ext)) throw new DocError(AV_NOT_YET(name, AUDIO_EXT.has(ext) ? 'âm thanh' : 'video'));
   const limit = ARCHIVE_EXT.has(ext) ? MAX_ARCHIVE_BYTES : MAX_FILE_BYTES;
   if (st.size > limit) throw new DocError(`"${name}" quá lớn (${(st.size / 1048576).toFixed(1)} MB). Giới hạn là ${limit / 1048576} MB mỗi tệp${ARCHIVE_EXT.has(ext) ? ' nén' : ''}.`);
   if (st.size === 0) throw new DocError(`"${name}" là tệp rỗng.`);
@@ -232,4 +237,5 @@ function buildUserContent(question, packedBlock) {
   return `Dưới đây là nội dung tài liệu người dùng gửi kèm. Hãy dựa vào tài liệu để trả lời; nếu tài liệu không có thông tin, hãy nói rõ. Phần chữ đọc từ ảnh (OCR) có thể có lỗi chính tả nhỏ.\n\n${packedBlock}\n\nCâu hỏi: ${question}`;
 }
 
-module.exports = { OCR_EXT, OFFICE_EXT, AUDIO_EXT, VIDEO_EXT, ARCHIVE_EXT, extOf, extractBuffer, extractFile, packDocuments, buildUserContent, keywords, scoreChunk, chunkText, DocError, MAX_FILE_BYTES, IMAGE_EXT, TEXT_EXT };
+const PICKER_EXT = [...new Set(['pdf', 'docx', ...OFFICE_EXT, ...ARCHIVE_EXT, ...OCR_EXT, ...TEXT_EXT])];
+module.exports = { SUPPORTED_TEXT, SUPPORTED_SENTENCE, PICKER_EXT, OCR_EXT, OFFICE_EXT, AUDIO_EXT, VIDEO_EXT, ARCHIVE_EXT, extOf, extractBuffer, extractFile, packDocuments, buildUserContent, keywords, scoreChunk, chunkText, DocError, MAX_FILE_BYTES, IMAGE_EXT, TEXT_EXT };

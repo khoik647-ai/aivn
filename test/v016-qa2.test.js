@@ -1,7 +1,7 @@
 'use strict';
 // Hồi quy cho QA lượt 2 (/workspace/qa-review/pass-2-20261021-0856.md): B13–B19 và phần còn dở của B1, B2, B11.
 const test = require('node:test'); const assert = require('node:assert');
-const fs = require('fs'); const path = require('path');
+const fs = require('fs'); const path = require('path'); const os = require('os');
 const SV = require('../src/agent/send-verify');
 
 // ---------- B15: kiểm chứng “đã gửi” ----------
@@ -206,4 +206,21 @@ test('B19: “Đa ngôn ngữ” ghi rõ khi nhà phát triển không nêu ti�
     if (!vi) assert.ok(!/tiếng Việt (tốt|khá)/i.test(c.desc), c.id);
     assert.ok(!/Hợp laptop GPU|Cho máy GPU \d+ GB|chạy mượt với GPU/i.test(c.desc), `${c.id}: mức chạy trên máy do nhãn tính, không ghi cứng trong mô tả`);
   }
+});
+
+// ---------- B14: chữ hướng dẫn đính kèm khớp với loại tệp đọc được thật ----------
+test('B14: vùng thả tệp, nút 📎, bộ chọn tệp, read_file và thông báo lỗi khớp đúng loại tệp đọc được; không hứa âm thanh/video', async () => {
+  const D = require('../src/docs'); const html = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/index.html'), 'utf8');
+  assert.ok(html.includes(`<span>${D.SUPPORTED_TEXT}</span>`), 'vùng thả tệp'); assert.ok(html.includes(`title="Đính kèm tệp: ${D.SUPPORTED_TEXT}"`), 'nút 📎');
+  for (const e of ['xlsx', 'pptx', 'odt', 'ods', 'odp', 'zip', 'pdf', 'docx', 'png', 'txt']) assert.ok(D.PICKER_EXT.includes(e), e);
+  for (const e of ['mp3', 'wav', 'mp4', 'mov']) assert.ok(!D.PICKER_EXT.includes(e), 'bộ chọn không cho chọn ' + e);
+  assert.ok(!/âm thanh|video/i.test(D.SUPPORTED_TEXT + D.SUPPORTED_SENTENCE));
+  const main = fs.readFileSync(path.join(__dirname, '..', 'src/main.js'), 'utf8'); assert.match(main, /extensions: require\('\.\/docs'\)\.PICKER_EXT/);
+  const A = require('../src/agent/agent'); assert.match(A.DEFS.read_file.description, /XLSX/); assert.match(A.DEFS.read_file.description, /không đọc âm thanh\/video/);
+  // mỗi loại trong danh sách đọc được thật (hành vi), âm thanh báo rõ là chưa hỗ trợ
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b14-'));
+  fs.writeFileSync(path.join(tmp, 'a.wav'), Buffer.alloc(64)); fs.writeFileSync(path.join(tmp, 'a.xyz'), 'x');
+  await assert.rejects(D.extractFile(path.join(tmp, 'a.wav')), /chưa đọc được âm thanh\/video/);
+  await assert.rejects(D.extractFile(path.join(tmp, 'a.xyz')), (e) => e.message.includes(D.SUPPORTED_SENTENCE));
+  fs.writeFileSync(path.join(tmp, 'n.md'), '# Ghi chú\nxin chào'); assert.match((await D.extractFile(path.join(tmp, 'n.md'))).text, /xin chào/);
 });

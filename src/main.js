@@ -1118,7 +1118,7 @@ function registerIpc() {
   });
   ipcMain.handle('files:pick', async () => {
     const r = await dialog.showOpenDialog(win, { buttonLabel: 'Mở', title: 'Chọn tệp để gửi kèm', properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'Tài liệu, ảnh, âm thanh và video', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'pdf', 'docx', 'odt', 'xlsx', 'xlsm', 'ods', 'pptx', 'odp', 'zip', 'mp3', 'wav', 'm4a', 'aac', 'ogg', 'opus', 'flac', 'mp4', 'webm', 'mov', 'm4v', 'mkv', 'txt', 'md', 'csv', 'json', 'html', 'xml', 'yaml', 'yml', 'log', 'js', 'ts', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rs', 'php', 'sql', 'sh'] }, { name: 'Tất cả tệp', extensions: ['*'] }] });
+      filters: [{ name: 'Tài liệu và ảnh AIVN đọc được', extensions: require('./docs').PICKER_EXT }, { name: 'Tất cả tệp', extensions: ['*'] }] });
     return r.canceled ? [] : r.filePaths;
   });
   ipcMain.handle('clipboard:write', async (_e, t) => { await require('electron').clipboard.writeText(String(t ?? '')); return true; });
