@@ -157,17 +157,50 @@ function createComputerTools(deps) {
       const w = list.find(x => words(x.title).includes(fq) || words(x.proc || '') === fq) || null;
       if (!w) return null; try { await (deps.focusWindow ? deps.focusWindow(w) : U.focus(w)); } catch {} return w; } catch { return null; }
   }
+  // B28 (QA lượt 4): cửa sổ ĐANG MỞ của ứng dụng người dùng nhắc tới (mọi hệ điều hành) — một đoạn tiêu đề (“Microsoft Teams”, “Gmail”, “Telegram”…) có trong câu lệnh
+  const wfold = (x) => C.fold(x).replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  let rwCache = null;
+  async function relevantWindows(query) {
+    if (!query || !deps.listWindows) return [];
+    let list; try { if (!rwCache || Date.now() - rwCache.at > 3000) rwCache = { at: Date.now(), list: await deps.listWindows() }; list = (rwCache.list || []).filter(w => w && w.title && !/^aivn\b/i.test(w.title)); } catch { return []; }
+    const fq = ' ' + wfold(query) + ' ';
+    const has = (x) => !!x && x.length >= 4 && fq.includes(' ' + x + ' ');
+    const segs = (t) => String(t).split(/\s+[-–—|·]\s+/).map(wfold).filter(x => x && x.split(' ').length <= 3);
+    return list.filter(w => segs(w.title).some(sg => has(sg) || (sg.includes(' ') && has(sg.split(' ').pop()))) || has(wfold(String(w.proc || '').replace(/\.exe$/i, '')))).slice(0, 4);
+  }
+  // B29: open_app/open_url thất bại → không nhảy sang ứng dụng/trang KHÁC mà người dùng không nhắc tới (Máy tính, Zalo, trình duyệt…)
+  function unrelatedAfterFail(ctx, target) {
+    if (!ctx || !ctx.openFails || !ctx.openFails.length || !ctx.userQuery) return null;
+    const fq = ' ' + wfold(ctx.userQuery) + ' '; const t = wfold(target);
+    if (!t || fq.includes(' ' + t + ' ') || t.split(' ').some(w => w.length >= 4 && fq.includes(' ' + w + ' ')) || ctx.openFails.some(f => wfold(f) === t)) return null;
+    return { refused: true, forModel: `KHÔNG mở “${target}”: người dùng không nhắc tới ứng dụng/trang này, và trước đó chưa mở được “${ctx.openFails[0]}”. Đừng chuyển sang ứng dụng khác. Báo người dùng là chưa mở được “${ctx.openFails[0]}” (nêu lỗi), hoặc nếu cửa sổ đó đang mở thì dùng screen_look với window = tên đó.`, summary: `không mở ứng dụng không liên quan (${String(target).slice(0, 30)})` };
+  }
+  const mentioned = (ctx, target) => { const fq = ' ' + wfold(ctx.userQuery) + ' '; const t = wfold(target); return !t || fq.includes(' ' + t + ' ') || t.split(' ').some(w => w.length >= 4 && fq.includes(' ' + w + ' ')); };
+  async function unrelated(ctx, target) {
+    const g = unrelatedAfterFail(ctx, target); if (g) return g;
+    // người dùng nói tới một cửa sổ ĐANG MỞ (“Trong Gmail đang mở…”) → không mở ứng dụng/trang khác mà họ không nhắc tới
+    if (!ctx || !ctx.userQuery || mentioned(ctx, target)) return null;
+    const rw = await relevantWindows(ctx.userQuery); if (!rw.length) return null;
+    return { refused: true, forModel: `KHÔNG mở “${target}”: người dùng không nhắc tới nó, và việc này làm trên cửa sổ ĐANG MỞ “${rw[0].title}”. Dùng screen_look với window = "${rw[0].title.split(/\s+[-–—|·]\s+/).pop()}" rồi thao tác trên cửa sổ đó.`, summary: `dùng cửa sổ đang mở “${String(rw[0].title).slice(0, 40)}”` };
+  }
   async function exec(name, a, ctx) {
     const s = st();
+    try { return await exec0(name, a, ctx, s); }
+    catch (e) { if (ctx && ['open_app', 'open_url'].includes(name)) { ctx.openFails = ctx.openFails || []; ctx.openFails.push(String(name === 'open_app' ? a.name || '' : a.url || '').slice(0, 80)); } throw e; }
+  }
+  async function exec0(name, a, ctx, s) {
     switch (name) {
       case 'list_apps': {
         const q = String(a.query || '').trim();
+        const ow = q ? await relevantWindows(q) : [];
+        if (ow.length) return { forModel: `“${q}” ĐANG MỞ trên máy: ${ow.map(w => `“${w.title}”`).join(', ')}. Không cần tìm hay mở lại: dùng screen_look với window = "${q}" rồi thao tác trên cửa sổ đó. Đừng nói ứng dụng chưa cài.`, summary: `“${q}” đang mở` };
         let list = await apps(); if (q && process.platform === 'darwin' && !list.some(x => C.score(q, x.name) >= 40)) list = C.mergeApps(list, await C.macSpotlight(q)); if (q) list = list.map(x => ({ ...x, s: C.score(q, x.name) })).filter(x => x.s >= 40).sort((x, y) => y.s - x.s);
         const shown = list.slice(0, 80).map(x => x.name);
         return { forModel: `${q ? `Ứng dụng khớp "${q}"` : 'Ứng dụng đã cài'} (${list.length}${list.length > 80 ? ', hiện 80' : ''}):\n${shown.join('\n') || `(không có mục khớp; đã kiểm tra ${SOURCES}. Đừng kết luận là chưa cài: hãy thử open_app với tên này)`}${failedNote()}`, summary: `${list.length} ứng dụng${q ? ` khớp “${q}”` : ''}`, detail: shown.join('\n') };
       }
       case 'open_app': {
         const q = String(a.name || '').trim(); if (!q) throw new CompError('Thiếu tên ứng dụng');
+        { const g = await unrelated(ctx, q); if (g) return g; }
         if (a.new_window !== true) { const w = await openWindowFor(q); if (w) { if (ctx) ctx.lastOpenedApp = q; return { forModel: `“${q}” ĐÃ có cửa sổ đang mở: “${w.title}”. Đã chuyển tới cửa sổ đó (không mở thêm). Dùng screen_look để xem rồi thao tác trên cửa sổ này.`, summary: `Dùng cửa sổ đang mở “${w.title}”` }; } }
         const all = await apps();
         let hit = C.findApp(q, all);
@@ -208,6 +241,9 @@ function createComputerTools(deps) {
         if (!/^(https?:|mailto:)$/.test(url.protocol)) throw new CompError('Chỉ mở được địa chỉ http, https hoặc mailto.');
         const wk = (WEB_KEYS.find(([re]) => re.test(url.href)) || [])[1];
         if (wk && a.new_window !== true) { const w = await openWindowFor(wk); if (w) return { forModel: `${wk} ĐÃ có cửa sổ đang mở: “${w.title}”. Đã chuyển tới cửa sổ đó thay vì mở ${url.hostname}. Dùng screen_look để thao tác trên cửa sổ này.`, summary: `Dùng cửa sổ đang mở “${w.title}”` }; }
+        { const g = await unrelated(ctx, wk || url.hostname.replace(/^www\./, '')); if (g) return g; }
+        // B29 (quyết định của Khôi): “Truy cập mạng” TẮT → không mở trang web (mailto: vẫn mở được — đó là ứng dụng thư trên máy)
+        if (url.protocol !== 'mailto:' && s.agentWeb !== true) return { refused: true, forModel: `Không mở ${url.hostname}: “Cho phép truy cập mạng” đang TẮT, nên AIVN AGENT không mở trang web. Nếu trang này đã mở trong một cửa sổ trình duyệt, dùng screen_look với window = tên trang. Nếu không, báo người dùng: cần bật “Cho phép truy cập mạng” trong Cài đặt AIVN AGENT, hoặc tự mở trang rồi giao lại việc.`, summary: `không mở ${url.hostname}: truy cập mạng đang tắt` };
         await deps.openExternal(url.href);
         return { forModel: `Đã mở ${url.href} trong trình duyệt của người dùng. (Bạn không đọc được nội dung trang qua công cụ này.)`, summary: `Đã mở ${url.href}`, urls: [{ url: url.href, kind: 'opened' }] };
       }
@@ -264,7 +300,7 @@ function createComputerTools(deps) {
     const best = C.findApp(query, all);
     return { platform: process.platform, total: all.length, ms: Date.now() - t, sources: lastDiag ? lastDiag.sources : {}, errors: lastDiag ? lastDiag.errors : [], dirs: lastDiag ? lastDiag.dirs : null, deepMs: lastDiag ? lastDiag.ms : null, query, best: best ? { name: best.name, path: best.path || null, target: best.target || null, appId: best.appId || null } : null, matches };
   }
-  return { defs: DEFS, names, exec, has: (n) => n in DEFS, CompError, scanReport, pending: async () => (deps.screen && deps.screen.pending ? deps.screen.pending() : null), searchTodo: () => (deps.screen && deps.screen.searchTodo ? deps.screen.searchTodo() : null), searchFound: () => (deps.screen && deps.screen.searchFound ? deps.screen.searchFound() : null) };
+  return { relevantWindows, defs: DEFS, names, exec, has: (n) => n in DEFS, CompError, scanReport, pending: async () => (deps.screen && deps.screen.pending ? deps.screen.pending() : null), searchTodo: () => (deps.screen && deps.screen.searchTodo ? deps.screen.searchTodo() : null), searchFound: () => (deps.screen && deps.screen.searchFound ? deps.screen.searchFound() : null) };
 }
 
 module.exports = { createComputerTools, DEFS: DEFS, LEVEL1, LEVEL2, CompError, isSendAction };

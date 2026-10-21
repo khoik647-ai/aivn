@@ -872,7 +872,7 @@ const snapAlt = (m) => ({ content: m.content, thought: m.thought || null, thinkS
 function statsHtml(st) {
   if (!st) return '';
   const parts = [st.tps ? `${st.tps.toFixed(1).replace('.', DEC())} token/giây` : null, st.tokens != null ? `${st.tokens} token` : null,
-    st.ttft != null ? `${fmtSec(st.ttft)} tới token đầu` : null, st.stop ? `Dừng: ${STOP_LABEL[st.stop] || st.stop}` : null, st.preset ? `Preset: ${st.preset}` : null];
+    st.ttft != null ? `${fmtSec(st.ttft)} tới token đầu` : null, st.stop ? `Dừng: ${STOP_LABEL[st.stop] || st.stop}` : null, st.preset ? `Cấu hình mẫu: ${st.preset}` : null];
   return `<div class="msg-stats">${parts.filter(Boolean).map(esc).join(' · ')}</div>`;
 }
 function paintCtxBar(st) {
@@ -1128,7 +1128,7 @@ function paintServer(st) {
   $('#srvPort').disabled = st.running; $('#curlEx').textContent = curlExample(port, st.keySet);
   if ('lan' in st) {
     $('#srvLan').checked = st.lan; $('#srvCors').checked = st.cors; $('#srvTtl').value = String(st.ttlMin || 0);
-    $('#srvLanUrls').innerHTML = st.lan ? (st.lanUrls.length ? 'Địa chỉ cho thiết bị khác: ' + st.lanUrls.map(u => `<code>${esc(u)}</code>`).join(' ') : '<span class="warn-ink">Máy chưa có địa chỉ mạng LAN.</span>') : '';
+    $('#srvLanUrls').innerHTML = st.lan ? (st.lanUrls.length ? 'Địa chỉ cho thiết bị khác: ' + st.lanUrls.map(u => `<code>${esc(u)}</code>`).join(' ') : '<span class="warn-ink">Máy chưa có địa chỉ trong mạng nội bộ.</span>') : '';
     $('#srvKeyState').textContent = st.keySet ? 'Đã có khoá: mọi yêu cầu phải gửi "Authorization: Bearer <khoá>".' : 'Chưa có: ai trên máy này cũng gọi được API.';
     $('#srvKeyGen').textContent = st.keySet ? 'Tạo khoá mới' : 'Tạo khoá'; $('#srvKeyReveal').hidden = !st.keySet; $('#srvKeyClear').hidden = !st.keySet; if (!st.keySet) $('#srvKeyShow').hidden = true;
     $('#srvLoaded').innerHTML = (st.loaded || []).length ? st.loaded.map(m => `<div class="row"><code>${esc(m.id)}</code><span class="muted small">${m.kind === 'eyes' ? 'mắt nhìn của AIVN AGENT' : `trò chuyện · ngữ cảnh ${Number(m.ctx || 0).toLocaleString(LOC())}${m.vision ? ' · nhìn ảnh' : ''}${m.jit ? ' · nạp theo yêu cầu API' : ''}`}</span>${m.kind === 'chat' ? '<button type="button" class="btn sm" data-srv-unload="1">Gỡ khỏi bộ nhớ</button>' : ''}</div>`).join('') : '<span class="muted small">Chưa nạp mô hình nào. Yêu cầu API ghi "model" là mô hình đã tải sẽ được tự nạp.</span>';
@@ -1137,7 +1137,7 @@ function paintServer(st) {
 }
 const srvErr = (err) => toast(String(err.message || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), true);
 $('#srvLan').addEventListener('change', async (e) => {
-  if (e.target.checked && !(await modalAsk({ icon: '🌐', title: 'Mở máy chủ API cho mạng LAN?', message: 'Thiết bị khác trong cùng mạng (Wi-Fi quán cà phê, ký túc xá…) sẽ thấy cổng này. Chỉ ai có khoá API mới dùng được mô hình của bạn. Chỉ bật trong mạng bạn tin tưởng.', okLabel: 'Mở cho LAN', noLabel: 'Huỷ' }))) { e.target.checked = false; return; }
+  if (e.target.checked && !(await modalAsk({ icon: '🌐', title: 'Mở máy chủ API cho mạng nội bộ?', message: 'Thiết bị khác trong cùng mạng (Wi-Fi quán cà phê, ký túc xá…) sẽ thấy cổng này. Chỉ ai có khoá API mới dùng được mô hình của bạn. Chỉ bật trong mạng bạn tin tưởng.', okLabel: 'Mở cho mạng nội bộ', noLabel: 'Huỷ' }))) { e.target.checked = false; return; }
   try { if (e.target.checked && !(await A.serverStatus()).keySet) { const k = await A.serverKey('generate'); showKey(k.key); } paintServer(await A.serverConfig({ lan: e.target.checked })); } catch (err) { srvErr(err); paintServer(await A.serverStatus()); }
 });
 $('#srvCors').addEventListener('change', async (e) => { try { paintServer(await A.serverConfig({ cors: e.target.checked })); } catch (err) { srvErr(err); } });

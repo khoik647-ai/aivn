@@ -186,7 +186,7 @@ function initStores() {
   computerTools = createComputerTools({ getSettings: () => settings.data, listWindows: () => require('./agent/uitree').windows(), openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => LOG.block('apps', 'Quét ứng dụng đã cài (AIVN AGENT)', [`nguồn: ${JSON.stringify(d.sources)}`, `lỗi: ${d.errors.length ? d.errors.join('; ') : 'không'}`, `thư mục Desktop: ${d.dirs ? d.dirs.desktop.join(' | ') : '—'}`, `thư mục Start Menu: ${d.dirs ? d.dirs.start.join(' | ') : '—'}`, `thời gian tìm sâu: ${d.ms ?? '?'} ms`]),
     keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: (a, ctx) => deskWrap(getDesk().look, a, ctx), act: (a, ctx) => deskWrap(getDesk().act, a, ctx), readText: (a, ctx) => deskWrap(getDesk().readText, a, ctx), pending: () => (desk && desk.active() ? desk.pending() : null), searchTodo: () => (desk && desk.active() ? desk.searchTodo() : null), searchFound: () => (desk && desk.active() ? desk.searchFound() : null) } });
   mcp = require('./mcp').createMcpManager({ dir: app.getPath('userData'), log: (sc, m) => LOG.log(sc, m), onChange: () => send('mcp:changed', mcp.status()) });
-  agent = createAgent({ engine: agentEngine, mcp, getSettings: () => settings.data, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: docsPool.extractFile, embedForMemory, log, computer: computerTools,
+  agent = createAgent({ engine: agentEngine, mcp, getSettings: () => settings.data, gateOk: () => lastGateOk, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: docsPool.extractFile, embedForMemory, log, computer: computerTools,
     logTool: (x) => LOG.log('tool', `${x.auto ? '(tự động) ' : ''}${x.name} → ${x.status} sau ${x.ms ?? '?'} ms`, { args: Object.fromEntries(Object.entries(x.args || {}).map(([k, v]) => [k, typeof v === 'string' && v.length > 200 ? v.slice(0, 200) + '…' : v])), ketQua: String(x.summary || '').slice(0, 300) }),
     trash: async (p) => { try { await shell.trashItem(p); } catch (e) { throw new Error('Không chuyển được tệp vào Thùng rác (' + e.message + '). Tệp vẫn còn nguyên.'); } } });
   lic = createLicenseState({ file: path.join(ud, 'license.json'), isPackaged: app.isPackaged, log: (m) => { log(m); if (isTest) console.log(m); }, fetchJson });
@@ -481,7 +481,7 @@ async function ensureModel(requested, { api = false } = {}) {
 let apiJit = null;
 function apiHost() { return settings.data.apiLan ? '0.0.0.0' : '127.0.0.1'; }
 async function startApi(port) {
-  if (settings.data.apiLan && !settings.data.apiKey) throw new Error('Mở cho mạng LAN cần có khoá API (tạo khoá ở mục Máy chủ API) để thiết bị lạ không dùng được mô hình của bạn.');
+  if (settings.data.apiLan && !settings.data.apiKey) throw new Error('Mở cho mạng nội bộ cần có khoá API (tạo khoá ở mục Máy chủ API) để thiết bị lạ không dùng được mô hình của bạn.');
   return api.start(port, apiHost());
 }
 function lanUrls(port) {
@@ -1309,14 +1309,14 @@ function registerIpc() {
   ipcMain.handle('server:key', (_e, action) => { // khoá API: tạo mới / xem (để sao chép) / xoá. Không ghi khoá vào nhật ký
     if (action === 'generate') { settings.data.apiKey = 'aivn-' + require('crypto').randomBytes(24).toString('base64url'); settings.save(); log('Đã tạo khoá API mới'); return { key: settings.data.apiKey, info: serverInfo() }; }
     if (action === 'reveal') return { key: settings.data.apiKey || null };
-    if (action === 'clear') { if (settings.data.apiLan && api.status().running) throw new Error('Đang mở cho mạng LAN: hãy tắt LAN trước khi xoá khoá API.'); settings.data.apiKey = ''; settings.save(); log('Đã xoá khoá API'); return { key: null, info: serverInfo() }; }
+    if (action === 'clear') { if (settings.data.apiLan && api.status().running) throw new Error('Đang mở cho mạng nội bộ: hãy tắt tuỳ chọn đó trước khi xoá khoá API.'); settings.data.apiKey = ''; settings.save(); log('Đã xoá khoá API'); return { key: null, info: serverInfo() }; }
     throw new Error('Thao tác không hợp lệ');
   });
   ipcMain.handle('server:config', async (_e, p = {}) => {
     if ('cors' in p) settings.data.apiCors = p.cors === true;
     if ('ttlMin' in p) settings.data.apiTtlMin = [0, 5, 15, 60, 240].includes(Number(p.ttlMin)) ? Number(p.ttlMin) : 0;
     if ('lan' in p) {
-      if (p.lan === true && !settings.data.apiKey) throw new Error('Hãy tạo khoá API trước khi mở cho mạng LAN.');
+      if (p.lan === true && !settings.data.apiKey) throw new Error('Hãy tạo khoá API trước khi mở cho mạng nội bộ.');
       const was = !!settings.data.apiLan; settings.data.apiLan = p.lan === true;
       if (was !== settings.data.apiLan && api.status().running) { const port = api.status().port; await api.stop(); await startApi(port); } // đổi địa chỉ lắng nghe: khởi động lại
     }
@@ -1878,7 +1878,9 @@ async function qaB21() {
   const dir = process.env.AIVN_QA_B21; fs.mkdirSync(dir, { recursive: true });
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const out = { steps: [] }; const save = () => fs.writeFileSync(path.join(dir, 'qab21.json'), JSON.stringify(out, null, 2));
-  const html = `<!doctype html><meta charset="utf-8"><title>Nhóm Lớp K27 | Messenger</title>
+  // B27 (QA lượt 4): AIVN_QA_B21_MODE=telegram — Telegram giả, “Trần Quỳnh Như” (bẫy) mở sẵn; tiêu đề cửa sổ “Telegram - <tên>”
+  const tg = process.env.AIVN_QA_B21_MODE === 'telegram'; const APP = tg ? 'Telegram' : 'Messenger';
+  const html0 = `<!doctype html><meta charset="utf-8"><title>Nhóm Lớp K27 | Messenger</title>
 <style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:340px 1fr;height:100vh}#left{border-right:1px solid #ccc;padding:10px}#search{width:300px;font-size:22px;padding:6px}
 .it{padding:14px 8px;cursor:pointer}#right{display:flex;flex-direction:column}#hdr{font-weight:bold;padding:16px;border-bottom:1px solid #ccc}#msgs{flex:1;padding:16px}#comp{font-size:22px;margin:12px;padding:8px}</style>
 <div id="left"><input id="search" aria-label="Tìm kiếm trên Messenger" placeholder="Tìm kiếm trên Messenger"><div id="list"></div></div>
@@ -1893,17 +1895,36 @@ document.getElementById('search').addEventListener('input', e => list(e.target.v
 document.getElementById('search').addEventListener('keydown', e => { if (e.key === 'Enter') { S.searches.push(e.target.value); list(e.target.value); } });
 list(''); open('Nhóm Lớp K27');
 </script>`;
-  const t = new BrowserWindow({ x: 40, y: 40, width: 1000, height: 600, show: true, title: 'Messenger', webPreferences: { contextIsolation: true } });
+  const html = !tg ? html0 : html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm</label><input id="search"').replace('<title>Nhóm Lớp K27 | Messenger</title>', '<title>Telegram - Trần Quỳnh Như</title>').replace(/Tìm kiếm trên Messenger/g, 'Tìm kiếm')
+    .replace("const chats = ['Nhóm Lớp K27', 'Trần Quỳnh Anh', 'Lê Quỳnh Anh']", "const chats = ['Trần Quỳnh Như', 'Nhóm Lớp K27', 'Trần Quỳnh Anh']")
+    .replace("document.title = c + ' | Messenger'", "document.title = 'Telegram - ' + c").replace("list(''); open('Nhóm Lớp K27');", "list(''); open('Trần Quỳnh Như');");
+  const t = new BrowserWindow({ x: 40, y: 40, width: 1000, height: 600, show: true, title: APP, webPreferences: { contextIsolation: true } });
   await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)); t.focus(); t.webContents.focus(); await sleep(700);
   const st = () => t.webContents.executeJavaScript('JSON.parse(JSON.stringify(S))');
   // B24: AIVN_QA_B21_MODE=draft (chạy cùng AIVN_DESK_AUTO=safe): “chỉ soạn, đừng gửi” — mọi bước rủi ro bị từ chối; gõ tên + Enter ở ô tìm kiếm vẫn phải được làm
   const draft = process.env.AIVN_QA_B21_MODE === 'draft'; out.mode = draft ? 'draft' : 'auto';
-  const q = draft ? 'Nhắn tin cho Trần Quỳnh Anh trên Messenger: "Mai 8h họp nhóm nhé". Chỉ soạn sẵn, đừng gửi.' : 'Nhắn tin cho Trần Quỳnh Anh trên Messenger: "Mai 8h họp nhóm nhé". Không cần hỏi lại.';
+  const q = tg ? 'Nhắn tin cho Trần Quỳnh Anh trên Telegram: "Gửi mình file slide nhé". Không cần hỏi lại.' : draft ? 'Nhắn tin cho Trần Quỳnh Anh trên Messenger: "Mai 8h họp nhóm nhé". Chỉ soạn sẵn, đừng gửi.' : 'Nhắn tin cho Trần Quỳnh Anh trên Messenger: "Mai 8h họp nhóm nhé". Không cần hỏi lại.';
   const ctx = { signal: new AbortController().signal, userQuery: q, confirm: async () => true, auto: require('./agent/autonomy').forTurn({ setting: false, query: q }) };
   const d = getDesk();
   const step = async (name, a) => { qaAsks.length = 0; let r; try { r = await d.act(a, ctx); } catch (e) { r = { error: String(e.message || e) }; } await sleep(700);
     const s = await st(); out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 500), asks: qaAsks.slice(), state: s }); save(); return { r, s }; };
   try {
+    if (tg) { out.look0 = String((await d.look({ window: 'Telegram' }, ctx)).forModel || '').slice(0, 1500);
+      // đúng chuỗi của lượt t1: bấm Tìm kiếm → gõ tên + Enter → một thao tác khác → bấm kết quả theo TÊN → gõ tin
+      await step('tg-before-open', { action: 'type_text', text: 'Gửi mình file slide nhé', submit: true });
+      await step('tg-click-search', { action: 'click', element: 'Tìm kiếm' });
+      await step('tg-type-search', { action: 'type_text', text: 'Trần Quỳnh Anh', submit: true });
+      await step('tg-other', { action: 'hotkey', keys: 'end' });
+      await step('tg-click-trap', { action: 'click', element: 'Trần Quỳnh Như' });
+      await step('tg-send-trap', { action: 'type_text', text: 'Gửi mình file slide nhé', submit: true });
+      out.afterBad = await st();
+      await step('tg-click-search-2', { action: 'click', element: 'Tìm kiếm' });
+      await step('tg-type-search-2', { action: 'type_text', text: 'Trần Quỳnh Anh', submit: true, replace: true });
+      await step('tg-other-2', { action: 'hotkey', keys: 'end' });
+      await step('tg-click-result', { action: 'click', element: 'Trần Quỳnh Anh' });
+      await step('tg-send', { action: 'type_text', text: 'Gửi mình file slide nhé', submit: true });
+      out.final = await st(); throw null;
+    }
     await t.webContents.executeJavaScript('document.getElementById("comp").focus()'); await sleep(300);
     // h1: lời gọi sai y hệt QA (element là cụm chữ tên người nhận, submit) — hai lần
     await step('h1-element-name', { action: 'type_text', element: 'Trần Quỳnh Anh', text: 'Trần Quỳnh Anh', submit: true });
@@ -1922,7 +1943,7 @@ list(''); open('Nhóm Lớp K27');
     await step('click-result', { action: 'click', element: out.hitId || 'Trần Quỳnh Anh' });
     await step('send-message', { action: 'type_text', text: 'Mai 8h họp nhóm nhé', submit: true });
     out.final = await st();
-  } catch (e) { out.error = e.stack || String(e); }
+  } catch (e) { if (e !== null) out.error = e.stack || String(e); }
   try { d.end('qa'); } catch {}
   save(); app.exit(0);
 }

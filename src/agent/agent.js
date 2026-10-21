@@ -41,7 +41,7 @@ const IDENTITY = [
 const WEL = {
   vi: { chat: '- Trò chuyện, giải thích, viết và dịch bằng mô hình AI chạy trên máy', chatCloud: (c) => `- Trò chuyện, giải thích, viết và dịch bằng mô hình ${c.model} trên máy chủ ${c.host} (bộ não đám mây bạn đã bật)`,
     img: '- Đọc ảnh bạn dán và tìm trong tài liệu của bạn', docs: '- Tìm trong tài liệu của bạn', tools: '- Dùng công cụ: máy tính, đọc/ghi tệp trong thư mục bạn cho phép, tìm trên web, chạy mã', mem: '- Ghi nhớ điều bạn dặn và tạo lịch nhắc tự động',
-    open: '- Mở ứng dụng, tệp, trang web và chạy lệnh trên máy, nhưng chỉ khi bạn đồng ý trên thẻ duyệt', screen: '- Điều khiển màn hình (thử nghiệm): bạn duyệt từng cú bấm',
+    open: '- Tự mở ứng dụng, tệp và trang web cho việc bạn giao; chạy lệnh, gửi tin, xoá, mua hàng, khoá máy hay chỉnh âm lượng thì hỏi bạn trên thẻ duyệt trước (trừ khi bạn đã yêu cầu rõ)', screen: '- Điều khiển màn hình (thử nghiệm): bạn duyệt từng cú bấm',
     noModel: 'Hãy chọn một mô hình ở thanh phía trên để bắt đầu.', noVision: 'Mô hình đang nạp chỉ đọc chữ: mình **chưa nhìn được ảnh hay màn hình**. Muốn mình bấm/gõ trong ứng dụng (Zalo, Messenger…), hãy chọn mô hình có 👁 được đánh dấu dùng được cho AIVN AGENT.',
     noAgent: 'Mô hình đang nạp chưa dùng được cho AIVN AGENT (xem thanh cảnh báo phía trên), nên mình chưa điều khiển màn hình.',
     intro: 'Xin chào! Mình là **AIVN AGENT**, trợ lý có sẵn trong AIVN, chạy ngay trên máy tính của bạn, không gửi dữ liệu đi đâu cả.',
@@ -49,7 +49,7 @@ const WEL = {
     can: 'Mình có thể:', outro: 'Cha đỡ đầu của mình là **anh Nguyễn Ngọc Khôi**, sinh viên Văn Lang University. Bạn muốn mình giúp gì nào?' },
   en: { chat: '- Chat, explain, write and translate with an AI model running on this computer', chatCloud: (c) => `- Chat, explain, write and translate with the ${c.model} model on ${c.host} (the cloud brain you turned on)`,
     img: '- Read images you paste and search your documents', docs: '- Search your documents', tools: '- Use tools: calculator, read/write files in folders you allow, search the web, run code', mem: '- Remember what you tell me and create automatic reminders',
-    open: '- Open apps, files and web pages and run commands on this computer, but only when you approve on the approval card', screen: '- Control the screen (experimental): you approve every click',
+    open: '- Open apps, files and web pages on my own for the task you give me; running commands, sending messages, deleting, buying, locking the computer or changing the volume needs your OK on an approval card first (unless you clearly asked for it)', screen: '- Control the screen (experimental): you approve every click',
     noModel: 'Choose a model in the top bar to get started.', noVision: 'The loaded model only reads text: I **cannot see images or the screen yet**. If you want me to click/type in apps (Zalo, Messenger…), pick a model with 👁 marked as usable for AIVN AGENT.',
     noAgent: 'The loaded model is not usable for AIVN AGENT yet (see the warning bar above), so I cannot control the screen.',
     intro: "Hi! I'm **AIVN AGENT**, the assistant built into AIVN. I run right on your computer and never send your data anywhere.",
@@ -57,7 +57,7 @@ const WEL = {
     can: 'I can:', outro: 'My godfather is **Nguyễn Ngọc Khôi**, a student at Van Lang University. What can I help you with?' },
   zh: { chat: '- 使用在本机运行的 AI 模型进行对话、解释、写作和翻译', chatCloud: (c) => `- 使用 ${c.host} 上的 ${c.model} 模型进行对话、解释、写作和翻译（你已开启云端大脑）`,
     img: '- 读取你粘贴的图片，并在你的文档中搜索', docs: '- 在你的文档中搜索', tools: '- 使用工具：计算器、在你允许的文件夹中读写文件、网络搜索、运行代码', mem: '- 记住你的嘱咐，并创建自动提醒',
-    open: '- 在本机打开应用、文件、网页和运行命令，但仅在你于批准卡片上同意之后', screen: '- 控制屏幕（实验性）：每次点击都由你批准',
+    open: '- 为你交代的任务自行打开应用、文件和网页；运行命令、发送消息、删除、购买、锁定电脑或调节音量前，会先在批准卡片上征得你的同意（除非你已明确要求）', screen: '- 控制屏幕（实验性）：每次点击都由你批准',
     noModel: '请在顶部栏选择一个模型以开始。', noVision: '当前加载的模型只能读取文字：我**还无法查看图片或屏幕**。如需我在应用中点击/输入（Zalo、Messenger…），请选择带 👁 且标记为可用于 AIVN AGENT 的模型。',
     noAgent: '当前加载的模型暂不能用于 AIVN AGENT（见上方警告栏），因此我还不能控制屏幕。',
     intro: '你好！我是 **AIVN AGENT**，AIVN 内置的助手，直接在你的电脑上运行，不会把数据发送到任何地方。',
@@ -178,7 +178,11 @@ const searchNudge = (todo) => `(Kiểm tra tự động của AIVN) Chưa đư�
 // Cảnh báo không gợi ý cứng một mô hình (có thể chính là mô hình đang dùng): chỉ tới bộ chọn mô hình của AIVN AGENT
 const NO_ACTION_WARN = 'Mô hình này chưa thực sự thao tác gì — chưa có việc nào được làm. Hãy chọn một mô hình được đánh dấu dùng được cho AIVN AGENT trong bộ chọn mô hình.';
 const NO_COMP_WARN = 'Mô hình chưa thao tác được trên máy tính trong lượt này (các bước khác đã chạy xong ở trên).';
-const noActionWarn = (steps) => steps.some(x => COMP.includes(x.name) && x.status === 'ok') ? null : steps.some(x => x.status === 'ok') ? NO_COMP_WARN : NO_ACTION_WARN;
+// B30 (QA lượt 4): mô hình đã qua cổng AIVN AGENT → không khuyên đổi mô hình (chỉ báo rõ là chưa làm gì)
+const openWinNudge = (ws) => `(Kiểm tra tự động của AIVN) SAI: ứng dụng này ĐANG MỞ trên máy — cửa sổ ${ws.map(w => `“${String(w.title).slice(0, 60)}”`).join(', ')}. Không được nói là chưa cài/không có. Gọi screen_look với window = tên cửa sổ đó rồi làm tiếp việc người dùng giao.`;
+const NO_ACTION_OK_WARN = 'Lượt này mô hình chưa thực sự thao tác gì — chưa có việc nào được làm. Bạn thử giao lại việc, nói rõ ứng dụng hay cửa sổ cần dùng.';
+const noActionWarn = (steps, gateOk = false) => steps.some(x => COMP.includes(x.name) && x.status === 'ok') ? null : steps.some(x => x.status === 'ok') ? NO_COMP_WARN : gateOk ? NO_ACTION_OK_WARN : NO_ACTION_WARN;
+const EMPTY_ANSWER = (sec) => `Mô hình không trả lời (câu trả lời trống${sec ? ` sau ${sec} giây` : ''}) và chưa làm việc nào. Bạn thử giao lại việc, hoặc chia thành bước ngắn hơn; nếu máy đang bận nhiều, hãy chờ máy rảnh rồi thử lại.`;
 // Gửi tin/thao tác quan trọng chỉ được báo thành công khi desktop-agent đã KIỂM CHỨNG trên màn hình (step.verify.sent):
 // thấy chữ vừa gửi trong cuộc trò chuyện và thấy tên người nhận (nếu người dùng nêu tên). Không có bằng chứng thì không được nói đã gửi.
 const SEND_CLAIM_RE = /(đã|vừa)\s+(được\s+)?(gửi|nhắn)(?!\p{L})|gửi[^.\n]{0,40}thành công|đã được gửi|(tin nhắn|lời chúc)[^.\n]{0,40}(đã|vừa)\s+(xuất hiện|tới|đến)/iu;
@@ -242,7 +246,7 @@ const CLAIMS = [
 const SCREEN_CTRL = ['screen_act', 'screen_look'];
 const COMP = ['open_app', 'open_path', 'open_url', 'close_app', 'run_command', 'system_action', 'screen_look', 'screen_act', 'list_apps', 'running_apps'];
 // Câu khẳng định "ứng dụng chưa cài / không có" (hay gợi ý dùng bản web thay thế)
-const NOT_INSTALLED_RE = /(chưa\s+(được\s+)?cài(\s+đặt)?|không\s+được\s+cài(\s+đặt)?|chưa\s+có\s+(ứng dụng|trên máy)|không\s+(có|tìm thấy|tồn tại)[^.\n]{0,40}(ứng dụng|trên máy|trong máy)|không có trên máy|zalo\.me|chat\.zalo|(trang|bản|phiên bản)\s+web\s+(của\s+)?zalo)/iu;
+const NOT_INSTALLED_RE = /(chưa\s+(được\s+)?cài(\s+đặt)?|không\s+được\s+cài(\s+đặt)?|chưa\s+có\s+(ứng dụng|trên máy)|không\s+(được\s+)?(có|tìm thấy|tồn tại)[^.\n]{0,40}(ứng dụng|trên máy|trong máy)|(ứng dụng|app)[^.\n]{0,30}không\s+(được\s+)?tìm thấy|không có trên máy|zalo\.me|chat\.zalo|(trang|bản|phiên bản)\s+web\s+(của\s+)?zalo)/iu;
 // "mở zalo", "mở ứng dụng zalo trên màn hình máy của tôi và gửi tin…" → { name: 'zalo', rest: 'và gửi tin…' }
 function openIntent(query) {
   const s = String(query || '').trim().replace(/\s+/g, ' ');
@@ -543,6 +547,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     }
   }
 
+  const gateOk = () => { try { return !!(deps.gateOk && deps.gateOk() === true); } catch { return false; } };
   async function systemPrompt({ query, names, headless }) {
     const s = S_();
     const fs_ = folders();
@@ -566,9 +571,11 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       fs_.length ? `Thư mục được phép làm việc (đường dẫn tương đối tính từ thư mục đầu tiên):\n${fs_.map((f, i) => `${i + 1}. ${path.basename(f)} → ${f}`).join('\n')}`
         : 'Chưa có thư mục nào được cho phép, nên bạn không đọc/ghi tệp được. Nếu người dùng cần, hãy hướng dẫn họ bấm "Thêm thư mục" trong phần Cài đặt AIVN AGENT.',
       s.agentWeb ? 'Truy cập mạng: ĐANG BẬT. Dùng web_search rồi fetch_url khi cần thông tin mới; ghi rõ địa chỉ nguồn trong câu trả lời.'
-        : 'web_search/fetch_url: ĐANG TẮT (CHỈ hai công cụ này). Bạn VẪN thao tác các cửa sổ đang mở (Gmail, Docs, Outlook…) bằng screen_look/screen_act. Cần tra cứu trên mạng thì nhờ người dùng bật "Cho phép truy cập mạng" trong Cài đặt.',
+        : 'web_search/fetch_url/open_url: ĐANG TẮT (CHỈ ba công cụ này). Bạn VẪN thao tác các cửa sổ đang mở (Gmail, Docs, Outlook…) bằng screen_look/screen_act. Cần tra cứu trên mạng thì nhờ người dùng bật "Cho phép truy cập mạng" trong Cài đặt.',
     ];
     if (names.includes('open_app')) lines.push('Máy tính: bạn mở được ứng dụng (open_app, list_apps), tệp/thư mục (open_path), trang web (open_url), xem/đóng ứng dụng đang mở, chạy lệnh terminal (run_command, người dùng duyệt từng lệnh) và thao tác hệ thống (system_action). Hệ điều hành: ' + ({ win32: 'Windows (lệnh chạy bằng PowerShell)', darwin: 'macOS (lệnh chạy bằng zsh)' }[process.platform] || 'Linux') + '. Ưu tiên công cụ chuyên dụng (open_app, open_url…) thay vì run_command. "Mở máy tính" nghĩa là mở ứng dụng Máy tính (Calculator) bằng open_app; Không bao giờ khẳng định một ứng dụng "không có" hay "chưa cài" trên máy; nếu open_app báo không tìm thấy: thử list_apps với từ khoá ngắn (vd. "zalo"), rồi (nếu có điều khiển màn hình) bấm nút Start, gõ tên ứng dụng và Enter; cuối cùng mới nói là chưa tìm/mở được và hỏi tên chính xác. KHÔNG tự mở trang web hay tìm trên mạng để thay cho ứng dụng (vd. mở zalo.me thay cho Zalo) khi người dùng chưa đồng ý — hãy hỏi trước. khi người dùng nhờ mở/chạy ứng dụng, hãy GỌI open_app ngay thay vì nói không làm được. Không bao giờ chạy lệnh xoá hàng loạt, tải mã từ mạng về chạy, hay đổi cài đặt bảo mật.');
+    // B28: cửa sổ ĐANG MỞ của ứng dụng người dùng nhắc tới (mọi hệ điều hành) — nói thẳng cho mô hình, khỏi list_apps/open_app hay nói “chưa cài”
+    if (names.includes('screen_look') && deps.computer && deps.computer.relevantWindows) { try { const rw = await deps.computer.relevantWindows(query); if (rw.length) lines.push(`Cửa sổ ĐANG MỞ liên quan: ${rw.map(w => `“${String(w.title).slice(0, 60)}”`).join(', ')}. Dùng ngay screen_look với window = tên đó; không list_apps/open_app.`); } catch {} }
     if (names.includes('open_app')) lines.push('open_app/open_url tự chuyển tới cửa sổ ĐANG MỞ (Outlook, Gmail, Zalo…) thay vì mở mới; đừng mở outlook.live.com khi đã có cửa sổ Outlook.');
     else lines.push('Máy tính: các công cụ mở ứng dụng/chạy lệnh đang TẮT (Cài đặt AIVN AGENT → Truy cập máy tính).');
     if (deps.computer && !names.includes('screen_act') && deps.computer.names({ headless: false }).includes('screen_act')) lines.push('Điều khiển màn hình (bấm, gõ trong ứng dụng như Zalo) đang BỊ CHẶN vì mô hình hiện tại không nhìn được màn hình. Nếu người dùng nhờ thao tác trong ứng dụng, nói rõ là chưa làm được và nhờ họ chọn mô hình được đánh dấu dùng được cho AIVN AGENT; không giả vờ đã làm.');
@@ -618,6 +625,8 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const actAsk = compOn && isActAsk(query);
     onStatus({ stage: 'prepare' });
     const sys = await systemPrompt({ query, names, headless });
+    // B28: cửa sổ đang mở liên quan tới câu lệnh (để không bao giờ nói “chưa cài” khi cửa sổ đang mở)
+    let relWins = []; try { relWins = !headless && names.includes('open_app') && deps.computer && deps.computer.relevantWindows ? await deps.computer.relevantWindows(query) : []; } catch {}
     const san = sanitizeHistory(messages, { act: actAsk });
     if (san.hidden) deps.log && deps.log(`[aivn agent] ẩn ${san.hidden} câu trả lời cũ khẳng định ứng dụng chưa cài`);
     if (san.guides) deps.log && deps.log(`[aivn agent] ẩn ${san.guides} câu trả lời cũ chỉ hướng dẫn/hỏi lại (không gọi công cụ)`);
@@ -731,7 +740,8 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         }
       }
       if (!r.toolCalls || !r.toolCalls.length) {
-        const fake = r.finishReason === 'abort' ? null : fakeActionCheck(r.text, steps, names, query);
+        const empty = r.finishReason !== 'abort' && !String(r.text || '').trim();
+        const fake = r.finishReason === 'abort' ? null : fakeActionCheck(r.text, steps, names, query) || (empty && emptyNudged && names.some(n => COMP.includes(n)) && !steps.some(x => x.status === 'ok') ? 'empty' : null);
         if (fake) fakeSeen = true;
         if (!String(r.text || '').trim() && !emptyNudged && round < maxRounds - 2) {
           // mô hình nhỏ đôi khi trả lời trống giữa chừng (vd. sau nhiều lần ghi tệp): nhắc một lần để làm nốt hoặc báo cáo
@@ -747,7 +757,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         if (found && OPEN_WANT_RE.test(String(query || '')) && round < maxRounds - 2) { openNudged = true; msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: openNudge(found) }); onStatus({ stage: 'verify', round, discarded: r.text || '' }); continue; }
         let todo = null; try { todo = !searchNudged && names.includes('screen_act') && deps.computer && deps.computer.searchTodo ? deps.computer.searchTodo() : null; } catch {}
         if (todo && NOT_FOUND_RE.test(r.text || '') && round < maxRounds - 2) { searchNudged = true; msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: searchNudge(todo) }); onStatus({ stage: 'verify', round, discarded: r.text || '' }); continue; }
-        const nudge = !nudged && round < maxRounds - 2 ? (claimCheck(query, r.text || '', steps, names) || sendClaimCheck(r.text || '', steps) || (fake ? FAKE_NUDGE : null)) : null;
+        const nudge = !nudged && round < maxRounds - 2 ? ((relWins.length && NOT_INSTALLED_RE.test(r.text || '') ? openWinNudge(relWins) : null) || claimCheck(query, r.text || '', steps, names) || sendClaimCheck(r.text || '', steps) || (fake && fake !== 'empty' ? FAKE_NUDGE : null)) : null;
         if (nudge) { nudged = true; msgs.push({ role: 'assistant', content: r.text || '' }, { role: 'user', content: nudge }); onStatus({ stage: 'verify', round, discarded: r.text || '' }); continue; }
         if (fake && !forcedTried && names.length && !signal?.aborted) {
           // lần cuối: buộc mô hình chọn MỘT công cụ thật hoặc cannot_do (sinh có ràng buộc ngữ pháp JSON)
@@ -757,12 +767,12 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
           let fr = null; try { const compTools = tools.filter(t => COMP.includes(t.name)); fr = await callModel([...(compTools.length ? compTools : tools), CANNOT], { toolChoice: 'required', temperature: 0, maxTokens: 400, signal }); } catch (e) { deps.log && deps.log('[aivn agent] buộc gọi công cụ lỗi: ' + e.message); }
           const c = fr && fr.toolCalls && fr.toolCalls[0];
           if (c && c.name !== 'cannot_do' && names.includes(c.name)) { r = { ...fr, text: '', toolCalls: [c] }; }
-          else { text = c && c.arguments && c.arguments.reason ? 'Mình chưa làm được việc này: ' + String(c.arguments.reason) : guardClaims(claimed, steps).text; const blockedClaim = text !== claimed; if (!blockedClaim) text = ''; warning = noActionWarn(steps) || (blockedClaim ? guardClaims(claimed, steps).warning : null); finishReason = 'stop'; break; }
+          else { text = c && c.arguments && c.arguments.reason ? 'Mình chưa làm được việc này: ' + String(c.arguments.reason) : guardClaims(claimed, steps).text; const blockedClaim = text !== claimed; if (!blockedClaim) text = ''; warning = noActionWarn(steps, gateOk()) || (blockedClaim ? guardClaims(claimed, steps).warning : null); finishReason = 'stop'; break; }
         } else {
           text = r.text; finishReason = r.finishReason;
           if (fake) {
             const did = steps.some(x => COMP.includes(x.name) && x.status === 'ok');
-            if (!did) warning = noActionWarn(steps);
+            if (!did) warning = noActionWarn(steps, gateOk());
             text = stripFake(String(text || '').replace(/<tool_call>[\s\S]*?(<\/tool_call>|$)/g, '').replace(/<\/?tool_result[^>]*>/g, '')).trim();
             if (!text && did) { const lastOk = [...steps].reverse().find(x => x.status === 'ok'); text = 'Xong: ' + lastOk.summary + '.'; }
           }
@@ -831,7 +841,10 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       const okSteps = steps.filter(x => x.status === 'ok');
       text = 'Đã làm:\n' + okSteps.slice(-12).map(x => `- ${x.label || x.name}: ${String(x.summary || '').slice(0, 120)}`).join('\n') + (okSteps.length > 12 ? `\n- … và ${okSteps.length - 12} bước khác` : '');
     }
-    if (fakeSeen && !warning && finishReason !== 'abort' && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) warning = noActionWarn(steps);
+    if (fakeSeen && !warning && finishReason !== 'abort' && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) warning = noActionWarn(steps, gateOk());
+    // B30: không có chữ nào và không bước nào làm được → báo rõ “mô hình không trả lời”, không để câu trả lời rỗng
+    if (!String(text || '').trim() && finishReason !== 'abort' && !steps.some(x => x.status === 'ok')) { text = EMPTY_ANSWER(Math.round((Date.now() - t0) / 1000)); if (warning === NO_ACTION_OK_WARN || warning === NO_ACTION_WARN) warning = null; deps.log && deps.log(`[aivn agent] câu trả lời trống sau ${Math.round((Date.now() - t0) / 1000)} giây, ${steps.length} bước — báo lỗi rõ cho người dùng`); }
+    if (finishReason !== 'abort' && relWins.length && NOT_INSTALLED_RE.test(text || '')) { text = `Ứng dụng này ĐANG MỞ trên máy (cửa sổ “${String(relWins[0].title).slice(0, 60)}”), nhưng mình chưa làm xong việc trên cửa sổ đó. Bạn giao lại việc giúp mình nhé.`; warning = warning || 'AIVN AGENT định nói ứng dụng chưa cài trong khi cửa sổ của nó đang mở — đã sửa lại câu trả lời.'; }
     if (finishReason !== 'abort') { const g = guardClaims(text, steps); text = tidyAnswer(g.text, steps); if (g.warning) warning = warning || g.warning; }
     // B25: tin đã bị gửi NHẦM chỗ → luôn báo rõ cho người dùng (dù mô hình có nói hay không)
     const wrong = steps.filter(x => x.verify && x.verify.wrongChat);
@@ -847,4 +860,4 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
   return { run, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck };
 }
 
-module.exports = { editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };
+module.exports = { noActionWarn, NO_ACTION_WARN, NO_ACTION_OK_WARN, EMPTY_ANSWER, editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };

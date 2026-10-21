@@ -253,7 +253,7 @@
     <section class="view" id="view-server">
       <div class="page">
         <div class="page-head">
-          <div><h2>Máy chủ API cục bộ</h2><p class="muted">Tương thích OpenAI: dùng được với thư viện openai, LangChain, hay bất kỳ công cụ nào cho phép đổi base URL.</p></div>
+          <div><h2>Máy chủ API cục bộ</h2><p class="muted">Tương thích OpenAI: dùng được với thư viện openai, LangChain, hay bất kỳ công cụ nào cho phép đổi địa chỉ máy chủ API.</p></div>
         </div>
         <div class="server-card">
           <label class="switch"><input type="checkbox" id="srvToggle"><span></span></label>
@@ -265,12 +265,12 @@
           <label class="check"><input type="checkbox" id="srvAuto"> Tự bật khi mở ứng dụng</label>
         </div>
         <div class="srv-opts">
-          <div class="srv-opt"><label class="check toggle"><input type="checkbox" id="srvLan"> <span><b>Cho thiết bị khác trong mạng LAN dùng</b><small>Lắng nghe trên mọi địa chỉ của máy (0.0.0.0). Bắt buộc có khoá API. Chỉ bật trong mạng bạn tin tưởng.</small></span></label><div class="small" id="srvLanUrls"></div></div>
-          <div class="srv-opt"><label class="check toggle"><input type="checkbox" id="srvCors"> <span><b>Cho trang web gọi API (CORS)</b><small>Tắt (mặc định): trang web mở trong trình duyệt không gọi được API của bạn. Chỉ bật khi bạn tự làm ứng dụng web cần gọi AIVN.</small></span></label></div>
+          <div class="srv-opt"><label class="check toggle"><input type="checkbox" id="srvLan"> <span><b>Cho thiết bị khác trong mạng nội bộ dùng</b><small>Lắng nghe trên mọi địa chỉ của máy (0.0.0.0). Bắt buộc có khoá API. Chỉ bật trong mạng bạn tin tưởng.</small></span></label><div class="small" id="srvLanUrls"></div></div>
+          <div class="srv-opt"><label class="check toggle"><input type="checkbox" id="srvCors"> <span><b>Cho trang web gọi API</b><small>Tắt (mặc định): trang web mở trong trình duyệt không gọi được API của bạn. Chỉ bật khi bạn tự làm ứng dụng web cần gọi AIVN.</small></span></label></div>
           <div class="srv-opt"><b>🔑 Khoá API</b> <span class="muted small" id="srvKeyState">Chưa có: ai trên máy này cũng gọi được API.</span>
             <div class="row wrap"><code class="srv-key" id="srvKeyShow" hidden></code><button type="button" class="btn sm" id="srvKeyGen">Tạo khoá</button><button type="button" class="btn sm" id="srvKeyReveal" hidden>Hiện &amp; sao chép</button><button type="button" class="btn sm" id="srvKeyClear" hidden>Xoá khoá</button></div></div>
-          <div class="srv-opt"><label class="small">Tự gỡ mô hình nạp theo yêu cầu API (TTL) <select id="srvTtl"><option value="0">Không tự gỡ</option><option value="5">sau 5 phút không dùng</option><option value="15">sau 15 phút không dùng</option><option value="60">sau 60 phút không dùng</option><option value="240">sau 4 giờ không dùng</option></select></label>
-            <small class="muted">Khi yêu cầu API ghi <code>model</code> là mô hình chưa nạp, AIVN tự nạp mô hình đó (JIT); TTL giải phóng bộ nhớ khi không còn ai dùng.</small></div>
+          <div class="srv-opt"><label class="small">Tự gỡ mô hình nạp theo yêu cầu API <select id="srvTtl"><option value="0">Không tự gỡ</option><option value="5">sau 5 phút không dùng</option><option value="15">sau 15 phút không dùng</option><option value="60">sau 60 phút không dùng</option><option value="240">sau 4 giờ không dùng</option></select></label>
+            <small class="muted">Khi yêu cầu API ghi <code>model</code> là mô hình chưa nạp, AIVN tự nạp ngay mô hình đó; tuỳ chọn tự gỡ ở trên giải phóng bộ nhớ khi không còn ai dùng.</small></div>
           <div class="srv-opt"><b>Mô hình đang nạp</b><div class="srv-loaded" id="srvLoaded"></div></div>
         </div>
         <div class="grid2">

@@ -183,7 +183,7 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
         if (server) return resolve(port);
         const s = http.createServer((req, res) => handle(req, res).catch(e => { try { err(res, 500, e.message, 'server_error'); } catch {} }));
         s.once('error', reject);
-        s.listen(p, h, () => { server = s; port = p; host = h; log(`Máy chủ đang chạy tại http://${h}:${p}${h === '0.0.0.0' ? ' (mọi thiết bị trong mạng LAN)' : ''}`); resolve(p); });
+        s.listen(p, h, () => { server = s; port = p; host = h; log(`Máy chủ đang chạy tại http://${h}:${p}${h === '0.0.0.0' ? ' (mọi thiết bị trong mạng nội bộ)' : ''}`); resolve(p); });
       });
     },
     stop() {

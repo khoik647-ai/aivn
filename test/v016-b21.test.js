@@ -54,14 +54,17 @@ test('B25: hết thời gian chờ thẻ duyệt ≠ người dùng từ chối 
 test('B23: “truy cập mạng tắt” chỉ áp dụng web_search/fetch_url; vẫn thao tác cửa sổ Gmail/Docs đang mở; ưu tiên cửa sổ đang mở thay vì outlook.live.com', async () => {
   const a = rd('src/agent/agent.js');
   assert.doesNotMatch(a, /Bạn không tìm kiếm hay mở trang web được/);
-  assert.match(a, /ĐANG TẮT \(CHỈ hai công cụ này\)\. Bạn VẪN thao tác các cửa sổ đang mở \(Gmail, Docs, Outlook/); assert.match(a, /đừng mở outlook\.live\.com khi đã có cửa sổ Outlook/);
+  assert.match(a, /ĐANG TẮT \(CHỈ ba công cụ này\)\. Bạn VẪN thao tác các cửa sổ đang mở \(Gmail, Docs, Outlook/); assert.match(a, /đừng mở outlook\.live\.com khi đã có cửa sổ Outlook/);
   const { createComputerTools } = require('../src/agent/computer-tools');
   let opened = null, focused = null;
   const ct = createComputerTools({ getSettings: () => ({ agentComputer: true }), openExternal: async (u) => { opened = u; }, listWindows: async () => [{ hwnd: 7, title: 'Thư - Hộp thư đến - Outlook', proc: 'chrome' }, { hwnd: 8, title: 'AIVN', proc: 'aivn' }], focusWindow: async (w) => { focused = w.hwnd; }, log: () => {} });
   const r = await ct.exec('open_url', { url: 'https://outlook.live.com/mail/' }, {});
   assert.strictEqual(opened, null, 'không mở trang mới'); assert.strictEqual(focused, 7); assert.match(r.forModel, /ĐÃ có cửa sổ đang mở/);
   const r2 = await ct.exec('open_app', { name: 'Outlook' }, {}); assert.match(r2.forModel, /ĐÃ có cửa sổ đang mở: “Thư - Hộp thư đến - Outlook”/);
-  await ct.exec('open_url', { url: 'https://vanlanguni.edu.vn' }, {}); assert.strictEqual(opened, 'https://vanlanguni.edu.vn/', 'trang khác vẫn mở bình thường');
+  // B29 (QA lượt 4, quyết định của Khôi): truy cập mạng TẮT → open_url bị chặn, báo rõ; BẬT → mở bình thường
+  const r3 = await ct.exec('open_url', { url: 'https://vanlanguni.edu.vn' }, {}); assert.strictEqual(opened, null, 'mạng tắt: không mở trang'); assert.ok(r3.refused); assert.match(r3.forModel, /Cho phép truy cập mạng” đang TẮT/);
+  const ct2 = createComputerTools({ getSettings: () => ({ agentComputer: true, agentWeb: true }), openExternal: async (u) => { opened = u; }, listWindows: async () => [], log: () => {} });
+  await ct2.exec('open_url', { url: 'https://vanlanguni.edu.vn' }, {}); assert.strictEqual(opened, 'https://vanlanguni.edu.vn/', 'mạng bật: trang khác vẫn mở bình thường');
 });
 test('B22: dung lượng tải ở cổng AIVN AGENT gồm cả tệp thị giác (khớp thẻ Khám phá)', () => {
   const m = rd('src/main.js'); assert.match(m, /dlSize: \(c\.size \|\| 0\) \+ \(c\.mmproj && c\.mmproj\.size \|\| 0\)/); assert.match(m, /size: x\.dlSize \|\| x\.size/);

@@ -32,7 +32,7 @@ test('LAN: lắng nghe 0.0.0.0, trạng thái báo đúng địa chỉ', async (
 });
 test('main: LAN bắt buộc khoá API; khoá/LAN/CORS/TTL không đổi được qua settings:set; khoá không gửi sang giao diện; TTL chỉ gỡ mô hình API tự nạp', () => {
   const m = fs.readFileSync(path.join(__dirname, '..', 'src/main.js'), 'utf8');
-  assert.match(m, /if \(settings\.data\.apiLan && !settings\.data\.apiKey\) throw new Error\('Mở cho mạng LAN cần có khoá API/);
+  assert.match(m, /if \(settings\.data\.apiLan && !settings\.data\.apiKey\) throw new Error\('Mở cho mạng nội bộ cần có khoá API/);
   assert.match(m, /apiKey: _k, apiLan: _l, apiCors: _c, apiTtlMin: _t, \.\.\.rest \} = patch/);
   assert.match(m, /const \{ hfToken, cloudBrain: _cb, apiKey, \.\.\.rest \} = settings\.data; return \{ \.\.\.rest, hfTokenSet: !!hfToken, apiKeySet: !!apiKey/);
   assert.match(m, /apiLan: false, apiCors: false, apiKey: '', apiTtlMin: 0/);

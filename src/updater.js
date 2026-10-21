@@ -28,6 +28,20 @@ function publishConfig() {
   return { provider: 'github', owner: pub.owner || PLACEHOLDER, repo: pub.repo || 'aivn' };
 }
 
+// 0.16 bản thử (vd. 0.16.0-beta.1): KHÔNG BAO GIỜ hạ cấp (về 0.15.3) và không đi tìm kênh “beta” — chỉ nhận bản ổn định MỚI HƠN
+function parseV(v) { const m = String(v || '').trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/); return m ? { n: [+m[1], +m[2], +m[3]], pre: m[4] ? m[4].split('.') : [] } : null; }
+function cmpV(a, b) {
+  const x = parseV(a), y = parseV(b); if (!x || !y) return 0;
+  for (let i = 0; i < 3; i++) if (x.n[i] !== y.n[i]) return x.n[i] < y.n[i] ? -1 : 1;
+  if (!x.pre.length || !y.pre.length) return x.pre.length === y.pre.length ? 0 : x.pre.length ? -1 : 1; // 0.16.0-beta.1 < 0.16.0
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+    const p = x.pre[i], q = y.pre[i]; if (p === undefined) return -1; if (q === undefined) return 1;
+    const pn = /^\d+$/.test(p), qn = /^\d+$/.test(q);
+    if (pn && qn) { if (+p !== +q) return +p < +q ? -1 : 1; } else if (pn !== qn) return pn ? -1 : 1; else if (p !== q) return p < q ? -1 : 1;
+  }
+  return 0;
+}
+const isNewer = (next, cur) => cmpV(next, cur) > 0;
 function createUpdater({ send, log }) {
   let autoUpdater = null;
   let state = { status: 'idle' };
@@ -44,10 +58,11 @@ function createUpdater({ send, log }) {
     autoUpdater.autoInstallOnAppQuit = true;
     autoUpdater.logger = { info: (m) => log && log('[cập nhật] ' + m), warn: (m) => log && log('[cập nhật] ' + m), error: (m) => log && log('[cập nhật] lỗi: ' + m), debug: () => {} };
     if (!app.isPackaged) autoUpdater.forceDevUpdateConfig = true;
+    autoUpdater.allowDowngrade = false; autoUpdater.allowPrerelease = false; // bản thử: chỉ nhìn bản ổn định mới nhất (releases/latest), không hạ cấp
     if (process.env.AIVN_UPDATE_URL) autoUpdater.setFeedURL({ provider: 'generic', url: process.env.AIVN_UPDATE_URL }); // chỉ dùng khi kiểm thử
     else autoUpdater.setFeedURL(cfg);
     autoUpdater.on('checking-for-update', () => set({ status: 'checking', error: null }));
-    autoUpdater.on('update-available', (info) => set({ status: 'available', version: info.version, releaseDate: info.releaseDate, canInstallInPlace, releasesUrl }));
+    autoUpdater.on('update-available', (info) => !isNewer(info.version, app.getVersion()) ? set({ status: 'latest', checkedAt: Date.now() }) : set({ status: 'available', version: info.version, releaseDate: info.releaseDate, canInstallInPlace, releasesUrl }));
     autoUpdater.on('update-not-available', () => set({ status: 'latest', checkedAt: Date.now() }));
     autoUpdater.on('download-progress', (p) => set({ status: 'downloading', percent: p.percent, transferred: p.transferred, total: p.total, bytesPerSecond: p.bytesPerSecond }));
     autoUpdater.on('update-downloaded', (info) => set({ status: 'downloaded', version: info.version }));
@@ -82,6 +97,7 @@ function createUpdater({ send, log }) {
   }
 
   async function download() {
+    if (state.version && !isNewer(state.version, app.getVersion())) { set({ status: 'latest', checkedAt: Date.now() }); return state; } // không bao giờ tải bản cũ hơn
     if (!canInstallInPlace) { shell.openExternal(releasesUrl); return state; }
     try { set({ status: 'downloading', percent: 0 }); await get().downloadUpdate(); }
     catch (e) { set({ status: 'error', error: friendly(e) }); }
@@ -94,4 +110,4 @@ function createUpdater({ send, log }) {
   return { check, download, install, openReleases, state: () => ({ ...state, canInstallInPlace, releasesUrl, current: app.getVersion() }), config: cfg };
 }
 
-module.exports = { createUpdater, PLACEHOLDER };
+module.exports = { createUpdater, PLACEHOLDER, cmpV, isNewer };

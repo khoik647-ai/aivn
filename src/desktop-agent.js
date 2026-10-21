@@ -313,7 +313,13 @@ function createDesktopAgent(deps) {
       const searchField = searchConfirmed(t, focusedEl, a);
       const R = SV.regionsOf(s.obs); const P = SV.parseSeen(s.lastSeen || '');
       const g = SV.chatGate({ query: ctx.userQuery, text: a.text, searchField, proc: s.obs && s.obs.win ? s.obs.win.proc : (s.target && s.target.proc) || '', title: s.obs && s.obs.win ? s.obs.win.title : '', state: s, header: [...(R ? R.header : []), P.header].filter(Boolean) });
-      if (g) { deps.log && deps.log('desk', 'Chặn gõ tin: chưa mở đúng người nhận'); return { error: 'chưa mở đúng người nhận', forModel: g, summary: 'chưa mở đúng người nhận — tìm người nhận trước' }; }
+      if (g) {
+        // B27: không để lặp vô tận — lần chặn thứ 3 trong lượt: dừng và báo người dùng (nêu những gì thấy trên màn hình)
+        s.gateBlocks = (s.gateBlocks || 0) + 1; deps.log && deps.log('desk', `Chặn gõ tin: chưa mở đúng người nhận (lần ${s.gateBlocks})`);
+        const hdrNow = [s.obs && s.obs.win ? s.obs.win.title : '', ...(R ? R.header : [])].filter(Boolean)[0] || '';
+        if (s.gateBlocks >= 3) return { error: 'chưa mở đúng người nhận', stop: true, forModel: `ĐÃ BỊ CHẶN ${s.gateBlocks} lần vì màn hình vẫn chưa cho thấy cuộc trò chuyện với “${SV.recipientOf(ctx.userQuery)}”${hdrNow ? ` (đang thấy: “${String(hdrNow).slice(0, 60)}”)` : ''}. DỪNG, không thử lại nữa. Báo người dùng: chưa gửi được vì không xác nhận được đã mở đúng cuộc trò chuyện; nhờ họ mở cuộc trò chuyện đó rồi giao lại việc.`, summary: 'dừng: không xác nhận được người nhận' };
+        return { error: 'chưa mở đúng người nhận', forModel: g, summary: 'chưa mở đúng người nhận — tìm người nhận trước' };
+      }
     }
     // B24: gõ tên/từ khoá (+ Enter) vào ô tìm kiếm ĐÃ XÁC NHẬN là TÌM, không phải gửi — không coi là bước rủi ro, kể cả chế độ “chỉ soạn, đừng gửi”
     const searchTyping = action === 'type_text' && !/\n/.test(String(a.text)) && String(a.text).length <= 80 && searchConfirmed(t, focusedEl, a);
@@ -371,7 +377,13 @@ function createDesktopAgent(deps) {
     const prevAction = s.lastAction;
     // bấm vào kết quả tìm kiếm khớp người nhận → coi như đã mở cuộc trò chuyện (kiểm lại tiêu đề ngay bên dưới)
     const rcp = ctx && ctx.userQuery ? SV.recipientOf(ctx.userQuery) : null;
-    const openPending = !!(rcp && ['click', 'double_click'].includes(action) && s.inSearch && s.foundHit && (SV.relates(s.foundHit.query, rcp) || SV.relates(s.foundHit.name, rcp) || SV.relates(`${t && t.el ? t.el.name || '' : ''}`, rcp)));
+    // B27 (QA lượt 4): sau khi gõ tìm (kể cả gõ + Enter, kết quả chưa ghi nhận) mà bấm vào kết quả → cũng là “mở cuộc trò chuyện”; kiểm lại bằng màn hình ngay dưới
+    const clickedName = `${t && t.el ? t.el.name || '' : ''} ${t && t.query ? t.query : String(a.element || a.target || '')}`;
+    const recentSearch = s.lastSearch && Date.now() - s.lastSearch.at < 300000 ? s.lastSearch : null;
+    const isClick = !!(rcp && ['click', 'double_click'].includes(action));
+    const strongOpen = isClick && !!(s.inSearch && s.foundHit && (SV.relates(s.foundHit.query, rcp) || SV.relates(s.foundHit.name, rcp))); // bấm đúng kết quả đã ghi nhận
+    const clickSearchy = /tìm|tim kiem|search|find/iu.test(clickedName);
+    const openPending = strongOpen || (isClick && !clickSearchy && !!((recentSearch && SV.relates(recentSearch.q, rcp)) || SV.relates(clickedName, rcp)));
     if (['click', 'double_click'].includes(action) && rcp && !openPending && s.chatOpen) s.chatOpen = null; // bấm chỗ khác: có thể đã đổi cuộc trò chuyện
     if (!['type_text', 'wait', 'scroll'].includes(action)) { s.inSearch = 0; s.foundHit = null; }
     s.lastAction = { action, el: t && t.el, keys: a.keys, at: Date.now(), query: t && t.query ? t.query : String(a.element || a.target || '') };
@@ -387,7 +399,10 @@ function createDesktopAgent(deps) {
       const R = SV.regionsOf(o.obs); const hdr = [o.obs.win ? o.obs.win.title : '', ...(R ? R.header : [])].filter(Boolean);
       const v = SV.verifySend({ msg: 'x', recipient: rcp, regions: { header: R ? R.header : [], messages: ['x'], composer: [] }, winTitle: o.obs.win ? o.obs.win.title : '' });
       const readable = R && R.header.length;
-      if (v.recipientSeen || !readable) { s.chatOpen = SV.nameKey(rcp); checks.push(v.recipientSeen ? `Đã mở cuộc trò chuyện với “${rcp}” (thấy tên ở tiêu đề).` : `Đã bấm kết quả “${rcp}”; chưa đọc được tiêu đề — kiểm tra lại bằng screen_look nếu cần.`); }
+      deps.log && deps.log('desk', `Kiểm tra mở chat: tiêu đề “${o.obs.win ? o.obs.win.title : ''}”, đầu khung: ${JSON.stringify(R ? R.header : [])}`);
+      if (SV.chatShown(rcp, o.obs.win ? o.obs.win.title : '', R ? R.header : [])) { s.chatOpen = SV.nameKey(rcp); s.gateBlocks = 0; checks.push(`Đã mở cuộc trò chuyện với “${rcp}” (thấy đúng tên trên màn hình).`); }
+      else if (strongOpen && (v.recipientSeen || !readable)) { s.chatOpen = SV.nameKey(rcp); checks.push(v.recipientSeen ? `Đã mở cuộc trò chuyện với “${rcp}” (thấy tên ở tiêu đề).` : `Đã bấm kết quả “${rcp}”; chưa đọc được tiêu đề — kiểm tra lại bằng screen_look nếu cần.`); }
+      else if (!readable && !SV.chatShown(rcp, '', hdr)) checks.push(`Đã bấm “${String(clickedName).trim().slice(0, 40)}”; chưa đọc được tiêu đề cuộc trò chuyện — gọi screen_look để xem đã mở đúng “${rcp}” chưa rồi mới gõ tin.`);
       else checks.push(`Đã bấm kết quả nhưng tiêu đề cuộc trò chuyện là “${String(hdr.find(h => !/^(zalo|messenger)$/i.test(h)) || hdr[0] || '').slice(0, 40)}”, KHÔNG phải “${rcp}”. Bấm đúng kết quả tên “${rcp}”.`);
     }
     let o2 = o;
@@ -419,7 +434,7 @@ function createDesktopAgent(deps) {
         s.searches = s.searches || []; s.searches.push({ text: q, found: verdict === 'yes' });
         const tried = new Set(s.searches.map(x => x.text));
         const rest = U.searchVariants(s.searches[0].text).filter(v => !tried.has(v));
-        s.inSearch = Date.now(); s.foundHit = null;
+        s.inSearch = Date.now(); s.foundHit = null; s.lastSearch = { q, at: Date.now() }; s.gateBlocks = 0;
         if (verdict === 'yes') {
           // kết quả nằm dưới ô tìm kiếm: chọn phần tử khớp gần ô nhất, tức kết quả đầu tiên (không phải chính chữ trong ô)
           const boxEl = el && el.b ? el : prevAction && prevAction.el && prevAction.el.b && Date.now() - prevAction.at < 300000 ? prevAction.el : null; // ô tìm kiếm = ô đang chọn, hoặc chỗ vừa bấm (gợi ý “Tìm kiếm…” chỉ thấy qua OCR)
