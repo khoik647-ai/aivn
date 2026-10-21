@@ -47,7 +47,37 @@ Get-Content -Encoding UTF8 C:\qa\r1\result.json | ConvertFrom-Json
 
 * `--model`: id trong *Mô hình của tôi*, id danh mục, tên tệp `.gguf`, hoặc viết tắt `2b` / `4b` / `8b` (Qwen3-VL Instruct đã có trên máy).
   Tên được so sau khi chuẩn hoá (bỏ gạch nối/gạch dưới/chấm, không phân biệt hoa thường): `Qwen3VL-8B-Instruct-Q4_K_M` = `qwen3-vl-8b-instruct-q4_k_m`.
-* **An toàn**: mọi thẻ xin phép (gửi, xoá, mua/thanh toán, ghi đè tệp, thao tác hệ thống do AIVN AGENT **tự** đề xuất…) đều **tự TỪ CHỐI**. Không có cách nào để tự cho phép.
+* **An toàn**: mọi thẻ xin phép (gửi, xoá, mua/thanh toán, ghi đè tệp, thao tác hệ thống do AIVN AGENT **tự** đề xuất…) đều **tự TỪ CHỐI**. Ngoại lệ duy nhất là `--approve-send-to` bên dưới (chỉ gửi vào chính mình).
+* **Bước GỬI tin luôn qua thẻ** (từ beta.2.2): câu “không cần hỏi lại” trong lệnh vẫn bỏ thẻ cho các bước khác (sửa tài liệu…), nhưng **không** cho bước gửi tin;
+  công tắc “Tự làm không hỏi” của hồ sơ không áp dụng trong QA.
+* **Bước gửi bị từ chối** (B93): AIVN AGENT dừng lượt; `finalAnswer` nói rõ *“Mình CHƯA gửi tin “…” cho “<đúng tên trong lệnh>”: bước gửi đã bị từ chối…”*
+  (không diễn đạt lại tên, không hỏi lại). `approvals[]` của thẻ gửi có `send: true`, `recipient` (tên trong lệnh), `shownChat` (tiêu đề khung chat giữa + tên trong chữ gợi ý ô soạn) và `text`.
+
+### `--approve-send-to "<tên>"` — chỉ để thử gửi THẬT vào cuộc trò chuyện của chính mình (beta.2.2)
+
+* Chỉ dùng kèm `AIVN_QA_MODE=1` **và** `--agent-task` (kèm `--qa-ui` / `--qa-input-diag` → cờ sai, thoát 2).
+* **Chỉ** nhận tên của cuộc trò chuyện với chính mình: `Cloud của tôi` = `My Documents` = `My Cloud` = `我的文档`… (khớp cả cụm, không phân biệt hoa thường/dấu).
+  Tên khác (người, nhóm, “Cloud”, “My Documents 2”…) → **từ chối chạy**: ghi lý do vào stderr, `aivn.log` và `result.json`, **thoát mã 2**.
+* Tự cho phép **đúng một** bước gửi, và chỉ khi: thẻ là bước GỬI của lớp phủ màn hình, người nhận trong lệnh là cuộc trò chuyện của chính mình, **tiêu đề khung chat giữa**
+  trên màn hình lúc đó đúng là cuộc trò chuyện đó, và lệnh không có “chỉ soạn / đừng gửi”. Mọi thẻ khác (gửi lần hai, xoá, thẻ ngoài lớp phủ…) vẫn bị từ chối.
+  Mỗi quyết định có một dòng `--approve-send-to: CHO PHÉP …` / `KHÔNG cho phép — <lý do>` trong nhật ký. `result.json` có `approvedSends`, `approveSendTo`.
+
+```powershell
+$env:AIVN_QA_MODE = "1"
+& "$env:LOCALAPPDATA\Programs\AIVN\AIVN.exe" --agent-task 'gửi tin "AIVN test beta.2.2 - bỏ qua" cho Cloud của tôi trên Zalo' `
+    --approve-send-to "My Documents" --model 8b --profile D:\AIVN-QA\beta2.2\profile --agent-settings-from main `
+    --out D:\AIVN-QA\beta2.2\self-send\result.json --shots D:\AIVN-QA\beta2.2\self-send\shots --timeout 300 --lang vi
+$LASTEXITCODE   # 0 = đã gửi và kiểm chứng trên màn hình
+```
+
+### `--answer "<câu trả lời>"` — trả lời câu hỏi của AIVN AGENT (B75)
+
+Khi lượt đầu kết thúc bằng một câu hỏi (`asked_user`, vd. “Gửi cho ai?”), bộ chạy trả lời **một lần** bằng câu này (cùng cuộc trò chuyện) rồi để AIVN AGENT làm tiếp
+với **cùng luật xin phép**. `result.json` có `firstTurn` (câu hỏi), `answer`, và kết quả của lượt sau. Lượt đầu không hỏi → cờ không được dùng.
+
+```powershell
+AIVN.exe --agent-task "nhắn giúp mình là mai 8h họp nhé" --answer "Cloud của tôi" --model 8b --out C:\qa\b75\result.json --profile C:\qa\profile --agent-settings-from main
+```
 * **Lệnh hệ thống người dùng nêu rõ** (quyết định sản phẩm B1/B44): câu chỉ là một lệnh rõ ràng như “tăng âm lượng thêm 10%”, “đặt âm lượng 30%”,
   “khoá màn hình” → làm **ngay, không có thẻ**, không qua mô hình (đường tắt). Chỉ khi AIVN AGENT **tự** muốn đổi âm lượng/khoá máy (người dùng không yêu cầu)
   thì mới có thẻ (và trong QA bị tự từ chối). Đường tắt vẫn ghi bước vào `steps[]` (`tool: "system_action"`, `auto: true`, ảnh chụp nếu có `--shots`).
@@ -70,7 +100,8 @@ Get-Content -Encoding UTF8 C:\qa\r1\result.json | ConvertFrom-Json
   "status": "done | failed | blocked | asked_user",
   "reason": "…", "question": "Gửi cho ai?",
   "finalAnswer": "…", "warning": null,
-  "approvals": [{ "kind": "desk|approve|confirm|screen", "title": "…", "tool": "…", "recipient": "…", "answer": "denied" }],
+  "approvals": [{ "kind": "desk|approve|confirm|screen", "title": "…", "tool": "…", "send": true, "recipient": "Cloud của tôi", "shownChat": { "header": ["My Documents"], "composer": "My Documents" }, "text": "…", "answer": "denied | allowed (--approve-send-to “My Documents”)" }],
+  "approvedSends": 0, "approveSendTo": null, "firstTurn": null, "answer": null,
   "steps": [{
     "n": 1, "tool": "screen_act", "args": {…}, "status": "ok", "summary": "…",
     "verification": {…}, "durationMs": 812,
@@ -89,7 +120,7 @@ Get-Content -Encoding UTF8 C:\qa\r1\result.json | ConvertFrom-Json
 # A) Tra cứu trên Chrome — trả lời kèm URL nguồn
 AIVN.exe --agent-task "mở Chrome, tìm 'giá vàng SJC hôm nay', mở kết quả đầu tiên và cho mình biết giá mua vào, kèm đường dẫn nguồn" --model 8b --out C:\qa\chrome\result.json --shots C:\qa\chrome\shots
 
-# B) Google Docs (tài liệu nháp Khôi tạo sẵn) — sửa cần xin phép → ở chế độ QA sẽ "blocked"; thêm câu "không cần hỏi lại" để chạy hết
+# B) Google Docs (tài liệu nháp Khôi tạo sẵn) — sửa cần xin phép → ở chế độ QA sẽ "blocked"; thêm câu "không cần hỏi lại" để chạy hết (không áp dụng cho bước gửi tin)
 AIVN.exe --agent-task "trong Google Docs 'QA nháp', thay tất cả 'ngày mai' bằng 'thứ Hai', không cần hỏi lại" --model 8b --out C:\qa\docs\result.json --shots C:\qa\docs\shots
 
 # C) Soạn tin nhưng không gửi (lời từ chối mang lý do "chỉ soạn")

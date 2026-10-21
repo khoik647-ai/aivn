@@ -669,7 +669,13 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     // 0.15.2: lỗi giữa lượt mang theo số bước công cụ đã chạy, để bên ngoài KHÔNG chạy lại cả lượt khi đã có thao tác thật (tránh gửi tin hai lần)
     return runStore.run(store, () => runInner(args)).then((r) => finishLang(r, args)).catch((e) => { try { if (e && typeof e === 'object') e.stepsDone = (store.steps || []).filter(x => x.status !== 'running' || x.auto).length; } catch {} throw e; });
   }
-  async function runInner({ messages, convoId = null, signal, onToken = () => {}, onStep = () => {}, onStatus = () => {}, headless = false, confirm, confirmScreen, approve = null }) {
+  // B93: câu cuối sau khi bước GỬI bị từ chối — nói rõ CHƯA gửi, giữ NGUYÊN tên người nhận (không diễn đạt lại) và nội dung tin
+  function refusedSendText({ recipient, text } = {}) {
+    const who = String(recipient || '').trim(); const msg = String(text || '').trim();
+    const REFUSED_SEND_MSG = who && msg ? `Mình CHƯA gửi tin “${msg}” cho “${who}”: bước gửi đã bị từ chối nên không có tin nào được gửi.` : who ? `Mình CHƯA gửi tin cho “${who}”: bước gửi đã bị từ chối nên không có tin nào được gửi.` : 'Mình CHƯA gửi tin: bước gửi đã bị từ chối nên không có tin nào được gửi.';
+    return REFUSED_SEND_MSG;
+  }
+  async function runInner({ messages, convoId = null, signal, onToken = () => {}, onStep = () => {}, onStatus = () => {}, headless = false, confirm, confirmScreen, approve = null, qa = false }) {
     const s = S_();
     const names = activeTools({ headless });
     const att = (runStore.getStore() || {}).attachments || [];
@@ -758,7 +764,10 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       // chỉ khi riêng lời nhắc hệ thống + công cụ + yêu cầu hiện tại đã không vừa: báo cần ngữ cảnh lớn hơn (bên ngoài tự tăng ngữ cảnh)
       if (!r.fits && st.contextSize) { const need = r.tokens + toolTokOf(tools) + reserveOf(); const e = new Error(`Lời nhắc cần khoảng ${need} token nhưng ngữ cảnh chỉ có ${st.contextSize}.`); e.code = 'CTX_SMALL'; e.need = need; e.have = st.contextSize; throw e; } }
     // 0.16: “Tự làm không hỏi” — công tắc (giữ qua các lượt) hoặc câu trong yêu cầu (chỉ lượt này); xem autonomy.js
-    const auto = AU.forTurn({ setting: !headless && S_().agentAutonomy === true, query });
+    // QA runner: công tắc “Tự làm không hỏi” của hồ sơ không áp dụng; câu “không cần hỏi lại” trong lệnh vẫn có tác dụng như thường (sửa tài liệu…),
+    // NHƯNG bước GỬI tin luôn phải qua thẻ — bộ chạy QA tự từ chối, hoặc cho phép đúng một lần gửi vào chính mình (--approve-send-to). Không bao giờ tự gửi.
+    const auto = AU.forTurn({ setting: !qa && !headless && S_().agentAutonomy === true, query });
+    if (qa) { auto.askBeforeSend = true; if (auto.on) deps.log && deps.log('[aivn agent] chế độ QA: “không cần hỏi lại” KHÔNG áp dụng cho bước gửi tin — bước gửi vẫn qua thẻ xin phép'); }
     const ctx = { signal, convoId, userQuery: query, auto, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
     const steps = [], seen = new Map(); const retry = RT.createRetryTracker();
     const look = { same: 0, sig: '', hint: '', blocked: 0 }; // B40
@@ -974,11 +983,11 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         onStep({ ...step });
         msgs.push({ role: 'tool', tool_call_id: call.id, content: typeof out.forModel === 'string' && out.forModel ? out.forModel : String(out.forModel ?? out.message ?? out.summary ?? JSON.stringify(out)) || '(không có kết quả)' });
         // B49/B36: công cụ yêu cầu DỪNG (chặn người nhận 3 lần) hoặc tin đã bị GỬI NHẦM → dừng thật, không để mô hình làm tiếp
-        if (out.stop || (out.verify && out.verify.wrongChat)) { hardStop = out.ask ? { why: String(out.error || ''), ask: String(out.ask) } : out.verify && out.verify.wrongChat ? { why: out.verify.why, wrong: true } : { why: String(out.error || out.summary || 'công cụ yêu cầu dừng') }; break; }
+        if (out.stop || (out.verify && out.verify.wrongChat)) { hardStop = out.sendRefused ? { why: String(out.error || ''), sendRefused: out.sendRefused } : out.ask ? { why: String(out.error || ''), ask: String(out.ask) } : out.verify && out.verify.wrongChat ? { why: out.verify.why, wrong: true } : { why: String(out.error || out.summary || 'công cụ yêu cầu dừng') }; break; }
         if (signal?.aborted) break;
       }
       if (signal?.aborted) { finishReason = 'abort'; break; }
-      if (hardStop) { outcome = hardStop.ask ? 'asked_user' : hardStop.wrong ? 'blocked' : 'failed'; text = hardStop.ask ? hardStop.ask : hardStop.wrong ? `⚠ ${hardStop.why}. AIVN AGENT đã dừng, không gửi thêm gì. Bạn mở cuộc trò chuyện đó để thu hồi/xoá tin giúp mình.` : honestOf(hardStop.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng theo yêu cầu của công cụ: ${hardStop.why}`); break; }
+      if (hardStop) { outcome = hardStop.ask ? 'asked_user' : hardStop.wrong || hardStop.sendRefused ? 'blocked' : 'failed'; text = hardStop.sendRefused ? refusedSendText(hardStop.sendRefused) : hardStop.ask ? hardStop.ask : hardStop.wrong ? `⚠ ${hardStop.why}. AIVN AGENT đã dừng, không gửi thêm gì. Bạn mở cuộc trò chuyện đó để thu hồi/xoá tin giúp mình.` : honestOf(hardStop.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng theo yêu cầu của công cụ: ${hardStop.why}`); break; }
       // B39: cùng một cách đã hỏng mà mô hình cứ quay lại (bị chặn 2–3 lần) → dừng sớm, báo trung thực những gì đã thử
       if (look.blocked >= 2) { text = honestOf('quan sát màn hình nhiều lần liền mà mô hình không làm bước nào'); warning = null; finishReason = 'stop'; deps.log && deps.log('[aivn agent] dừng sớm (B40): quan sát lặp lại'); break; }
       { const cs = cyc.stuck(); if (cs) { text = honestOf(cs.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng sớm (B66b ${cs.kind}): ${cs.why}`); break; } }
@@ -1022,7 +1031,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     return { text: (text || '').trim(), steps, usage, finishReason, urls, memories: sys.memories.map(m => m.text), tools: names, warning, outcome };
   }
 
-  return { run, replyLang, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck, localizeText };
+  return { refusedSendText, run, replyLang, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck, localizeText };
 }
 
 module.exports = { scrubToolNames, isAppTask, appOf, NO_APP_ACTION_WARN, noActionWarn, NO_ACTION_WARN, NO_ACTION_OK_WARN, EMPTY_ANSWER, editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };

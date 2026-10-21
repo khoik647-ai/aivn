@@ -44,6 +44,12 @@ test('B90 thật (Electron + Xvfb, Zalo giả 3 cột): “My Documents” mở 
   assert.ok(!d.error, String(d.error));
   assert.ok(!st['b90-open-send'].blocked, st['b90-open-send'].forModel + st['b90-open-send'].summary);
   assert.ok(st['b90-wrong-open'].blocked); assert.match(st['b90-wrong-open'].forModel, /ô Tìm kiếm/);
-  assert.deepStrictEqual(d.final.sent, [{ to: 'My Documents', text: 'AIVN test beta.2.2 - bỏ qua' }]);
+  // beta.2.2: bộ chạy QA thật — --approve-send-to cho phép đúng bước gửi tới chính mình (tiêu đề khung “My Documents”); không có cờ → từ chối, dừng, ghi người nhận
+  const ap = d.qaApprove; assert.strictEqual(ap.approvals.length, 1); assert.match(ap.approvals[0].answer, /--approve-send-to/);
+  assert.strictEqual(ap.approvals[0].recipient, 'Cloud của tôi'); assert.ok(ap.approvals[0].shownChat.header.includes('My Documents'), JSON.stringify(ap.approvals[0].shownChat));
+  assert.strictEqual(ap.approvals[0].text, 'AIVN self 1'); assert.strictEqual(ap.status, 'done', ap.reason); assert.strictEqual(ap.exitCode, 0);
+  const dn = d.qaDeny; assert.strictEqual(dn.approvals[0].answer, 'denied'); assert.strictEqual(dn.approvals[0].recipient, 'Cloud của tôi'); assert.strictEqual(dn.status, 'blocked');
+  const act2 = d.qaActs.find(x => x.text === 'AIVN self 2'); assert.ok(act2.stop && act2.sendRefused, JSON.stringify(act2)); assert.strictEqual(act2.sendRefused.recipient, 'Cloud của tôi');
+  assert.deepStrictEqual(d.final.sent, [{ to: 'My Documents', text: 'AIVN test beta.2.2 - bỏ qua' }, { to: 'My Documents', text: 'AIVN self 1' }]);
   assert.match(fs.readFileSync(path.join(ud, 'logs', 'aivn.log'), 'utf8'), /Chốt người nhận \(B90\)/);
 });

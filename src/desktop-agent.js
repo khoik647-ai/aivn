@@ -637,8 +637,12 @@ function createDesktopAgent(deps) {
       const crop = s.shot ? thumbOf(s.shot).src : null;
       const logWho = gate.send && gateRcp ? ` · người nhận “${gateRcp}”` : '';
       deps.log && deps.log('desk', `Xin phép (đã hỏi)${gate.send ? ' — bước GỬI' : risk ? ' — bước quan trọng' : ''}: screen_act ${action} · ${desc}${logWho}`);
+      // B93: thẻ GỬI mang đúng tên người nhận (theo lệnh) + tên cuộc trò chuyện đang hiện trên màn hình (tiêu đề khung giữa / chữ gợi ý ô soạn)
+      const sendInfo = gate.send ? (() => { const sendText = action === 'type_text' ? String(a.text || '').replace(/\n+$/, '') : s.lastTyped || ''; let shown = null;
+        try { const R = SV.regionsOf(s.obs); shown = { header: R ? R.header.slice(0, 4) : [], composer: SV.composerTarget([...(R ? R.composer : []), ...((s.obs && s.obs.elements) || []).flatMap(e => [e.placeholder, e.name])].filter(Boolean)), title: s.obs && s.obs.win ? s.obs.win.title : '' }; } catch {}
+        return { send: true, recipient: gateRcp || null, sendText, shown }; })() : {};
       const r = await ask({ action, title: risk ? '⚠ Bước quan trọng — kiểm tra kỹ' : 'AIVN AGENT muốn làm bước này', desc: desc.charAt(0).toUpperCase() + desc.slice(1), risk, text: action === 'type_text' ? String(a.text) : null,
-        window: s.obs && s.obs.win ? s.obs.win.title : '', image: s.shot ? s.shot.dataUrl : crop, box, via: t ? t.via : null, mode });
+        window: s.obs && s.obs.win ? s.obs.win.title : '', image: s.shot ? s.shot.dataUrl : crop, box, via: t ? t.via : null, mode, ...sendInfo });
       deps.log && deps.log('desk', `Xin phép: người dùng ${r.ok ? 'CHO PHÉP' : r.timeout ? 'không trả lời (hết giờ)' : 'TỪ CHỐI'} — screen_act ${action} · ${desc}${logWho}${r.reason ? ` · lý do “${String(r.reason).slice(0, 80)}”` : ''}`);
       if (!r.ok && r.timeout) { // B25: không ai trả lời thẻ ≠ người dùng từ chối
         ov('target', { box: null }); s.lastAction = null;
@@ -648,6 +652,13 @@ function createDesktopAgent(deps) {
         ov('target', { box: null });
         const reason = String(r.reason || '').trim();
         s.lastAction = null;
+        // B93 (máy thật beta.2.1): bị từ chối bước GỬI (không kèm góp ý sửa, hoặc lời từ chối dứt khoát của QA) → DỪNG lượt, câu cuối nói rõ CHƯA gửi
+        // và dùng ĐÚNG tên người nhận (mô hình từng tự đổi thành “Cloud của bạn” và hỏi lại “bạn có muốn gửi không?”)
+        if (gate.send && (!reason || r.final)) {
+          const who = sendInfo.recipient || ''; const msg = String(sendInfo.sendText || '').slice(0, 120);
+          deps.log && deps.log('desk', `Bước GỬI bị từ chối → dừng lượt, không gửi${who ? ` (người nhận “${who}”)` : ''}`);
+          return { refused: true, stop: true, sendRefused: { recipient: who, text: msg }, error: 'bước gửi bị từ chối', forModel: `Bước GỬI tin${who ? ` tới “${who}”` : ''} đã bị TỪ CHỐI — tin CHƯA được gửi.`, summary: 'bị từ chối' + (reason ? ': ' + reason.slice(0, 60) : '') };
+        }
         return { refused: true, forModel: `Người dùng KHÔNG cho phép: ${desc}.${reason ? ` Lý do của người dùng: "${reason.slice(0, 300)}". Hãy làm theo góp ý này.` : ' Dừng thao tác này và hỏi người dùng muốn làm gì.'}`, summary: 'bị từ chối' + (reason ? ': ' + reason.slice(0, 60) : '') };
       }
       if (r.mode === 'important' && mode !== 'important' && deps.setSettings) deps.setSettings({ agentScreenMode: 'important' });

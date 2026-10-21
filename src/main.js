@@ -640,7 +640,7 @@ async function runAgentTurn({ reqId, convoId, messages, headless = false, signal
   if (comp) computerSessionStart();
   const files = (Array.isArray(attachments) ? attachments : []).filter(f => f && typeof f.path === 'string' && path.isAbsolute(f.path) && fs.existsSync(f.path) && fs.statSync(f.path).isFile()).slice(0, 10);
   const tb = tokenBatcher(reqId);
-  try { return await agent.run({ messages, convoId, signal, headless, attachments: files, confirm: qa ? qa.confirm : (...a) => { tb.flush(); return askConfirm(...a); }, confirmScreen: qa ? qa.confirmScreen : (...a) => { tb.flush(); return askScreen(...a); }, approve: qa ? qa.approve : (card) => { tb.flush(); return askApproval(card); }, // QA runner: thẻ xin phép luôn bị TỪ CHỐI tự động (qa-runner.js)
+  try { return await agent.run({ messages, convoId, signal, headless, qa: !!qa, attachments: files, confirm: qa ? qa.confirm : (...a) => { tb.flush(); return askConfirm(...a); }, confirmScreen: qa ? qa.confirmScreen : (...a) => { tb.flush(); return askScreen(...a); }, approve: qa ? qa.approve : (card) => { tb.flush(); return askApproval(card); }, // QA runner: thẻ xin phép luôn bị TỪ CHỐI tự động (qa-runner.js)
     onToken: (t) => reqId && tb.push(t),
     onStep: (st) => { tb.flush(); if (qa && qa.onStep) qa.onStep(st); reqId && send('agent:step', { reqId, step: slimStep(st) }); },
     onStatus: (st) => { tb.flush(); reqId && send('agent:status', { reqId, ...st }); } }); }
@@ -2264,6 +2264,15 @@ q.addEventListener('input',e=>list(q.value));list('');open(${B90 ? "'My Document
         await t.webContents.executeJavaScript("open('Nhóm Lớp K27')"); await sleep(400); await d.look({ window: 'Zalo' }, c5);
         const d2 = c5; d2.userQuery = 'gửi tin "lần hai" cho Cloud của tôi trên Zalo';
         await step5('b90-wrong-open', { action: 'type_text', text: 'lần hai', submit: true });
+        // beta.2.2: bộ chạy QA thật (qa-runner.run) + desktop-agent thật; “lượt AIVN AGENT” giả chỉ gọi d.act (không mô hình) — thẻ gửi phải mang recipient + tiêu đề khung
+        const QAR = require('./qa-runner');
+        const qaTurn = (text) => async () => { const c = { ...ctx, userQuery: `gửi tin "${text}" cho Cloud của tôi trên Zalo`, auto: { on: false } }; await d.look({ window: 'Zalo' }, c);
+          const r = await d.act({ action: 'type_text', text, submit: true }, c); out.qaActs = (out.qaActs || []).concat([{ text, summary: r.summary || r.error || '', refused: !!r.refused, stop: !!r.stop, sendRefused: r.sendRefused || null, sent: !!(r.verify && r.verify.sent) }]);
+          return { outcome: r.verify && r.verify.sent ? 'done' : 'blocked', text: r.sendRefused ? 'từ chối' : 'Đã gửi.', steps: [{ id: text, name: 'screen_act', status: r.refused ? 'refused' : 'ok', verify: r.verify || null }] }; };
+        await t.webContents.executeJavaScript("open('My Documents')"); await sleep(400);
+        const qd = { version: 't', engine: { status: () => ({ loaded: true, id: 'fake', path: '/fake.gguf' }) }, listModels: () => [], desk: d, LOG };
+        out.qaApprove = await QAR.run({ task: 'gửi tin "AIVN self 1" cho Cloud của tôi trên Zalo', out: path.join(dir, 'qa-approve.json'), timeout: 60, approveSendTo: 'My Documents' }, { ...qd, runAgentTurn: qaTurn('AIVN self 1') });
+        out.qaDeny = await QAR.run({ task: 'gửi tin "AIVN self 2" cho Cloud của tôi trên Zalo', out: path.join(dir, 'qa-deny.json'), timeout: 60 }, { ...qd, runAgentTurn: qaTurn('AIVN self 2') });
         out.final = await st(); throw null;
       }
       await step5('b85-before-open', { action: 'type_text', text: 'AIVN test - thử beta.3', submit: true });
@@ -2985,6 +2994,7 @@ async function qaRun(req) {
 // AIVN_QA_MODE=1 + cờ QA nhưng tham số sai: KHÔNG mở AIVN như thường (bot QA sẽ chờ mãi) → ghi result.json nếu biết --out, thoát mã 2
 if (qaReq.invalid && String(process.env.AIVN_QA_MODE || '') === '1') {
   try { process.stderr.write('[AIVN QA] ' + qaReq.warn + '\n'); } catch {}
+  try { LOG.log('qa', qaReq.warn + ' → thoát mã 2'); } catch {}
   try { const raw = QAR.parseArgs(process.argv); if (raw && raw.out) QAR.writeJson(path.resolve(raw.out), { schema: 1, status: 'failed', exitCode: 2, reason: qaReq.warn }); } catch {}
   process.exit(2);
 }

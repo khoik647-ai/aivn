@@ -5,9 +5,13 @@
 // KHÔNG có cổng mạng/HTTP (chỉ dòng lệnh). Chạy đúng vòng AIVN AGENT bình thường, MỌI cổng an toàn giữ nguyên;
 // bước cần xin phép (gửi/xoá/mua/khoá/âm lượng…) luôn bị TỪ CHỐI tự động — không bao giờ tự cho phép.
 // Mã thoát: 0 = done · 2 = failed/blocked · 3 = asked_user.
+// beta.2.2 (chỉ dùng kèm AIVN_QA_MODE=1 + --agent-task):
+//   --approve-send-to "<tên>"  tự CHO PHÉP đúng MỘT bước gửi — CHỈ tới cuộc trò chuyện của chính người dùng (Cloud của tôi / My Documents / My Cloud…),
+//                              và chỉ khi tiêu đề khung chat giữa trên màn hình đúng là cuộc trò chuyện đó. Tên khác → từ chối chạy, thoát mã 2.
+//   --answer "<câu trả lời>"   AIVN AGENT hỏi lại (asked_user) → trả lời MỘT lần bằng câu này rồi cho AIVN AGENT làm tiếp.
 const fs = require('fs'); const path = require('path');
 
-const FLAGS = { '--agent-task': 'task', '--qa-ui': 'script', '--profile': 'profile', '--model': 'model', '--out': 'out', '--shots': 'shots', '--timeout': 'timeout', '--lang': 'lang', '--qa-input-diag': 'inputDiag', '--agent-settings-from': 'agentFrom' };
+const FLAGS = { '--agent-task': 'task', '--qa-ui': 'script', '--profile': 'profile', '--model': 'model', '--out': 'out', '--shots': 'shots', '--timeout': 'timeout', '--lang': 'lang', '--qa-input-diag': 'inputDiag', '--agent-settings-from': 'agentFrom', '--approve-send-to': 'approveSendTo', '--answer': 'answer' };
 const BOOL = new Set(['--qa-input-diag']); // cờ không nhận giá trị
 const LANGS = ['vi', 'en', 'zh'];
 // lệnh nói rõ “chỉ soạn, đừng gửi”: lời từ chối mang lý do đó để AIVN AGENT dừng trước bước gửi (vẫn KHÔNG cho phép)
@@ -27,6 +31,9 @@ function parseArgs(argv = []) {
   }
   return seen ? a : null;
 }
+// --approve-send-to: chỉ cuộc trò chuyện với CHÍNH MÌNH (nhóm tên khác của “Cloud của tôi”, khớp chặt cả cụm)
+const SELF_CHAT = () => require('./agent/send-verify').namesFor('Cloud của tôi');
+function isSelfChat(name) { const SV = require('./agent/send-verify'); const k = SV.nameKey(String(name || '')); return !!k && SELF_CHAT().some(n => SV.nameKey(n) === k); }
 // kiểm tra & chuẩn hoá; trả { ok, args, error }
 function validate(a, { cwd = process.cwd() } = {}) {
   if (!a) return { ok: false, error: 'không có cờ QA' };
@@ -40,7 +47,16 @@ function validate(a, { cwd = process.cwd() } = {}) {
   const agentFrom = a.agentFrom != null ? String(a.agentFrom).trim().toLowerCase() : null;
   if (agentFrom != null && agentFrom !== 'main') return { ok: false, error: '--agent-settings-from chỉ nhận "main"' };
   if (agentFrom && !a.profile) return { ok: false, error: '--agent-settings-from main chỉ dùng kèm --profile <thư mục> (không có --profile thì đã dùng cài đặt thật)' };
-  return { ok: true, args: { task, model: a.model ? String(a.model).trim() : null, out, shots, timeout, lang, profile: a.profile ? path.resolve(cwd, a.profile) : null, agentFrom } };
+  let approveSendTo = null;
+  if (a.approveSendTo != null) {
+    const n = String(a.approveSendTo).trim();
+    if (!n) return { ok: false, error: '--approve-send-to cần tên cuộc trò chuyện (chỉ nhận cuộc trò chuyện của chính bạn: ' + SELF_CHAT().slice(0, 3).join(' / ') + ')' };
+    if (!isSelfChat(n)) return { ok: false, error: `--approve-send-to TỪ CHỐI “${n.slice(0, 60)}”: chỉ được tự cho phép gửi vào cuộc trò chuyện của chính bạn (${SELF_CHAT().join(' / ')}), không bao giờ cho người khác` };
+    approveSendTo = n;
+  }
+  let answer = null;
+  if (a.answer != null) { answer = String(a.answer).trim(); if (!answer) return { ok: false, error: '--answer cần câu trả lời' }; if (answer.length > 500) return { ok: false, error: '--answer quá dài (tối đa 500 ký tự)' }; }
+  return { ok: true, args: { task, model: a.model ? String(a.model).trim() : null, out, shots, timeout, lang, profile: a.profile ? path.resolve(cwd, a.profile) : null, agentFrom, approveSendTo, answer } };
 }
 // cổng bật: AIVN_QA_MODE=1 VÀ có cờ. Trả { enabled, args, warn }
 function fromArgv(argv, env = process.env, opts) {
@@ -49,6 +65,7 @@ function fromArgv(argv, env = process.env, opts) {
   const kinds = [raw.task != null && 'agent-task', raw.script != null && 'qa-ui', raw.inputDiag != null && 'input-diag'].filter(Boolean);
   if (kinds.length > 1) return { enabled: false, args: null, invalid: true, warn: 'Cờ QA không hợp lệ: chỉ dùng một trong --agent-task, --qa-ui hoặc --qa-input-diag mỗi lần chạy' };
   const kind = kinds[0] || 'agent-task';
+  if (kind !== 'agent-task' && (raw.approveSendTo != null || raw.answer != null)) return { enabled: false, args: null, invalid: true, warn: 'Cờ QA không hợp lệ: --approve-send-to và --answer chỉ dùng kèm --agent-task' };
   const v = validateKind(kind, raw, opts); if (!v.ok) return { enabled: false, args: null, invalid: true, warn: `Cờ QA không hợp lệ: ${v.error}` };
   return { enabled: true, kind, args: v.args, warn: null };
 }
@@ -109,9 +126,20 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
   const open = new Map(); let denied = 0, r = null, error = null, timedOut = false; let restoreLang = null;
   const ac = new AbortController(); const timer = setTimeout(() => { timedOut = true; ac.abort(); }, args.timeout * 1000);
   // ghi lại + trả lời một thẻ xin phép (đồng bộ). Thẻ ngoài lớp phủ màn hình (confirm/approve/screen) luôn coi là bước quan trọng → TỪ CHỐI
-  const ask = (kind, req = {}) => { const risk = kind !== 'desk' || isRiskyAsk(req); const a = risk ? answerFor({ ...req, risk: true }, { draft }) : { ok: true, reason: '' }; if (!a.ok) denied++;
-    res.approvals.push({ kind, at: Date.now() - t0, title: req.title || req.label || req.kind || null, tool: req.tool || null, risk, recipient: req.recipient || null, desc: String(req.desc || req.message || req.text || '').slice(0, 300), answer: a.ok ? 'allowed (không rủi ro)' : 'denied' });
-    deps.LOG && deps.LOG.log('qa', `QA tự trả lời thẻ ${kind}: ${a.ok ? 'làm (không rủi ro)' : 'TỪ CHỐI'} — ${req.title || req.desc || req.kind || ''}`); return a; };
+  let sendApproved = 0;
+  // --approve-send-to: CHỈ thẻ GỬI của lớp phủ màn hình, người nhận theo lệnh là cuộc trò chuyện của chính mình, tiêu đề khung giữa ĐÚNG là nó, chưa cho phép lần nào
+  const selfSend = (kind, req) => {
+    if (!args.approveSendTo || kind !== 'desk' || !req.send) return null;
+    const hdr = ((req.shown && req.shown.header) || []).find(isSelfChat);
+    const why = draft ? 'lệnh nói chỉ soạn, đừng gửi' : sendApproved ? 'đã cho phép một lần gửi rồi' : !isSelfChat(req.recipient) ? `người nhận “${req.recipient || '?'}” không phải cuộc trò chuyện của chính bạn`
+      : !hdr ? `tiêu đề khung chat trên màn hình (${JSON.stringify(((req.shown && req.shown.header) || []).slice(0, 2))}) không phải cuộc trò chuyện của chính bạn` : null;
+    deps.LOG && deps.LOG.log('qa', why ? `--approve-send-to: KHÔNG cho phép — ${why}` : `--approve-send-to: CHO PHÉP gửi tới “${req.recipient}” (tiêu đề khung chat “${hdr}”)`);
+    return why ? null : hdr;
+  };
+  const ask = (kind, req = {}) => { const risk = kind !== 'desk' || isRiskyAsk(req); const self = risk ? selfSend(kind, req) : null;
+    const a = self ? { ok: true, reason: '' } : risk ? { ...answerFor({ ...req, risk: true }, { draft }), final: true } : { ok: true, reason: '' }; if (!a.ok) denied++; if (self) sendApproved++;
+    res.approvals.push({ kind, at: Date.now() - t0, title: req.title || req.label || req.kind || null, tool: req.tool || null, risk, send: !!req.send, recipient: req.recipient || null, shownChat: req.shown ? { header: req.shown.header || [], composer: req.shown.composer || null } : null, text: req.sendText != null ? String(req.sendText).slice(0, 300) : null, desc: String(req.desc || req.message || req.text || '').slice(0, 300), answer: self ? `allowed (--approve-send-to “${args.approveSendTo}”)` : a.ok ? 'allowed (không rủi ro)' : 'denied' });
+    deps.LOG && deps.LOG.log('qa', `QA tự trả lời thẻ ${kind}: ${self ? 'CHO PHÉP (--approve-send-to)' : a.ok ? 'làm (không rủi ro)' : 'TỪ CHỐI'} — ${req.title || req.desc || req.kind || ''}${req.recipient ? ` · người nhận “${req.recipient}”` : ''}`); return a; };
   let n = 0; const pendingSteps = [];
   async function onStep1(s) {
           if (s.status === 'running' || s.status === 'pending') { open.set(s.id, { i0: lines.length, t: Date.now() }); return; }
@@ -136,10 +164,18 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
     if (args.shots) fs.mkdirSync(args.shots, { recursive: true });
     if (deps.desk && deps.desk.setBenchAnswer) deps.desk.setBenchAnswer((req) => ask('desk', req));
     const tr = Date.now();
-    r = await deps.runAgentTurn({ reqId: null, convoId: 'qa-' + runId, messages: [{ role: 'user', content: args.task }], headless: false, signal: ac.signal,
+    const turn = (messages) => deps.runAgentTurn({ reqId: null, convoId: 'qa-' + runId, messages, headless: false, signal: ac.signal,
       qa: { confirm: async (req) => { ask('confirm', req); return false; }, confirmScreen: async (req) => { ask('screen', req); return { ok: false }; },
         approve: async (card) => { const x = ask('approve', card); return { ok: false, reason: x.reason }; },
         onStep: (s) => { const p = onStep1(s); pendingSteps.push(p); return p; } } });
+    r = await turn([{ role: 'user', content: args.task }]);
+    // --answer: AIVN AGENT hỏi lại → trả lời MỘT lần rồi làm tiếp (cùng cuộc trò chuyện, cùng luật xin phép)
+    if (args.answer && r && (r.outcome === 'asked_user' || r.asked) && !ac.signal.aborted) {
+      await Promise.allSettled(pendingSteps);
+      res.firstTurn = { outcome: r.outcome || null, asked: r.asked || null, question: String(r.text || '').slice(0, 1000) }; res.answer = args.answer;
+      deps.LOG && deps.LOG.log('qa', `QA trả lời câu hỏi của AIVN AGENT (--answer): “${args.answer.slice(0, 120)}”`);
+      r = await turn([{ role: 'user', content: args.task }, { role: 'assistant', content: String(r.text || '') }, { role: 'user', content: args.answer }]);
+    }
     // B89: onStep chụp ảnh (bất đồng bộ) rồi mới ghi bước — đường tắt (lệnh hệ thống) trả kết quả ngay → phải chờ hết trước khi viết result.json
     await Promise.allSettled(pendingSteps);
     if (r && Array.isArray(r.steps)) for (const s of r.steps) if (s && s.status !== 'running' && !res.steps.some(x => x.id === s.id)) res.steps.push({ n: res.steps.length + 1, id: s.id, tool: s.name, args: s.args || null, status: s.status, summary: s.summary || null, verification: s.verify || s.check || null, durationMs: s.ms ?? null, debug: [], shot: null, auto: !!s.auto });
@@ -148,7 +184,7 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
   } catch (e) { error = e; }
   finally { clearTimeout(timer); untap(); if (deps.desk && deps.desk.setBenchAnswer) deps.desk.setBenchAnswer(null); if (restoreLang) { try { restoreLang(); } catch {} } }
   const s = statusOf(r, { denied, draft, error: timedOut ? null : error, timedOut, task: args.task });
-  Object.assign(res, { status: s.status, reason: s.reason || null, question: s.question || null, finalAnswer: r ? r.text || '' : null, warning: r ? r.warning || null : null, draftOnly: draft, deniedApprovals: denied, exitCode: exitCodeOf(s.status) });
+  Object.assign(res, { status: s.status, reason: s.reason || null, question: s.question || null, finalAnswer: r ? r.text || '' : null, warning: r ? r.warning || null : null, draftOnly: draft, deniedApprovals: denied, approvedSends: sendApproved, approveSendTo: args.approveSendTo || null, exitCode: exitCodeOf(s.status) });
   res.timings.totalMs = Date.now() - t0; res.timings.finishedAt = new Date().toISOString();
   res.log = lines.slice(-600);
   try { writeJson(args.out, res); } catch (e) { deps.LOG && deps.LOG.log('qa', 'Không ghi được result.json: ' + e.message); }
@@ -161,4 +197,4 @@ async function waitResult(out, runId, ms, sleep = (t) => new Promise(r => setTim
   while (Date.now() < end) { try { const j = JSON.parse(fs.readFileSync(out, 'utf8')); if (j && j.runId === runId) return j; } catch {} await sleep(500); }
   return null;
 }
-module.exports = { parseArgs, validate, validateKind, fromArgv, resolveModel, isRiskyAsk, answerFor, statusOf, exitCodeOf, run, waitResult, writeJson, DRAFT_RE };
+module.exports = { isSelfChat, SELF_CHAT, parseArgs, validate, validateKind, fromArgv, resolveModel, isRiskyAsk, answerFor, statusOf, exitCodeOf, run, waitResult, writeJson, DRAFT_RE };
