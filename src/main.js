@@ -53,7 +53,7 @@ const QA_PROFILE = (() => { try { const q = require('./qa-runner').fromArgv(proc
   try { const lf = path.join(real, 'license.json'); if (fs.existsSync(lf)) { fs.copyFileSync(lf, path.join(dir, 'license.json')); } } catch {}
   return { dir, real, models: path.join(real, 'models'), agentFrom: q.args.agentFrom || null }; } catch { return null; } })();
 const LOG = require('./logger');
-LOG.init(path.join(app.getPath('userData'), 'logs'));
+LOG.init(path.join(app.getPath('userData'), 'logs'), app.getVersion()); // B88: nâng cấp → tệp nhật ký mới có BOM
 { const os_ = require('os'); LOG.block('app', `Khởi động AIVN ${app.getVersion()}${app.isPackaged ? '' : ' (mã nguồn)'}`, [`Hệ điều hành: ${process.platform} ${process.arch} ${os_.release()}${process.getSystemVersion ? ' (' + process.getSystemVersion() + ')' : ''}`, `CPU: ${(os_.cpus()[0] || {}).model || '?'} · ${os_.cpus().length} luồng`, `RAM: ${(os_.totalmem() / 1024 ** 3).toFixed(1)} GB (trống ${(os_.freemem() / 1024 ** 3).toFixed(1)} GB)`, `Electron ${process.versions.electron} · thư mục dữ liệu: ${app.getPath('userData')}`]); }
 process.on('uncaughtException', (e) => { LOG.block('crash', 'Lỗi không bắt được (tiến trình chính): ' + (e && e.message), [e && e.stack]); });
 process.on('unhandledRejection', (e) => { LOG.log('app', 'Promise bị từ chối không xử lý: ' + (e && e.message || e)); });

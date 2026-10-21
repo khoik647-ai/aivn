@@ -14,9 +14,23 @@ function redact(v, depth = 0) {
 }
 const short = (s, n = 400) => { s = String(s); return s.length > n ? s.slice(0, n) + `…(+${s.length - n} ký tự)` : s; };
 function fmt(x) { if (x === undefined) return ''; if (typeof x === 'string') return short(redact(x), 4000); try { return short(JSON.stringify(redact(x)), 4000); } catch { return String(x); } }
-function init(logDir) {
+// B88: sau khi NÂNG CẤP (phiên bản khác lần trước) hoặc tệp cũ KHÔNG có BOM (bản cũ ghi UTF-8 không BOM — nối thêm thì
+// không bao giờ có BOM) → xoay tệp cũ sang .1 và mở tệp MỚI có BOM. Phiên bản lần trước lưu ở logs/.version.
+function hasBom(f) { try { const fd = fs.openSync(f, 'r'); try { const b = Buffer.alloc(3); return fs.readSync(fd, b, 0, 3, 0) === 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf; } finally { fs.closeSync(fd); } } catch { return true; } }
+function fresh(f, why) { try { if (!fs.statSync(f).size) return null; } catch { return null; } try { fs.rmSync(f + '.1', { force: true }); fs.renameSync(f, f + '.1'); return why; } catch { return null; } }
+function init(logDir, version) {
   dir = logDir; file = path.join(dir, 'aivn.log'); engineFile = path.join(dir, 'engine.log');
-  try { fs.mkdirSync(dir, { recursive: true }); for (const f of [file, engineFile]) fs.appendFileSync(f, withBom(f, ''), 'utf8'); broken = null; } catch (e) { broken = e.message; try { process.stderr.write('[AIVN] không ghi được nhật ký: ' + e.message + '\n'); } catch {} }
+  const rotated = [];
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const vf = path.join(dir, '.version'); let prev = null; try { prev = fs.readFileSync(vf, 'utf8').trim() || null; } catch {}
+    const upgraded = !!(version && prev !== String(version));
+    for (const f of [file, engineFile]) { const why = upgraded ? `nâng cấp ${prev || '(cũ)'} → ${version}` : !hasBom(f) ? 'tệp cũ không có BOM' : null; if (why && fresh(f, why)) rotated.push(`${path.basename(f)} → ${path.basename(f)}.1 (${why})`); }
+    for (const f of [file, engineFile]) fs.appendFileSync(f, withBom(f, ''), 'utf8');
+    if (version) try { fs.writeFileSync(vf, String(version)); } catch {}
+    broken = null;
+  } catch (e) { broken = e.message; try { process.stderr.write('[AIVN] không ghi được nhật ký: ' + e.message + '\n'); } catch {} }
+  if (rotated.length) log('app', 'Nhật ký mới (UTF-8 có BOM); tệp cũ đã xoay vòng: ' + rotated.join('; '));
   return file;
 }
 function rotate(f) { try { if (fs.statSync(f).size > MAX) { try { fs.rmSync(f + '.1', { force: true }); } catch {} fs.renameSync(f, f + '.1'); } } catch {} }
