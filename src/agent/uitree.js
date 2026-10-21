@@ -409,6 +409,14 @@ function searchVariants(text) {
 }
 // Chữ OCR trông như ô nhập (chữ gợi ý "Tìm kiếm", "Nhập tin nhắn…"): ở ứng dụng không đọc được qua Trợ năng (Zalo…), đó là ô nhập thật
 const INPUT_HINT = /(^|\s)(tìm|tim|search|find|nhập|nhap|soạn|soan|gõ|type|write|enter)(\s|$|…|\.)|tìm kiếm|tim kiem|tin nhắn|tin nhan|message|aa$/i;
+// B76: OCR đọc sai dấu/ký tự (“Lich hop nhém” cho “Lịch họp nhóm”) — needle (đã fold) gần đúng nằm trong hay: khoảng cách sửa ≤ 25% độ dài trên một cửa sổ trượt
+function fuzzyHas(hay, needle) {
+  const h = String(hay || ''), n = String(needle || ''); if (!n) return true; if (h.includes(n)) return true; if (n.length < 5) return false;
+  const L = n.length, lim = Math.floor(L * 0.25);
+  const lev = (a, b) => { let prev = Array.from({ length: b.length + 1 }, (_, j) => j); for (let i = 1; i <= a.length; i++) { const cur = [i]; for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; } return prev[b.length]; };
+  for (let i = 0; i <= Math.max(0, h.length - L + lim); i++) for (const w of [L - lim, L, L + lim]) { if (w <= 0 || i + w > h.length + 0) continue; if (lev(h.slice(i, i + w), n) <= lim) return true; }
+  return h.length < L && h.length >= L - lim && lev(h, n) <= lim;
+}
 const inputLike = (el) => !!(el && !el.editable && el.ocr && String(el.name || '').trim().length <= 40 && INPUT_HINT.test(String(el.name || '').trim()));
 // B60 (QA lượt 7): tham chiếu id phần tử do mô hình viết: “e10”, “[e12]”, “e10 Trần Quỳnh Anh”, “e3: "Send"”, “e11 (Tiêu đề)”.
 // (?!\d) chặn quay lui: “e10” KHÔNG được hiểu thành e1 + nhãn “0”, “e22” không thành e2 + “2”; nhãn không bắt buộc.
@@ -436,4 +444,4 @@ function newTexts(beforeEls, afterEls, max = 4) {
   return out.slice(0, max);
 }
 const isIdRef = (q) => { const r = parseIdRef(q); return !!(r && !r.label); };
-module.exports = { windowAt, PS_WINAT, parseIdRef, isIdRef, resolveIdRef, newTexts, ID_REF, queryVariants, findElementAny, stabilizeIds, isButtonish, taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };
+module.exports = { fuzzyHas, windowAt, PS_WINAT, parseIdRef, isIdRef, resolveIdRef, newTexts, ID_REF, queryVariants, findElementAny, stabilizeIds, isButtonish, taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };

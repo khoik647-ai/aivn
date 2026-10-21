@@ -965,6 +965,8 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
           const msg = userErr ? e.message : (e && e.message) || String(e);
           out = { error: msg, forModel: `Lỗi: ${msg}`, summary: String(msg).split(/\s(?=Bước tiếp:|Gần giống:)/)[0] }; /* B33b: thẻ bước chỉ hiện câu đầu; hướng dẫn cho mô hình vẫn ở chi tiết */
           if (!userErr) deps.log && deps.log(`[aivn agent] ${call.name} lỗi: ${msg}`);
+          // QA lượt 8 (B66): lỗi ném ra (vd. phím hỏng) cũng tính vào chống lặp — lần 3 cùng cách bị chặn, nhiều lỗi liền → dừng sớm
+          if (call.name === 'screen_act') { try { const rr = retry.after(args, out); if (rr.bad) { out = { ...out, forModel: String(out.forModel || '') + rr.hint }; step.check = rr.bad; } } catch {} }
         }
         Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', check: step.check || null, summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, ms: Date.now() - step.startedAt });
         logTool(step);

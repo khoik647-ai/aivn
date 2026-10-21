@@ -251,9 +251,11 @@ function createDesktopAgent(deps) {
       if (R && R.el) return { el: R.el, x: R.el.b[0] + R.el.b[2] / 2, y: R.el.b[1] + R.el.b[3] / 2, via: R.el.ocr ? 'OCR' : 'cây giao diện' };
       if (R) return { el: null, query: q, ...R }; }
     // B27: bấm theo TÊN ngay sau khi gõ tìm → ưu tiên dòng trong danh sách kết quả, không bấm vào chữ vừa gõ trong ô tìm kiếm
-    if (q && s && s.obs && s.searchEcho && Date.now() - s.searchEcho.at < SEARCH_MS() && !U.isIdRef(q) && U.fold(q).trim() === U.fold(s.searchEcho.name || '').trim()) {
+    // chữ trong ô có thể kèm con trỏ nháy (“Trần Quỳnh Anh|”) hoặc không, tuỳ lúc chụp → so sánh bỏ con trỏ/dấu câu (lỗi chập chờn B27)
+    const bare = (x) => U.fold(String(x || '')).replace(/[^\p{L}\p{N} ]/gu, ' ').replace(/\s+/g, ' ').trim();
+    if (q && s && s.obs && s.searchEcho && Date.now() - s.searchEcho.at < SEARCH_MS() && !U.isIdRef(q) && bare(q) === bare(s.searchEcho.name)) {
       const E = s.searchEcho.b; const inEcho = (e) => e.b && Math.abs((e.b[1] + e.b[3] / 2) - (E[1] + E[3] / 2)) <= Math.max(10, E[3] / 2) && e.b[0] < E[0] + E[2] && e.b[0] + e.b[2] > E[0];
-      const el = s.obs.elements.filter(e => e.b && U.fold(e.name || '').trim() === U.fold(q).trim() && !inEcho(e)).sort((x, y) => x.b[1] - y.b[1])[0];
+      const el = s.obs.elements.filter(e => e.b && bare(e.name) === bare(q) && !inEcho(e)).sort((x, y) => x.b[1] - y.b[1])[0];
       if (el) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' };
     }
     if (q && s && s.obs) { const el = U.findElementAny(s.obs.elements, q); if (el) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' }; }
@@ -498,6 +500,23 @@ function createDesktopAgent(deps) {
     { const la = s.lastAction; const justSearch = inSearchMode() || la && Date.now() - (la.doneAt || la.at) < 60000 && ((['click', 'double_click'].includes(la.action) && /tìm|tim kiem|search|find/iu.test(`${la.query || ''} ${la.el ? la.el.name || '' : ''}`))
         || (la.action === 'hotkey' && /^(ctrl|cmd|command|meta)\+(f|k|e)$/i.test(String(la.keys || '').replace(/\s/g, '')))); // B64: vừa mở ô tìm kiếm bằng Ctrl+F/K (Zalo, Telegram, Teams…) → gõ vào ô đang chọn
       if (action === 'type_text' && justSearch && t && t.el && (t.el.ocr || (!t.el.editable && !U.inputLike(t.el))) && !/tìm|tim kiem|search|find/iu.test(`${t.el.name || ''} ${t.el.placeholder || ''}`)) { staleEl = t.el; t = null; needPoint = false; deps.log && deps.log('desk', `Vừa mở ô tìm kiếm (${la.action === 'hotkey' ? la.keys : 'bấm “Tìm kiếm”'}) — bỏ ${staleEl.id || 'phần tử'} “${String(staleEl.name || '').slice(0, 30)}”, gõ vào ô tìm kiếm đang chọn`); } }
+    // B76 (QA lượt 8, Outlook o10): (1) chữ OCR là CHỮ ĐÃ GÕ trong một ô khác (Tiêu đề) → gõ vào đó sẽ chèn vào giữa chữ cũ; (2) cùng chữ vào cùng ô lần nữa
+    // (id đổi theo chữ trong ô nên chống lặp theo id không bắt được) → khoá theo VỊ TRÍ ô + chữ gõ, không theo id
+    if (action === 'type_text' && !(a.replace === true)) {
+      const ft = U.fold(String(a.text || '')).trim(); const log = s.typedLog || [];
+      const tb = t && t.el && Array.isArray(t.el.b) ? t.el.b : null;
+      if (t && t.el && t.el.ocr && !U.inputLike(t.el) && !/tìm|tim kiem|search|find/iu.test(String(t.el.name || ''))) {
+        const nm = U.fold(String(t.el.name || ''));
+        const hit = log.slice().reverse().find(x => { const p = U.fold(x.text).trim().slice(0, 24); return p.length >= 4 && (nm.includes(p.slice(0, Math.min(8, p.length))) || U.fuzzyHas(nm, p.slice(0, Math.min(16, p.length)))); });
+        if (hit) { const same = U.fold(hit.text).trim() === ft;
+          deps.log && deps.log('desk', `Chặn gõ (B76): ${t.el.id} “${String(t.el.name || '').slice(0, 30)}” là chữ đã gõ trước đó (“${String(hit.text).slice(0, 30)}”)${same ? ' — gõ trùng' : ' — sẽ chèn vào giữa'}`);
+          return { refused: true, error: same ? 'đã gõ chữ này rồi' : 'không gõ vào chữ đã có trong ô khác', forModel: same ? `KHÔNG gõ lại: “${String(hit.text).slice(0, 60)}” ĐÃ được gõ vào ô này rồi (chữ OCR “${String(t.el.name || '').slice(0, 40)}” chính là chữ đó, OCR có thể đọc sai dấu). Gõ lại sẽ bị TRÙNG. Làm bước tiếp theo (ô khác / nút khác).` : `KHÔNG gõ: ${t.el.id} “${String(t.el.name || '').slice(0, 40)}” là CHỮ ĐÃ GÕ trong một ô (lúc trước đã gõ “${String(hit.text).slice(0, 40)}” vào đó) — gõ vào đây sẽ chèn vào GIỮA chữ đó và làm hỏng ô. Bấm vào ĐÚNG ô cần gõ (vd. vùng nội dung/thân thư, ô soạn tin) rồi type_text KHÔNG kèm element.`, summary: same ? 'đã gõ chữ này vào ô này rồi — không gõ trùng' : `“${String(t.el.name || '').slice(0, 30)}” là chữ đã gõ trong ô khác — không gõ vào đó` }; }
+      }
+      const overlap = (p, q) => p && q && Math.abs((p[1] + p[3] / 2) - (q[1] + q[3] / 2)) <= Math.max(12, Math.min(p[3], q[3]) / 2 + 6) && p[0] < q[0] + q[2] + 40 && q[0] < p[0] + p[2] + 40;
+      const dup = ft && log.find(x => U.fold(x.text).trim() === ft && ((tb && x.box && overlap(tb, x.box)) || (!tb && !x.box && s.lastAction && s.lastAction.action === 'type_text' && U.fold(String(s.lastTyped || '')).trim() === ft)));
+      if (dup && !(s.inSearch || inSearchMode())) { deps.log && deps.log('desk', `Chặn gõ trùng (B76): “${String(a.text).slice(0, 30)}” đã gõ vào ô này`);
+        return { refused: true, error: 'đã gõ chữ này rồi', forModel: `KHÔNG gõ lại: “${String(a.text).slice(0, 60)}” ĐÃ được gõ vào đúng ô này trong việc này (OCR có thể đọc sai dấu nên báo “chưa thấy”). Gõ lại sẽ bị TRÙNG. Nếu thật sự cần thay thì type_text với replace: true; nếu không thì làm bước tiếp theo.`, summary: 'đã gõ chữ này vào ô này rồi — không gõ trùng' }; }
+    }
     if (needPoint && (!t || t.x == null)) {
       const q = t && t.query ? t.query : '';
       if (q && !U.isIdRef(q)) t = await groundWithVision(q, ctx) || t;
@@ -686,7 +705,7 @@ function createDesktopAgent(deps) {
     let searchyDone = false;
     if (action === 'type_text') {
       const typed = U.fold(String(a.text).split('\n')[0]).slice(0, 40);
-      const seen = o.obs.elements.some(e => (e.value && U.fold(e.value).includes(typed)) || (e.name && U.fold(e.name).includes(typed)));
+      const seen = o.obs.elements.some(e => (e.value && U.fold(e.value).includes(typed)) || (e.name && U.fold(e.name).includes(typed)) || (e.ocr && e.name && U.fuzzyHas(U.fold(e.name), typed.slice(0, 24)))); // B76: OCR đọc sai dấu (“Lich hop nhém”)
       if (!a.submit) checks.push(seen ? 'Đã thấy chữ vừa gõ trên màn hình.' : 'CHƯA thấy chữ vừa gõ trong danh sách phần tử (có thể ô không hiện giá trị) — hãy kiểm tra trước khi làm tiếp.');
       else checks.push('Đã gõ (dán một lần) rồi bấm Enter.');
       // ô tìm kiếm: chờ kết quả tải, nhìn lại, rồi mới kết luận; gợi ý tìm không dấu / một phần tên
@@ -754,6 +773,7 @@ function createDesktopAgent(deps) {
         else checks.push(`Ô tìm kiếm: đã chờ ~${Math.round(waited / 100) / 10} giây và CHƯA thấy kết quả khớp "${q}".` + (rest.length ? ` Bước tiếp theo BẮT BUỘC: gõ lại "${rest[0]}" vào ô tìm kiếm (screen_act type_text, replace: true). Chưa được nói "không tìm thấy"${rest.length > 1 ? `; nếu vẫn không ra thì lần lượt thử ${rest.slice(1).map(v => `"${v}"`).join(', ')}` : ''}.` : ' Đã thử nguyên văn, không dấu và một phần tên — có thể báo người dùng là không tìm thấy (nêu các cách đã thử).'));
       }
     }
+    if (action === 'type_text' && !searchyDone && !a.submit) { const eb = t && t.el && Array.isArray(t.el.b) ? t.el.b.slice() : (focusedEl && Array.isArray(focusedEl.b) ? focusedEl.b.slice() : null); s.typedLog = [...(s.typedLog || []), { text: String(a.text || ''), box: eb, at: Date.now() }].slice(-12); }
     // gửi tin: kiểm chứng trên màn hình (thấy chữ vừa gửi + thấy tên người nhận); kết quả nằm ở out.verify để agent.js không cho báo giả
     let verify;
     const targetName = `${t && t.el ? t.el.name || '' : ''} ${a.element || a.target || ''}`;

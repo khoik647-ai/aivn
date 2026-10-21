@@ -2241,6 +2241,27 @@ list(''); open('Nhóm Lớp K27');
       await step('b70-click-send', { action: 'click', element: 'Gửi' });
       out.final = await st(); throw null;
     }
+    if (process.env.AIVN_QA_B21_MODE === 'b76') { // B76 (QA lượt 8, Outlook o10): nội dung thư bị gõ vào ô Tiêu đề 3 lần (id đổi theo chữ trong ô)
+      const ol = `<!doctype html><meta charset=utf-8><title>Thư mới - Outlook</title><style>body{font:16px sans-serif;margin:20px}input,textarea{display:block;width:700px;font:26px sans-serif;margin:18px 0;padding:10px;border:1px solid #888}textarea{height:220px}::placeholder{color:#222;opacity:1}</style>
+<input id=to placeholder="Người nhận"><input id=subj placeholder="Thêm tiêu đề"><textarea id=body placeholder="Nhập nội dung thư tại đây"></textarea>
+<script>window.S={};function benchRead(){return {to:to.value,subj:subj.value,body:body.value}}</script>`;
+      await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(ol)); t.focus(); t.webContents.focus(); await sleep(600);
+      const st2 = () => t.webContents.executeJavaScript('benchRead()');
+      const q3 = 'Soạn thư Outlook gửi quynhanh.tran@truong.edu.vn, tiêu đề "Lịch họp nhóm", nội dung "Nhóm mình họp lúc 8h sáng thứ Năm nhé." Chỉ soạn, đừng gửi.';
+      const c3 = { ...ctx, userQuery: q3, auto: require('./agent/autonomy').forTurn({ setting: false, query: q3 }) };
+      const step3 = async (name, a) => { qaAsks.length = 0; let r; try { r = await d.act(a, c3); } catch (e) { r = { error: String(e.message || e) }; } await sleep(500);
+        out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 2500), state: await st2() }); save(); return r; };
+      await d.look({ window: 'Outlook' }, c3);
+      await step3('b76-click-subject', { action: 'click', element: 'Thêm tiêu đề' });
+      await step3('b76-type-subject', { action: 'type_text', text: 'Lịch họp nhóm' });
+      const l = String((await d.look({}, c3)).forModel || ''); out.look1 = l.slice(0, 1500);
+      const sid = (l.match(/\[(e\d+)\][^\n]*"L\S{1,2}ch h\S{1,2}p[^"\n]*"/u) || [])[1]; out.subjId = sid || null;
+      await step3('b76-type-body-into-subject', { action: 'type_text', element: sid || 'Lịch họp nhóm', text: 'Nhóm mình họp lúc 8h sáng thứ Năm nhé.' });
+      await step3('b76-type-subject-again', { action: 'type_text', text: 'Lịch họp nhóm' });
+      await step3('b76-click-body', { action: 'click', element: 'Nhập nội dung thư tại đây' });
+      await step3('b76-type-body', { action: 'type_text', text: 'Nhóm mình họp lúc 8h sáng thứ Năm nhé.' });
+      out.final = await st2(); throw null;
+    }
     if (process.env.AIVN_QA_B21_MODE === 'b64slow') { // B64 (QA lượt 8, d10/zen): máy chậm — kiểm tra lại sau khi bấm mất > 60 giây; gõ tên KHÔNG kèm element ngay sau đó vẫn phải được coi là gõ vào ô tìm kiếm
       const realNow = Date.now; let skew = 0; Date.now = () => realNow() + skew; out.skews = [];
       const untap = LOG.tap((line, scope) => { if (scope === 'desk' && /Thao tác: bấm/.test(line) && out.skewNext) { out.skewNext = false; skew += 90000; out.skews.push(line.slice(0, 120)); } });
