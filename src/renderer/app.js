@@ -903,7 +903,7 @@ const PRM = [
   { k: 'minP', label: 'Min P', min: 0, max: 1, step: 0.01, hint: 'Bỏ token có xác suất nhỏ hơn P × token tốt nhất.' },
   { k: 'repeatPenalty', label: 'Phạt lặp lại', min: 0.5, max: 3, step: 0.01, hint: 'Lớn hơn 1 thì mô hình ít lặp lại từ đã dùng.' },
   { k: 'presencePenalty', label: 'Phạt chủ đề cũ', min: -2, max: 2, step: 0.05, hint: 'Lớn hơn 0 thì mô hình hay nói ý mới hơn.' },
-  { k: 'seed', label: 'Seed', min: 0, max: 2147483647, step: 1, hint: 'Cùng seed + cùng câu hỏi → câu trả lời lặp lại được (chạy CPU nhiều luồng có thể lệch đôi chút). Để trống = ngẫu nhiên.', noDefault: true },
+  { k: 'seed', label: 'Seed', min: 0, max: 2147483647, step: 1, hint: 'Cùng seed + cùng câu hỏi + cùng máy và cài đặt thường cho câu trả lời giống nhau, nhưng llama.cpp không bảo đảm giống từng chữ (nhất là khi chạy bằng CPU). Để trống = ngẫu nhiên.', noDefault: true },
 ];
 const cp = { builtin: [], defaults: null };
 const cpParams = () => ({ ...((state.settings && state.settings.chatParams) || {}) });
