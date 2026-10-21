@@ -100,5 +100,10 @@ const CLAIMS = {
   'ui-venus-ground-7b-q4_k_m': [d('vision', S.venus, 'image-text-to-text'), d('gui', S.venus, 'precise GUI element grounding … using only screenshots as input')],
 };
 
-function claimsFor(id) { return (CLAIMS[id] || []).map(c => ({ ...c, label: TAGS[c.t] || c.t, kindLabel: KIND[c.k] })); }
+// B19 (QA lượt 2): “Đa ngôn ngữ” không được khiến người dùng hiểu là có tiếng Việt khi nhà phát triển không nêu tiếng Việt
+function langLabel(c, all) {
+  if (c.t !== 'multilingual' || all.some(x => x.t === 'vi' && x.k !== 'x') || /vietnam/i.test(c.q || '')) return TAGS[c.t];
+  return (String(c.q || '').match(/,/g) || []).length >= 2 ? 'Đa ngôn ngữ (danh sách chính thức không có tiếng Việt)' : 'Đa ngôn ngữ (không nêu riêng tiếng Việt)';
+}
+function claimsFor(id) { const all = CLAIMS[id] || []; return all.map(c => ({ ...c, label: langLabel(c, all) || TAGS[c.t] || c.t, kindLabel: KIND[c.k] })); }
 module.exports = { CLAIMS, TAGS, KIND, SCREEN_TAGS, claimsFor, VER };

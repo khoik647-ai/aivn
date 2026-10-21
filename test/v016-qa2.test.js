@@ -109,3 +109,101 @@ test('B16: với câu phủ định, system_action hiện thẻ hỏi và không
     assert.strictEqual(asked.length, 3, 'mỗi câu đều phải hỏi, kể cả khi bật “Tự làm không hỏi”'); assert.strictEqual(ran, 0);
   } finally { C.systemAction = orig; }
 });
+
+// ---------- B17: một cách tính cho gợi ý ⭐, nhãn thẻ, nhóm, bộ chọn và cổng AIVN AGENT ----------
+const hf = require('../src/hf'); const catalog = require('../src/catalog'); const AE = require('../src/agent-eligibility');
+const AP = require('../src/agent-plan'); const R = require('../src/recommend'); const FIT = require('../src/fit');
+const shipped = require('../src/bench-results.json').models; const sc = { shipped, local: {} };
+const G = 1024 ** 3;
+const MACHINES = {
+  PC: { ram: 32 * G, gpu: 'cuda', vram: { total: 12 * G, free: 11.4 * G }, devices: ['NVIDIA GeForce RTX 4070 SUPER'], cpus: 12 },
+  LAPTOP: { ram: 16 * G, gpu: 'vulkan', vram: { total: 4 * G }, devices: ['NVIDIA GeForce RTX 3050 Ti Laptop GPU'] }, // hồ sơ QA (Ryzen 7 4800H)
+  GPU2: { ram: 16 * G, gpu: 'cuda', vram: { total: 2 * G }, devices: ['NVIDIA GeForce MX450'], cpus: 8 },
+  TINY: { ram: 4 * G, gpu: false, vram: { total: 0 }, cpus: 4 },
+};
+const fitAt = (c, h, ctx) => hf.fitFor(c.size, h, { id: c.id, params: c.params, mmprojSize: c.mmproj ? c.mmproj.size : 0, ctx });
+// mô phỏng đúng catalogList() + agentModelGate() của main.js
+function discover(h) {
+  const P = AP.plan(catalog.map(c => ({ id: c.id, vision: !!c.mmproj, catalog: c, size: c.size })), (e, ctx) => fitAt(e.catalog, h, ctx), sc);
+  const list = catalog.map(c => ({ ...c, fit: fitAt(c, h, 0), agentFit: fitAt(c, h, P.ctx) }));
+  const ann = R.annotate(list, sc, h.vram.total, AP.elOpts(P)).list.map(c => ({ ...c, agentCheck: AE.eligibility({ vision: !!c.mmproj, catalog: c, fit: c.agentFit }, { shipped: shipped[c.id], ...AP.elOpts(P) }) }));
+  const gateBest = AE.bestFor(catalog.map(c => ({ id: c.id, vision: !!c.mmproj, catalog: c, size: c.size, agentFit: fitAt(c, h, P.ctx) })), sc, AP.elOpts(P));
+  return { P, ann, gateBest };
+}
+const grp = (f) => FIT.groupOf ? FIT.groupOf(f) : (f && (f.group || ({ fit: 'smooth', slow: 'slow', big: 'no' })[f.level]));
+test('B17: laptop RTX 3050 Ti 4 GB — AIVN AGENT dùng 12K, Qwen3-VL 2B nằm trọn VRAM, được ⭐ và qua cổng', () => {
+  const { P, ann, gateBest } = discover(MACHINES.LAPTOP);
+  assert.strictEqual(P.ctx, 12288); assert.strictEqual(P.lowered, true);
+  const star = ann.filter(c => c.recScreen); assert.strictEqual(star.length, 1); assert.strictEqual(star[0].id, 'qwen3-vl-2b-instruct-q8_0');
+  assert.strictEqual(star[0].agentFit.level, 'fit', 'nhãn và nhóm của thẻ ⭐ đều là Chạy mượt');
+  assert.strictEqual(star[0].agentCheck.ok, true); assert.strictEqual(star[0].agentCheck.code, 'ok');
+  assert.strictEqual(gateBest.id, star[0].id, 'gợi ý ⭐ và cổng AIVN AGENT chọn cùng một mô hình');
+  // tràn ít (≤ 1 GB): vẫn chọn được, nhóm Chạy chậm + cảnh báo; tràn nhiều: Quá nặng
+  const four = ann.find(c => c.id === 'qwen3-vl-4b-instruct-q4_k_m'); assert.strictEqual(four.agentFit.level, 'slow'); assert.ok(four.agentCheck.ok && four.agentCheck.slow, JSON.stringify(four.agentCheck));
+  const eight = ann.find(c => c.id === 'qwen3-vl-8b-instruct-q4_k_m'); assert.strictEqual(eight.agentCheck.code, 'heavy');
+  assert.match(AP.note(P), /12K/);
+});
+test('B17: PC RTX 4070 Super — giữ 16K, chỉ nhận mô hình chạy mượt, ⭐ = Qwen3-VL 8B', () => {
+  const { P, ann, gateBest } = discover(MACHINES.PC);
+  assert.deepStrictEqual([P.ctx, P.allowSlow], [16384, false]);
+  const star = ann.filter(c => c.recScreen); assert.strictEqual(star.length, 1); assert.strictEqual(star[0].id, 'qwen3-vl-8b-instruct-q4_k_m'); assert.strictEqual(gateBest.id, star[0].id);
+  for (const c of ann.filter(x => x.agentCheck.ok)) assert.strictEqual(c.agentFit.level, 'fit', c.id);
+});
+test('B17: mọi máy — thẻ có ⭐ điều khiển máy luôn qua cổng, và nhóm của thẻ trùng nhãn mức chạy', () => {
+  for (const [n, h] of Object.entries(MACHINES)) {
+    const { ann, gateBest } = discover(h);
+    const star = ann.find(c => c.recScreen);
+    if (star) { assert.ok(star.agentCheck.ok, `${n}: ${star.id} có ⭐ nhưng cổng chặn: ${star.agentCheck.reason}`); assert.strictEqual(gateBest && gateBest.id, star.id, n); }
+    else assert.strictEqual(gateBest, null, `${n}: cổng có mô hình nhưng không gắn ⭐`);
+    for (const c of ann) if (c.agentCheck.ok) assert.notStrictEqual(c.agentFit.level, 'big', `${n}: ${c.id}`);
+  }
+});
+test('B17: máy không chạy nổi mô hình AIVN AGENT nào → không gắn ⭐ điều khiển máy', () => {
+  const { ann, gateBest } = discover(MACHINES.TINY);
+  if (!gateBest) assert.ok(!ann.some(c => c.recScreen));
+});
+test('B17: lời chào không hứa nhìn ảnh/điều khiển màn hình khi mô hình chỉ đọc chữ', () => {
+  const A = require('../src/agent/agent');
+  const t = A.welcomeFor({ loaded: true, vision: false });
+  assert.ok(!/Đọc ảnh|Điều khiển màn hình/.test(t), t); assert.match(t, /chưa nhìn được ảnh hay màn hình/);
+  const v = A.welcomeFor({ loaded: true, vision: true, agentOk: true }); assert.match(v, /Đọc ảnh/); assert.match(v, /Điều khiển màn hình/);
+  assert.ok(!/Điều khiển màn hình \(thử/.test(A.welcomeFor({ loaded: true, vision: true, agentOk: false })));
+});
+test('B17: cổng chặn mô hình không dùng được thì có nút chuyển hoặc tải (giao diện)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/app.js'), 'utf8');
+  const html = new Function('esc', 'fmtBytes', src.match(/function agentGateHtml\(g\) \{[\s\S]*?\n\}/)[0] + '; return agentGateHtml;')((x) => String(x), (b) => b + ' B');
+  assert.match(html({ ok: false, code: 'text', reason: 'Chỉ đọc chữ', modelName: 'Qwen2.5 0.5B', best: null, recommended: [{ id: 'qwen3-vl-2b-instruct-q8_0', name: 'Qwen3-VL 2B', size: 3, installed: false }] }), /data-rec="qwen3-vl-2b-instruct-q8_0"/);
+  assert.match(html({ ok: false, code: 'text', reason: 'Chỉ đọc chữ', modelName: 'Qwen2.5 0.5B', best: { id: 'x', name: 'Qwen3-VL 4B' } }), /data-switch="x"/);
+});
+
+// ---------- B18: việc theo lịch qua cùng cổng mô hình ----------
+test('B18: runAgentTurn (dùng cho cả Gửi và Lịch tự động) kiểm tra cổng AIVN AGENT; chỉ bài đo được bỏ qua', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'src/main.js'), 'utf8');
+  const body = main.slice(main.indexOf('async function runAgentTurn('), main.indexOf('async function runAgentTurn(') + 1500);
+  assert.match(body, /gate = true/); assert.match(body, /if \(gate\) \{\s*const g = await agentModelGate\(\);\s*if \(!g\.ok\)/);
+  const sched = main.slice(main.indexOf('async function onScheduleFire('), main.indexOf('async function onScheduleFire(') + 2500);
+  assert.match(sched, /runAgentTurn\(\{ convoId, headless: true, signal: ac\.signal, messages/); assert.ok(!/gate: false/.test(sched));
+  assert.strictEqual((main.match(/runAgentTurn\([^)]*gate: false/g) || []).length, 1, 'chỉ bài đo Điểm tác vụ bỏ qua cổng');
+});
+
+// ---------- B19: nhãn công cụ và ngôn ngữ nhất quán ----------
+test('B19: nhãn 🛠 Hỗ trợ công cụ không mâu thuẫn với ✓/⚠ Gọi công cụ; mô hình qua cổng AIVN AGENT luôn “Tốt”', () => {
+  const { toolSupport } = require('../src/toolsupport');
+  for (const c of catalog) {
+    const t = toolSupport(c); const tc = (c.claims || []).filter(x => x.t === 'tools');
+    if (tc.some(x => x.k === 'x')) assert.notStrictEqual(t.level, 'good', c.id);
+    if (tc.some(x => x.k === 'v')) assert.notStrictEqual(t.level, 'none', c.id);
+    if (AE.eligibility({ vision: !!c.mmproj, catalog: c, fit: null }, { shipped: shipped[c.id] }).ok) assert.strictEqual(t.level, 'good', `${c.id}: ${t.label}`);
+  }
+  assert.strictEqual(toolSupport(catalog.find(c => c.id === 'qwen3-vl-2b-instruct-q8_0')).label, 'Tốt');
+});
+test('B19: “Đa ngôn ngữ” ghi rõ khi nhà phát triển không nêu tiếng Việt; mô tả không tự nhận tiếng Việt/độ vừa máy', () => {
+  const llama = catalog.find(c => c.id === 'llama-3.2-3b-instruct-q4_k_m').claims.find(x => x.t === 'multilingual');
+  assert.match(llama.label, /không có tiếng Việt/);
+  for (const c of catalog) {
+    const vi = (c.claims || []).some(x => x.t === 'vi');
+    for (const x of (c.claims || []).filter(y => y.t === 'multilingual')) if (!vi) assert.match(x.label, /tiếng Việt/, c.id);
+    if (!vi) assert.ok(!/tiếng Việt (tốt|khá)/i.test(c.desc), c.id);
+    assert.ok(!/Hợp laptop GPU|Cho máy GPU \d+ GB|chạy mượt với GPU/i.test(c.desc), `${c.id}: mức chạy trên máy do nhãn tính, không ghi cứng trong mô tả`);
+  }
+});

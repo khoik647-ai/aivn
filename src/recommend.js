@@ -41,26 +41,33 @@ function strongestSmooth(cands) {
   return sorted.find(c => grp(c) === 'smooth') || slow[0] || null;
 }
 // list: mục Khám phá (đã có fit, size, mmproj, installed); scores: { local, shipped }
-function recommend(list, scores = {}) {
+function recommend(list, scores = {}, agentOpts = null) {
   const chatC = strongestSmooth(list.filter(c => !GROUND_ONLY.test(c.id) && (!c.tools || c.tools.level !== 'none')));
-  const agentC = agentPick(list, scores);
+  const agentC = agentPick(list, scores, agentOpts);
   const planners = PLANNERS.map(id => list.find(c => c.id === id)).filter(Boolean);
   const plannerOk = [chatC, ...planners].filter(Boolean).find(c => passes(pickBench(c.id, scores, c.file))) || null;
   const grounders = GROUNDERS.map(id => list.find(c => c.id === id)).filter(Boolean);
   const grounder = grounders.find(c => fitRank(c.fit) >= 3 && gPasses(pickBench(c.id, scores, c.file))) || null;
   return { chat: chatC && chatC.id, agent: agentC && agentC.id, planner: plannerOk && plannerOk.id, grounder: grounder && grounder.id, plannerCandidate: chatC && chatC.id };
 }
-// AIVN AGENT: mạnh nhất chạy mượt trong số mô hình dùng được cho agent (agent-eligibility.js, bỏ qua điều kiện vừa máy để xếp nhóm riêng)
-function agentPick(list, scores = {}) {
+// AIVN AGENT (B17, QA lượt 2): dùng ĐÚNG cách chọn của cổng AIVN AGENT (AE.bestFor với độ vừa máy ở ngữ cảnh AIVN AGENT — agentFit —
+// và cùng quy tắc cho phép “Chạy chậm” của agent-plan.js), để mô hình được gắn ⭐ luôn chạy được AIVN AGENT. Không mô hình nào đạt → không gắn ⭐.
+function agentPick(list, scores = {}, agentOpts = null) {
+  if (list.some(c => c.agentFit)) {
+    const E = list.map(c => ({ ...c, installed: false, vision: isVision(c), catalog: c.claims ? c : (c.catalog || c), fit: c.agentFit || null }));
+    const b = AE.bestFor(E, scores, agentOpts || {}); return b ? list.find(c => c.id === b.id) : null;
+  }
+  // chưa có số liệu máy: chỉ lọc theo khả năng, xếp như cũ
   const ok = list.filter(c => AE.eligibility({ vision: isVision(c), catalog: c, fit: null }, { shipped: (scores.shipped || {})[c.id], local: (scores.local || {})[c.id] }).ok);
   return strongestSmooth(ok);
 }
 // Điều khiển màn hình: luôn một mô hình nhìn ảnh tự lập kế hoạch và tự nhìn (quy tắc 0.16: AIVN AGENT không nhận mô hình chỉ đọc chữ).
 // list có fit → mạnh nhất chạy mượt; không có fit → theo VRAM (byte). pair giữ lại để tương thích nhưng luôn null.
-function screenSetup(list, vramBytes = 0, scores = {}) {
+function screenSetup(list, vramBytes = 0, scores = {}, agentOpts = null) {
   const GB = 1024 ** 3, v = (vramBytes || 0) / GB; const by = (id) => list.find(c => c.id === id);
-  let solo = list.some(c => c.fit) ? agentPick(list, scores) : null;
-  if (!solo) { const soloC = VISION_SOLO.filter(x => v >= x.vram && by(x.id)); solo = soloC[0] ? by(soloC[0].id) : by(VISION_SOLO[VISION_SOLO.length - 1].id) || null; }
+  const measured = list.some(c => c.fit || c.agentFit);
+  let solo = measured ? agentPick(list, scores, agentOpts) : null;
+  if (!solo && !measured) { const soloC = VISION_SOLO.filter(x => v >= x.vram && by(x.id)); solo = soloC[0] ? by(soloC[0].id) : by(VISION_SOLO[VISION_SOLO.length - 1].id) || null; }
   return { solo: solo ? solo.id : null, pair: null, vramGB: Math.round(v * 10) / 10 };
 }
 // mô hình có nhìn được ảnh không (tệp mmproj hoặc trạng thái bộ máy)
@@ -72,8 +79,8 @@ function eyesFor(list, vramBytes = 0) {
   return cands.find(c => c.installed) || cands[0] || null;
 }
 // gắn nhãn lên từng thẻ
-function annotate(list, scores = {}, vramBytes = 0) {
-  const r = recommend(list, scores); const ss = screenSetup(list, vramBytes, scores); r.screen = ss;
+function annotate(list, scores = {}, vramBytes = 0, agentOpts = null) {
+  const r = recommend(list, scores, agentOpts); const ss = screenSetup(list, vramBytes, scores, agentOpts); r.screen = ss;
   return { rec: r, list: list.map(c => {
     const b = pickBench(c.id, scores, c.file);
     const o = { ...c, bench: b ? { score: b.score, done: b.done, safety: b.safety, where: b.where, date: b.date, seconds: b.seconds, grounding: b.grounding || null } : null };

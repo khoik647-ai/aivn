@@ -45,7 +45,7 @@ test('bestFor: mô hình chạy mượt luôn đứng trước mô hình chạy 
 });
 test('main + giao diện: cổng AIVN AGENT có slow/spill, banner cảnh báo không chặn, llama-server báo số lớp trên GPU', () => {
   const fs = require('fs'); const path = require('path'); const rd = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
-  const main = rd('src/main.js'); assert.match(main, /agentAllowSlow\(h, sc, out\)/); assert.match(main, /slow: !!\(e && e\.slow\)/); assert.match(main, /const spill = st\.loaded/);
+  const main = rd('src/main.js'); assert.match(main, /const P = agentPlanFor\(h, sc, out\)/); assert.match(main, /slow: !!\(e && e\.slow\)/); assert.match(main, /const spill = st\.loaded/);
   const app = rd('src/renderer/app.js'); assert.match(app, /function agentSlowHtml\(g\)/); assert.match(app, /g && g\.ok && !g\.cloud && \(g\.slow \|\| g\.spill\)/);
   assert.match(rd('src/vision-server.js'), /offloaded \(\\d\+\)\\\/\(\\d\+\) layers to GPU/);
 });

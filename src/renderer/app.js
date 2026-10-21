@@ -412,7 +412,8 @@ async function renderCatalog() {
   // Điều khiển máy tính: chỉ mô hình AIVN AGENT dùng được (nhìn màn hình + gọi công cụ đã kiểm chứng + định vị đạt), xếp theo mức chạy với ngữ cảnh agent
   const comp = list.filter(c => c.agentCheck && c.agentCheck.code !== 'text' && c.agentCheck.code !== 'tools' && c.agentCheck.code !== 'ground' && c.agentCheck.code !== 'unknown');
   $('#screenArea').hidden = !comp.length;
-  $('#screenCards').innerHTML = fitSections(comp, catCard, (c) => c.agentFit || c.fit);
+  $('#screenCards').innerHTML = fitSections(comp, (c) => catCard(c, true), (c) => c.agentFit || c.fit);
+  const ctxNote = comp.find(c => c.agentCtx) ? comp.find(c => c.agentCtx).agentCtx : 0; const pn = $('#screenCtxNote'); if (pn) pn.textContent = ctxNote && ctxNote < 16384 ? `Mức chạy ở mục này tính với ngữ cảnh AIVN AGENT ${ctxNote.toLocaleString('vi-VN')} token: máy này không có mô hình AIVN AGENT nào nằm trọn VRAM ở 16K, nên AIVN dùng 12K (lịch sử và ảnh màn hình được tự thu gọn).` : (ctxNote ? `Mức chạy ở mục này tính với ngữ cảnh AIVN AGENT ${ctxNote.toLocaleString('vi-VN')} token.` : '');
   $('#catalog').innerHTML = fitSections(list.filter(c => !comp.includes(c)), catCard);
 }
 const roleTag = (c) => c.role === 'planner' ? '<span class="tag" title="Mô hình này chỉ đọc chữ, không nhìn được màn hình nên không dùng được cho AIVN AGENT. Dùng tốt trong Trò chuyện.">Chỉ dùng cho Trò chuyện</span>': c.role === 'grounder' ? '<span class="tag comp" title="Nhìn được ảnh chụp màn hình: đọc màn hình và chỉ ra toạ độ cần bấm, kể cả với Zalo/ứng dụng Electron không cho đọc nút/ô.">🎯 Nhìn màn hình</span>' : '';
@@ -442,10 +443,11 @@ function visTag(c) {
   return cl ? `<button class="tag vis claim-${cl.k}" data-act="open-hf" data-url="${esc(cl.src)}" title="${esc(base + ' ' + claimTitle(cl))}">👁 ${CLAIM_MARK[cl.k]} Nhìn được ảnh</button>`
     : `<span class="tag vis" title="${esc(base)}">👁 Nhìn được ảnh</span>`;
 }
-const catCard = (c) => `<div class="card" data-id="${esc(c.id)}">
+// agent = thẻ trong mục Điều khiển máy tính: nhãn mức chạy tính ở ngữ cảnh AIVN AGENT (agentFit) — khớp nhóm chứa thẻ và cổng AIVN AGENT (B17)
+const catCard = (c, agent = false) => `<div class="card" data-id="${esc(c.id)}">
     <div class="card-top"><div class="av">${esc(c.family.slice(0, 2))}</div><div><h4>${esc(c.name)}</h4><div class="sub">${esc(c.params)} tham số · ${esc(c.quant)} · ${fmtBytes(c.size + (c.mmproj ? c.mmproj.size : 0))}</div></div></div>
     <p>${esc(c.desc)}</p>
-    <div class="tags">${c.recommended ? '<span class="tag rec" title="Qwen3 gọi công cụ tốt nhất trong các mô hình vừa máy này">⭐ Gợi ý: trò chuyện &amp; công cụ</span>' : ''}${c.recScreen ? '<span class="tag rec" title="Một mô hình vừa lập kế hoạch vừa nhìn màn hình, chọn theo VRAM máy này. Nhà phát triển (Qwen) ghi: Visual Agent — Operates PC/mobile GUIs.">⭐ Gợi ý: điều khiển máy (tự nhìn màn hình)</span>' : ''}${c.recGround ? `<span class="tag rec" title="${esc('Mắt nhìn cho mô hình lập kế hoạch Qwen3, chọn theo VRAM máy này.' + (/phi thương mại/i.test(c.license || '') ? ' Lưu ý giấy phép: ' + c.license + '.' : ''))}">⭐ Gợi ý: mắt nhìn (cặp hai mô hình)</span>` : ''}${c.recPairPlanner ? '<span class="tag rec" title="Lập kế hoạch trong cặp hai mô hình — dùng kèm mắt nhìn được gợi ý.">⭐ Gợi ý: lập kế hoạch (cặp)</span>' : ''}${roleTag(c)}${benchTag(c)}${fitBadge(c.fit)}${c.vision ? visTag(c) : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
+    <div class="tags">${c.recommended ? '<span class="tag rec" title="Qwen3 gọi công cụ tốt nhất trong các mô hình vừa máy này">⭐ Gợi ý: trò chuyện &amp; công cụ</span>' : ''}${c.recScreen && agent && c.agentCheck && c.agentCheck.ok ? '<span class="tag rec" title="Một mô hình vừa lập kế hoạch vừa nhìn màn hình, chọn theo VRAM máy này. Nhà phát triển (Qwen) ghi: Visual Agent — Operates PC/mobile GUIs.">⭐ Gợi ý: điều khiển máy (tự nhìn màn hình)</span>' : ''}${c.recGround ? `<span class="tag rec" title="${esc('Mắt nhìn cho mô hình lập kế hoạch Qwen3, chọn theo VRAM máy này.' + (/phi thương mại/i.test(c.license || '') ? ' Lưu ý giấy phép: ' + c.license + '.' : ''))}">⭐ Gợi ý: mắt nhìn (cặp hai mô hình)</span>` : ''}${c.recPairPlanner ? '<span class="tag rec" title="Lập kế hoạch trong cặp hai mô hình — dùng kèm mắt nhìn được gợi ý.">⭐ Gợi ý: lập kế hoạch (cặp)</span>' : ''}${roleTag(c)}${benchTag(c)}${fitBadge(agent === true ? (c.agentFit || c.fit) : c.fit)}${agent === true && c.agentCheck && !c.agentCheck.ok ? `<span class="tag warn" title="${esc(c.agentCheck.reason)}">⛔ ${esc(c.agentCheck.reason.split(' (')[0])}</span>` : agent === true && c.agentCheck && c.agentCheck.slow ? `<span class="tag warn" title="${esc(c.agentCheck.reason)}">⚠ Chạy chậm cho AIVN AGENT</span>` : ''}${c.vision ? visTag(c) : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
     ${claimsRow(c)}
     <div class="card-foot" data-job="${esc(jobIdFor(c.repo, c.file))}">${footHtml({ ...c, size: c.size + (c.mmproj ? c.mmproj.size : 0) }, `data-act="dl-cat" data-id="${esc(c.id)}"`, c.file)}</div>
     <button class="linkish" data-act="open-repo" data-repo="${esc(c.repo)}">Các bản lượng tử khác · ${esc(c.repo)}</button></div>`;
@@ -1674,7 +1676,7 @@ async function agentGateOk() {
 // Mô hình đang nạp không dùng được cho AIVN AGENT → chặn chạy, đưa nút chuyển một chạm sang mô hình tốt nhất
 function agentGateHtml(g) {
   const sw = g.best ? `<button class="btn sm primary" data-switch="${esc(g.best.id)}">⇄ Chuyển sang ${esc(g.best.name)}</button>` : '';
-  const recs = g.best ? '' : (g.recommended || []).map(r => `<button class="btn sm primary" data-rec="${esc(r.id)}" data-installed="${r.installed ? 1 : 0}">${r.installed ? 'Nạp' : '⬇ Tải'} ${esc(r.name)}${r.installed ? '' : ' (' + fmtBytes(r.size) + ')'}</button>`).join(' ');
+  const recs = g.best ? '' : (g.recommended || []).map(r => `<button class="btn sm primary" data-rec="${esc(r.id)}" data-installed="${r.installed ? 1 : 0}">${r.installed ? 'Nạp' : '⬇ Tải'} ${esc(r.name)}${r.installed ? '' : ' (' + fmtBytes(r.size) + ')'}${r.slow ? ' · chạy chậm' : ''}</button>`).join(' ');
   const what = g.code === 'none' ? '🤖 Chưa nạp mô hình cho AIVN AGENT.' : `⛔ <b>${esc(g.modelName || 'Mô hình này')}</b> chưa dùng được cho AIVN AGENT: <b>${esc(g.reason)}</b>.`;
   return `<span class="agent-gate">${what} AIVN AGENT cần mô hình nhìn được màn hình, gọi công cụ ổn định và vừa máy. ${g.best ? 'Mô hình phù hợp nhất đã có trên máy:' : (g.recommended || []).length ? 'Gợi ý cho máy này:' : 'Chưa có mô hình nào làm được việc này mà vừa máy này — bạn vẫn dùng Trò chuyện bình thường.'}</span> ${sw}${recs}`;
 }
@@ -1683,8 +1685,9 @@ function agentSlowHtml(g) {
   const b = g.spill && g.spill.better;
   const btn = b ? (b.installed ? `<button class="btn sm primary" data-switch="${esc(b.id)}">⇄ Chuyển sang ${esc(b.name)}</button>` : `<button class="btn sm primary" data-rec="${esc(b.id)}" data-installed="0">⬇ Tải ${esc(b.name)}</button>`) : '';
   const spill = g.spill ? `<b>${esc(g.modelName || 'Mô hình')}</b> đang tràn khỏi VRAM: chỉ ${g.spill.gpuLayers}/${g.spill.totalLayers} lớp chạy trên GPU, phần còn lại chạy bằng CPU nên mỗi bước sẽ chậm. ${b ? `Mô hình nhìn màn hình vừa trọn VRAM máy này: <b>${esc(b.name)}</b>.` : 'Đóng bớt ứng dụng dùng GPU (trò chơi, trình duyệt nhiều tab) rồi nạp lại có thể giúp.'}` : '';
-  const slow = g.slow ? `<b>${esc(g.modelName || 'Mô hình')}</b>: ${esc(g.slowReason || 'chạy chậm trên máy này')} Máy này không có mô hình nào cho AIVN AGENT chạy mượt, nên AIVN cho dùng mô hình chạy chậm thay vì chặn.` : '';
-  return `<span class="agent-slow">🐢 ${spill || slow}</span> ${btn}`;
+  const slow = g.slow ? `<b>${esc(g.modelName || 'Mô hình')}</b>: ${esc(g.slowReason || 'chạy chậm trên máy này')} ${g.planNote ? ' ' + esc(g.planNote) : ''}${g.best && !g.best.slow ? ` Mô hình chạy mượt hơn trên máy này: <b>${esc(g.best.name)}</b>.` : ''}` : '';
+  const btn2 = !btn && g.slow && g.best && !g.best.slow ? `<button class="btn sm primary" data-switch="${esc(g.best.id)}">⇄ Chuyển sang ${esc(g.best.name)}</button>` : !btn && g.slow && !g.best ? ((g.recommended || []).filter(r => !r.slow).slice(0, 1).map(r => `<button class="btn sm" data-rec="${esc(r.id)}" data-installed="${r.installed ? 1 : 0}">${r.installed ? 'Nạp' : '⬇ Tải'} ${esc(r.name)}${r.installed ? '' : ' (' + fmtBytes(r.size) + ')'}</button>`).join('')) : '';
+  return `<span class="agent-slow">🐢 ${spill || slow}</span> ${btn}${btn2}`;
 }
 function paintAgentWarn(adv) {
   const w = $('#agentWarn');
@@ -1692,7 +1695,7 @@ function paintAgentWarn(adv) {
   const recBtns = rec.map(r => `<button class="btn sm" data-rec="${esc(r.id)}" data-installed="${r.installed ? 1 : 0}">${r.installed ? 'Nạp' : 'Tải'} ${esc(r.name)}</button>`).join(' ');
   const g = state.agent && state.agent.gate;
   if (g && !g.cloud && !g.ok) { w.innerHTML = agentGateHtml(g); w.hidden = false; return; }
-  if (!state.status.loaded) { w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN AGENT cần mô hình nhìn được màn hình và gọi công cụ ổn định, vd. <b>Qwen3-VL 8B</b> hoặc <b>Qwen3-VL 4B</b>.</span>`; w.hidden = false; return; }
+  if (!state.status.loaded) { const r0 = g && (g.best || (g.recommended || [])[0]); w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN AGENT cần mô hình nhìn được màn hình và gọi công cụ ổn định${r0 ? `, gợi ý cho máy này: <b>${esc(r0.name)}</b>` : ''}.</span>`; w.hidden = false; return; }
   if (g && g.ok && !g.cloud && (g.slow || g.spill)) { w.innerHTML = agentSlowHtml(g); w.hidden = false; return; }
   if (g && g.ok) { w.hidden = true; return; } // mô hình đã qua kiểm tra AIVN AGENT: không cần các cảnh báo cũ
   if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN AGENT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để AIVN AGENT làm việc đáng tin cậy, hãy chọn mô hình được đánh dấu dùng được cho AIVN AGENT trong bộ chọn mô hình.</span> ${recBtns}`; w.hidden = false; return; }

@@ -35,7 +35,19 @@ const IDENTITY = [
   `CHỈ tự giới thiệu khi người dùng hỏi RÕ bạn là ai, bạn làm được gì, hoặc ai tạo ra bạn: khi đó giới thiệu ngắn gọn là AIVN AGENT, kể những việc bạn làm được (trò chuyện bằng mô hình chạy trên máy, đọc ảnh khi mô hình hỗ trợ, tìm trong tài liệu, dùng công cụ tệp/web/chạy mã, ghi nhớ, lịch nhắc, mở ứng dụng và điều khiển máy tính khi người dùng đồng ý) và nói cha đỡ đầu của bạn là ${CREATOR}. Mọi trường hợp khác: KHÔNG chào hỏi, KHÔNG tự giới thiệu, KHÔNG nhắc cha đỡ đầu — trả lời hoặc làm thẳng vào việc người dùng nhờ. Nếu người dùng chỉ chào (vd. "chào bạn"), chỉ chào lại một câu ngắn và hỏi cần giúp gì.`,
   'Không bao giờ nói mình là sản phẩm khác hay do công ty AI nào tạo ra. Nếu được hỏi về mô hình bên dưới, nói rằng bạn là AIVN AGENT chạy trên mô hình mã nguồn mở mà người dùng đã chọn nạp trong AIVN.',
 ].join('\n');
-const WELCOME = 'Xin chào! Mình là **AIVN AGENT**, trợ lý có sẵn trong AIVN, chạy ngay trên máy tính của bạn, không gửi dữ liệu đi đâu cả.\n\nMình có thể:\n- Trò chuyện, giải thích, viết và dịch bằng mô hình AI chạy trên máy\n- Đọc ảnh (khi mô hình hỗ trợ nhìn ảnh) và tìm trong tài liệu của bạn\n- Dùng công cụ: máy tính, đọc/ghi tệp trong thư mục bạn cho phép, tìm trên web, chạy mã\n- Ghi nhớ điều bạn dặn và tạo lịch nhắc tự động\n- Mở ứng dụng, tệp, trang web và chạy lệnh trên máy, nhưng chỉ khi bạn đồng ý trên thẻ duyệt\n- Điều khiển màn hình (thử nghiệm): bạn duyệt từng cú bấm\n\nCha đỡ đầu của mình là **anh Nguyễn Ngọc Khôi**, sinh viên Văn Lang University. Bạn muốn mình giúp gì nào?';
+// B17 (QA lượt 2): lời chào chỉ kể việc mô hình ĐANG NẠP làm được — mô hình chỉ đọc chữ thì không hứa đọc ảnh hay điều khiển màn hình
+function welcomeFor({ loaded = true, vision = true, agentOk = true } = {}) {
+  const lines = ['- Trò chuyện, giải thích, viết và dịch bằng mô hình AI chạy trên máy'];
+  lines.push(vision ? '- Đọc ảnh bạn dán và tìm trong tài liệu của bạn' : '- Tìm trong tài liệu của bạn');
+  lines.push('- Dùng công cụ: máy tính, đọc/ghi tệp trong thư mục bạn cho phép, tìm trên web, chạy mã', '- Ghi nhớ điều bạn dặn và tạo lịch nhắc tự động',
+    '- Mở ứng dụng, tệp, trang web và chạy lệnh trên máy, nhưng chỉ khi bạn đồng ý trên thẻ duyệt');
+  if (vision && agentOk) lines.push('- Điều khiển màn hình (thử nghiệm): bạn duyệt từng cú bấm');
+  const note = !loaded ? '\n\nHãy chọn một mô hình ở thanh phía trên để bắt đầu.'
+    : !vision ? '\n\nMô hình đang nạp chỉ đọc chữ: mình **chưa nhìn được ảnh hay màn hình**. Muốn mình bấm/gõ trong ứng dụng (Zalo, Messenger…), hãy chọn mô hình có 👁 được đánh dấu dùng được cho AIVN AGENT.'
+    : !agentOk ? '\n\nMô hình đang nạp chưa dùng được cho AIVN AGENT (xem thanh cảnh báo phía trên), nên mình chưa điều khiển màn hình.' : '';
+  return 'Xin chào! Mình là **AIVN AGENT**, trợ lý có sẵn trong AIVN, chạy ngay trên máy tính của bạn, không gửi dữ liệu đi đâu cả.\n\nMình có thể:\n' + lines.join('\n') + note + '\n\nCha đỡ đầu của mình là **anh Nguyễn Ngọc Khôi**, sinh viên Văn Lang University. Bạn muốn mình giúp gì nào?';
+}
+const WELCOME = welcomeFor();
 
 // Mô hình nhỏ hay lặp lại lời tự giới thiệu ở mọi câu trả lời: chỉ giữ khi người dùng hỏi rõ
 const ASK_ID_RE = /(bạn là ai|mày là ai|em là ai|là gì vậy|giới thiệu (về )?(bản thân|bạn|mình)|làm được (những )?(gì|việc gì)|có thể làm (được )?gì|giúp được (gì|những gì)|ai (tạo|làm|phát triển|viết) ra (bạn|mày|em)|cha đỡ đầu|who are you|what can you do|who (made|created) you)/iu;
@@ -796,4 +808,4 @@ function createAgent(deps) {
   return { run, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck };
 }
 
-module.exports = { editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };
+module.exports = { editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };

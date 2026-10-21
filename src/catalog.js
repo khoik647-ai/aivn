@@ -34,7 +34,7 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen2",
   "vision": false,
-  "desc": "Cân bằng tốt giữa tốc độ và chất lượng, trả lời tiếng Việt khá ổn."
+  "desc": "Cân bằng giữa tốc độ và chất lượng; Qwen ghi có hỗ trợ tiếng Việt."
  },
  {
   "id": "qwen2.5-3b-instruct-q4_k_m",
@@ -66,7 +66,7 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen2",
   "vision": false,
-  "desc": "Mạnh, đa năng, tiếng Việt tốt. Cần máy có từ 8 GB RAM trở lên.",
+  "desc": "Mạnh, đa năng; Qwen ghi có hỗ trợ tiếng Việt. Cần máy có từ 8 GB RAM trở lên.",
   "agent": true
  },
  {
@@ -99,7 +99,7 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen3",
   "vision": false,
-  "desc": "Nhỏ gọn nhưng suy luận tốt, hợp với laptop phổ thông."
+  "desc": "Nhỏ gọn, có chế độ suy luận (thinking)."
  },
  {
   "id": "qwen3-4b-instruct-2507-q4_k_m",
@@ -214,7 +214,7 @@ const CATALOG = [
   "license": "Gemma",
   "arch": "gemma2",
   "vision": false,
-  "desc": "Văn phong tự nhiên, gọn nhẹ, chạy tốt trên laptop không có card rời."
+  "desc": "Văn phong tự nhiên, gọn nhẹ."
  },
  {
   "id": "google_gemma-3-1b-it-q4_k_m",
@@ -249,7 +249,7 @@ const CATALOG = [
   "ram": "≥ 6 GB RAM",
   "license": "Gemma",
   "arch": "gemma3",
-  "desc": "Đa ngôn ngữ tốt, đọc và mô tả ảnh. Bản chính thức của ggml-org kèm tệp thị giác (mmproj).",
+  "desc": "Google ghi hỗ trợ hơn 140 ngôn ngữ (không nêu riêng tiếng Việt), đọc và mô tả ảnh. Bản chính thức của ggml-org kèm tệp thị giác (mmproj).",
   "url": "https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf",
   "vision": true,
   "agent": true
@@ -271,7 +271,7 @@ const CATALOG = [
   "ram": "≥ 6 GB RAM",
   "license": "Apache 2.0",
   "arch": "qwen3vl",
-  "desc": "Nhìn màn hình, chỉ đúng nút cần bấm (toạ độ 0-1000) và gọi công cụ gốc. Hợp laptop GPU 4 GB và Mac M1 8 GB.",
+  "desc": "Nhìn màn hình, chỉ đúng nút cần bấm (toạ độ 0-1000) và gọi công cụ gốc. Mức chạy trên máy bạn xem ở nhãn Chạy mượt/Chạy chậm.",
   "url": "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
   "vision": true,
   "computer": true,
@@ -297,7 +297,7 @@ const CATALOG = [
   "ram": "≥ 10 GB RAM",
   "license": "Apache 2.0",
   "arch": "qwen3vl",
-  "desc": "Bản lớn hơn của Qwen3-VL: hiểu giao diện và làm nhiều bước chắc chắn hơn. Cho máy GPU 8 GB trở lên hoặc Mac 16 GB.",
+  "desc": "Bản lớn hơn của Qwen3-VL: hiểu giao diện và làm nhiều bước chắc chắn hơn.",
   "url": "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
   "vision": true,
   "computer": true,
@@ -323,7 +323,7 @@ const CATALOG = [
   "ram": "≥ 5 GB RAM",
   "license": "Qwen Research (phi thương mại)",
   "arch": "qwen2vl",
-  "desc": "Hiểu ảnh, đọc chữ trong ảnh tốt; định vị nút theo điểm ảnh. Nhỏ, hợp máy yếu.",
+  "desc": "Hiểu ảnh, đọc chữ trong ảnh; định vị nút theo điểm ảnh. Nhỏ.",
   "url": "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
   "vision": true,
   "computer": true,
@@ -427,7 +427,7 @@ const CATALOG = [
   "ram": "≥ 4 GB RAM",
   "license": "Apache 2.0",
   "arch": "qwen3vl",
-  "desc": "Mô hình nhìn ảnh thế hệ Qwen3, nhỏ gọn, mô tả ảnh bằng tiếng Việt tốt.",
+  "desc": "Mô hình nhìn ảnh thế hệ Qwen3, nhỏ gọn; AIVN đã thử mô tả ảnh và báo cáo bằng tiếng Việt.",
   "url": "https://huggingface.co/ggml-org/Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen3-VL-2B-Instruct-Q8_0.gguf",
   "vision": true
  },
@@ -500,7 +500,7 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "llama",
   "vision": false,
-  "desc": "12B đa ngôn ngữ, ngữ cảnh 128K. Cần từ 16 GB RAM.",
+  "desc": "12B, Mistral ghi huấn luyện nhiều dữ liệu đa ngôn ngữ (không nêu tiếng Việt), ngữ cảnh 128K. Cần từ 16 GB RAM.",
   "agent": true
  },
  {
@@ -533,7 +533,7 @@ const CATALOG = [
   "license": "MIT",
   "arch": "phi3",
   "vision": false,
-  "desc": "Phi thế hệ 4 bản nhỏ, đa ngôn ngữ tốt hơn Phi-3.5."
+  "desc": "Phi thế hệ 4 bản nhỏ, Microsoft ghi có gọi hàm (function calling)."
  },
  {
   "id": "phi-4-q4_k_m",
@@ -663,7 +663,7 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen3",
   "vision": false,
-  "desc": "Mạnh hơn rõ so với 8B, có chế độ suy nghĩ / không suy nghĩ. Cần máy 16 GB RAM, chạy mượt với GPU 12 GB.",
+  "desc": "Mạnh hơn rõ so với 8B, có chế độ suy nghĩ / không suy nghĩ. Cần máy 16 GB RAM.",
   "agent": true
  },
  {

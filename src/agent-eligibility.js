@@ -15,7 +15,7 @@ const REASONS = {
   unknown: 'Chưa được AIVN kiểm chứng cho AIVN AGENT',
 };
 // m: { vision, catalog: mục Kho (có claims) | null, fit: { level } | null }; shipped/local: điểm đo { grounding: {score,total} }
-function eligibility(m, { shipped = null, local = null, allowSlow = false } = {}) {
+function eligibility(m, { shipped = null, local = null, allowSlow = false, maxSpill = Infinity } = {}) {
   if (!m) return { ok: false, code: 'none', reason: 'Chưa chọn mô hình' };
   if (!m.vision) return { ok: false, code: 'text', reason: REASONS.text };
   const c = m.catalog; const claims = (c && c.claims) || [];
@@ -29,18 +29,18 @@ function eligibility(m, { shipped = null, local = null, allowSlow = false } = {}
   if (m.fit && m.fit.level !== 'fit') {
     // 0.16: máy yếu (vd. laptop GPU 4 GB) không có mô hình nào chạy mượt cho AIVN AGENT → vẫn cho dùng mô hình "Chạy chậm"
     // (một phần trên GPU, phần còn lại trên CPU/RAM) nếu đủ nhanh, kèm cảnh báo — thay vì chặn hẳn. "Không chạy được" vẫn chặn.
-    if (allowSlow && m.fit.level === 'slow' && (m.fit.tps || 0) >= MIN_SLOW_TPS) return { ok: true, code: 'slow', slow: true, reason: slowReason(m.fit), score: g ? g.score : null };
+    if (allowSlow && m.fit.level === 'slow' && (m.fit.tps || 0) >= MIN_SLOW_TPS && (m.fit.ram || 0) <= maxSpill) return { ok: true, code: 'slow', slow: true, reason: slowReason(m.fit), score: g ? g.score : null };
     return { ok: false, code: 'heavy', reason: REASONS.heavy + (m.fit.hint ? ` (${m.fit.hint.charAt(0).toLowerCase() + m.fit.hint.slice(1)})` : '') };
   }
   return { ok: true, code: 'ok', reason: g ? `Nhìn màn hình, gọi công cụ đã kiểm chứng, điểm định vị ${g.score}/10` : 'Nhìn màn hình, gọi công cụ và định vị đã kiểm chứng' };
 }
 // mô hình tốt nhất cho AIVN AGENT trong danh sách (độ vừa máy tính theo ngữ cảnh của AIVN AGENT: agentFit nếu có) (đã cài trước, rồi điểm định vị cao, rồi nhỏ)
-function bestFor(list, scores = {}, { allowSlow = false } = {}) {
+function bestFor(list, scores = {}, { allowSlow = false, maxSpill = Infinity } = {}) {
   const sc = (m) => { const c = m.catalog; const id = c && c.id; const s = (scores.shipped || {})[id]; const l = (scores.local || {})[m.id] || (scores.local || {})[id]; const g = (l && l.grounding) || (s && s.grounding); return g ? g.score : 7; };
   const fitOf = (m) => m.agentFit || m.fit || null;
   // mô hình chạy chậm: điểm định vị nhân hệ số tốc độ (dưới 20 token/giây bị trừ) — tránh chọn mô hình mạnh nhưng mỗi bước mất cả phút
   const val = (m) => { const f = fitOf(m); const slow = f && f.level === 'slow'; return sc(m) * (slow ? Math.min(1, (f.tps || 0) / 20) : 1); };
-  return list.map(m => ({ m, e: eligibility({ ...m, fit: fitOf(m) }, { shipped: m.catalog && (scores.shipped || {})[m.catalog.id], local: (scores.local || {})[m.id], allowSlow }) })).filter(x => x.e.ok)
+  return list.map(m => ({ m, e: eligibility({ ...m, fit: fitOf(m) }, { shipped: m.catalog && (scores.shipped || {})[m.catalog.id], local: (scores.local || {})[m.id], allowSlow, maxSpill }) })).filter(x => x.e.ok)
     .sort((a, b) => (!!b.e.slow === !!a.e.slow ? 0 : a.e.slow ? 1 : -1) || (!!b.m.installed - !!a.m.installed) || (val(b.m) - val(a.m)) || ((a.m.size || 0) - (b.m.size || 0))).map(x => x.m)[0] || null;
 }
 // có mô hình nào dùng được cho AIVN AGENT mà chạy MƯỢT trên máy này không (xét cả Khám phá) — không có thì cho phép "Chạy chậm"

@@ -4,7 +4,7 @@
 const LABEL = { good: 'Tốt', limited: 'Hạn chế', none: 'Không' };
 const HINT = {
   good: 'Mô hình được huấn luyện để gọi công cụ: AIVN AGENT mở ứng dụng, đọc tệp… đáng tin cậy.',
-  limited: 'Mẫu chat không có gọi công cụ gốc hoặc mô hình nhỏ: AIVN dùng giao thức công cụ dạng văn bản, có thể bỏ bước hoặc gọi sai. Nên dùng Qwen3 4B/8B cho AIVN AGENT.',
+  limited: 'Mẫu chat không có gọi công cụ gốc hoặc mô hình nhỏ: AIVN dùng giao thức công cụ dạng văn bản, có thể bỏ bước hoặc gọi sai. Nên dùng mô hình có nhãn ✓ Gọi công cụ cho AIVN AGENT.',
   none: 'Mô hình quá nhỏ/không hợp để gọi công cụ: AIVN AGENT gần như không thao tác được. Chỉ nên dùng để trò chuyện.',
 };
 function paramsOf(name, params) {
@@ -13,7 +13,18 @@ function paramsOf(name, params) {
   if (!m) return null; const v = parseFloat(m[1]); return m[2] === 'm' ? v / 1000 : v;
 }
 // meta (khi mô hình đã nạp): { name, arch, sizeLabel, toolTemplate } đọc từ GGUF; toolMode/wrapper từ bộ máy
-function toolSupport({ id = '', name = '', file = '', params = null, meta = null, toolMode = null, wrapper = null, size = 0, toolLevel = null, claims = null } = {}) {
+function toolSupport({ id = '', name = '', file = '', params = null, meta = null, toolMode = null, wrapper = null, size = 0, toolLevel = null, claims = null, mmproj = null } = {}) {
+  // B19 (QA lượt 2): kết quả AIVN tự thử (nhãn ✓/⚠ “Gọi công cụ”, docs/verified.md) là nguồn DUY NHẤT khi có — nhãn 🛠 không được mâu thuẫn với nó
+  const tc = Array.isArray(claims) ? claims.filter(c => c.t === 'tools') : [];
+  if (tc.some(c => c.k === 'x')) return { level: 'limited', label: LABEL.limited, hint: 'AIVN đã thử: mô hình không gọi công cụ trong bài thử (docs/verified.md). ' + HINT.limited, verified: true };
+  if (tc.some(c => c.k === 'v')) {
+    const tiny = paramsOf(`${id} ${file} ${name}`, params); // mô hình rất nhỏ: thử gọi được nhưng dễ sai ở việc nhiều bước
+    if (tiny != null && tiny < 1.2) return { level: 'limited', label: 'Gọi được, chưa ổn định', hint: 'AIVN đã thử gọi được công cụ (docs/verified.md), nhưng mô hình rất nhỏ nên dễ gọi sai ở việc nhiều bước.', verified: true };
+    const est = toolSupport({ id, name, file, params, meta, toolMode, wrapper, size, toolLevel }).level;
+    // mô hình chữ mà ước lượng chỉ “Hạn chế” (vd. Gemma 2 2B qua giao thức dạng văn bản): mới thử gọi được một lần, chưa gọi là “Tốt”
+    if (est !== 'good' && !mmproj) return { level: 'limited', label: 'Gọi được (AIVN thử 1 lần)', hint: 'AIVN đã thử: mô hình gọi đúng công cụ trong bài thử (docs/verified.md), nhưng mới thử một lần; việc nhiều bước có thể bỏ bước hoặc gọi sai.', verified: true };
+    return { level: 'good', label: LABEL.good, hint: 'AIVN đã tự thử: gọi đúng công cụ (docs/verified.md).', verified: true };
+  }
   if (LABEL[toolLevel]) return { level: toolLevel, label: LABEL[toolLevel], hint: HINT[toolLevel] }; // đã kiểm tra thật trong Kho (mục Điều khiển máy tính)
   const s = `${id} ${name} ${file} ${meta && meta.name || ''} ${meta && meta.arch || ''}`.toLowerCase().replace(/_/g, '-');
   let p = paramsOf(`${id} ${file} ${name} ${meta && meta.sizeLabel || ''} ${meta && meta.name || ''}`, params);
@@ -30,10 +41,6 @@ function toolSupport({ id = '', name = '', file = '', params = null, meta = null
   else level = 'limited'; // Gemma 2/3, Mistral 7B, Llama 3.2 3B, Qwen 1.5–3B, mô hình nhìn ảnh nhỏ, mô hình lạ
   // mẫu chat của chính tệp GGUF có gọi công cụ gốc (hoặc bộ máy đã nhận ra định dạng gốc) → không hạ xuống "Hạn chế" chỉ vì tên lạ
   if (level === 'limited' && (meta && meta.toolTemplate || toolMode === 'native') && (p == null || p >= 3.5)) level = 'good';
-  // kết quả AIVN tự thử (docs/verified.md) thắng ước lượng theo tên: thử chưa đạt → tối đa "Hạn chế"; đã gọi được → ít nhất "Hạn chế"
-  const tc = Array.isArray(claims) ? claims.filter(c => c.t === 'tools') : [];
-  if (tc.some(c => c.k === 'x') && level === 'good') level = 'limited';
-  if (tc.some(c => c.k === 'v') && level === 'none') level = 'limited';
   return { level, label: LABEL[level], hint: HINT[level] };
 }
 module.exports = { toolSupport, paramsOf, LABEL };
