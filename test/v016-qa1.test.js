@@ -80,11 +80,6 @@ test('B3: mô hình không nhìn được ảnh thì không có screen_act/scree
   const off = mk(false).activeTools(); assert.ok(!off.includes('screen_act') && !off.includes('screen_look'), off.join()); assert.ok(off.includes('open_app'));
   const on = mk(true).activeTools(); assert.ok(on.includes('screen_act') && on.includes('screen_look'));
 });
-test('B4: nút công cụ bị chặn không ghi “· tắt”', () => {
-  const app = read('src/renderer/app.js');
-  assert.match(app, /s\.st === 'blocked' \? ' · ' \+ esc\(s\.short \|\| 'bị chặn'\)/);
-  assert.match(app, /short: 'cần mô hình nhìn màn hình'/);
-});
 
 // ---------- B5: cảnh báo không viết cứng tên mô hình, không báo “chưa làm gì” khi công cụ đã chạy ----------
 test('B5: cảnh báo không gợi ý cứng Qwen3 4B/8B; đã có bước xong thì không báo “chưa có việc nào được làm”', () => {
@@ -117,9 +112,19 @@ test('B7: trim-middle/rolling không để 2 tin assistant (hay user) liền nha
   const long = [{ role: 'system', content: 's' }]; for (let i = 0; i < 12; i++) long.push({ role: 'user', content: 'q' + i + 'x'.repeat(40 * (i % 3)) }, { role: 'assistant', content: 'a' + i + 'y'.repeat(50 * (i % 4)) }); long.push({ role: 'user', content: 'cuối' });
   for (let ctx = 200; ctx < 2400; ctx += 97) for (const p of ['trim-middle', 'rolling']) { const r = fitOverflow(long, p, 64, ctx, t => t.length).messages; assert.ok(alt(r), `${p} ${ctx}`); assert.strictEqual(r.at(-1).content, 'cuối'); }
 });
-test('B7: mẫu Gemma 3 (bắt luân phiên) chạy được sau khi cắt', () => {
-  const tplPath = path.join(root, 'test/fixtures/gemma3.jinja'); if (!fs.existsSync(tplPath)) return;
-  const tpl = fs.readFileSync(tplPath, 'utf8'); assert.match(tpl, /must alternate/);
+test('B7: mẫu Gemma 3 thật (bắt luân phiên) dựng được lời nhắc từ kết quả sau khi cắt, ở mọi ngân sách', () => {
+  const { Template } = require('@huggingface/jinja'); const { fitOverflow } = require('../src/chatfit');
+  const tpl = new Template(read('test/fixtures/gemma3.jinja'));
+  const render = (messages) => tpl.render({ messages, bos_token: '<bos>', add_generation_prompt: true });
+  // đối chứng: mẫu thật ném lỗi khi 2 tin cùng vai liền nhau (nên test này có ý nghĩa)
+  assert.throws(() => render([{ role: 'user', content: 'a' }, { role: 'user', content: 'b' }]), /must alternate/);
+  const long = [{ role: 'system', content: 'Bạn là AIVN.' }]; for (let i = 0; i < 14; i++) long.push({ role: 'user', content: 'hỏi ' + i + ' ' + 'x'.repeat(37 * (i % 4)) }, { role: 'assistant', content: 'đáp ' + i + ' ' + 'y'.repeat(53 * (i % 3)) }); long.push({ role: 'user', content: 'câu cuối' });
+  let n = 0;
+  for (let ctx = 180; ctx < 3000; ctx += 71) for (const p of ['trim-middle', 'rolling']) {
+    const out = render(fitOverflow(long, p, 64, ctx, t => t.length).messages); n++;
+    assert.match(out, /câu cuối<end_of_turn>\n<start_of_turn>model\n$/, `${p} ${ctx}`);
+  }
+  assert.ok(n > 60);
 });
 
 // ---------- B8: liên kết “Đã kiểm chứng” không 404 ----------
@@ -133,11 +138,4 @@ test('B8: nhãn ✓ trỏ tới trang kiểm chứng trên GitHub Pages do relea
   void claims;
 });
 
-// ---------- B11, B12 ----------
-test('B11: ứng dụng gọi thống nhất là “Khám phá”, không còn “Kho mô hình”', () => {
-  for (const f of ['src/renderer/app.js', 'src/renderer/index.html', 'src/main.js', 'src/hf.js', 'src/downloader.js']) assert.ok(!/Kho mô hình/.test(read(f)), f);
-});
-test('B12: đầu câu trả lời hiện tên hiển thị của mô hình, không phải id tệp', () => {
-  const app = read('src/renderer/app.js');
-  assert.match(app, /m\.model \? ' · ' \+ esc\(modelLabel\(m\.model\)\)/); assert.match(app, /function modelLabel\(id\)/);
-});
+// ---------- B4, B11, B12: test hành vi trên giao diện thật ở test/v016-ui-behaviour.test.js (QA lượt 2) ----------

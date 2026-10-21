@@ -77,7 +77,7 @@ const convoMode = (c) => c.mode === 'agent' ? 'agent' : 'chat';
 function modelLabel(id) {
   const m = (state.models || []).find(x => x.id === id || x.file === id || (x.catalog && x.catalog.id === id));
   if (m) return m.catalog ? m.catalog.name : m.file.replace(/\.gguf$/i, '');
-  const c = (state.catalog || []).find(x => x.id === id); return c ? c.name : id;
+  const c = (state.catalog || []).find(x => x.id === id); return c ? c.name : String(id).replace(/\.gguf$/i, '');
 }
 // Hộp cảnh báo dưới câu trả lời: tiêu đề theo đúng loại cảnh báo (QA B5: không ghi “Chưa có việc nào được làm” khi công cụ đã chạy xong)
 function warnBox(w) {

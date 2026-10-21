@@ -1569,6 +1569,25 @@ async function qaUI() {
     await shot('016-agent-gate');
     fs.writeFileSync(path.join(dir, 'qa016fit.json'), JSON.stringify(out, null, 2)); app.exit(0); return;
   }
+  if (process.env.AIVN_QAUI_BEHAV) { // test hành vi giao diện thật (QA lượt 2: thay test chỉ dò chuỗi cho B4, B11, B12)
+    await js('document.querySelectorAll(".modal-back").forEach(m => m.hidden = true); 1');
+    // B4: nút “Điều khiển màn hình” khi mô hình không nhìn được màn hình
+    out.b4 = await js(`(() => { const info = Object.assign({ toolsOff: [], folders: [], web: false, python: { available: true, enabled: false }, memory: { enabled: true } }, state.agent || {}, { computer: { enabled: true, screen: true, vision: false } });
+      renderToolChips(info); const el = document.querySelector('#toolChips [data-chip="screen"] .tc-main'); return el ? { text: el.textContent.trim(), aria: el.getAttribute('aria-label'), cls: el.parentElement.className } : null; })()`);
+    // B12: tiêu đề câu trả lời hiện tên hiển thị, không phải tên tệp
+    out.b12 = await js(`(() => { state.models = [{ id: 'Qwen3-VL-2B-Instruct-Q8_0.gguf', file: 'Qwen3-VL-2B-Instruct-Q8_0.gguf', catalog: { id: 'qwen3-vl-2b', name: 'Qwen3-VL 2B Instruct' } }];
+      state.current = { id: 'qa-b12', title: 'qa', mode: 'chat', messages: [{ role: 'user', content: 'chào' }, { role: 'assistant', content: 'Xin chào', model: 'Qwen3-VL-2B-Instruct-Q8_0.gguf' }, { role: 'assistant', content: 'Ừ', model: 'khong-co-trong-danh-sach.gguf' }] };
+      if (typeof setMode === 'function') setMode('chat'); state.current = state.current || null; renderMessages(); return [...document.querySelectorAll('#messages .msg.assistant .who')].map(w => w.textContent.trim()); })()`);
+    // B11: duyệt mọi màn hình, không chỗ nào còn “Kho mô hình” (chữ, title, aria-label, data-tip, placeholder)
+    out.b11 = { nav: await js('document.querySelector(\'.nav-item[data-view="discover"]\').getAttribute("aria-label")'), hits: [] };
+    for (const v of await js('[...document.querySelectorAll(".nav-item[data-view]")].map(b => b.dataset.view)')) {
+      await js(`show(${JSON.stringify(v)}); 1`); await sleep(300);
+      out.b11.hits.push(...await js(`(() => { const h = []; const re = /Kho m\\u00f4 h\\u00ecnh/i; const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) if (re.test(n.nodeValue)) h.push(${JSON.stringify(v)} + ': ' + n.nodeValue.trim().slice(0, 80));
+        for (const e of document.querySelectorAll('[title],[aria-label],[data-tip],[placeholder]')) for (const k of ['title', 'aria-label', 'data-tip', 'placeholder']) { const x = e.getAttribute(k); if (x && re.test(x)) h.push(${JSON.stringify(v)} + ' @' + k + ': ' + x.slice(0, 80)); } return h; })()`));
+    }
+    out.views = await js('[...document.querySelectorAll(".nav-item[data-view]")].map(b => b.dataset.view)');
+    fs.writeFileSync(path.join(dir, 'behav.json'), JSON.stringify(out, null, 2)); app.exit(0); return;
+  }
   if (process.env.AIVN_QAUI_151) { // QA 0.15.1: điều hướng, thông báo, biểu mẫu
     await js('document.querySelectorAll(".modal-back").forEach(m => m.hidden = true)');
     const st = async (n) => { await shot(n); out[n] = await js(`({ toasts: [...document.querySelectorAll(".toast-stack .toast-item")].map(t => (t.classList.contains("err") ? "ERR " : "") + t.textContent.replace("×", "").trim()), crmNav: [...document.querySelectorAll("[data-crm-nav]")].map(e => getComputedStyle(e).display), active: document.querySelector(".view.active")?.id })`); };
