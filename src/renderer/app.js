@@ -2215,7 +2215,7 @@ $('#lkSleep').addEventListener('change', async (e) => { await A.lockOptions({ lo
   $('#aboutVer').textContent = `phiên bản ${info.version}`;
   paintUpdate(await A.updateState());
   resetForm(); refreshSchedCount(); refreshMemCount();
-  $('#modelsDir').textContent = 'Thư mục lưu: ' + info.paths.models;
+  $('#modelsDir').textContent = 'Thư mục lưu: ' + info.paths.models; mdirRefresh();
 })();
 
 // ---------- Nâng cao: phần cứng & ghi đè ----------
@@ -2379,6 +2379,36 @@ $('#setNav').addEventListener('keydown', (e) => {
   setTab(n.dataset.stab); n.focus();
 });
 $('#setKeys').addEventListener('click', openKeys);
+// ---------- Thư mục mô hình (beta.3): đổi ổ khi ổ C: sắp đầy — chuyển mô hình có tiến độ, hoặc chỉ trỏ sang thư mục mới ----------
+async function mdirRefresh() {
+  const d = await A.modelsDirInfo(); if (!d) return;
+  $('#mdirInfo').textContent = `${d.dir} · ổ ${d.drive} còn trống ${d.free == null ? 'không rõ' : fmtBytes(d.free)} · mô hình đang chiếm ${fmtBytes(d.bytes)}`;
+  $('#mdirReset').hidden = d.isDefault || d.moving; $('#mdirChange').disabled = d.moving || d.qaProfile; $('#modelsDirChange').hidden = d.qaProfile;
+  const w = $('#mdirWarn'); w.hidden = !d.problem; w.textContent = d.problem ? `Thư mục đã chọn không dùng được, đang dùng thư mục mặc định: ${d.problem}` : '';
+  $('#modelsDir').textContent = `Thư mục lưu: ${d.dir} (ổ ${d.drive} còn ${d.free == null ? 'không rõ' : fmtBytes(d.free)})`;
+  return d;
+}
+async function mdirChange() {
+  const r = await A.modelsDirPick(); if (!r || r.canceled) return; if (!r.ok) { toast(r.error, true); return; }
+  const cur = r.current; let mode = null;
+  if (cur.files > 0) {
+    const move = await modalAsk({ icon: '📂', title: 'Chuyển mô hình sang thư mục mới?', message: `Chuyển ${cur.files} tệp (${fmtBytes(cur.bytes)}) từ ${cur.dir} sang ${r.dir} (ổ ${r.drive} còn trống ${r.free == null ? 'không rõ' : fmtBytes(r.free)}). Mô hình đang nạp sẽ được gỡ ra trong lúc chuyển.`, okLabel: 'Chuyển mô hình', noLabel: 'Không chuyển' });
+    if (move) { if (!r.fits) { toast(`Không đủ dung lượng trống: cần ${fmtBytes(cur.bytes)}, ổ ${r.drive} chỉ còn ${fmtBytes(r.free)}. Hãy chọn ổ khác.`, true); return; } mode = 'move'; }
+    else if (await modalAsk({ icon: '📁', title: 'Chỉ dùng thư mục mới?', message: `Mô hình tải về sau sẽ lưu ở ${r.dir}. Các mô hình đã có vẫn ở ${cur.dir} và vẫn dùng được.`, okLabel: 'Dùng thư mục mới', noLabel: 'Huỷ' })) mode = 'point';
+  } else mode = 'point';
+  if (!mode) return;
+  if (mode === 'move') { $('#mdirProg').hidden = false; $('#mdirBar').value = 0; $('#mdirProgTxt').textContent = ''; show('settings', { tab: 'general' }); }
+  const x = await A.modelsDirApply({ dir: r.dir, mode });
+  $('#mdirProg').hidden = true;
+  if (!x || !x.ok) toast((x && x.error) || 'Không đổi được thư mục mô hình', true);
+  else toast(mode === 'move' ? `Đã chuyển ${x.moved + (x.skipped || 0)} tệp sang ${r.dir} ✓` : `Đã đổi thư mục mô hình sang ${r.dir} ✓`);
+  await mdirRefresh(); refreshModels();
+}
+A.onModelsDirProgress((p) => { if (!p || p.finished) return; $('#mdirProg').hidden = false; $('#mdirBar').value = p.bytesTotal ? p.bytesDone / p.bytesTotal : p.done / Math.max(1, p.total); $('#mdirProgTxt').textContent = `${p.done}/${p.total} tệp · ${fmtBytes(p.bytesDone)} / ${fmtBytes(p.bytesTotal)} · ${String(p.file || '').split(/[\\/]/).pop()}`; });
+$('#mdirChange').addEventListener('click', mdirChange); $('#modelsDirChange').addEventListener('click', mdirChange);
+$('#mdirCancel').addEventListener('click', () => A.modelsDirCancel());
+$('#mdirReset').addEventListener('click', async () => { const x = await A.modelsDirReset(); if (x && x.ok) toast('Đã về thư mục mô hình mặc định ✓'); await mdirRefresh(); refreshModels(); });
+mdirRefresh();
 // Mức hiển thị: Cơ bản ẩn các phần có lớp .adv-only
 function setUiMode(m) {
   m = m === 'advanced' ? 'advanced' : 'basic'; document.documentElement.dataset.ui = m; localStorage.setItem('aivn.uiMode', m);

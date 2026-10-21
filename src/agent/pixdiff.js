@@ -24,5 +24,6 @@ function around(box, pad = 0.06) {
 // có tác dụng nhìn thấy được? (con trỏ nhấp nháy/đồng hồ chỉ đổi vài điểm ảnh: dưới ngưỡng)
 function changed(d) { if (!d) return null; return d.global >= 0.02 || (d.region != null && d.region >= 0.015); } // viền tiêu điểm của ô khác (≈1%) không tính
 const pct = (v) => v == null ? '?' : (v >= 0.1 ? Math.round(v * 100) : Math.round(v * 1000) / 10) + '%';
-function describe(d) { return d ? `${pct(d.region)} quanh chỗ bấm, ${pct(d.global)} cả cửa sổ` : ''; }
+// vùng quanh chỗ bấm không đo được (chỗ bấm ngoài ảnh chụp) → nói rõ, không in “?” (QA máy thật tưởng là lỗi mã hoá UTF-8)
+function describe(d) { return d ? `${d.region == null ? 'không đo được vùng' : pct(d.region)} quanh chỗ bấm, ${d.global == null ? 'không đo được' : pct(d.global)} cả cửa sổ` : ''; }
 module.exports = { diffBitmaps, around, changed, describe };

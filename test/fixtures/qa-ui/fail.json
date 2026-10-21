@@ -1,0 +1,1 @@
+{ "name": "phải hỏng", "steps": [ { "goto": "chat" }, { "click": { "testid": "khong-co-nut-nay", "timeout": 800 } }, { "goto": "settings" } ] }

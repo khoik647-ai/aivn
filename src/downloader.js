@@ -33,7 +33,7 @@ async function fetchFollow(url, { headers = {}, token, signal, fetchImpl = fetch
   throw new Error('Quá nhiều lần chuyển hướng');
 }
 
-function createDownloader({ dir, send = () => {}, getToken = () => null, maxConcurrent = 2, fetchImpl = fetch, log = () => {} }) {
+function createDownloader({ dir, checkSpace = null, send = () => {}, getToken = () => null, maxConcurrent = 2, fetchImpl = fetch, log = () => {} }) {
   const jobs = new Map();
   const snap = (j) => ({ id: j.id, repo: j.repo, name: j.name, quant: j.quant, status: j.status, received: j.received, total: j.total, speed: j.speed || 0, eta: j.eta ?? null,
     error: j.error || null, parts: j.files.length, part: j.part || 0, dest: j.files[0].dest, catalogId: j.catalogId || null });
@@ -42,7 +42,7 @@ function createDownloader({ dir, send = () => {}, getToken = () => null, maxConc
   function destFor(repo, file) {
     const [author, name] = repo.split('/');
     const safe = (s) => s.replace(/[^\w.\-]+/g, '_');
-    return path.join(dir, safe(author), safe(name), safe(file.split('/').pop()));
+    return path.join(typeof dir === 'function' ? dir() : dir, safe(author), safe(name), safe(file.split('/').pop()));
   }
   const fileSize = (p) => { try { return fs.statSync(p).size; } catch { return -1; } };
 
@@ -117,12 +117,15 @@ function createDownloader({ dir, send = () => {}, getToken = () => null, maxConc
   async function run(j) {
     j.status = 'downloading'; j.error = null; j.ac = new AbortController(); j.samples = []; j.received = receivedOnDisk(j); emit(j, true);
     try {
+      // thư mục mô hình có thể vừa đổi: đặt lại đích cho tệp chưa có gì; kiểm tra dung lượng trống TRƯỚC khi tải (lỗi rõ ràng, không tải dở rồi hỏng)
+      for (const f of j.files) if (fileSize(f.dest) < 0 && fileSize(f.dest + '.part') < 0) f.dest = destFor(j.repo, f.path);
+      if (checkSpace && j.total) checkSpace(path.dirname(j.files[0].dest), Math.max(0, j.total - receivedOnDisk(j)));
       for (let k = 0; k < j.files.length; k++) await downloadFile(j, j.files[k], k);
       j.status = 'done'; j.received = j.total; j.speed = 0; j.eta = 0; emit(j, true);
       send('dl:done', snap(j));
     } catch (e) {
       if (j.ac.signal.aborted) { j.status = j.removing ? 'removed' : 'paused'; }
-      else { j.status = 'error'; j.error = e.http ? e.message : (isTransient(e) ? 'Mất kết nối mạng khi tải. Bấm "Tiếp tục" để tải tiếp.' : 'Lỗi tải: ' + e.message); }
+      else { j.status = 'error'; j.error = e.http || e.code === 'ENOSPC_AIVN' ? e.message : e.code === 'ENOSPC' ? 'Ổ đĩa đã đầy khi đang tải. Giải phóng dung lượng hoặc đổi thư mục mô hình (Cài đặt → Chung) rồi bấm "Tiếp tục".' : (isTransient(e) ? 'Mất kết nối mạng khi tải. Bấm "Tiếp tục" để tải tiếp.' : 'Lỗi tải: ' + e.message); }
       j.speed = 0; j.eta = null; emit(j, true);
       if (j.status === 'removed') { for (const f of j.files) fs.rmSync(f.dest + '.part', { force: true }); jobs.delete(j.id); send('dl:removed', { id: j.id }); }
     } finally { pump(); }

@@ -229,6 +229,8 @@ function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal,
       const res = await session.promptWithMeta(prompt, {
         temperature, topP, maxTokens, signal, stopOnAbortSignal: true, ...SMP.toLlamaCpp(sampling), ...(topP != null ? { topP } : {}),
         ...(Number.isInteger(seed) && seed >= 0 ? { seed } : {}), ...(stops.length ? { customStopTriggers: stops } : {}), ...(grammar ? { grammar } : {}),
+        // B71: mô hình suy luận (gpt-oss Harmony, Qwen3 thinking) không được dùng hết maxTokens cho phần suy luận rồi trả câu trả lời RỖNG
+        ...(maxTokens > 0 ? { budgets: { thoughtTokens: Math.max(256, Math.floor(maxTokens * 0.6)) } } : {}),
         onResponseChunk: (c) => {
           if (ttft == null) ttft = (Date.now() - t0) / 1000;
           if (c.type === 'segment') { if (c.segmentType === 'thought' && c.text) { thought += c.text; onToken && onToken(c.text, 'think'); } return; }

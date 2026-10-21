@@ -699,7 +699,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     // B61 (máy thật): “nhắn giúp mình là mai 8h họp nhé” — không có người nhận → hỏi NGAY, trước mọi thao tác màn hình; mô hình không được tự chọn người nhận
     if (compOn && require('./send-verify').missingRecipient(query)) {
       deps.log && deps.log(`[aivn agent] việc gửi tin chưa có người nhận → hỏi “Gửi cho ai?” trước khi làm: "${query.slice(0, 60)}"`);
-      return { text: require('./send-verify').askWho(), steps: [], usage: {}, finishReason: 'stop', urls: [], memories: [], tools: names, warning: null, asked: 'recipient' };
+      return { text: require('./send-verify').askWho(), steps: [], usage: {}, finishReason: 'stop', urls: [], memories: [], tools: names, warning: null, asked: 'recipient', outcome: 'asked_user' };
     }
     const actAsk = compOn && isActAsk(query);
     // B41: việc trên trang web/ứng dụng → ẩn “Chạy JavaScript” (chạy trong hộp cát Node, không chạm được trang: mô hình nhỏ tưởng nó điều khiển được trang → “document is not defined”)
@@ -757,7 +757,8 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const ctx = { signal, convoId, userQuery: query, auto, contextSize: st.contextSize, confirm: headless ? async () => false : confirm, confirmScreen: headless ? async () => ({ ok: false }) : confirmScreen };
     const steps = [], seen = new Map(); const retry = RT.createRetryTracker();
     const look = { same: 0, sig: '', hint: '', blocked: 0 }; // B40
-    const honestOf = (reason) => { let rcp = null; try { rcp = require('./send-verify').recipientOf(query); } catch {} const m = /\b(zalo|messenger|telegram|teams|slack|discord|whatsapp|viber)\b/i.exec(String(query || '')); return RT.honestStatus({ query, tracker: retry, steps, reason, recipient: rcp, app: m ? m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() : '' }); };
+    let outcome = null, honestUsed = false; // QA runner / báo cáo: done | failed | blocked | asked_user (chỉ “done” khi không có câu trả lời trung thực “chưa xong”)
+    const honestOf = (reason) => { honestUsed = true; let rcp = null; try { rcp = require('./send-verify').recipientOf(query); } catch {} const m = /\b(zalo|messenger|telegram|teams|slack|discord|whatsapp|viber)\b/i.exec(String(query || '')); return RT.honestStatus({ query, tracker: retry, steps, reason, recipient: rcp, app: m ? m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() : '' }); };
     (runStore.getStore() || {}).steps = steps;
     // B67: “Xong” CHỈ khi mục tiêu đã kiểm chứng. Việc trên màn hình (screen_act) cần kiểm chứng thật (đã gửi/đã thấy kết quả);
     // bước cuối là kết quả cũ “(lặp lại)” hoặc lần thao tác cuối chưa có tác dụng → nói thật đã thử gì, chưa xong ở đâu
@@ -970,7 +971,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         if (signal?.aborted) break;
       }
       if (signal?.aborted) { finishReason = 'abort'; break; }
-      if (hardStop) { text = hardStop.ask ? hardStop.ask : hardStop.wrong ? `⚠ ${hardStop.why}. AIVN AGENT đã dừng, không gửi thêm gì. Bạn mở cuộc trò chuyện đó để thu hồi/xoá tin giúp mình.` : honestOf(hardStop.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng theo yêu cầu của công cụ: ${hardStop.why}`); break; }
+      if (hardStop) { outcome = hardStop.ask ? 'asked_user' : hardStop.wrong ? 'blocked' : 'failed'; text = hardStop.ask ? hardStop.ask : hardStop.wrong ? `⚠ ${hardStop.why}. AIVN AGENT đã dừng, không gửi thêm gì. Bạn mở cuộc trò chuyện đó để thu hồi/xoá tin giúp mình.` : honestOf(hardStop.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng theo yêu cầu của công cụ: ${hardStop.why}`); break; }
       // B39: cùng một cách đã hỏng mà mô hình cứ quay lại (bị chặn 2–3 lần) → dừng sớm, báo trung thực những gì đã thử
       if (look.blocked >= 2) { text = honestOf('quan sát màn hình nhiều lần liền mà mô hình không làm bước nào'); warning = null; finishReason = 'stop'; deps.log && deps.log('[aivn agent] dừng sớm (B40): quan sát lặp lại'); break; }
       { const cs = cyc.stuck(); if (cs) { text = honestOf(cs.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng sớm (B66b ${cs.kind}): ${cs.why}`); break; } }
@@ -991,7 +992,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     // B30: không có chữ nào và không bước nào làm được → báo rõ “mô hình không trả lời”, không để câu trả lời rỗng
     if (!String(text || '').trim() && finishReason !== 'abort' && !steps.some(x => x.status === 'ok')) { text = EMPTY_ANSWER(Math.round((Date.now() - t0) / 1000)); if (warning === NO_ACTION_OK_WARN || warning === NO_ACTION_WARN) warning = null; deps.log && deps.log(`[aivn agent] câu trả lời trống sau ${Math.round((Date.now() - t0) / 1000)} giây, ${steps.length} bước — báo lỗi rõ cho người dùng`); }
     if (finishReason !== 'abort' && relWins.length && NOT_INSTALLED_RE.test(text || '')) { text = `Ứng dụng này ĐANG MỞ trên máy (cửa sổ “${String(relWins[0].title).slice(0, 60)}”), nhưng mình chưa làm xong việc trên cửa sổ đó. Bạn giao lại việc giúp mình nhé.`; warning = warning || 'AIVN AGENT định nói ứng dụng chưa cài trong khi cửa sổ của nó đang mở — đã sửa lại câu trả lời.'; }
-    if (finishReason !== 'abort') { const g = guardClaims(text, steps); text = tidyAnswer(g.text, steps); if (g.warning) warning = warning || g.warning; }
+    if (finishReason !== 'abort') { const g = guardClaims(text, steps); if (g.text !== text && /CHƯA xác nhận/.test(g.text)) honestUsed = true; text = tidyAnswer(g.text, steps); if (g.warning) warning = warning || g.warning; }
     // B25: tin đã bị gửi NHẦM chỗ → luôn báo rõ cho người dùng (dù mô hình có nói hay không)
     const wrong = steps.filter(x => x.verify && x.verify.wrongChat);
     if (wrong.length) { const w = wrong[wrong.length - 1].verify; const note = `⚠ Tin nhắn đã bị GỬI NHẦM: ${w.why}. Hãy mở cuộc trò chuyện “${w.wrongTo || 'đó'}” để thu hồi/xoá tin nếu cần.`; if (!String(text).includes('GỬI NHẦM')) text = `${note}\n\n${text}`.trim(); warning = note; }
@@ -1010,7 +1011,8 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     text = stripIntro((text || '').trim(), query, { history: messages.slice(0, -1) });
     // B44: không bao giờ để lộ tên công cụ nội bộ (system_action, volume_up, screen_look…) trong câu trả lời cho người dùng
     text = scrubToolNames(text, names, defOf);
-    return { text: (text || '').trim(), steps, usage, finishReason, urls, memories: sys.memories.map(m => m.text), tools: names, warning };
+    if (!outcome) outcome = finishReason === 'abort' ? 'failed' : (honestUsed || wrong.length || !steps.some(x => x.status === 'ok') && !String(text || '').trim()) ? 'failed' : 'done';
+    return { text: (text || '').trim(), steps, usage, finishReason, urls, memories: sys.memories.map(m => m.text), tools: names, warning, outcome };
   }
 
   return { run, replyLang, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck, localizeText };

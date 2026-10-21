@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('aivn', {
   catalog: inv('catalog:list'), hfSearch: inv('hf:search'), hfRepo: inv('hf:repo'), hwInfo: inv('hw:info'), sysStats: inv('sys:stats'),
   dlStart: inv('dl:start'), dlPause: inv('dl:pause'), dlResume: inv('dl:resume'), dlRemove: inv('dl:remove'), dlList: inv('dl:list'),
   models: inv('models:list'), importModel: inv('models:import'), loadModel: inv('models:load'), modelMeta: inv('models:meta'), chatDefaults: inv('chat:defaults'), presetsBuiltin: inv('presets:builtin'), presetExport: inv('presets:export'), presetImport: inv('presets:import'), modelEstimate: inv('models:estimate'), saveModelLoad: inv('models:saveLoad'), unloadModel: inv('models:unload'),
+  modelsDirInfo: inv('models:dir-info'), modelsDirPick: inv('models:dir-pick'), modelsDirApply: inv('models:dir-apply'), modelsDirCancel: inv('models:dir-cancel'), modelsDirReset: inv('models:dir-reset'), onModelsDirProgress: on('models:dir-progress'),
   deleteModel: inv('models:delete'), reveal: inv('models:reveal'), modelStatus: inv('model:status'),
   generate: inv('chat:generate'), stop: inv('chat:stop'),
   convos: inv('convos:list'), saveConvo: inv('convos:save'), deleteConvo: inv('convos:delete'),

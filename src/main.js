@@ -45,6 +45,13 @@ const isTest = process.env.AIVN_TEST === '1';
 // Giới hạn bộ nhớ JS của giao diện trên máy yếu (đọc mức đã tính ở lần chạy trước; phải đặt trước khi app sẵn sàng)
 try { const ud0 = process.env.AIVN_USER_DATA || app.getPath('userData'); const pc = JSON.parse(fs.readFileSync(path.join(ud0, 'perf-cache.json'), 'utf8')); if (pc.rendererHeapMB > 0) app.commandLine.appendSwitch('js-flags', `--max-old-space-size=${pc.rendererHeapMB}`); } catch {}
 if (process.env.AIVN_USER_DATA) app.setPath('userData', process.env.AIVN_USER_DATA);
+// QA runner --profile <thư mục>: hồ sơ RIÊNG (đặt TRƯỚC khoá một-phiên-bản → là một bản AIVN riêng, không đụng AIVN đang mở của người dùng
+// cùng trò chuyện/kinh doanh/ghi nhớ/lịch của họ). Chỉ dùng chung thư mục mô hình (chỉ đọc, trừ khi tải thêm) và chép bản sao giấy phép (chỉ đọc).
+const QA_PROFILE = (() => { try { const q = require('./qa-runner').fromArgv(process.argv, process.env); if (!q.enabled || !q.args.profile) return null;
+  const real = app.getPath('userData'); const dir = q.args.profile; if (path.resolve(dir) === path.resolve(real)) return null;
+  fs.mkdirSync(dir, { recursive: true }); app.setPath('userData', dir);
+  try { const lf = path.join(real, 'license.json'); if (fs.existsSync(lf)) { fs.copyFileSync(lf, path.join(dir, 'license.json')); } } catch {}
+  return { dir, real, models: path.join(real, 'models') }; } catch { return null; } })();
 const LOG = require('./logger');
 LOG.init(path.join(app.getPath('userData'), 'logs'));
 { const os_ = require('os'); LOG.block('app', `Khởi động AIVN ${app.getVersion()}${app.isPackaged ? '' : ' (mã nguồn)'}`, [`Hệ điều hành: ${process.platform} ${process.arch} ${os_.release()}${process.getSystemVersion ? ' (' + process.getSystemVersion() + ')' : ''}`, `CPU: ${(os_.cpus()[0] || {}).model || '?'} · ${os_.cpus().length} luồng`, `RAM: ${(os_.totalmem() / 1024 ** 3).toFixed(1)} GB (trống ${(os_.freemem() / 1024 ** 3).toFixed(1)} GB)`, `Electron ${process.versions.electron} · thư mục dữ liệu: ${app.getPath('userData')}`]); }
@@ -170,15 +177,18 @@ const stopReasons = new Map(); // reqId -> lý do dừng (ghi nhật ký + hiệ
 function abortGen(reqId, ac, reason) { if (!ac || ac.signal.aborted) return; stopReasons.set(reqId, reason); LOG.log('app', `Dừng lượt ${reqId}: ${reason}`); try { ac.abort(); } catch {} }
 const serverLog = [];
 
+let modelsDirProblem = null;
 function initStores() {
   const ud = app.getPath('userData');
-  paths = { userData: ud, models: path.join(ud, 'models') };
+  paths = { userData: ud, models: QA_PROFILE ? QA_PROFILE.models : path.join(ud, 'models') }; // hồ sơ QA: dùng chung mô hình của hồ sơ thật
   fs.mkdirSync(paths.models, { recursive: true });
   settings = new JsonStore(path.join(ud, 'settings.json'), {
     systemPrompt: 'Bạn là AIVN, một trợ lý AI thân thiện. Hãy trả lời bằng tiếng Việt, rõ ràng và chính xác.',
     temperature: 0.7, maxTokens: 1024, contextSize: 0, perfMode: 'auto', apiPort: 1234, apiAutoStart: false, apiLan: false, apiCors: false, apiKey: '', apiTtlMin: 0, imported: [], lastModel: null, hfToken: '', uiLang: 'vi', theme: 'light', themeFx: 'full', rag: true, vision: true,
     agentFolders: [], agentWeb: false, agentPython: false, agentMemory: true, agentTemperature: 0.2, agentComputer: true, agentScreen: false, agentScreenMode: 'each', agentAutonomy: false, agentScreenBudget: 40, agentAutoReadOnly: false, keepInTray: false, openAtLogin: false,
   });
+  // thư mục mô hình do người dùng chọn (Cài đặt → Chung / Mô hình của tôi → Đổi thư mục); ổ đã rút / không ghi được → về mặc định, báo trong nhật ký
+  if (!QA_PROFILE && settings.data.modelsDir) { const v = require('./models-dir').validateTarget(settings.data.modelsDir); if (v.ok) paths.models = v.dir; else { modelsDirProblem = `${settings.data.modelsDir}: ${v.error}`; LOG.log('app', 'Thư mục mô hình đã chọn không dùng được, tạm dùng thư mục mặc định: ' + modelsDirProblem); } }
   if (!settings.data.perfMigrated) { if (settings.data.contextSize === 4096) settings.data.contextSize = 0; settings.data.perfMigrated = 1; settings.save(); } // 4096 là mặc định cũ → chuyển sang Tự động theo mức máy
   Object.assign(process.env, Object.fromEntries(Object.entries(engineEnv()).filter(([k, v]) => v && !process.env[k]))); // bộ máy (tiến trình riêng) kế thừa các biến này khi khởi động
   convos = new JsonStore(path.join(ud, 'conversations.json'), { list: [] });
@@ -196,7 +206,7 @@ function initStores() {
   admin = createAdmin({ dir: ud, fetchJson, fetchRaw: (u, o) => net.fetch(u, { cache: 'no-store', ...o }), log,
     publicX: !app.isPackaged && process.env.AIVN_TEST_PUBKEY ? process.env.AIVN_TEST_PUBKEY : LIC.PUBLIC_KEY_X });
   media = MEDIA.createMedia({ app, protocol, BrowserWindow, ipcMain, modelsDir: () => paths.models, isTest, log: (k, m, d) => LOG.log(k, m, d), threads: () => Math.max(2, Math.min(8, require('os').cpus().length - 2)) });
-  downloader = createDownloader({ dir: paths.models, send: (ch, d) => { send(ch, d); if (ch === 'dl:done' && d && d.catalogId && d.catalogId === settings.data.pendingEyes) setTimeout(() => { const c = catalog.find(x => x.id === d.catalogId); const m = c && listModels().find(x => x.file.toLowerCase() === c.file.toLowerCase() && x.mmproj); if (m) { settings.data.agentGrounder = m.id; settings.data.pendingEyes = null; settings.save(); LOG.log('desk', 'Đã tải xong mắt nhìn ' + m.file + ' — dùng làm mô hình định vị'); send('settings:changed', { agentGrounder: m.id }); send('app:notice', { text: `Đã có mắt nhìn: ${c.name}. AIVN AGENT sẽ tự dùng mô hình này để nhìn màn hình.`, kind: 'ok' }); } }, 300); }, getToken: () => settings.data.hfToken || null, maxConcurrent: 2, log: (m) => isTest && console.log(m) });
+  downloader = createDownloader({ dir: () => paths.models, checkSpace: (d, need) => require('./models-dir').checkSpace(d, need), send: (ch, d) => { send(ch, d); if (ch === 'dl:done' && d && d.catalogId && d.catalogId === settings.data.pendingEyes) setTimeout(() => { const c = catalog.find(x => x.id === d.catalogId); const m = c && listModels().find(x => x.file.toLowerCase() === c.file.toLowerCase() && x.mmproj); if (m) { settings.data.agentGrounder = m.id; settings.data.pendingEyes = null; settings.save(); LOG.log('desk', 'Đã tải xong mắt nhìn ' + m.file + ' — dùng làm mô hình định vị'); send('settings:changed', { agentGrounder: m.id }); send('app:notice', { text: `Đã có mắt nhìn: ${c.name}. AIVN AGENT sẽ tự dùng mô hình này để nhìn màn hình.`, kind: 'ok' }); } }, 300); }, getToken: () => settings.data.hfToken || null, maxConcurrent: 2, log: (m) => isTest && console.log(m) });
 }
 // ---------- Cổng vào: kích hoạt (bắt buộc) + Khoá ứng dụng (tuỳ chọn) ----------
 let computerTools = null, admin = null;
@@ -291,7 +301,7 @@ const EMBED_RE = /(^|[-_.])(embed|embedding|bge-m3|bge-small|bge-base|bge-large|
 function modelIdFromFile(f) { const b = path.basename(f); const m = b.match(SPLIT_RE); return (m ? m[1] : b.replace(/\.gguf$/i, '')).toLowerCase(); }
 
 // Quét thư mục mô hình (models/<tác giả>/<repo>/<tệp>.gguf và tệp ở gốc). Mô hình chia phần chỉ hiện một dòng.
-function scanDir(dir, depth, out) {
+function scanDir(dir, depth, out, root = paths.models) {
   let ents = [];
   try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
   const files = ents.filter(e => e.isFile() && /\.gguf$/i.test(e.name) && !/mmproj/i.test(e.name) && !EMBED_RE.test(e.name));
@@ -310,16 +320,18 @@ function scanDir(dir, depth, out) {
           try { size += fs.statSync(pf).size; } catch { missing++; }
         }
       }
-      const rel = path.relative(paths.models, dir);
+      const rel = path.relative(root, dir);
       out.push({ id: modelIdFromFile(e.name), file: e.name, path: full, size, mtime: fs.statSync(full).mtimeMs, source: 'downloaded', parts, incomplete: missing > 0, mmproj, vision: !!mmproj, repo: rel && rel.split(path.sep).length === 2 ? rel.split(path.sep).join('/') : null });
     } catch {}
   }
-  if (depth > 0) for (const e of ents) if (e.isDirectory()) scanDir(path.join(dir, e.name), depth - 1, out);
+  if (depth > 0) for (const e of ents) if (e.isDirectory()) scanDir(path.join(dir, e.name), depth - 1, out, root);
 }
 
 function listModels() {
   const out = [];
   scanDir(paths.models, 3, out);
+  // “chỉ trỏ sang thư mục mới”: thư mục mô hình cũ vẫn được quét (mô hình cũ vẫn hiện, vẫn nạp được)
+  for (const d of settings.data.modelDirsExtra || []) if (d && path.resolve(d) !== path.resolve(paths.models) && fs.existsSync(d)) scanDir(d, 3, out, d);
   for (const full of settings.data.imported) {
     try { const s = fs.statSync(full); let mm = null; try { const n = hf.pickMmprojFile(fs.readdirSync(path.dirname(full))); if (n) mm = path.join(path.dirname(full), n); } catch {}
       out.push({ id: modelIdFromFile(full), file: path.basename(full), path: full, size: s.size, mtime: s.mtimeMs, source: 'imported', parts: 1, mmproj: mm, vision: !!mm }); } catch {}
@@ -468,7 +480,7 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       const x = new Error(`Không nạp được ${m.catalog ? m.catalog.name : m.file}${n ? ` (đã thử ${n} cách: GPU, GPU một phần, CPU)` : ''}. Lỗi: ${e.message}. Chi tiết đã ghi vào nhật ký (Mô hình của tôi → Mở thư mục nhật ký).`);
       x.code = 'LOAD_FAILED'; throw x;
     }
-    if (st.fallbackFrom && st.fallbackFrom.length) { engineLog('Nạp ' + m.file + ' bằng chế độ dự phòng: ' + st.mode, null, { attempts: st.fallbackFrom }); st.notice = `GPU không nạp được mô hình này, AIVN đã chuyển sang chế độ ${MODE_VI[st.mode] || st.mode} (chậm hơn nhưng vẫn dùng được).`; }
+    if (st.fallbackFrom && st.fallbackFrom.length) { engineLog('Nạp ' + m.file + ' bằng chế độ dự phòng: ' + st.mode, null, { attempts: st.fallbackFrom, final: { mode: st.mode, ctx: st.contextSize, gpuLayers: st.gpuLayers, totalLayers: st.totalLayers } }); st.notice = require('./load-notice').loadNotice(st); }
     st = { ...st, loadParams: ml }; lastCtx = st.contextSize || lastCtx; engineDied = false;
     if (ctxNote) { st = { ...st, notice: [st.notice, ctxNote].filter(Boolean).join(' ') }; LOG.log('load', ctxNote); }
     if (reason) LOG.log('load', 'Lý do nạp lại: ' + reason);
@@ -608,7 +620,7 @@ function askApproval(card) {
   });
 }
 const slimStep = (x) => ({ id: x.id, name: x.name, label: x.label, icon: x.icon, args: x.args, status: x.status, summary: x.summary, detail: typeof x.detail === 'string' ? x.detail.slice(0, 4000) : x.detail, urls: x.urls, ms: x.ms, pre: x.pre, thumb: x.thumb && typeof x.thumb.src === 'string' && x.thumb.src.length < 120000 ? x.thumb : undefined });
-async function runAgentTurn({ reqId, convoId, messages, headless = false, signal, attachments = [], gate = true }) {
+async function runAgentTurn({ reqId, convoId, messages, headless = false, signal, attachments = [], gate = true, qa = null }) {
   if (!engine.status().loaded && !cloudBrainOn()) {
     if (headless && settings.data.lastModel) await loadById(settings.data.lastModel);
     else throw new Error('Chưa nạp mô hình nào. Hãy chọn mô hình ở thanh phía trên (trong chế độ AIVN AGENT, bộ chọn chỉ cho chọn mô hình dùng được cho AIVN AGENT).');
@@ -625,9 +637,9 @@ async function runAgentTurn({ reqId, convoId, messages, headless = false, signal
   if (comp) computerSessionStart();
   const files = (Array.isArray(attachments) ? attachments : []).filter(f => f && typeof f.path === 'string' && path.isAbsolute(f.path) && fs.existsSync(f.path) && fs.statSync(f.path).isFile()).slice(0, 10);
   const tb = tokenBatcher(reqId);
-  try { return await agent.run({ messages, convoId, signal, headless, attachments: files, confirm: (...a) => { tb.flush(); return askConfirm(...a); }, confirmScreen: (...a) => { tb.flush(); return askScreen(...a); }, approve: (card) => { tb.flush(); return askApproval(card); },
+  try { return await agent.run({ messages, convoId, signal, headless, attachments: files, confirm: qa ? qa.confirm : (...a) => { tb.flush(); return askConfirm(...a); }, confirmScreen: qa ? qa.confirmScreen : (...a) => { tb.flush(); return askScreen(...a); }, approve: qa ? qa.approve : (card) => { tb.flush(); return askApproval(card); }, // QA runner: thẻ xin phép luôn bị TỪ CHỐI tự động (qa-runner.js)
     onToken: (t) => reqId && tb.push(t),
-    onStep: (st) => { tb.flush(); reqId && send('agent:step', { reqId, step: slimStep(st) }); },
+    onStep: (st) => { tb.flush(); if (qa && qa.onStep) qa.onStep(st); reqId && send('agent:step', { reqId, step: slimStep(st) }); },
     onStatus: (st) => { tb.flush(); reqId && send('agent:status', { reqId, ...st }); } }); }
   finally { tb.flush(); if (comp) computerSessionEnd(); if (desk && desk.active()) desk.end(signal && signal.aborted ? 'đã dừng' : 'xong lượt'); }
 }
@@ -1116,6 +1128,7 @@ function registerIpc() {
   ipcMain.handle('models:load', async (_e, id, o = {}) => { try { if (o && o.remember && o.load) { settings.data.modelLoad = { ...(settings.data.modelLoad || {}), [id]: cleanLoad(o.load) }; settings.save(); } return { ok: true, status: await loadById(id, { force: !!(o && o.force), load: o && o.load || null }) }; } catch (e) { return { ok: false, error: e.message, code: e.code || null, modelId: e.modelId || id, catalogId: e.catalogId || null }; } });
   ipcMain.handle('models:unload', async () => { await engine.unloadModel(); const st = engine.status(); send('model:status', st); return st; });
   ipcMain.handle('models:delete', async (_e, id) => {
+    if (QA_PROFILE) throw new Error('Hồ sơ QA chỉ đọc thư mục mô hình dùng chung: không xoá mô hình.');
     const m = listModels().find(x => x.id === id);
     if (!m) return listModels();
     const ok = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Huỷ', 'Xoá'], defaultId: 0, cancelId: 0, title: 'Xoá mô hình',
@@ -1132,6 +1145,42 @@ function registerIpc() {
     }
     return listModels();
   });
+  // ---------- Đổi thư mục mô hình (beta.3) ----------
+  let dirMove = null; // { ac } khi đang chuyển
+  const defaultModelsDir = () => path.join(paths.userData, 'models');
+  const dirInfo = () => { const MD = require('./models-dir'); const files = MD.listFiles(paths.models); return { dir: paths.models, isDefault: path.resolve(paths.models) === path.resolve(defaultModelsDir()), default: defaultModelsDir(), free: MD.freeBytes(paths.models), drive: MD.driveOf(paths.models), bytes: files.reduce((s, f) => s + f.size, 0), files: files.length, extra: (settings.data.modelDirsExtra || []).filter(d => fs.existsSync(d)), problem: modelsDirProblem, moving: !!dirMove, qaProfile: !!QA_PROFILE }; };
+  ipcMain.handle('models:dir-info', () => dirInfo());
+  ipcMain.handle('models:dir-pick', async () => {
+    if (QA_PROFILE) return { ok: false, error: 'Hồ sơ QA dùng chung thư mục mô hình của hồ sơ thật: không đổi được.' };
+    const r = await dialog.showOpenDialog(win, { title: 'Chọn thư mục lưu mô hình', buttonLabel: 'Chọn thư mục này', properties: ['openDirectory', 'createDirectory'], defaultPath: paths.models });
+    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true };
+    const v = require('./models-dir').validateTarget(r.filePaths[0], { from: paths.models }); if (!v.ok) return v;
+    const cur = dirInfo(); return { ok: true, dir: v.dir, free: v.free, drive: require('./models-dir').driveOf(v.dir), current: cur, fits: v.free == null || v.free >= cur.bytes + require('./models-dir').MARGIN };
+  });
+  ipcMain.handle('models:dir-apply', async (_e, { dir, mode } = {}) => {
+    const MD = require('./models-dir');
+    if (QA_PROFILE) return { ok: false, error: 'Hồ sơ QA: không đổi thư mục mô hình.' };
+    if (dirMove) return { ok: false, error: 'Đang chuyển mô hình, hãy đợi xong.' };
+    const v = MD.validateTarget(dir, { from: paths.models }); if (!v.ok) return v;
+    if (downloader.list().some(j => j.status === 'downloading' || j.status === 'queued')) return { ok: false, error: 'Đang tải mô hình: hãy tạm dừng hoặc đợi tải xong rồi đổi thư mục.' };
+    const old = paths.models;
+    if (mode === 'move') {
+      const st = engine.status(); if (st.loaded && st.path && path.resolve(st.path).startsWith(path.resolve(old) + path.sep)) { await engine.unloadModel(); send('model:status', engine.status()); }
+      dirMove = { ac: new AbortController() }; LOG.log('app', `Chuyển mô hình: ${old} → ${v.dir}`);
+      try { const r = await MD.moveModels(old, v.dir, { signal: dirMove.ac.signal, onProgress: (p) => send('models:dir-progress', p) });
+        paths.models = v.dir; settings.data.modelsDir = v.dir; settings.data.modelDirsExtra = (settings.data.modelDirsExtra || []).filter(d => path.resolve(d) !== path.resolve(v.dir)); settings.save();
+        LOG.log('app', `Đã chuyển ${r.moved} tệp (${(r.bytes / 1024 ** 3).toFixed(2)} GB)${r.sameDrive ? ' (cùng ổ, đổi tên)' : ''} → ${v.dir}`); send('models:dir-progress', { finished: true, ...r });
+        return { ok: true, ...r, info: dirInfo() };
+      } catch (e) { LOG.log('app', 'Chuyển mô hình dừng: ' + e.message); send('models:dir-progress', { finished: true, error: e.message }); return { ok: false, error: e.message, info: dirInfo() }; }
+      finally { dirMove = null; }
+    }
+    // chỉ trỏ sang thư mục mới: thư mục cũ vẫn được quét
+    const extra = new Set(settings.data.modelDirsExtra || []); if (MD.listFiles(old).length) extra.add(old); extra.delete(v.dir);
+    paths.models = v.dir; settings.data.modelsDir = v.dir; settings.data.modelDirsExtra = [...extra]; settings.save(); modelsDirProblem = null;
+    LOG.log('app', `Thư mục mô hình mới: ${v.dir} (mô hình ở ${old} vẫn dùng được)`); return { ok: true, moved: 0, info: dirInfo() };
+  });
+  ipcMain.handle('models:dir-cancel', () => { if (dirMove) dirMove.ac.abort(); return true; });
+  ipcMain.handle('models:dir-reset', () => { if (QA_PROFILE || dirMove) return { ok: false }; settings.data.modelsDir = null; paths.models = defaultModelsDir(); fs.mkdirSync(paths.models, { recursive: true }); settings.save(); return { ok: true, info: dirInfo() }; });
   ipcMain.handle('models:reveal', (_e, p) => { shell.showItemInFolder(p || paths.models); return true; });
   ipcMain.handle('model:status', () => engine.status());
   ipcMain.handle('bench:run', async (_e, { ids }) => { try { return { ok: true, results: await runAgentBench(Array.isArray(ids) ? ids.slice(0, 4) : []) }; } catch (e) { return { ok: false, error: e.message }; } });
@@ -1419,9 +1468,11 @@ function createWindow({ hidden = false } = {}) {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true,
       additionalArguments: [`--aivn-theme=${windowBg() === '#ffffff' ? 'light' : 'dark'}`] }, // giao diện đã lưu, áp dụng trước lần vẽ đầu tiên
   });
+  if (typeof qaReq !== 'undefined' && qaReq.enabled && qaReq.kind === 'qa-ui') { const si = win.showInactive.bind(win); win.show = si; win.focus = () => {}; win.moveTop = () => {}; } // không có lệnh nào (thẻ xin phép, thông báo…) giành được tiêu điểm
   buildMenus();
   loadUi();
-  win.once('ready-to-show', () => { if (!hidden) win.show(); });
+  // QA giao diện (--qa-ui): mở cửa sổ KHÔNG giành tiêu điểm (showInactive) để không làm phiền người dùng đang làm việc
+  win.once('ready-to-show', () => { if (hidden) return; if (typeof qaReq !== 'undefined' && qaReq.enabled && qaReq.kind === 'qa-ui') { win.showInactive(); return; } win.show(); });
   // Chạy nền: đóng cửa sổ thì thu xuống khay để Lịch tự động tiếp tục chạy
   win.on('close', (e) => {
     if (settings.data.keepInTray && tray && !quitting) {
@@ -2830,12 +2881,50 @@ async function selfTestV13() {
   out.finished = new Date().toISOString(); save(); app.quit();
 }
 
-const gotLock = isTest || app.requestSingleInstanceLock();
-if (!gotLock) app.quit();
+// ---------- QA runner (beta.3): chỉ khi AIVN_QA_MODE=1 VÀ có cờ — xem docs/qa-runner.md. KHÔNG mở cổng mạng/CDP nào ----------
+const QAR = require('./qa-runner');
+const qaReq = QAR.fromArgv(process.argv, process.env);
+let qaBusy = false;
+function qaCommit() { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'build-info.json'), 'utf8')).commit || null; } catch {} if (app.isPackaged) return null; try { return require('child_process').execSync('git rev-parse --short HEAD', { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return null; } }
+function qaDisplays() { const { screen } = require('electron'); return { platform: process.platform, displays: screen.getAllDisplays().map(d => ({ id: d.id, primary: d.id === screen.getPrimaryDisplay().id, bounds: d.bounds, workArea: d.workArea, scaleFactor: d.scaleFactor, dpi: Math.round(96 * d.scaleFactor), size: { width: Math.round(d.size.width * d.scaleFactor), height: Math.round(d.size.height * d.scaleFactor) } })) }; }
+async function qaRun(req) {
+  const args = req.args; const runId = req.runId || String(Date.now());
+  if (qaBusy) { const r = { schema: 1, runId, status: 'failed', reason: 'AIVN đang chạy một việc QA khác', exitCode: 2 }; try { QAR.writeJson(args.out, r); } catch {} return r; }
+  qaBusy = true; LOG.log('qa', `QA runner bắt đầu (${req.kind || 'agent-task'}): ${String(args.task || args.script || '').slice(0, 200)}`);
+  try {
+    if (req.kind === 'qa-ui') { const U = require('./qa-ui'); return await U.run(args, { win: () => win, LOG, version: app.getVersion(), commit: qaCommit(), displays: qaDisplays, profile: QA_PROFILE, engine, listModels, loadById,
+      hookDialogs: (h) => U.hookDialogs(dialog, h), setMainClock: U.setMainClock, notifyModel: () => send('model:status', engine.status()), hw: () => engine.hardwareInfo(),
+      metrics: () => ({ appMemMB: Math.round(app.getAppMetrics().reduce((s, x) => s + (x.memory ? x.memory.workingSetSize : 0), 0) / 1024) }) }, { runId }); }
+    return await QAR.run(args, { version: app.getVersion(), commit: qaCommit(), engine, listModels, loadById, runAgentTurn, desk: getDesk(), displays: qaDisplays, LOG, activated,
+      capture: (o) => require('./screen-control').capture(o),
+      setLang: (l) => { const old = settings.data.uiLang; settings.data.uiLang = l; send('settings:changed', { uiLang: l }); return () => { settings.data.uiLang = old; send('settings:changed', { uiLang: old }); }; } }, { runId });
+  } finally { qaBusy = false; }
+}
+// AIVN_QA_MODE=1 + cờ QA nhưng tham số sai: KHÔNG mở AIVN như thường (bot QA sẽ chờ mãi) → ghi result.json nếu biết --out, thoát mã 2
+if (qaReq.invalid && String(process.env.AIVN_QA_MODE || '') === '1') {
+  try { process.stderr.write('[AIVN QA] ' + qaReq.warn + '\n'); } catch {}
+  try { const raw = QAR.parseArgs(process.argv); if (raw && raw.out) QAR.writeJson(path.resolve(raw.out), { schema: 1, status: 'failed', exitCode: 2, reason: qaReq.warn }); } catch {}
+  process.exit(2);
+}
+const gotLock = isTest || app.requestSingleInstanceLock(qaReq.enabled ? { aivnQa: { ...qaReq, runId: qaReq.runId = `${process.pid}-${Date.now()}` } } : undefined);
+if (!gotLock && qaReq.enabled && qaReq.kind === 'qa-ui') {
+  // QA giao diện KHÔNG bao giờ điều khiển cửa sổ AIVN người dùng đang mở (dữ liệu thật, giành tiêu điểm) → cần --profile riêng
+  try { QAR.writeJson(qaReq.args.out, { schema: 1, runId: qaReq.runId, kind: 'qa-ui', status: 'failed', exitCode: 2, reason: 'AIVN đang mở với hồ sơ thật: chạy --qa-ui kèm --profile <thư mục riêng> để có một phiên riêng không đụng dữ liệu người dùng' }); } catch {}
+  app.exit(2);
+} else if (!gotLock && qaReq.enabled) {
+  // AIVN đang mở: chuyển việc QA cho bản đang chạy rồi chờ result.json của đúng lượt này → thoát với mã của nó
+  const ms = ((qaReq.args.timeout || 600) + 180) * 1000;
+  QAR.waitResult(qaReq.args.out, qaReq.runId, ms).then(j => { const code = j ? (j.exitCode ?? QAR.exitCodeOf(j.status)) : 2; if (!j) { try { process.stderr.write('[AIVN QA] không nhận được result.json từ bản AIVN đang chạy\n'); } catch {} } app.exit(code); });
+} else if (!gotLock) app.quit();
 else {
   // chỉ bản đang giữ khoá một-phiên-bản mới dọn (bản mở thứ hai không được giết llama-server của bản đang chạy)
   try { const k = pidFile.cleanup({ log: (m) => { console.log(m); LOG.log('engine', m); } }); if (k.length) LOG.log('engine', `Đã dừng ${k.length} llama-server còn sót từ lần chạy trước`); } catch (e) { console.warn('[dọn] ' + e.message); }
-  app.on('second-instance', () => showWindow());
+  app.on('second-instance', (_e, _argv, _cwd, extra) => {
+    const q = extra && extra.aivnQa;
+    // việc QA chuyển từ bản thứ hai (bản đó đã tự kiểm AIVN_QA_MODE=1 + cờ); kiểm lại tham số ở đây, không tin dữ liệu chuyển sang
+    if (q && q.enabled && q.args && q.runId && q.kind !== 'qa-ui') { const v = q.kind === 'qa-ui' ? require('./qa-ui').validate(q.args) : QAR.validate(q.args); if (v.ok) { LOG.log('qa', `Nhận việc QA chuyển từ bản mở thứ hai (lượt ${q.runId})`); qaRun({ ...q, args: v.args }).catch(e => LOG.log('qa', 'QA runner lỗi: ' + e.message)); return; } LOG.log('qa', 'Bỏ qua việc QA chuyển sang: ' + v.error); }
+    showWindow();
+  });
   app.on('before-quit', () => { quitting = true; });
   app.whenReady().then(async () => {
     initStores();
@@ -2845,6 +2934,8 @@ else {
     else LOG.log('app', 'Máy chưa kích hoạt: chờ nhập mã (bộ máy AI, lịch tự động, máy chủ API chưa chạy)');
     licenseCheck().catch(() => {});
     startGateTimers();
+    if (qaReq.warn) { LOG.log('qa', qaReq.warn); console.warn('[AIVN QA] ' + qaReq.warn); }
+    if (qaReq.enabled) win.webContents.once('did-finish-load', () => setTimeout(async () => { let r = null; try { r = await qaRun(qaReq); } catch (e) { LOG.log('qa', 'QA runner lỗi: ' + (e.stack || e.message)); } const code = r ? (r.exitCode ?? QAR.exitCodeOf(r.status)) : 2; try { process.stdout.write(`[AIVN QA] ${r ? r.status : 'failed'} → ${qaReq.args.out}\n`); } catch {} app.exit(code); }, 2500));
     if (app.isPackaged || process.env.AIVN_UPDATE_CHECK === '1') setTimeout(() => updater.check({ silent: true }), Number(process.env.AIVN_UPDATE_DELAY || 5000));
     if (process.env.AIVN_SHOTS141) win.webContents.once('did-finish-load', () => setTimeout(() => shots141().catch(e => { console.error('SHOTS lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_FULLBENCH && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => runFullBench((process.env.AIVN_FULLBENCH_MODELS || '').split(',').filter(Boolean), { parts: process.env.AIVN_FULLBENCH_PARTS ? process.env.AIVN_FULLBENCH_PARTS.split(',') : null, apps: process.env.AIVN_FULLBENCH_APPS ? process.env.AIVN_FULLBENCH_APPS.split(',') : null, out: path.join(process.env.AIVN_FULLBENCH, 'result.json') }).then(r => { console.log('FULLBENCH', JSON.stringify(r)); app.quit(); }, e => { console.error('FULLBENCH lỗi', e); app.exit(2); }), 2500));

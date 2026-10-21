@@ -456,6 +456,7 @@ function createDesktopAgent(deps) {
     if (action === 'hotkey') { // chặn tổ hợp hệ thống trước khi hỏi
       const k = require('./agent/keys').parse(a.keys);
       // B66d: Win+D / Win+M thu nhỏ mọi cửa sổ — chỉ khi người dùng xin “hiện màn hình chính”
+      if (k.media) throw new Error(`Không bấm “${a.keys}” bằng phím tắt: âm lượng / phát nhạc cần xin phép — dùng công cụ hệ thống (system_action) để người dùng duyệt.`);
       if (k.hidesAll && !require('./agent/computer').sysAsked('show_desktop', (ctx && ctx.userQuery) || '')) throw new Error(`Không bấm “${a.keys}”: tổ hợp này thu nhỏ MỌI cửa sổ mà người dùng không yêu cầu. Làm trực tiếp trong cửa sổ ứng dụng (focus_window).`);
     }
     if (action === 'type_text' && !String(a.text || '')) throw new Error('Thiếu text cần gõ.');
