@@ -78,6 +78,7 @@
       "src/engine.js",
       "src/engine-host.js",
       "src/vision-server.js",
+      "src/orphans.js",
       "src/agent/textproto.js",
       "src/agent/sampling.js",
       "src/gguf.js",

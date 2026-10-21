@@ -1,6 +1,6 @@
 # Kết quả AIVN tự kiểm chứng
 
-Trang này là nguồn cho mọi nhãn **✓ Đã kiểm chứng** và **⚠ AIVN thử chưa đạt** trong Kho mô hình. Nhãn **ⓘ Theo nhà phát triển** thì dẫn thẳng tới thẻ mô hình hoặc tài liệu chính thức, kèm câu trích nguyên văn.
+Trang này là nguồn cho mọi nhãn **✓ Đã kiểm chứng** và **⚠ AIVN thử chưa đạt** trong Khám phá. Nhãn **ⓘ Theo nhà phát triển** thì dẫn thẳng tới thẻ mô hình hoặc tài liệu chính thức, kèm câu trích nguyên văn.
 
 Quy ước:
 

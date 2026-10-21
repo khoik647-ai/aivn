@@ -5,14 +5,14 @@ Dùng cho giao diện ứng dụng, trang web, ghi chú phát hành và lời AI
 ## Quy ước chính tả tiếng Việt
 
 - **Đặt dấu thanh kiểu truyền thống** (khớp từ điển hunspell vi_VN và phần lớn chuỗi hiện có): *xoá, hoá, khoá, tuỳ, hoạ, thuỷ, hoà, uỷ*. Không viết *xóa, hóa, khóa, tùy, họa*.
-- Chữ hoa đầu câu và đầu tên mục; tên mục giữ nguyên chữ hoa như trên thanh bên (ví dụ “Kho mô hình”, “Máy chủ API”).
+- Chữ hoa đầu câu và đầu tên mục; tên mục giữ nguyên chữ hoa như trên thanh bên (ví dụ “Khám phá”, “Máy chủ API”).
 - Số thập phân dùng dấu phẩy (0,8 GB), hàng nghìn dùng dấu chấm (1.766.000 đ). Đơn vị cách số một khoảng trắng (4 GB, 20 MB).
 - Dấu ngoặc kép “…” cho tên nút/tuỳ chọn được trích; không dùng "…" thẳng trong văn bản hiển thị.
 - Tên riêng giữ nguyên: **AIVN**, **AIVN AGENT**, **NGUYỄN NGỌC KHÔI SINH VIÊN VLU** (không dịch, không đổi chữ hoa).
 
 ## Quy ước tiếng Anh và tiếng Trung
 
-- EN: American English, sentence case cho nút và tiêu đề nhỏ, Title Case chỉ cho tên mục chính (Model Hub, API Server). Văn phong ngắn, chủ động, không dịch từng chữ.
+- EN: American English, sentence case cho nút và tiêu đề nhỏ, Title Case chỉ cho tên mục chính (Discover, API Server). Văn phong ngắn, chủ động, không dịch từng chữ.
 - ZH: Tiếng Trung giản thể (zh-CN), dấu câu toàn khổ (，。：“”), khoảng trắng giữa chữ Hán và chữ Latinh/số (“4 GB 内存”, “AIVN 会…”).
 
 ## Thuật ngữ
@@ -36,7 +36,7 @@ Dùng cho giao diện ứng dụng, trang web, ghi chú phát hành và lời AI
 | bộ máy AI | AI engine | AI 引擎 | llama.cpp |
 | tăng tốc GPU | GPU acceleration | GPU 加速 | |
 | VRAM / RAM | VRAM / RAM | 显存 / 内存 | |
-| Kho mô hình | Model Hub | 模型库 | Tên mục |
+| Khám phá | Discover | 发现 | Tên mục (như mục Discover của LM Studio); không dùng “Kho mô hình” |
 | Trò chuyện | Chat | 对话 | Tên mục |
 | AIVN AGENT | AIVN AGENT | AIVN AGENT | Không dịch |
 | Điều khiển màn hình | Screen control | 屏幕控制 | Tên tuỳ chọn |

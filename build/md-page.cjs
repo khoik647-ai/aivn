@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-// Đổi docs/verified.md thành trang web tĩnh (dist/site/verified.html) để nhãn “✓ Đã kiểm chứng” trong Kho mô hình luôn mở được
+// Đổi docs/verified.md thành trang web tĩnh (dist/site/verified.html) để nhãn “✓ Đã kiểm chứng” trong Khám phá luôn mở được
 // (QA B8: liên kết tới nhánh main bị 404 trước khi phát hành). Markdown tối giản: tiêu đề, đoạn, danh sách, bảng, mã, liên kết, <a id>.
 const fs = require('fs');
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

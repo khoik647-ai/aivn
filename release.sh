@@ -116,7 +116,7 @@ MB_WIN="$(mb "$OUT/AIVN-Setup.exe")"; MB_ARM="$(mb "$OUT/AIVN-mac-arm64.zip")"; 
 sed -i -e "s/__MB_WIN__/$MB_WIN/g" -e "s/__MB_ARM__/$MB_ARM/g" -e "s/__MB_X64__/$MB_X64/g" "$SITE/index.html"
 grep -q "__MB_" "$SITE/index.html" && die "trang web còn chỗ dung lượng chưa điền"
 echo "Dung lượng trên trang: Windows ~$MB_WIN MB · Mac ARM ~$MB_ARM MB · Mac Intel ~$MB_X64 MB"
-# trang kết quả tự kiểm chứng (nhãn ✓ trong Kho mô hình trỏ tới đây; QA B8)
+# trang kết quả tự kiểm chứng (nhãn ✓ trong Khám phá trỏ tới đây; QA B8)
 node build/md-page.cjs docs/verified.md "$SITE/verified.html" || die "không tạo được verified.html"
 grep -q 'id="v0143-nhin-anh"' "$SITE/verified.html" || die "verified.html thiếu mục kiểm chứng"
 
@@ -162,12 +162,12 @@ NOTES="AIVN $VERSION · Phát triển bởi NGUYỄN NGỌC KHÔI SINH VIÊN VLU
 Mới ở 0.13.0 – Trợ lý (chạy hoàn toàn trên mô hình cục bộ):
 - Trợ lý tự gọi công cụ nhiều bước: máy tính, ngày giờ, đọc/liệt kê/ghi tệp (cả PDF, DOCX) chỉ trong thư mục bạn cho phép, chạy JavaScript trong hộp cát (không đọc tệp, không vào mạng, tối đa 3 giây), Python nếu máy có. Xoá hoặc ghi đè tệp luôn hỏi bằng hộp thoại tiếng Việt; xoá là chuyển vào Thùng rác.
 - Tìm kiếm web và đọc trang (DuckDuckGo, dự phòng Wikipedia) chỉ khi bạn bật “Cho phép truy cập mạng”; mọi địa chỉ đã mở được ghi dưới câu trả lời. Chặn địa chỉ nội bộ/LAN.
-- Mỗi bước hiện thành thẻ thu gọn (công cụ, đầu vào, kết quả), có nút Dừng; cảnh báo khi mô hình quá nhỏ để dùng công cụ (gợi ý Qwen3 4B/8B, Gemma 3 4B trở lên). Kho mô hình gắn nhãn “Hợp cho Trợ lý”.
+- Mỗi bước hiện thành thẻ thu gọn (công cụ, đầu vào, kết quả), có nút Dừng; cảnh báo khi mô hình quá nhỏ để dùng công cụ (gợi ý Qwen3 4B/8B, Gemma 3 4B trở lên). Khám phá gắn nhãn “Hợp cho Trợ lý”.
 - Ghi nhớ: Trợ lý lưu điều bạn muốn nó nhớ, trang Ghi nhớ để xem/sửa/xoá; điều liên quan được đưa vào lời nhắc (theo ý nghĩa bằng BGE-M3 nếu đã tải, nếu không thì theo từ khoá).
 - Lịch tự động: lời nhắc và việc định kỳ cho Trợ lý (một lần, hằng ngày, hằng tuần), thông báo của hệ điều hành, kết quả lưu thành cuộc trò chuyện; tuỳ chọn chạy nền trong khay hệ thống và mở cùng máy.
 - Máy chủ API: /v1/chat/completions hỗ trợ tools / tool_choice (gọi hàm kiểu OpenAI, cả khi stream) và response_format json_schema / json_object.
 
-Vẫn có: nhìn ảnh bằng mô hình thị giác; hỏi đáp tài liệu dài (RAG, BGE-M3); /v1/embeddings; logo rồng và giao diện đỏ–trắng; Kho mô hình tìm mọi GGUF trên Hugging Face, 29 gợi ý đã kiểm tra; tải có hàng đợi và tải tiếp; dán ảnh và OCR tiếng Việt; máy chủ API tương thích OpenAI; tự động cập nhật.
+Vẫn có: nhìn ảnh bằng mô hình thị giác; hỏi đáp tài liệu dài (RAG, BGE-M3); /v1/embeddings; logo rồng và giao diện đỏ–trắng; Khám phá tìm mọi GGUF trên Hugging Face, 29 gợi ý đã kiểm tra; tải có hàng đợi và tải tiếp; dán ảnh và OCR tiếng Việt; máy chủ API tương thích OpenAI; tự động cập nhật.
 
 Tải về:
 - Windows 10/11: AIVN-Setup.exe
