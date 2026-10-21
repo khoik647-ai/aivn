@@ -52,7 +52,7 @@ function show(view, opts = {}) {
   if (view === 'discover' && !$('#sugArea').hidden) renderCatalog();
   if (view === 'models') refreshModels();
   if (view === 'crm') renderCrm();
-  if (view === 'server') refreshServer();
+  if (view === 'server') { refreshServer(); fullBenchRefresh(); }
   if (view === 'settings') setTab(opts.tab || setTab.cur || 'general');
   document.title = 'AIVN · ' + (VIEW_TITLES[view] || 'Trò chuyện');
 }
@@ -102,9 +102,11 @@ function modelOptionsHtml(models, cur, agentMode) {
   const head = `<option value="">${models.length ? (agentMode ? '— Chọn mô hình cho AIVN AGENT —' : '— Chọn mô hình để nạp —') : '— Chưa có mô hình, hãy vào mục Khám phá —'}</option>`;
   const ok = agentMode ? models.filter(m => m.agent && m.agent.ok) : models;
   const bad = agentMode ? models.filter(m => !(m.agent && m.agent.ok)) : [];
-  const groups = FIT_GROUPS.map(([k, label]) => { const items = sortFit(ok, fitOf).filter(m => fitGroupOf(fitOf(m)) === k); return items.length ? `<optgroup label="${esc(label)}">${items.map(m => opt(m, k === 'no' && agentMode, k === 'no' && agentMode ? 'Quá nặng cho máy' : '')).join('')}</optgroup>` : ''; }).join('');
+  const vs = (m) => !!(agentMode && m.agent && m.agent.verySlow); // “Rất chậm” (bật tay) — nhóm riêng, cuối, có cảnh báo
+  const slowest = ok.filter(vs).length ? `<optgroup label="Rất chậm (tràn RAM) — bạn đã tự bật">${sortFit(ok.filter(vs), fitOf).map(m => opt(m, false, 'Rất chậm: mỗi bước có thể mất 1–3 phút')).join('')}</optgroup>` : '';
+  const groups = FIT_GROUPS.map(([k, label]) => { const items = sortFit(ok.filter(m => !vs(m)), fitOf).filter(m => fitGroupOf(fitOf(m)) === k); return items.length ? `<optgroup label="${esc(label)}">${items.map(m => opt(m, k === 'no' && agentMode, k === 'no' && agentMode ? 'Quá nặng cho máy' : '')).join('')}</optgroup>` : ''; }).join('');
   const blocked = bad.length ? `<optgroup label="Không dùng được cho AIVN AGENT">${sortFit(bad, fitOf).map(m => opt(m, true, (m.agent && m.agent.reason) || 'Chưa được AIVN kiểm chứng')).join('')}</optgroup>` : '';
-  return head + groups + blocked;
+  return head + groups + slowest + blocked;
 }
 async function refreshModels() {
   state.models = await A.models();
@@ -144,7 +146,7 @@ function renderModelTable() {
   const head = MM_COLS.map(([k, label]) => `<button type="button" class="th" data-sort="${k}" role="columnheader" aria-sort="${mmSort.key === k ? (mmSort.dir > 0 ? 'ascending' : 'descending') : 'none'}"><span>${esc(label)}</span>${mmSort.key === k ? `<span aria-hidden="true">${mmSort.dir > 0 ? ' ▲' : ' ▼'}</span>` : ''}</button>`).join('');
   t.innerHTML = `<div class="tr head" role="row">${head}<span role="columnheader">Thao tác</span></div>` + (list.length ? list.map(m => `<div class="tr" role="row" data-id="${esc(m.id)}">
       <span title="${esc(m.path)}"><b>${esc(m.catalog ? m.catalog.name : m.file)}</b>${m.loaded ? '<span class="badge">Đang nạp</span>' : ''}${m.vision ? '<span class="badge vis" title="Có tệp thị giác (mmproj) cạnh mô hình">👁 Nhìn được ảnh</span>' : ''}${m.agent && m.agent.ok ? '<span class="badge" title="Dùng được cho AIVN AGENT">🤖</span>' : ''}<div class="muted" style="font-size:11.5px">${esc([m.params && m.params + ' tham số', m.source === 'imported' ? 'đã nhập' : 'đã tải', m.id].filter(Boolean).join(' · '))}</div></span>
-      <span>${esc(m.quant || '—')}</span><span>${fmtBytes(m.size)}</span><span>${fitBadge(m.fit)}</span>
+      <span>${esc(m.quant || '—')}</span><span title="${m.mmprojSize ? esc(`Mô hình ${fmtBytes(m.size)} + tệp thị giác ${fmtBytes(m.mmprojSize)}`) : ''}">${fmtBytes(m.size + (m.mmprojSize || 0))}</span><span>${fitBadge(m.fit)}</span>
       <span title="Tốc độ sinh chữ đo được khi bạn dùng mô hình này trên máy này (trung bình gần đây)">${m.usage && m.usage.tps ? `${String(m.usage.tps).replace('.', DEC())} token/giây` : '<span class="muted">chưa đo</span>'}</span>
       <span>${m.usage && m.usage.lastUsed ? fmtUsedAgo(m.usage.lastUsed) + (m.usage.uses ? `<div class="muted small">${m.usage.uses} lượt</div>` : '') : '<span class="muted">chưa dùng</span>'}</span>
       <span class="acts">${m.loaded ? '<button class="btn sm" data-act="unload">Gỡ khỏi bộ nhớ</button>' : '<button class="btn sm primary" data-act="load">Nạp</button>'}
@@ -189,7 +191,7 @@ async function ensureLoaded() {
   if (!state.models || !state.models.length) await refreshModels();
   const list = state.models || [];
   // AIVN AGENT: chỉ tự nạp mô hình dùng được cho agent (mạnh nhất chạy mượt)
-  const agentList = sortFit(list.filter(m => m.agent && m.agent.ok), (m) => m.agentFit || m.fit);
+  const agentList = sortFit(list.filter(m => m.agent && m.agent.ok), (m) => m.agentFit || m.fit).sort((a, b) => !!a.agent.verySlow - !!b.agent.verySlow); // “Rất chậm” không bao giờ tự nạp trước
   if (isAgent() && !agentList.length && list.length) { await refreshAgent(); toast('Chưa có mô hình nào trên máy dùng được cho AIVN AGENT — xem gợi ý ở biểu ngữ phía trên', true); return false; }
   const pool = isAgent() ? agentList : list;
   const pick = pool.find(m => m.id === $('#modelSelect').value) || pool.find(m => state.settings && m.id === state.settings.lastModel) || pool[0];
@@ -409,7 +411,7 @@ const fmtAgo = (iso) => { if (!iso) return ''; const d = (Date.now() - new Date(
 const fmtParams = (n) => !n ? '' : n >= 1e9 ? (n / 1e9).toFixed(n >= 1e10 ? 0 : 1).replace('.', DEC()) + 'B tham số' : Math.round(n / 1e6) + 'M tham số';
 const cleanErr = (m) => String(m).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 // Mức chạy trên máy này (src/fit.js): Chạy mượt (trọn trong VRAM) · Chạy chậm (tràn sang RAM) · Không chạy được — kèm tốc độ và bộ nhớ ước tính
-const fitBadge = (f) => f ? `<span class="fit ${f.level}" title="${esc(f.hint + (f.ctx ? ` · tính với ngữ cảnh ${Number(f.ctx).toLocaleString(LOC())} token` : '') + ' · số liệu ước tính')}">${esc(f.label)}${f.text ? ` <small>· ${esc(f.text)}</small>` : ''}</span>` : '';
+const fitBadge = (f) => f ? `<span class="fit ${f.level}" title="${esc(f.hint + (f.ctx ? ` · tính với ngữ cảnh ${Number(f.ctx).toLocaleString(LOC())} token` : '') + (f.measured || f.tpsMeasured ? ' · theo số đo thật trên máy này' : ' · số liệu ước tính') + (f.detail ? '\n' + f.detail : ''))}">${esc(f.label)}${f.text ? ` <small>· ${esc(f.text)}${f.measured || f.tpsMeasured ? ` · ${esc('đo thật')}` : ''}</small>` : ''}</span>` : ''; // B38: cùng một cách tính cho Khám phá và Mô hình của tôi
 const FIT_GROUPS = [['smooth', 'Chạy mượt', 'nằm trọn trong VRAM, mạnh trước'], ['slow', 'Chạy chậm', 'tràn sang RAM, mạnh trước'], ['no', 'Không chạy được', 'lớn hơn VRAM + RAM của máy này']];
 const fitGroupOf = (f) => (f && (f.group || ({ fit: 'smooth', slow: 'slow', big: 'no' })[f.level])) || 'slow';
 // xếp: Chạy mượt → Chạy chậm → Không chạy được, trong mỗi nhóm mạnh trước
@@ -1948,6 +1950,7 @@ function paintComputer(c) {
   $('#agScreen').checked = c.screen;
   $('#agScreenNote').innerHTML = `AIVN AGENT tự mở ứng dụng và thao tác như bạn: đọc danh sách nút/ô của cửa sổ (Trợ năng của hệ điều hành) và chữ trên màn hình, bấm/gõ từng bước rồi kiểm tra lại. Cần <b>nhìn được màn hình</b>: dùng mô hình nhìn ảnh (Qwen3-VL) làm mô hình chính, hoặc mô hình chữ + mắt nhìn (AIVN tự nạp mô hình nhìn ảnh đã cài). Luôn hỏi trước khi gửi tin nhắn, thanh toán, xoá, nộp biểu mẫu; không bao giờ gõ mật khẩu. Dừng: <b>Esc</b>, <b>${esc(c.stopKey)}</b> hoặc nút “Dừng ngay”.`;
   $('#agGrounder').innerHTML = '<option value="">Không dùng — chỉ cây giao diện + đọc chữ</option>' + (c.grounders || []).map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join(''); $('#agGrounder').value = c.grounder || '';
+  $('#agVerySlow').checked = !!c.verySlow;
   $('#agScreenOpts').hidden = !c.screen; $('#agScreenMode').value = c.screenMode || 'each'; $('#agScreenBudget').value = String(c.screenBudget || 40);
   paintBench();
   const g = $('#permGuide');
@@ -1981,6 +1984,22 @@ $('#benchRun').addEventListener('click', async () => {
   if (!$('#sugArea').hidden) renderCatalog();
 });
 $('#benchStop').addEventListener('click', () => A.benchStop());
+// Bộ đo AIVN AGENT đầy đủ (màn Nhà phát triển)
+async function fullBenchRefresh() {
+  if (!$('#fbModels') || $('#fbRun').hidden) return;
+  const ms = await A.benchFullModels().catch(() => []);
+  $('#fbModels').innerHTML = ms.length ? ms.map(m => `<label class="check"><input type="checkbox" value="${esc(m.id)}" checked> Qwen3-VL ${esc(m.size)} <span class="muted">${esc(m.quant)}</span></label>`).join('') : `<span class="muted small">${esc('Chưa thấy Qwen3-VL 2B/4B/8B đã tải đủ (cần cả tệp thị giác).')}</span>`;
+  $('#fbRun').disabled = !ms.length;
+}
+$('#fbRun').addEventListener('click', async () => {
+  const ids = [...$('#fbModels').querySelectorAll('input:checked')].map(i => i.value); if (!ids.length) return;
+  $('#fbRun').hidden = true; $('#fbStop').hidden = false; $('#fbRes').textContent = 'Đang chuẩn bị…';
+  const r = await A.benchFull({ ids });
+  $('#fbRun').hidden = false; $('#fbStop').hidden = true;
+  $('#fbRes').textContent = r.ok ? `${r.summary.join('\n')}\n\n${'Đã lưu kết quả:'} ${r.file}` : 'Không đo được:' + ' ' + r.error;
+});
+$('#fbStop').addEventListener('click', () => A.benchStop());
+A.onBenchFullProgress((p) => { if ($('#fbRun').hidden) $('#fbRes').textContent = `${'Đang đo'} Qwen3-VL ${p.model} (${p.mi}/${p.models}) · ${p.phase || ''}${p.i ? ` ${p.i}/${p.n}` : ''}${p.label ? ': ' + p.label : ''}…`; });
 $('#alwaysList').addEventListener('click', async (e) => { const b = e.target.closest('[data-revoke]'); if (!b) return; await A.agentAlwaysRevoke(b.dataset.revoke); toast('AIVN AGENT sẽ hỏi lại trước khi dùng công cụ này.'); refreshAgent(); });
 A.onBenchProgress((p) => { if ($('#benchModel').dataset.busy) $('#benchRes').textContent = `Đang đo ${p.i}/${p.n}: ${p.label}…`; });
 $('#agComp').addEventListener('change', (e) => saveAgentSetting({ agentComputer: e.target.checked }));
@@ -2028,6 +2047,13 @@ $('#agScreenMode').addEventListener('change', async (e) => {
   saveAgentSetting({ agentScreenMode: e.target.value });
 });
 $('#agGrounder').addEventListener('change', (e) => saveAgentSetting({ agentGrounder: e.target.value || '' }));
+$('#agVerySlow').addEventListener('change', async (e) => {
+  if (e.target.checked) {
+    const ok = await modalAsk({ icon: '🐢', title: 'Cho dùng mô hình “Rất chậm”?', message: 'Chỉ dành cho máy yếu (vd. laptop GPU 4 GB) khi mô hình nhỏ chưa làm tốt việc của bạn. Mô hình lớn (vd. Qwen3-VL 8B) sẽ tràn sang RAM: mỗi bước có thể mất 1–3 phút, máy nóng và ồn hơn, ứng dụng khác chậm lại. AIVN AGENT chờ lâu gấp 3 lần trước khi báo hết giờ. Mô hình này không bao giờ được gợi ý ⭐ hay tự nạp — bạn phải tự chọn trong bộ chọn mô hình.', okLabel: 'Vẫn bật', noLabel: 'Thôi' });
+    if (!ok) { e.target.checked = false; return; }
+  }
+  await saveAgentSetting({ agentVerySlow: e.target.checked }); refreshModels().catch(() => {}); refreshAgent && refreshAgent().catch(() => {});
+});
 $('#agScreenBudget').addEventListener('change', (e) => saveAgentSetting({ agentScreenBudget: Number(e.target.value) }));
 $('#agScreen').addEventListener('change', async (e) => {
   if (e.target.checked && !(await modalAsk({ icon: '🖱', title: 'Bật Điều khiển máy tính (thử nghiệm)?', message: 'AIVN AGENT sẽ tự điều khiển chuột/bàn phím: đọc cửa sổ đang mở (Trợ năng của hệ điều hành), chụp màn hình để đọc chữ (ảnh không gửi đi đâu), rồi bấm/gõ từng bước. Mặc định bạn duyệt TỪNG bước trên thẻ nổi (Ctrl+Enter = cho phép, Esc = từ chối). Gửi tin nhắn, thanh toán, xoá luôn hỏi; không bao giờ gõ mật khẩu. Dừng ngay: Esc hoặc Ctrl+Alt+Q (macOS: ⌘⌥Q).', okLabel: 'Bật', noLabel: 'Huỷ' }))) { e.target.checked = false; return; }

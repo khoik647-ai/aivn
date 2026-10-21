@@ -40,8 +40,21 @@ function strength(m) {
   return +(base * g).toFixed(2);
 }
 // KV cache f16 mỗi token: dùng số đo từ GGUF nếu có, nếu không ước theo số tham số (GQA phổ biến: 8B ≈ 110 KB/token)
-const kvPerToken = (m) => m.kvPerToken || Math.max(48e3, 9e3 * (parseParams(m.params || m.sizeLabel, m.size).total || 4) + 40e3);
-const computeBuf = (ctx) => 300 * MiB + ctx * 2048;
+// B38 (máy thật của Khôi: Qwen3-VL 4B ước 4,4 GB nhưng VRAM thật tăng ~7,2 GB): hiệu chỉnh theo kiến trúc thật của các họ phổ biến
+// (Qwen3/Qwen3-VL: 28 lớp × 8 đầu KV × 128 ≈ 115 KB/token cho ≤ 2B; 36 lớp ≈ 147 KB/token cho 4B/8B; 14B 40 lớp ≈ 164 KB; 32B 64 lớp ≈ 262 KB)
+const kvPerToken = (m) => { if (m.kvPerToken) return m.kvPerToken; const P = parseParams(m.params || m.sizeLabel, m.size).total || 4; return P <= 2.6 ? 115e3 : P <= 9.5 ? 147e3 : P <= 16 ? 164e3 : 262e3; };
+// bộ đệm tính toán của llama.cpp lớn dần theo ngữ cảnh (đo: ~0,7 GB ở 16K cho mô hình 4B)
+const computeBuf = (ctx) => 300 * MiB + ctx * 24 * 1024;
+// mô hình nhìn ảnh: bộ đệm mã hoá ảnh (ảnh chụp màn hình ~1 triệu điểm ảnh) ngoài trọng số mmproj
+const VISION_BUF = 600 * MiB;
+// CUDA/Vulkan context + bộ máy
+const RUNTIME = 350 * MiB;
+// Một cách tính duy nhất cho Khám phá và Mô hình của tôi: gom thông tin mô hình (catalog / tệp đã cài / số đo thật) thành đầu vào của machineFit
+// measured: { bytes, ctx } = VRAM tăng thật khi nạp trên máy này (main.js ghi lại sau mỗi lần nạp lên GPU)
+function metaOf({ catalog = null, size = 0, mmprojSize = null, file = '', kvPerToken = null, measured = null } = {}) {
+  return { id: catalog ? catalog.id : null, size: size || (catalog && catalog.size) || 0, mmprojSize: mmprojSize != null ? mmprojSize : (catalog && catalog.mmproj ? catalog.mmproj.size || 0 : 0),
+    params: (catalog && catalog.params) || (String(file).match(/(\d+(?:\.\d+)?)\s*[bB](?![a-z])/) || [])[0] || null, kvPerToken: kvPerToken || (catalog && catalog.kvPerToken) || null, measured: measured && measured.bytes > 0 ? measured : null };
+}
 // Băng thông bộ nhớ GPU (GB/s) theo tên; không biết thì ước theo dung lượng VRAM
 const GPU_BW = [
   [/5090/, 1790], [/5080/, 960], [/5070 ?ti/i, 896], [/5070/, 672], [/5060 ?ti/i, 448], [/5060/, 448],
@@ -58,7 +71,8 @@ function gpuBandwidth(hw) {
 }
 // RAM: ước 2 kênh DDR4/DDR5 ≈ 50 GB/s; Mac Apple Silicon dùng bộ nhớ hợp nhất ≈ 100+ GB/s
 const cpuBandwidth = (hw) => hw.gpu === 'metal' ? 120 : (hw.ramBandwidth || 60);
-const EFF_GPU = 0.55, EFF_CPU = 0.7;
+// hiệu chỉnh theo số đo thật (RTX 4070 SUPER: Qwen3-VL 4B Q4_K_M 114,7 token/giây): băng thông hiệu dụng 75 % + ~2,5 ms chi phí cố định mỗi token trên GPU
+const EFF_GPU = 0.75, EFF_CPU = 0.7, TOK_OVH_GPU = 0.0025, TOK_OVH_CPU = 0.001;
 
 // m: { size, mmprojSize?, params?, kvPerToken?, id? }; o: { ctx }
 function machineFit(m, hw, o = {}) {
@@ -66,7 +80,10 @@ function machineFit(m, hw, o = {}) {
   const ctx = o.ctx || 8192;
   const weights = (m.size || 0) + (m.mmprojSize || 0);
   const kv = kvPerToken(m) * ctx;
-  const need = weights + kv + computeBuf(ctx) + 150 * MiB;
+  let need = weights + kv + computeBuf(ctx) + (m.mmprojSize ? VISION_BUF : 0) + RUNTIME;
+  // có số đo thật trên máy này: dùng số đo (chỉnh theo phần KV + bộ đệm khác ngữ cảnh)
+  const meas = m.measured && m.measured.bytes > 0 ? m.measured : null;
+  if (meas) need = Math.max(weights, meas.bytes + (kvPerToken(m) + 24 * 1024) * (ctx - (meas.ctx || ctx)));
   const vramTotal = hw.gpu && hw.gpu !== 'metal' && hw.vram && hw.vram.total && !hw.vram.integratedOnly && !hw.cpuOnly ? hw.vram.total : 0;
   const vramBudget = vramTotal ? vramTotal - Math.max(600 * MiB, vramTotal * 0.06) : 0; // màn hình và Windows giữ một phần VRAM
   const ramBudget = Math.max(0, hw.ram * 0.85 - 1.5 * GB); // chừa cho hệ điều hành và ứng dụng khác
@@ -80,22 +97,24 @@ function machineFit(m, hw, o = {}) {
     tps = perTok ? (cpuBandwidth(hw) * EFF_GPU * GB) / perTok : 0;
     hint = ok ? 'Vừa bộ nhớ hợp nhất của Mac' : group === 'slow' ? 'Gần hết bộ nhớ, máy có thể chậm' : 'Lớn hơn bộ nhớ của máy';
   } else if (vramTotal) {
-    if (need <= vramBudget) { group = 'smooth'; vramUse = need; tps = perTok ? (gpuBandwidth(hw) * EFF_GPU * GB) / perTok : 0; hint = 'Nằm trọn trong VRAM'; }
+    if (need <= vramBudget) { group = 'smooth'; vramUse = need; tps = perTok ? 1 / (perTok / (gpuBandwidth(hw) * EFF_GPU * GB) + TOK_OVH_GPU) : 0; hint = 'Nằm trọn trong VRAM'; }
     else if (need <= vramBudget + ramBudget) {
       group = 'slow'; vramUse = vramBudget; ramUse = need - vramBudget;
       const onGpu = Math.max(0, Math.min(1, (vramBudget - kv - computeBuf(ctx)) / Math.max(1, weights)));
-      const t = perTok * onGpu / (gpuBandwidth(hw) * EFF_GPU * GB) + perTok * (1 - onGpu) / (cpuBandwidth(hw) * EFF_CPU * GB);
+      const t = perTok * onGpu / (gpuBandwidth(hw) * EFF_GPU * GB) + perTok * (1 - onGpu) / (cpuBandwidth(hw) * EFF_CPU * GB) + TOK_OVH_GPU;
       tps = t ? 1 / t : 0; hint = `Tràn ${(ramUse / 1024 ** 3).toFixed(1).replace('.', ',')} GB sang RAM, phần đó chạy bằng CPU`;
     } else { group = 'no'; hint = 'Lớn hơn VRAM + RAM của máy'; tps = 0; ramUse = need; }
   } else {
     // máy không có GPU rời: “mượt” khi vừa RAM và ước tính ≥ 10 token/giây trên CPU
-    ramUse = need; tps = perTok ? (cpuBandwidth(hw) * EFF_CPU * GB) / perTok : 0;
+    ramUse = need; tps = perTok ? 1 / (perTok / (cpuBandwidth(hw) * EFF_CPU * GB) + TOK_OVH_CPU) : 0;
     group = need > ramBudget ? 'no' : tps >= 10 ? 'smooth' : 'slow';
     hint = group === 'no' ? 'Lớn hơn RAM của máy' : group === 'smooth' ? 'Chạy bằng CPU, vừa RAM' : 'Chạy bằng CPU, khá chậm';
   }
   const r = { group, label: LABEL[group], level: group === 'smooth' ? 'fit' : group === 'slow' ? 'slow' : 'big', hint, ctx,
-    need: Math.round(need), vram: Math.round(vramUse), ram: Math.round(ramUse), tps: tps ? Math.max(0.5, Math.round(tps * 10) / 10) : 0 };
-  r.text = fmtFit(r); return r;
+    need: Math.round(need), vram: Math.round(vramUse), ram: Math.round(ramUse), tps: tps ? Math.max(0.5, Math.round(tps * 10) / 10) : 0, measured: !!meas,
+    parts: { weights: Math.round(m.size || 0), mmproj: Math.round(m.mmprojSize || 0), kv: Math.round(kv), compute: Math.round(computeBuf(ctx) + (m.mmprojSize ? VISION_BUF : 0) + RUNTIME) } };
+  if (m.measuredTps > 0 && group !== 'no') { r.tps = Math.round(m.measuredTps * 10) / 10; r.tpsMeasured = true; }
+  r.text = fmtFit(r); r.detail = fitDetail(r); return r;
 }
 const ORDER = { smooth: 0, slow: 1, no: 2 };
 // sắp xếp: nhóm (mượt → chậm → không chạy) rồi mạnh trước; f(m) trả về kết quả machineFit của m
@@ -115,4 +134,10 @@ function fmtFit(f) {
   const sp = f.tps ? `~${f.tps >= 10 ? Math.round(f.tps) : String(f.tps).replace('.', ',')} token/giây` : '';
   return [sp, mem].filter(Boolean).join(' · ');
 }
-module.exports = { GROUPS, LABEL, parseParams, strength, kvPerToken, gpuBandwidth, machineFit, sortByFit, groupByFit, fmtFit };
+// chú thích chi tiết (tooltip): trọng số + mmproj + KV ở ngữ cảnh N + bộ đệm
+function fitDetail(f) {
+  if (!f || !f.parts) return '';
+  const gb = (b) => (b / 1024 ** 3).toFixed(1).replace('.', ',') + ' GB';
+  return `Ước tính ở ngữ cảnh ${f.ctx}: trọng số ${gb(f.parts.weights)}${f.parts.mmproj ? ` + tệp thị giác ${gb(f.parts.mmproj)}` : ''} + bộ đệm KV ${gb(f.parts.kv)} + bộ đệm tính toán ${gb(f.parts.compute)} = ${gb(f.need)}${f.measured ? ' (theo số đo VRAM thật khi nạp trên máy này)' : ''}`;
+}
+module.exports = { GROUPS, LABEL, parseParams, strength, kvPerToken, computeBuf, metaOf, gpuBandwidth, machineFit, sortByFit, groupByFit, fmtFit, fitDetail };

@@ -12,7 +12,9 @@
   const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
   const dt = (s) => s ? new Date(String(s).length === 10 ? s + 'T00:00:00' : s).toLocaleDateString(LOC()) : '';
   const qn = (n) => (Math.round((Number(n) || 0) * 1000) / 1000).toLocaleString(LOC());
-  const amt = (l) => Math.round((Number(String(l.qty).replace(',', '.')) || 0) * (parseMoney(l.price)) * (1 - (Number(l.discount_pct) || 0) / 100));
+  // B50: cùng quy tắc với máy chủ (crm/text.parseQty): “1.000” = 1000, “1,5” = 1,5
+  const parseQty = (v) => { const t = String(v ?? '').replace(/\s/g, ''); if (/^[-+]?\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(t)) return Number(t.replace(/\./g, '').replace(',', '.')); if (/^[-+]?\d+(?:,\d+)?$/.test(t)) return Number(t.replace(',', '.')); if (/^[-+]?\d*\.\d+$/.test(t)) return Number(t); return NaN; };
+  const amt = (l) => Math.round((parseQty(l.qty) || 0) * (parseMoney(l.price)) * (1 - (Number(l.discount_pct) || 0) / 100));
   const parseMoney = (v) => typeof v === 'number' ? v : Number(String(v ?? '').replace(/[^\d-]/g, '')) || 0;
   const badge = (txt, tone) => `<span class="biz-badge ${tone || ''}">${esc(txt)}</span>`;
   const TONE = { draft: '', sent: 'info', sale: 'ok', cancel: 'muted', ready: 'info', done: 'ok', posted: 'ok', not_paid: 'warn', partial: 'info', paid: 'ok', reversed: 'muted', to_invoice: 'warn', invoiced: 'ok', no: 'muted', pending: 'warn', full: 'ok', none: 'muted' };
@@ -260,7 +262,7 @@
       if (a === 'discard') { B.form = null; B.edit = null; return rerender(); }
       if (a === 'addLine') { readForm(); if (f.type === 'receipt') { const p = B.products.find(x => x.type === 'product'); B.edit.lines.push({ product_id: p ? p.id : '', qty: 1, unit_cost: p ? p.cost : 0 }); } else B.edit.lines.push({ product_id: '', name: '', qty: 1, unit: 'cái', price: 0, discount_pct: 0 }); return rerender(); }
       if (a === 'delLine') { readForm(); B.edit.lines.splice(Number(el.dataset.i), 1); return rerender(); }
-      if (a === 'archiveProduct') { if (await modalAsk({ icon: '📦', title: 'Lưu trữ sản phẩm?', message: 'Sản phẩm sẽ ẩn khỏi danh sách và không chọn được cho đơn mới. Đơn, hoá đơn và lịch sử kho cũ vẫn giữ nguyên.', okLabel: 'Lưu trữ', noLabel: 'Giữ lại' })) { await C('deleteProduct', el.dataset.id); toast('Đã lưu trữ ✓'); } return rerender(); }
+      if (a === 'archiveProduct') { if (await modalAsk({ icon: '📦', title: 'Lưu trữ sản phẩm?', message: 'Sản phẩm sẽ ẩn khỏi danh sách và không chọn được cho đơn mới. Đơn, hoá đơn và lịch sử kho cũ vẫn giữ nguyên.', okLabel: 'Lưu trữ', noLabel: 'Giữ lại' })) { const r = await A.crm('deleteProduct', el.dataset.id); if (!r.ok && r.code === 'stock') { if (!await modalAsk({ icon: '⚠', title: 'Sản phẩm còn tồn kho', message: r.error, okLabel: 'Vẫn lưu trữ', noLabel: 'Giữ lại' })) return rerender(); const r2 = await A.crm('deleteProduct', el.dataset.id, { force: true }); if (!r2.ok) throw new Error(r2.error); } else if (!r.ok) throw new Error(r.error); toast('Đã lưu trữ ✓'); } return rerender(); }
       if (a === 'count') { return dialog(`Kiểm kê: ${el.dataset.name}`, [['counted', 'Số lượng đếm được thực tế'], ['note', 'Ghi chú (vd. Kiểm kê cuối tháng)']], { counted: el.dataset.qty }, async (o) => { const r = await C('adjustStock', el.dataset.id, o.counted, o.note); toast(r.changed ? `Đã điều chỉnh tồn: ${r.diff > 0 ? '+' : ''}${qn(r.diff)}` : 'Tồn kho đã đúng, không cần điều chỉnh.'); rerender(); }); }
       // Bán hàng
       if (a === 'saveOrder') { readForm(); const o = await C('saveQuote', orderPayload()); B.form = { type: 'order', id: o.id }; B.edit = null; toast('Đã lưu ✓'); return rerender(); }
@@ -280,7 +282,7 @@
         let backorder = true;
         if (partial) backorder = await modalAsk({ icon: '📦', title: 'Làm thiếu so với nhu cầu', message: 'Một số dòng làm ít hơn nhu cầu. Tạo phiếu chờ (backorder) cho phần còn lại?', okLabel: 'Tạo phiếu chờ', noLabel: 'Không, bỏ phần còn lại' });
         const r = await A.crm('validatePicking', f.id, { backorder });
-        if (!r.ok && r.code === 'short') { if (!await modalAsk({ icon: '⚠', title: 'Không đủ hàng trong kho', message: r.error, okLabel: 'Vẫn giao (tồn âm)', noLabel: 'Để sau' })) return; const r2 = await A.crm('validatePicking', f.id, { backorder, force: true }); if (!r2.ok) throw new Error(r2.error); }
+        if (!r.ok && (r.code === 'short' || r.code === 'over')) { if (!await modalAsk({ icon: '⚠', title: r.code === 'over' ? 'Giao vượt số lượng đặt' : 'Không đủ hàng trong kho', message: r.error, okLabel: r.code === 'over' ? 'Vẫn giao vượt' : 'Vẫn giao (tồn âm)', noLabel: 'Để sau' })) return; const r2 = await A.crm('validatePicking', f.id, { backorder, force: true }); if (!r2.ok) throw new Error(r2.error); }
         else if (!r.ok) throw new Error(r.error);
         toast('Đã xác nhận phiếu ✓'); return rerender();
       }

@@ -120,7 +120,7 @@ function parseSeen(seen) {
 }
 // regions: { header: [chữ ở đầu khung chat], composer: [chữ trong ô soạn], messages: [chữ trong khung tin], list: [danh sách trái] }
 // (desktop-agent tách theo vị trí trên màn hình); seen: câu trả lời có cấu trúc của mắt nhìn; winTitle: tiêu đề cửa sổ
-const APP_TITLE = /^(zalo|messenger|facebook|telegram|microsoft teams|teams|discord|gmail|signal|whatsapp|skype|line|viber|google chrome|chrome|microsoft edge|firefox|mozilla firefox|outlook|microsoft outlook|trò chuyện|tro chuyen|chat|thư|thu|mail|inbox|hộp thư đến|hop thu den|tin nhắn|messages?)$/i;
+const APP_TITLE = /^(aivn bench|zalo|messenger|facebook|telegram|microsoft teams|teams|discord|gmail|signal|whatsapp|skype|line|viber|google chrome|chrome|microsoft edge|firefox|mozilla firefox|outlook|microsoft outlook|trò chuyện|tro chuyen|chat|thư|thu|mail|inbox|hộp thư đến|hop thu den|tin nhắn|messages?)$/i;
 // B27 (QA lượt 4): màn hình (tiêu đề cửa sổ / đầu khung chat) cho thấy ĐÚNG cuộc trò chuyện với người nhận — đúng tên đầy đủ, không chú thích lạ,
 // và tiêu đề cửa sổ không nêu cuộc trò chuyện khác. Dùng để mở khoá chatGate theo màn hình thay vì chỉ theo cờ nội bộ.
 function chatShown(recipient, title = '', header = []) {

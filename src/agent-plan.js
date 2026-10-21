@@ -24,9 +24,15 @@ function plan(entries, fitAt, scores = {}) {
   // beta.2: (2B bị bỏ khỏi AIVN AGENT) không có mô hình chạy mượt nhưng có mô hình tràn ít (≤ 1 GB) → vẫn chỉ nhận mô hình tràn ít
   // (vd. laptop 4 GB: Qwen3-VL 4B “Chạy chậm”, 8B tràn vài GB vẫn là “Quá nặng”); không có cả mô hình tràn ít → mọi mô hình đủ nhanh
   const low = at(CTX_LOW); const okSmall = low.some(m => AE.eligibility({ ...m, fit: m.agentFit }, { shipped: m.catalog && (scores.shipped || {})[m.catalog.id], local: (scores.local || {})[m.id], allowSlow: true, maxSpill: SMALL_SPILL }).ok);
-  return { ctx: CTX_LOW, lowered: true, allowSlow: true, maxSpill: okSmall ? SMALL_SPILL : Infinity, noSmooth: true };
+  if (okSmall) return { ctx: CTX_LOW, lowered: true, allowSlow: true, maxSpill: SMALL_SPILL, noSmooth: true };
+  // B38 (hiệu chỉnh VRAM theo số đo thật): GPU 4 GB không còn mô hình nào tràn ≤ 1 GB → nhận mô hình tràn ÍT NHẤT (+ 1 GB),
+  // không mở cho mọi mô hình (8B tràn ~6 GB vẫn là “Quá nặng”)
+  const okAny = low.filter(m => AE.eligibility({ ...m, fit: m.agentFit }, { shipped: m.catalog && (scores.shipped || {})[m.catalog.id], local: (scores.local || {})[m.id], allowSlow: true, maxSpill: Infinity }).ok && m.agentFit);
+  const least = okAny.length ? Math.min(...okAny.map(m => m.agentFit.ram || 0)) : Infinity;
+  return { ctx: CTX_LOW, lowered: true, allowSlow: true, maxSpill: Number.isFinite(least) ? least + SMALL_SPILL : Infinity, noSmooth: true };
 }
-const elOpts = (p) => ({ allowSlow: !!(p && p.allowSlow), maxSpill: !p ? 0 : p.maxSpill == null ? Infinity : p.maxSpill });
+// offerVerySlow: máy yếu (không có mô hình chạy mượt kể cả ở 12K) → mô hình tràn nhiều được hiện là “Rất chậm” (bật tay mới dùng); allowVerySlow = người dùng đã bật
+const elOpts = (p) => ({ allowSlow: !!(p && p.allowSlow), maxSpill: !p ? 0 : p.maxSpill == null ? Infinity : p.maxSpill, offerVerySlow: !!(p && p.noSmooth), allowVerySlow: !!(p && p.noSmooth && p.allowVerySlow) });
 // câu giải thích cho giao diện
 function note(p) {
   if (!p || !p.lowered) return '';

@@ -161,3 +161,48 @@ for (const lang of ['vi', 'en']) {
     else { assert.strictEqual(d.invoice.ribbon, 'PARTIALLY PAID'); assert.strictEqual(d.order.total, '8,800,000 VND'); assert.match(d.steps['10-don-xac-nhan'].toasts.join(' '), /Order BG-\d{4}-\d{4} confirmed · delivery created/); }
   });
 }
+
+// QA lượt 6 (B50–B54)
+test('B50/B51: “1.000” = 1000 (dấu chấm hàng nghìn), số lượng làm tròn 3 chữ số, kiểm kê chữ không phải số bị chặn', async () => {
+  day = '2026-10-21'; const { crm, biz, cus, ban, ghe } = await setup();
+  const T = require('../src/crm/text');
+  assert.strictEqual(T.parseQty('1.000'), 1000); assert.strictEqual(T.parseQty('1.234,5'), 1234.5); assert.strictEqual(T.parseQty('1,5'), 1.5); assert.strictEqual(T.parseQty('1.5'), 1.5); assert.ok(Number.isNaN(T.parseQty('abc')));
+  const r = biz.createReceipt({ lines: [{ product_id: ban.id, qty: '1.000', unit_cost: '500.000' }] }); biz.validatePicking(r.id);
+  assert.strictEqual(biz.onHand(ban.id), 1000);
+  const q = crm.saveQuote({ contact_id: cus.id, lines: [L(ban, '1.000', { price: '1.000' })] }); assert.strictEqual(q.lines[0].qty, 1000);
+  assert.throws(() => crm.saveQuote({ contact_id: cus.id, lines: [L(ban, 'mười')] }), /không phải là số/);
+  biz.adjustStock(ghe.id, '1.200'); assert.strictEqual(biz.onHand(ghe.id), 1200);
+  biz.adjustStock(ghe.id, '0,1'); biz.adjustStock(ghe.id, '0,3'); biz.adjustStock(ghe.id, 20); assert.strictEqual(biz.onHand(ghe.id), 20, 'không còn 20,000000000000046');
+  assert.throws(() => biz.adjustStock(ghe.id, 'abc'), /phải là số ≥ 0/); assert.strictEqual(biz.onHand(ghe.id), 20);
+  assert.throws(() => biz.adjustStock(ghe.id, '-1'), /phải là số ≥ 0/);
+});
+test('B52: thuế suất 7% báo lỗi (không tự đổi thành 10%); bỏ trống = 10%', async () => {
+  day = '2026-10-21'; const { crm, biz, cus, ban } = await setup();
+  assert.throws(() => biz.saveInvoice({ partner_id: cus.id, lines: [{ name: 'Tư vấn', qty: 1, price: 100000 }], vat_pct: 7 }), /không hợp lệ/);
+  assert.throws(() => crm.saveQuote({ contact_id: cus.id, vat_pct: 7, lines: [L(ban, 1)] }), /không hợp lệ/);
+  assert.strictEqual(biz.saveInvoice({ partner_id: cus.id, lines: [{ name: 'Tư vấn', qty: 1, price: 100000 }] }).vat_pct, 10);
+  assert.strictEqual(crm.saveQuote({ contact_id: cus.id, vat_pct: '8%', lines: [L(ban, 1)] }).vat_pct, 8);
+});
+test('B53: tổng giấy báo có không vượt hoá đơn gốc; giấy báo có mới = phần chưa đảo', async () => {
+  day = '2026-10-21'; const { biz, cus } = await setup();
+  const inv = biz.postInvoice(biz.saveInvoice({ partner_id: cus.id, lines: [{ name: 'Tư vấn', qty: 10, price: 1000000 }], vat_pct: 10 }).id);
+  let rf = biz.creditNote(inv.id); rf = biz.saveInvoice({ id: rf.id, lines: [{ name: 'Giảm giá', qty: 1, price: 2000000 }] }); rf = biz.postInvoice(rf.id);
+  assert.strictEqual(rf.amount_total, 2200000);
+  const rf2 = biz.creditNote(inv.id); assert.strictEqual(rf2.amount_total, inv.amount_total - 2200000, 'mặc định = phần còn lại');
+  const big = biz.saveInvoice({ id: rf2.id, lines: [{ name: 'Đảo', qty: 1, price: 10000000 }] });
+  assert.throws(() => biz.postInvoice(big.id), /vượt hoá đơn gốc/);
+  biz.saveInvoice({ id: rf2.id, lines: [{ name: 'Đảo', qty: 1, price: 8000000 }] }); biz.postInvoice(rf2.id);
+  assert.throws(() => biz.creditNote(inv.id), /báo có toàn bộ/);
+});
+test('B54: giá trị tồn âm hiện âm; lưu trữ sản phẩm còn tồn phải xác nhận; giao vượt số đặt phải xác nhận', async () => {
+  day = '2026-10-21'; const { crm, biz, cus, ban } = await setup();
+  const so = biz.confirmOrder(crm.saveQuote({ contact_id: cus.id, lines: [L(ban, 3)] }).id);
+  const pk = so.pickings[0]; const mv = biz.getPicking(pk.id).moves[0];
+  biz.setDone(pk.id, { [mv.id]: 5 });
+  assert.throws(() => biz.validatePicking(pk.id), (e) => e.code === 'over' && /Giao nhiều hơn/.test(e.message));
+  biz.validatePicking(pk.id, { force: true }); assert.strictEqual(biz.onHand(ban.id), -5);
+  const row = biz.listStock({}).rows.find(r => r.id === ban.id); assert.ok(row.value < 0, 'giá trị tồn âm');
+  biz.adjustStock(ban.id, 2);
+  assert.throws(() => crm.deleteProduct(ban.id), (e) => e.code === 'stock');
+  assert.strictEqual(crm.deleteProduct(ban.id, { force: true }), true);
+});

@@ -141,6 +141,7 @@
                 <small class="muted">AIVN mở một cửa sổ thử “AIVN Bench” và để mô hình tự làm 10 việc có kịch bản (mở ứng dụng, bấm nút có tên, gõ tiếng Việt, đọc chữ, nhấp đúp…) + 1 bài an toàn (phải hỏi trước khi gửi). Chấm điểm tự động bằng trạng thái thật của cửa sổ. Mất khoảng 10–40 phút; đừng dùng chuột/bàn phím trong lúc đo (Esc để dừng).</small>
                 <div class="row wrap"><select id="benchModel" aria-label="Mô hình cần đo"></select><button type="button" class="btn sm" id="benchRun">Bắt đầu đo</button><button type="button" class="btn sm" id="benchStop" hidden>Dừng</button></div>
                 <div class="bench-res" id="benchRes"></div></div>
+              <label class="check toggle"><input type="checkbox" id="agVerySlow"> <span><b>🐢 Cho dùng mô hình “Rất chậm” (tràn RAM)</b><small>Chỉ cho máy yếu không có mô hình nào chạy mượt: mô hình lớn hơn VRAM nhiều lần (vd. Qwen3-VL 8B trên GPU 4 GB) hiện trong bộ chọn với nhãn “Rất chậm”. Mỗi bước có thể mất 1–3 phút; không bao giờ là lựa chọn gợi ý.</small></span></label>
               <label class="small">Tối đa <select id="agScreenBudget"><option>20</option><option>40</option><option>60</option><option>100</option></select> thao tác mỗi lượt</label>
             </div>
             <div class="perm-guide" id="permGuide" hidden></div>
@@ -274,6 +275,11 @@
             <small class="muted">Khi yêu cầu API ghi <code>model</code> là mô hình chưa nạp, AIVN tự nạp ngay mô hình đó; tuỳ chọn tự gỡ ở trên giải phóng bộ nhớ khi không còn ai dùng.</small></div>
           <div class="srv-opt"><b>Mô hình đang nạp</b><div class="srv-loaded" id="srvLoaded"></div></div>
         </div>
+        <div class="srv-opts" id="fullBenchBox"><div class="srv-opt"><b>🧪 Bộ đo AIVN AGENT (gửi kết quả cho nhà phát triển)</b>
+          <small class="muted">Chạy trên các mô hình Qwen3-VL 2B/4B/8B đã tải: gọi công cụ, định vị nút, việc trong ứng dụng GIẢ (Messenger/Zalo/Outlook “AIVN Bench”), âm lượng (giả lập) và mở ứng dụng. Mất khoảng 20–40 phút; đừng dùng chuột/bàn phím trong lúc đo. Không gửi tin nhắn hay thư thật nào. Xong sẽ lưu MỘT tệp .json trong thư mục Tải về.</small>
+          <div class="row wrap" id="fbModels"></div>
+          <div class="row wrap"><button type="button" class="btn sm primary" id="fbRun">Chạy bộ đo</button><button type="button" class="btn sm" id="fbStop" hidden>Dừng</button></div>
+          <pre class="muted small" id="fbRes"></pre></div></div>
         <div class="grid2">
           <div>
             <h4>Đường dẫn API</h4>

@@ -10,12 +10,15 @@ const D = require('./agent/dpi');
 const PD = require('./agent/pixdiff');
 const SMALL_RE = /(?:^|[^0-9.])(?:0\.\d|[1-4](?:\.\d)?)\s*b(?:[^a-z]|$)/i; // mô hình ≤ 4B
 const U = require('./agent/uitree');
+const OB = require('./agent/ocr-boost');
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const { riskOf, RISKY_NAME, ACT_LABEL, ALIASES } = require('./agent/desk-policy');
 const AU = require('./agent/autonomy');
 
 function createDesktopAgent(deps) {
+  // trạng thái “đang tìm kiếm/vừa gõ” còn hiệu lực 5 phút; mô hình “Rất chậm” (bật tay) → ×3 (deps.stepScale)
+  const SEARCH_MS = () => 300000 * Math.max(1, Number(deps.stepScale ? deps.stepScale() : 1) || 1);
   // deps: { engine, getSettings, setSettings, log, getMainWindow, preload, isTest, fakeScreen }
   const S = () => deps.getSettings();
   let overlay = null, overlayReady = null, session = null, askSeq = 0; const asks = new Map();
@@ -127,7 +130,22 @@ function createDesktopAgent(deps) {
         out.push({ text: l.text, conf: l.conf, cy: (y1 + y2) / 2, nb: { x1: x1 / W, y1: y1 / H, x2: x2 / W, y2: y2 / H } });
       }
     }
-    return out.filter(l => l.text.replace(/[^\p{L}\p{N}]/gu, '').length >= 3 || l.conf >= 85);
+    // B56 (QA lượt 6): chữ SÁNG trên nền MÀU/TỐI (nút chính “✉ Thư mới”, nút “Gửi” xanh) OCR thường bỏ sót → tìm các khối màu đậm cỡ nút,
+    // cắt riêng từng khối, đảo màu + tăng tương phản rồi đọc lại; chỉ thêm dòng chưa có
+    try {
+      const reg = img.crop({ x: R.x, y: R.y, width: R.x2 - R.x, height: R.y2 - R.y });
+      for (const bx of OB.coloredBlocks(reg)) {
+        const sc2 = 3; const c = reg.crop(bx); const inv = OB.invertForOcr(nativeImage, c.resize({ width: bx.width * sc2, quality: 'best' }));
+        const r2 = await deps.engine.ocrLines(inv.toPNG());
+        for (const l of r2.lines) {
+          const x1 = R.x + bx.x + (l.box[0] - 16) / sc2, y1 = R.y + bx.y + (l.box[1] - 16) / sc2, x2 = x1 + l.box[2] / sc2, y2 = y1 + l.box[3] / sc2;
+          const nb = { x1: x1 / W, y1: y1 / H, x2: x2 / W, y2: y2 / H };
+          if (out.some(o => o.nb.x1 < nb.x2 && nb.x1 < o.nb.x2 && o.nb.y1 < nb.y2 && nb.y1 < o.nb.y2)) continue;
+          out.push({ text: l.text, conf: l.conf, cy: (y1 + y2) / 2, nb, inverted: true });
+        }
+      }
+    } catch (e) { deps.log && deps.log('desk', 'OCR đảo màu lỗi: ' + e.message); }
+    return out.filter(l => l.text.replace(/[^\p{L}\p{N}]/gu, '').length >= (l.inverted ? 2 : 3) || l.conf >= 85);
   }
   // Mắt nhìn: mô hình chính nếu nhìn được ảnh, không thì mô hình định vị (tự chọn mô hình nhìn ảnh đã cài — xem main.getGrounder)
   async function eyes() {
@@ -168,7 +186,7 @@ function createDesktopAgent(deps) {
     s.idReg = s.idReg || {}; U.stabilizeIds(obs.elements, s.idReg); // B55: id ổn định giữa các lần quan sát
     s.obs = obs; s.shot = shot;
     let list = obs.elements;
-    if (query) { const fq = U.fold(query); const hit = list.filter(e => U.fold(e.name).includes(fq) || (e.value && U.fold(e.value).includes(fq))); list = hit.length ? [...hit, ...list.filter(e => !hit.includes(e))] : list; }
+    if (query) { const fqs = U.queryVariants(query); const fq = fqs[0] || U.fold(query); const hit = list.filter(e => fqs.some(v => U.fold(e.name).includes(v) || (e.value && U.fold(e.value).includes(v)))); list = hit.length ? [...hit, ...list.filter(e => !hit.includes(e))] : list; }
     // B40: mô hình nhỏ (≤ 4B) đọc danh sách dài 72+ phần tử rồi quan sát lại mãi: gửi danh sách GỌN, xếp theo mức liên quan tới việc (đích của việc lên đầu)
     const st0 = deps.engine.status() || {}; const small = SMALL_RE.test(String(st0.id || st0.path || '').split(/[\\/]/).pop());
     if (!query && ctx && ctx.userQuery) list = U.rankForTask(list, ctx.userQuery);
@@ -226,7 +244,7 @@ function createDesktopAgent(deps) {
         if (el && lab && el.name && !U.fold(el.name).includes(lab) && !lab.includes(U.fold(el.name))) return { el: null, query: q, labelChanged: { id, now: el, want: m[2] } };
         if (el) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' }; } }
     { const m = /^\[?(e\d+)\]?$/i.exec(q); if (m && s && s.obs && !s.obs.elements.some(e => e.id === m[1].toLowerCase())) { const inf = s.idReg && s.idReg.info ? s.idReg.info.get(m[1].toLowerCase()) : null; if (inf) return { el: null, query: q, goneId: { id: m[1].toLowerCase(), inf } }; } }
-    if (q && s && s.obs) { const el = U.findElement(s.obs.elements, q); if (el) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' }; }
+    if (q && s && s.obs) { const el = U.findElementAny(s.obs.elements, q); if (el) return { el, x: el.b[0] + el.b[2] / 2, y: el.b[1] + el.b[3] / 2, via: el.ocr ? 'OCR' : 'cây giao diện' }; }
     if (Number.isFinite(Number(a.x)) && Number.isFinite(Number(a.y)) && a.x !== '' && a.y !== '' && a.x != null && a.y != null && !(Number(a.x) === 0 && Number(a.y) === 0)) { const p = normToNative(Math.min(1, Math.max(0, a.x / 1000)), Math.min(1, Math.max(0, a.y / 1000))); return { el: null, x: p.x, y: p.y, via: 'toạ độ' }; }
     return q ? { el: null, query: q } : null;
   }
@@ -326,7 +344,7 @@ function createDesktopAgent(deps) {
     if (focusedEl && (focusedEl.editable || focusedEl.focused) && !focusedEl.ocr) return named(focusedEl);
     const la = s && s.lastAction; const recent = la && Date.now() - la.at < 60000;
     if (recent && (/^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(la.keys || '').replace(/\s/g, '')) || (['click', 'double_click'].includes(la.action) && SEARCHY.test(`${la.query || ''} ${la.el ? la.el.name || '' : ''}`)))) return true;
-    return !!(s && s.inSearch && Date.now() - s.inSearch < 300000 && la && la.action === 'type_text');
+    return !!(s && s.inSearch && Date.now() - s.inSearch < SEARCH_MS() && la && la.action === 'type_text');
   }
   async function act(a, ctx) {
     let action = String(a.action || '').toLowerCase(); action = ALIASES[action] || action;
@@ -458,7 +476,7 @@ function createDesktopAgent(deps) {
     const rcp = ctx && ctx.userQuery ? SV.recipientOf(ctx.userQuery) : null;
     // B27 (QA lượt 4): sau khi gõ tìm (kể cả gõ + Enter, kết quả chưa ghi nhận) mà bấm vào kết quả → cũng là “mở cuộc trò chuyện”; kiểm lại bằng màn hình ngay dưới
     const clickedName = `${t && t.el ? t.el.name || '' : ''} ${t && t.query ? t.query : String(a.element || a.target || '')}`;
-    const recentSearch = s.lastSearch && Date.now() - s.lastSearch.at < 300000 ? s.lastSearch : null;
+    const recentSearch = s.lastSearch && Date.now() - s.lastSearch.at < SEARCH_MS() ? s.lastSearch : null;
     const isClick = !!(rcp && ['click', 'double_click'].includes(action));
     const strongOpen = isClick && !!(s.inSearch && s.foundHit && (SV.relates(s.foundHit.query, rcp) || SV.relates(s.foundHit.name, rcp))); // bấm đúng kết quả đã ghi nhận
     const clickSearchy = /tìm|tim kiem|search|find/iu.test(clickedName);
@@ -479,7 +497,10 @@ function createDesktopAgent(deps) {
     let pd = shotDiff(beforeShot, s.shot, PD.around(box), winScope());
     if (pd && !PD.changed(pd) && isClickAct && o.poor && !(ctx.signal && ctx.signal.aborted)) { await sleep(900); o = await observe(ctx, { ocr: 'auto' }); pd = shotDiff(beforeShot, s.shot, PD.around(box), winScope()); }
     if (pd) deps.log && deps.log('desk', `So ảnh trước/sau: ${PD.describe(pd)}${a.__moved && a.__moved.calibrated ? ' · chuột đã hiệu chỉnh' : ''}`);
-    const pixChanged = PD.changed(pd);
+    // B37 (QA lượt 6, Classroom “+ Thêm tệp”): ảnh quanh chỗ bấm gần như không đổi nhưng trên màn hình có CHỮ MỚI (dòng “Bài làm của bạn: tệp.docx”) → thao tác ĐÃ có tác dụng
+    const newTexts = (() => { if (!before || !o.obs) return []; const old = new Set(before.elements.map(e => U.fold(e.name || '')).filter(Boolean)); return [...new Set(o.obs.elements.map(e => String(e.name || '').trim()).filter(n => n.length >= 3 && !old.has(U.fold(n))))].slice(0, 4); })();
+    const pixChanged = PD.changed(pd) || !!(newTexts.length && isClickAct);
+    if (newTexts.length && isClickAct && !PD.changed(pd)) checks.push(`Màn hình có chữ MỚI sau thao tác: ${newTexts.map(n => `“${n.slice(0, 50)}”`).join(', ')} — thao tác ĐÃ có tác dụng${/thêm tệp|tải lên|đính kèm|add file|attach|upload|添加|上传|附件/iu.test(`${t && t.el ? t.el.name || '' : ''} ${a.element || ''}`) ? '; tệp đã được thêm, KHÔNG bấm lại “thêm tệp” (sẽ gắn trùng)' : ''}.`);
     if (before && before.win && o.obs.win && before.win.title !== o.obs.win.title) checks.push(`Cửa sổ đổi thành "${o.obs.win.title}".`);
     if (openPending) {
       const R = SV.regionsOf(o.obs); const hdr = [o.obs.win ? o.obs.win.title : '', ...(R ? R.header : [])].filter(Boolean);
@@ -502,7 +523,7 @@ function createDesktopAgent(deps) {
       const el = t && t.el ? t.el : focusedEl;
       const prevTxt = prevAction && Date.now() - prevAction.at < 60000 ? `${prevAction.query || ''} ${prevAction.el ? prevAction.el.name || '' : ''}` : '';
       // còn đang ở ô tìm kiếm: lần gõ trước là tìm kiếm và từ đó chưa bấm vào đâu (máy chậm có thể mất vài phút giữa hai lần gõ)
-      const stillSearching = s.inSearch && Date.now() - s.inSearch < 300000;
+      const stillSearching = s.inSearch && Date.now() - s.inSearch < SEARCH_MS();
       const searchy = (stillSearching || /tìm|tim kiem|search|find|kiếm/i.test(`${el ? el.name + ' ' + (el.kind || '') : ''} ${a.element || a.target || ''} ${prevTxt}`) || (prevAction && Date.now() - prevAction.at < 60000 && /^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(prevAction.keys || '').replace(/\s/g, '')))) && !/\n/.test(String(a.text)) && String(a.text).length <= 80;
       if (searchy && String(a.text).trim()) { searchyDone = true;
         const q = String(a.text).split('\n')[0].trim(); const fq = U.fold(q);
@@ -523,7 +544,7 @@ function createDesktopAgent(deps) {
         s.inSearch = Date.now(); s.foundHit = null; s.lastSearch = { q, at: Date.now() }; s.gateBlocks = 0;
         if (verdict === 'yes') {
           // kết quả nằm dưới ô tìm kiếm: chọn phần tử khớp gần ô nhất, tức kết quả đầu tiên (không phải chính chữ trong ô)
-          const boxEl = el && el.b ? el : prevAction && prevAction.el && prevAction.el.b && Date.now() - prevAction.at < 300000 ? prevAction.el : null; // ô tìm kiếm = ô đang chọn, hoặc chỗ vừa bấm (gợi ý “Tìm kiếm…” chỉ thấy qua OCR)
+          const boxEl = el && el.b ? el : prevAction && prevAction.el && prevAction.el.b && Date.now() - prevAction.at < SEARCH_MS() ? prevAction.el : null; // ô tìm kiếm = ô đang chọn, hoặc chỗ vừa bấm (gợi ý “Tìm kiếm…” chỉ thấy qua OCR)
           let boxY = boxEl ? boxEl.b[1] + Math.max(0, (boxEl.b[3] || 0) - 8) : (t && t.y != null ? t.y : -1);
           // ô tìm kiếm mở bằng phím tắt (Ctrl+F…): không biết chỗ ô → chữ vừa gõ trong ô là dòng khớp NẰM TRÊN CÙNG, kết quả nằm dưới nó
           if (boxY < 0) { const ms = matches(o2).filter(e => e.b && e.ocr).sort((x, y) => x.b[1] - y.b[1]); if (ms.length >= 2 && U.fold(ms[0].name).replace(/[^\p{L}\p{N} ]/gu, '').trim() === fq.replace(/[^\p{L}\p{N} ]/gu, '').trim()) boxY = ms[0].b[1] + Math.max(0, ms[0].b[3] - 8); }
@@ -537,7 +558,12 @@ function createDesktopAgent(deps) {
           // B20 / quyết định của Khôi: hai người cùng họ tên (hoặc cùng tên kèm chú thích khác nhau) → HỎI người dùng, không tự chọn
           const rcpQ = ctx && ctx.userQuery ? SV.recipientOf(ctx.userQuery) : null; const distinct = rcpQ ? SV.sameNameCandidates(rcpQ, below.map(e => e.name)) : [];
           const exactDup = rcpQ ? below.filter(e => U.fold(e.name).trim() === U.fold(SV.nameKey(rcpQ))).length >= 2 : false;
-          if (rcpQ && (distinct.length >= 2 || exactDup)) {
+          // Teams (QA lượt 6, bẫy “Lê Văn Hùng (SV K26)”): kết quả DUY NHẤT có chú thích/khác tên đầy đủ → không tự mở, hỏi người dùng
+          const onlyOther = rcpQ && m && m.name && !distinct.some(x => SV.headerMatches(rcpQ, x)) && !SV.headerMatches(rcpQ, m.name);
+          if (onlyOther) {
+            s.foundHit = null; s.ambiguous = [m.name];
+            checks.push(`Ô tìm kiếm: kết quả là “${String(m.name).slice(0, 60)}”, KHÔNG đúng tên “${rcpQ}” (có chú thích/tên khác — có thể là người khác). KHÔNG tự mở. Dừng lại và HỎI người dùng có phải người này không, chưa gõ tin.`);
+          } else if (rcpQ && (distinct.length >= 2 || exactDup)) {
             s.foundHit = null; s.ambiguous = distinct.length >= 2 ? distinct : below.map(e => e.name);
             checks.push(`Ô tìm kiếm: có NHIỀU người cùng tên “${rcpQ}”: ${s.ambiguous.slice(0, 5).map(x => `“${x}”`).join(', ')}. KHÔNG tự chọn. Dừng lại và HỎI người dùng muốn nhắn cho người nào (nêu các lựa chọn), chưa gõ tin.`);
           } else {
@@ -582,7 +608,7 @@ function createDesktopAgent(deps) {
         checks.push(`Bấm chữ “Tìm kiếm” không làm màn hình đổi nên AIVN đã bấm phím tắt ${ak.search} của ${ak.name} để mở ô tìm kiếm. Bước tiếp: type_text KHÔNG kèm element (gõ tên cần tìm).`);
       } catch (e) { deps.log && deps.log('desk', 'Phím tắt tìm kiếm lỗi: ' + e.message); }
     }
-    if (pixChanged && !checks.some(c => /Cửa sổ đổi|Đã mở cuộc trò chuyện|Ô tìm kiếm|KIỂM CHỨNG|GỬI NHẦM|phím tắt/.test(c))) checks.push(`Màn hình đã thay đổi sau thao tác (${PD.describe(pd)}) — xem danh sách mới bên dưới để biết đã mở/chọn gì.`);
+    if (pixChanged && !checks.some(c => /Cửa sổ đổi|Đã mở cuộc trò chuyện|Ô tìm kiếm|KIỂM CHỨNG|GỬI NHẦM|phím tắt|chữ MỚI/.test(c))) checks.push(`Màn hình đã thay đổi sau thao tác (${PD.describe(pd)}) — xem danh sách mới bên dưới để biết đã mở/chọn gì.`);
     if (clickedInput && !checks.some(c => /Cửa sổ đổi|Đã mở cuộc trò chuyện|KIỂM CHỨNG|GỬI NHẦM|phím tắt|Hộp thoại/.test(c))) { const nm = String((t && t.el && (t.el.name || t.el.placeholder)) || (t && t.query && !/^\[?e\d+\]?$/i.test(t.query) ? t.query : '') || '').trim().slice(0, 40); checks.unshift(nm ? `Đã đặt con trỏ vào ô “${nm}”${t && t.el && t.el.id ? ` (${t.el.id})` : ''} — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.` : `Đã đặt con trỏ vào ô nhập${t && t.el && t.el.id ? ` ${t.el.id}` : ''} — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.`); }
     if (!checks.length) checks.push(pd ? `Màn hình không thay đổi rõ ràng (so ảnh trước/sau: ${PD.describe(pd)}) — nếu cần, thử cách khác${ak && ak.search ? `; với ${ak.name} có thể dùng phím tắt ${ak.search} để mở ô tìm kiếm` : ''}.` : 'Màn hình không thay đổi rõ ràng — nếu cần, thử cách khác.');
     return { ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };

@@ -32,6 +32,19 @@ function parseVnd(v) {
   if (mul > 1) s = s.replace(',', '.'); else s = s.replace(/[.,](?=\d{3}(\D|$))/g, '').replace(',', '.');
   const n = parseFloat(s); return Number.isFinite(n) ? Math.round(n * mul) : 0;
 }
+// B50 (QA lượt 6): số lượng theo kiểu Việt — dấu “.” đứng trước ĐÚNG 3 chữ số là phân cách hàng nghìn (“1.000” = 1000, “1.234,5” = 1234,5),
+// dấu “,” là phần thập phân (“1,5”); “1.5” vẫn là 1,5. Không phải số → NaN. Làm tròn 3 chữ số thập phân (như Odoo) để không trôi số thực.
+const round3 = (n) => Math.round((Number(n) + Number.EPSILON) * 1000) / 1000;
+function parseQty(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? round3(v) : NaN;
+  const s = String(v ?? '').replace(/[\s\u00a0]/g, ''); if (!s) return NaN;
+  let n;
+  if (/^[-+]?\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(s)) n = Number(s.replace(/\./g, '').replace(',', '.'));
+  else if (/^[-+]?\d+(?:,\d+)?$/.test(s)) n = Number(s.replace(',', '.'));
+  else if (/^[-+]?\d*\.\d+$/.test(s)) n = Number(s);
+  else return NaN;
+  return Number.isFinite(n) ? round3(n) : NaN;
+}
 const fmtVnd = (n) => (Math.round(Number(n) || 0)).toLocaleString('vi-VN') + ' ₫';
 
 const DIGITS = ['không', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín'];
@@ -53,4 +66,4 @@ function vndWords(n) {
   const s = parts.join(' ').replace(/\s+/g, ' ').trim();
   return s.charAt(0).toUpperCase() + s.slice(1) + ' đồng';
 }
-module.exports = { fold, normPhone, validPhone, fmtPhone, normEmail, validEmail, normTax, validTax, parseVnd, fmtVnd, vndWords };
+module.exports = { parseQty, round3, fold, normPhone, validPhone, fmtPhone, normEmail, validEmail, normTax, validTax, parseVnd, fmtVnd, vndWords };

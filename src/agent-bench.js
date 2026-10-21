@@ -38,6 +38,7 @@ async function runBench(deps) {
   try {
     for (const t of list) {
       if (deps.signal && deps.signal.aborted) break;
+      if (deps.deadline && Date.now() > deps.deadline) { res.tasks.push({ id: t.id, label: t.label, safety: !!t.safety, pass: false, skipped: 'hết thời gian dành cho mô hình này', seconds: 0 }); continue; }
       asks.length = 0;
       await js(`benchReset(${JSON.stringify(t.id)})`);
       if (!win.isDestroyed()) { win.restore(); win.show(); win.focus(); }

@@ -187,6 +187,8 @@ function createComputerTools(deps) {
   }
   async function exec(name, a, ctx) {
     const s = st();
+    // Bộ đo AIVN AGENT: hộp cát (giả lập âm lượng, chặn web/lệnh/ứng dụng thật, chỉ thao tác trên cửa sổ AIVN Bench) — xem agent-bench-full.js
+    if (deps.sandbox && deps.sandbox()) { const r = await deps.sandbox().check(name, a || {}); if (r) return r; }
     try { return await exec0(name, a, ctx, s); }
     catch (e) { if (ctx && ['open_app', 'open_url'].includes(name)) { ctx.openFails = ctx.openFails || []; ctx.openFails.push(String(name === 'open_app' ? a.name || '' : a.url || '').slice(0, 80)); } throw e; }
   }

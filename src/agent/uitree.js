@@ -264,6 +264,28 @@ function formatForModel(obs, { toNorm, limit = 120 } = {}) {
 
 const fold = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().replace(/\s+/g, ' ').trim();
 // tìm phần tử theo id ("e12", "[e12]") hoặc theo tên/mô tả ("nút Gửi", "ô tìm kiếm")
+// B56: tên nút/ô thường gặp theo nhiều ngôn ngữ — screen_look(query) / bấm theo tên khớp cả khi mô hình dùng ngôn ngữ khác ứng dụng
+const SYN = [
+  ['thư mới', 'new mail', 'new email', 'soạn thư', 'compose', 'viết thư', '新邮件', '写邮件', '撰写'],
+  ['tin nhắn mới', 'new message', 'new chat', '新消息', '新聊天'],
+  ['gửi', 'send', '发送', '傳送'], ['trả lời', 'reply', '回复'], ['chuyển tiếp', 'forward', '转发'],
+  ['tìm kiếm', 'search', 'tìm', 'find', '搜索', '查找'], ['tiêu đề', 'subject', 'add a subject', '主题'],
+  ['người nhận', 'đến', 'to', 'recipients', '收件人'], ['đính kèm', 'attach', 'thêm tệp', 'add file', 'upload', 'tải lên', '附件', '添加文件', '上传'],
+  ['nộp bài', 'turn in', 'submit', 'nộp', '提交', '上交'], ['lưu', 'save', '保存'], ['huỷ', 'hủy', 'cancel', '取消'], ['xoá', 'xóa', 'delete', 'discard', '删除'],
+  ['cài đặt', 'settings', '设置'], ['mở', 'open', '打开'], ['đóng', 'close', '关闭'], ['hộp thư đến', 'inbox', '收件箱'], ['thư nháp', 'drafts', '草稿'],
+  ['cuộc họp mới', 'new meeting', '新会议'], ['sự kiện mới', 'new event', '新活动'], ['tạo', 'create', 'new', '新建', '创建'],
+];
+function queryVariants(q) {
+  const f = fold(String(q || '').replace(/^[✉+✚＋\s]+/u, '')).trim(); if (!f) return [];
+  const out = [f];
+  for (const g of SYN) { const gf = g.map(x => fold(x)); if (gf.some(x => x === f || (x.length >= 4 && f.includes(x) && f.length <= x.length + 4))) for (const x of gf) if (!out.includes(x)) out.push(x); }
+  return out;
+}
+function findElementAny(elements, query) {
+  const e = findElement(elements, query); if (e) return e;
+  for (const v of queryVariants(query).slice(1)) { const x = findElement(elements, v); if (x) return x; }
+  return null;
+}
 function findElement(elements, query) {
   const q = String(query || '').trim(); if (!q) return null;
   const idm = q.match(/^\[?(e\d+)\]?$/i); if (idm) return elements.find(e => e.id === idm[1].toLowerCase()) || null;
@@ -370,4 +392,4 @@ function searchVariants(text) {
 // Chữ OCR trông như ô nhập (chữ gợi ý "Tìm kiếm", "Nhập tin nhắn…"): ở ứng dụng không đọc được qua Trợ năng (Zalo…), đó là ô nhập thật
 const INPUT_HINT = /(^|\s)(tìm|tim|search|find|nhập|nhap|soạn|soan|gõ|type|write|enter)(\s|$|…|\.)|tìm kiếm|tim kiem|tin nhắn|tin nhan|message|aa$/i;
 const inputLike = (el) => !!(el && !el.editable && el.ocr && String(el.name || '').trim().length <= 40 && INPUT_HINT.test(String(el.name || '').trim()));
-module.exports = { stabilizeIds, isButtonish, taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };
+module.exports = { queryVariants, findElementAny, stabilizeIds, isButtonish, taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };

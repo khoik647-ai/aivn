@@ -224,7 +224,12 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
     return db.get('SELECT * FROM products WHERE id = ?', [p.id]);
   }
   const listProducts = ({ q = '', all = false } = {}) => db.all(`SELECT * FROM products WHERE ${all ? '1' : 'active = 1'} ${q ? 'AND (lower(name) LIKE ? OR lower(sku) LIKE ?)' : ''} ORDER BY name`, q ? ['%' + q.toLowerCase() + '%', '%' + q.toLowerCase() + '%'] : []);
-  const deleteProduct = (id) => db.run('UPDATE products SET active = 0 WHERE id = ?', [id]) > 0;
+  // B54: lưu trữ sản phẩm còn tồn kho → báo (tồn và giá trị tồn sẽ biến khỏi báo cáo); force = người dùng đã đồng ý
+  const deleteProduct = (id, { force = false } = {}) => {
+    let q = 0; try { q = db.get("SELECT COALESCE(SUM(CASE kind WHEN 'in' THEN qty_done WHEN 'out' THEN -qty_done ELSE qty_done END), 0) AS q FROM moves WHERE product_id = ? AND state = 'done'", [id]).q; } catch {}
+    if (Math.abs(q) > 1e-9 && !force) { const e = new CrmError(`Sản phẩm còn tồn ${(Math.round(q * 1000) / 1000).toLocaleString('vi-VN')} trong kho. Kiểm kê về 0 trước khi lưu trữ, hoặc xác nhận vẫn lưu trữ.`); e.code = 'stock'; throw e; }
+    return db.run('UPDATE products SET active = 0 WHERE id = ?', [id]) > 0;
+  };
   function quoteTotals(qid, vatPct) {
     const lines = db.all('SELECT * FROM quote_lines WHERE quote_id = ? ORDER BY pos', [qid]);
     const sub = lines.reduce((a, l) => a + Math.round((l.qty || 0) * (l.price || 0) * (1 - (l.discount_pct || 0) / 100)), 0);
@@ -246,8 +251,8 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
     q.commitment_date = /^\d{4}-\d{2}-\d{2}$/.test(q.commitment_date || '') ? q.commitment_date : null;
     q.date = /^\d{4}-\d{2}-\d{2}$/.test(q.date || '') ? q.date : today();
     q.valid_until = /^\d{4}-\d{2}-\d{2}$/.test(q.valid_until || '') ? q.valid_until : null;
-    q.vat_pct = [0, 5, 8, 10].includes(Number(q.vat_pct)) ? Number(q.vat_pct) : 10; q.notes = str(q.notes, 3000); q.updated_at = now();
-    const lines = Array.isArray(input.lines) ? input.lines.map((l, i) => ({ id: newId('ql'), product_id: l.product_id || null, name: str(l.name, 300), unit: str(l.unit, 30) || 'cái', qty: Math.max(0, Number(String(l.qty).replace(',', '.')) || 0), price: Math.max(0, T.parseVnd(l.price)), discount_pct: Math.max(0, Math.min(100, Number(l.discount_pct) || 0)), pos: i })).filter(l => l.name) : null;
+    q.vat_pct = (() => { const x = q.vat_pct; if (x === undefined || x === null || x === '') return 10; const n = Number(String(x).replace('%', '').trim()); if (![0, 5, 8, 10].includes(n)) throw new CrmError(`Thuế suất GTGT “${x}” không hợp lệ — chỉ nhận 0%, 5%, 8% hoặc 10%.`); return n; })(); q.notes = str(q.notes, 3000); q.updated_at = now(); // B52 q.notes = str(q.notes, 3000); q.updated_at = now();
+    const lines = Array.isArray(input.lines) ? input.lines.map((l, i) => ({ id: newId('ql'), product_id: l.product_id || null, name: str(l.name, 300), unit: str(l.unit, 30) || 'cái', qty: (() => { const n = T.parseQty(l.qty); if (l.qty != null && String(l.qty).trim() !== '' && !Number.isFinite(n)) throw new CrmError(`Số lượng “${l.qty}” không phải là số.`); return Math.max(0, Number.isFinite(n) ? n : 0); })(), price: Math.max(0, T.parseVnd(l.price)), discount_pct: Math.max(0, Math.min(100, Number(l.discount_pct) || 0)), pos: i })).filter(l => l.name) : null;
     db.tx(() => {
       if (old) db.run('UPDATE quotes SET contact_id=?, lead_id=?, status=?, date=?, valid_until=?, notes=?, vat_pct=?, owner=?, payment_days=?, commitment_date=?, updated_at=? WHERE id=?', [q.contact_id, q.lead_id, q.status, q.date, q.valid_until, q.notes, q.vat_pct, q.owner, q.payment_days, q.commitment_date, q.updated_at, q.id]);
       else { q.id = newId('q'); q.number = nextQuoteNumber(); db.run('INSERT INTO quotes(id, number, contact_id, lead_id, status, date, valid_until, notes, vat_pct, owner, payment_days, commitment_date, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [q.id, q.number, q.contact_id, q.lead_id, q.status, q.date, q.valid_until, q.notes, q.vat_pct, q.owner, q.payment_days, q.commitment_date, now(), q.updated_at]); }

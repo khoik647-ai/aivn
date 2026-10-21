@@ -18,13 +18,15 @@ const DELIVERY_STATUS = { none: 'Không cần giao', pending: 'Chưa giao', part
 
 const newId = (p) => p + '_' + crypto.randomBytes(6).toString('hex');
 const str = (v, max = 500) => (v == null ? '' : String(v)).trim().slice(0, max);
-const num = (v) => { const n = Number(String(v ?? '').replace(/\s/g, '').replace(',', '.')); return Number.isFinite(n) ? n : 0; };
+const num = (v) => { const n = T.parseQty(v); return Number.isFinite(n) ? n : 0; }; // B50: “1.000” = 1000, làm tròn 3 chữ số
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
 const addDays = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return ymd(d); };
 const daysBetween = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
 const lineAmount = (l) => Math.round(num(l.qty) * num(l.price) * (1 - num(l.discount_pct) / 100));
 const EPS = 1e-9;
+// B52 (QA lượt 6): thuế suất không hợp lệ (vd. 7%) → báo lỗi, không tự đổi thành 10%
+const vatOf = (x) => { if (x === undefined || x === null || x === '') return 10; const n = Number(String(x).replace('%', '').trim()); if (![0, 5, 8, 10].includes(n)) throw new CrmError(`Thuế suất GTGT “${x}” không hợp lệ — chỉ nhận 0%, 5%, 8% hoặc 10%.`); return n; };
 
 function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date()), log = () => {} }) {
   const hist = (partnerId, text) => { if (partnerId) db.run('INSERT INTO history(id, contact_id, lead_id, kind, text, at) VALUES (?,?,?,?,?,?)', [newId('h'), partnerId, null, 'biz', str(text, 2000), now()]); };
@@ -41,7 +43,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
 
   // ---------- Kho ----------
   const MOVE_SIGN = "CASE kind WHEN 'in' THEN qty_done WHEN 'out' THEN -qty_done ELSE qty_done END";
-  const onHand = (pid) => db.get(`SELECT COALESCE(SUM(${MOVE_SIGN}), 0) AS q FROM moves WHERE product_id = ? AND state = 'done'`, [pid]).q;
+  const onHand = (pid) => T.round3(db.get(`SELECT COALESCE(SUM(${MOVE_SIGN}), 0) AS q FROM moves WHERE product_id = ? AND state = 'done'`, [pid]).q);
   const incoming = (pid) => db.get("SELECT COALESCE(SUM(qty), 0) AS q FROM moves WHERE product_id = ? AND kind = 'in' AND state IN ('draft','ready')", [pid]).q;
   const outgoing = (pid) => db.get("SELECT COALESCE(SUM(qty), 0) AS q FROM moves WHERE product_id = ? AND kind = 'out' AND state IN ('draft','ready')", [pid]).q;
   function stockOf(pid) { const h = onHand(pid), i = incoming(pid), o = outgoing(pid); return { on_hand: h, incoming: i, outgoing: o, forecast: h + i - o }; }
@@ -49,7 +51,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
   function listStock({ q = '', filter = 'all' } = {}) {
     const where = ["active = 1", "type = 'product'"], p = [];
     if (q) { where.push('(lower(name) LIKE ? OR lower(sku) LIKE ? OR barcode = ?)'); p.push('%' + q.toLowerCase() + '%', '%' + q.toLowerCase() + '%', q.trim()); }
-    let rows = db.all(`SELECT * FROM products WHERE ${where.join(' AND ')} ORDER BY name`, p).map(x => { const s = stockOf(x.id); return { ...x, ...s, value: Math.round(Math.max(0, s.on_hand) * (x.cost || 0)), below_min: x.min_qty > 0 && s.forecast < x.min_qty }; });
+    let rows = db.all(`SELECT * FROM products WHERE ${where.join(' AND ')} ORDER BY name`, p).map(x => { const s = stockOf(x.id); return { ...x, ...s, value: Math.round(s.on_hand * (x.cost || 0)), below_min: x.min_qty > 0 && s.forecast < x.min_qty }; });
     if (filter === 'low') rows = rows.filter(r => r.below_min); else if (filter === 'negative') rows = rows.filter(r => r.on_hand < -EPS); else if (filter === 'available') rows = rows.filter(r => r.on_hand > EPS);
     return { rows, totalValue: rows.reduce((a, r) => a + r.value, 0) };
   }
@@ -99,7 +101,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
   function setDone(pickingId, done = {}) {
     const pk = db.get('SELECT * FROM pickings WHERE id = ?', [pickingId]); if (!pk) throw new CrmError('Không tìm thấy phiếu kho.');
     if (!['draft', 'ready'].includes(pk.state)) throw new CrmError('Phiếu đã hoàn tất hoặc đã huỷ: không sửa được.');
-    db.tx(() => { for (const [mid, v] of Object.entries(done || {})) db.run('UPDATE moves SET qty_done = ? WHERE id = ? AND picking_id = ?', [Math.max(0, num(v)), mid, pickingId]); });
+    db.tx(() => { for (const [mid, v] of Object.entries(done || {})) { const q = T.parseQty(v); if (!Number.isFinite(q) || q < 0) throw new CrmError('Số lượng đã làm phải là số ≥ 0.'); db.run('UPDATE moves SET qty_done = ? WHERE id = ? AND picking_id = ?', [q, mid, pickingId]); } });
     return getPicking(pickingId);
   }
   // Xác nhận phiếu (Odoo: Validate). Không ghi số lượng đã làm → làm đủ như yêu cầu. Làm thiếu → phiếu chờ phần còn lại (backorder) nếu backorder=true.
@@ -114,6 +116,9 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
     const plan = moves.map(m => ({ m, done: pk.kind === 'adj' ? m.qty_done : anyDone ? Math.max(0, m.qty_done) : m.qty }));
     if (pk.kind !== 'adj' && !plan.some(x => x.done > EPS)) throw new CrmError('Chưa có số lượng nào được làm.');
     if (pk.kind === 'out' && !force) {
+      // B54: giao VƯỢT số đặt → hỏi lại (Odoo cảnh báo), không im lặng đánh dấu “Đã giao đủ”
+      const over = plan.filter(x => x.m.so_line_id && x.done > x.m.qty + EPS).map(x => `“${(product(x.m.product_id) || {}).name || ''}”: giao ${fmtQ(x.done)}, đơn cần ${fmtQ(x.m.qty)}`);
+      if (over.length) { const e = new CrmError('Giao nhiều hơn số lượng trên đơn — ' + over.join('; ') + '. Sửa số lượng đã làm, hoặc xác nhận vẫn giao vượt.'); e.code = 'over'; throw e; }
       const short = [];
       const need = new Map(); for (const x of plan) { const pr = product(x.m.product_id); if (pr && pr.type === 'product') need.set(pr.id, (need.get(pr.id) || 0) + x.done); }
       for (const [pid, q] of need) { const h = onHand(pid); if (h + EPS < q) short.push(`“${product(pid).name}”: cần ${fmtQ(q)}, còn ${fmtQ(h)}`); }
@@ -149,8 +154,8 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
   function adjustStock(productId, counted, note = '') {
     const pr = product(productId); if (!pr) throw new CrmError('Không tìm thấy sản phẩm.');
     if (pr.type !== 'product') throw new CrmError(`“${pr.name}” không phải hàng lưu kho nên không kiểm kê.`);
-    const c = num(counted); if (c < 0 || String(counted ?? '').trim() === '') throw new CrmError('Số lượng đếm được phải là số ≥ 0.');
-    const diff = +(c - onHand(productId)).toFixed(6); if (Math.abs(diff) < EPS) return { changed: false, on_hand: c };
+    const c = T.parseQty(counted); if (!Number.isFinite(c) || c < 0) throw new CrmError('Số lượng đếm được phải là số ≥ 0.'); // B51: “abc” không còn bị hiểu là 0
+    const diff = T.round3(c - onHand(productId)); if (Math.abs(diff) < EPS) return { changed: false, on_hand: c };
     const id = db.tx(() => { const pid = insertPicking({ kind: 'adj', origin: str(note, 120) || 'Kiểm kê', state: 'ready', lines: [{ product_id: productId, qty: diff, unit_cost: pr.cost }] }); db.run('UPDATE moves SET qty_done = ? WHERE picking_id = ?', [diff, pid]); return pid; });
     validatePicking(id);
     return { changed: true, on_hand: onHand(productId), diff, picking_id: id };
@@ -259,7 +264,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
     if (old && old.state !== 'draft') throw new CrmError('Chỉ sửa được hoá đơn nháp. Hoá đơn đã vào sổ: bấm “Đặt lại nháp” (khi chưa có thanh toán).');
     const v = { ...(old || {}), ...Object.fromEntries(Object.entries(input).filter(([k, x]) => x !== undefined && k !== 'lines')) };
     needPartner(v.partner_id);
-    v.vat_pct = [0, 5, 8, 10].includes(Number(v.vat_pct)) ? Number(v.vat_pct) : 10;
+    v.vat_pct = vatOf(v.vat_pct);
     v.invoice_date = isDate(v.invoice_date) ? v.invoice_date : null; v.due_date = isDate(v.due_date) ? v.due_date : null; v.notes = str(v.notes, 3000);
     const lines = cleanInvLines(input.lines);
     const id = db.tx(() => {
@@ -312,6 +317,8 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
     if (inv.state !== 'draft') throw new CrmError('Chỉ vào sổ được hoá đơn nháp.');
     needPartner(inv.partner_id); refreshAmounts(id);
     const a = amounts(id); if (!(a.amount_total > 0)) throw new CrmError('Hoá đơn chưa có dòng nào hoặc tổng tiền bằng 0.');
+    if (inv.kind === 'out_refund' && inv.reversed_id) { const orig = db.get('SELECT * FROM invoices WHERE id = ?', [inv.reversed_id]); const before = orig ? db.all("SELECT amount_total FROM invoices WHERE reversed_id = ? AND kind = 'out_refund' AND state = 'posted' AND id != ?", [orig.id, id]).reduce((x, r) => x + r.amount_total, 0) : 0;
+      if (orig && before + a.amount_total > orig.amount_total) throw new CrmError(`Tổng giấy báo có (${T.fmtVnd(before + a.amount_total)}) vượt hoá đơn gốc ${orig.number} (${T.fmtVnd(orig.amount_total)}). Giảm giấy báo có này xuống tối đa ${T.fmtVnd(Math.max(0, orig.amount_total - before))}.`); }
     const date = isDate(inv.invoice_date) ? inv.invoice_date : today();
     let due = isDate(inv.due_date) ? inv.due_date : null;
     if (!due) { const so = inv.so_id ? db.get('SELECT payment_days FROM quotes WHERE id = ?', [inv.so_id]) : null; due = addDays(date, (so && so.payment_days) || 0); }
@@ -363,13 +370,20 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
     return getInvoice(invoiceId);
   }
   // Giấy báo có (Odoo: Credit Note / Reverse): bản nháp sao chép các dòng của hoá đơn gốc
+  const creditedOf = (invId, exceptId = null) => db.all("SELECT id, amount_total FROM invoices WHERE reversed_id = ? AND kind = 'out_refund' AND state != 'cancel'", [invId]).filter(r => r.id !== exceptId).reduce((a, r) => a + (r.amount_total || 0), 0);
   function creditNote(invoiceId, { reason = '' } = {}) {
     const inv = db.get('SELECT * FROM invoices WHERE id = ?', [invoiceId]); if (!inv) throw new CrmError('Không tìm thấy hoá đơn.');
     if (inv.kind !== 'out_invoice' || inv.state !== 'posted') throw new CrmError('Chỉ tạo giấy báo có cho hoá đơn đã vào sổ.');
+    // B53 (QA lượt 6): tổng giấy báo có không được vượt hoá đơn gốc; giấy mới mặc định = phần CHƯA bị đảo
+    const credited = creditedOf(inv.id); const remain = inv.amount_total - credited;
+    if (remain <= 0) throw new CrmError(`Hoá đơn ${inv.number} đã được báo có toàn bộ (${T.fmtVnd(credited)}) — không tạo thêm giấy báo có.`);
     const id = db.tx(() => {
       const rid = newId('inv');
       db.run('INSERT INTO invoices(id, kind, partner_id, so_id, reversed_id, state, vat_pct, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)', [rid, 'out_refund', inv.partner_id, inv.so_id, inv.id, 'draft', inv.vat_pct, str(reason ? `Đảo ${inv.number}: ${reason}` : `Đảo ${inv.number}`, 3000), now(), now()]);
-      writeLines(rid, db.all('SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY pos', [invoiceId]));
+      if (credited > 0) { // đã đảo một phần: một dòng bằng phần còn lại (trước thuế), không chép lại toàn bộ
+        const un = Math.round(remain / (1 + (inv.vat_pct || 0) / 100));
+        writeLines(rid, [{ product_id: null, so_line_id: null, name: `Phần còn lại chưa báo có của ${inv.number}`, unit: 'lần', qty: 1, price: un, discount_pct: 0, pos: 0 }]);
+      } else writeLines(rid, db.all('SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY pos', [invoiceId]));
       refreshAmounts(rid); return rid;
     });
     return getInvoice(id);

@@ -582,6 +582,33 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const out = trI18n.tr(text, lang);
     return out !== text && !C.VI.test(out.replace(/“[^”]*”|"[^"]*"|\([^()]*\)/g, '')) ? out : text;
   }
+  // B57 (QA lượt 6): ngôn ngữ trả lời = ngôn ngữ CÂU LỆNH (chữ Hán → zh; tiếng Anh không dấu → en), không thì ngôn ngữ giao diện
+  function replyLang(query, ui) {
+    const q = String(query || ''); const C = require('../i18n/core');
+    if ((q.match(/[\u3400-\u9fff]/g) || []).length >= 2) return 'zh';
+    if (C.VI.test(q.replace(/“[^”]*”|"[^"]*"|'[^']*'/g, ''))) return ui && ui !== 'vi' && !/[a-z]{2,}\s+[a-z]{2,}\s+[a-z]{2,}/i.test(q.replace(/[^\x00-\x7f]+/g, '')) ? ui : 'vi';
+    if (/\b(the|please|open|send|tell|message|email|to|and|my|on|in|with|turn|volume|let|know|write|draft|create)\b/i.test(q) && /^[\x00-\x7f“”‘’…–—]*$/.test(q.replace(/“[^”]*”|"[^"]*"/g, ''))) return 'en';
+    return ui || 'vi';
+  }
+  // câu trả lời cuối còn là tiếng Việt trong khi người dùng dùng en/zh: dùng bản dịch có sẵn, không có thì nhờ mô hình dịch (một lượt ngắn, không công cụ)
+  async function finishLang(r, args) {
+    try {
+      if (!r || typeof r.text !== 'string' || !r.text.trim()) return r;
+      const C = require('../i18n/core'); const msgs = (args && args.messages) || []; const lu = [...msgs].reverse().find(m => m.role === 'user');
+      const q = lu ? (typeof lu.content === 'string' ? lu.content : (lu.content || []).map(x => x.text || '').join(' ')) : '';
+      const lang = replyLang(q, S_().uiLang); r.lang = lang;
+      if (lang === 'vi') return r;
+      r.text = localizeText(r.text, lang); if (typeof r.warning === 'string') r.warning = localizeText(r.warning, lang);
+      const viLeft = (t) => C.VI.test(String(t || '').replace(/“[^”]*”|"[^"]*"|\([^()]*\)/g, '')) && (String(t).match(new RegExp(C.VI.source, 'gi')) || []).length >= 4;
+      if (viLeft(r.text) && deps.engine && deps.engine.chatStep && !(args && args.signal && args.signal.aborted)) {
+        const name = C.REPLY_IN[lang] || lang;
+        const tr = await deps.engine.chatStep([{ role: 'system', content: `Dịch văn bản người dùng gửi sang ${name}. Giữ nguyên tên người, tên tệp, chữ trong ngoặc kép, số và đường dẫn. Chỉ in bản dịch, không giải thích.` }, { role: 'user', content: r.text }], { tools: [], toolChoice: 'none', temperature: 0.1, maxTokens: 700, signal: args && args.signal }).catch(() => null);
+        const out = tr && typeof tr.text === 'string' ? tr.text.replace(/<think>[\s\S]*?<\/think>/g, '').trim() : '';
+        if (out && !viLeft(out) && out.length < r.text.length * 3 + 200) { r.textVi = r.text; r.text = out; }
+      }
+    } catch {}
+    return r;
+  }
   function localizeResult(r) {
     try { const lang = S_().uiLang; if (r && lang && lang !== 'vi') { if (typeof r.text === 'string') r.text = localizeText(r.text, lang); if (typeof r.warning === 'string') r.warning = localizeText(r.warning, lang); } } catch {}
     return r;
@@ -592,9 +619,9 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const fs_ = folders();
     let mem = { items: [] };
     if (s.agentMemory !== false && deps.memory.count()) mem = await deps.memory.retrieve(query, { ...(await deps.embedForMemory()), k: 6 }).catch(() => ({ items: [] }));
-    const RI = require('../i18n/core').REPLY_IN[s.uiLang]; // giao diện en/zh → trả lời bằng ngôn ngữ đó
+    const RL = replyLang(query, s.uiLang); const RI = require('../i18n/core').REPLY_IN[RL]; // B57: ngôn ngữ câu lệnh / giao diện en/zh → trả lời bằng ngôn ngữ đó
     const lines = [
-      s.uiLang && s.uiLang !== 'vi' && RI ? IDENTITY.replace('Luôn trả lời bằng tiếng Việt,', `Luôn trả lời bằng ${RI} (ngôn ngữ giao diện), trừ khi người dùng viết bằng ngôn ngữ khác;`) : IDENTITY,
+      RL !== 'vi' && RI ? IDENTITY.replace('Luôn trả lời bằng tiếng Việt,', `Luôn trả lời bằng ${RI} (ngôn ngữ của người dùng), kể cả câu báo lỗi/báo chưa làm được;`) : IDENTITY,
       `Thời điểm hiện tại: ${nowVi()} (${tz()}).`,
       '',
       'Nguyên tắc làm việc:',
@@ -640,7 +667,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
   function run(args) {
     const store = { attachments: (args && args.attachments) || [] };
     // 0.15.2: lỗi giữa lượt mang theo số bước công cụ đã chạy, để bên ngoài KHÔNG chạy lại cả lượt khi đã có thao tác thật (tránh gửi tin hai lần)
-    return runStore.run(store, () => runInner(args)).then(localizeResult).catch((e) => { try { if (e && typeof e === 'object') e.stepsDone = (store.steps || []).filter(x => x.status !== 'running' || x.auto).length; } catch {} throw e; });
+    return runStore.run(store, () => runInner(args)).then((r) => finishLang(r, args)).catch((e) => { try { if (e && typeof e === 'object') e.stepsDone = (store.steps || []).filter(x => x.status !== 'running' || x.auto).length; } catch {} throw e; });
   }
   async function runInner({ messages, convoId = null, signal, onToken = () => {}, onStep = () => {}, onStatus = () => {}, headless = false, confirm, confirmScreen, approve = null }) {
     const s = S_();
@@ -958,7 +985,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     return { text: (text || '').trim(), steps, usage, finishReason, urls, memories: sys.memories.map(m => m.text), tools: names, warning };
   }
 
-  return { run, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck, localizeText };
+  return { run, replyLang, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck, localizeText };
 }
 
 module.exports = { scrubToolNames, isAppTask, appOf, NO_APP_ACTION_WARN, noActionWarn, NO_ACTION_WARN, NO_ACTION_OK_WARN, EMPTY_ANSWER, editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };

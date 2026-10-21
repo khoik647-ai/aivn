@@ -185,7 +185,7 @@ function initStores() {
   rag = createRagStore(path.join(ud, 'rag'));
   memory = createMemoryStore(path.join(ud, 'memory.json'));
   scheduler = createScheduler({ file: path.join(ud, 'schedules.json'), onFire: onScheduleFire, log: (m) => { console.log(m); log(m); } });
-  computerTools = createComputerTools({ getSettings: () => settings.data, listWindows: () => require('./agent/uitree').windows(), openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => LOG.block('apps', 'Quét ứng dụng đã cài (AIVN AGENT)', [`nguồn: ${JSON.stringify(d.sources)}`, `lỗi: ${d.errors.length ? d.errors.join('; ') : 'không'}`, `thư mục Desktop: ${d.dirs ? d.dirs.desktop.join(' | ') : '—'}`, `thư mục Start Menu: ${d.dirs ? d.dirs.start.join(' | ') : '—'}`, `thời gian tìm sâu: ${d.ms ?? '?'} ms`]),
+  computerTools = createComputerTools({ sandbox: () => benchSandbox, getSettings: () => settings.data, listWindows: () => require('./agent/uitree').windows(), openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => LOG.block('apps', 'Quét ứng dụng đã cài (AIVN AGENT)', [`nguồn: ${JSON.stringify(d.sources)}`, `lỗi: ${d.errors.length ? d.errors.join('; ') : 'không'}`, `thư mục Desktop: ${d.dirs ? d.dirs.desktop.join(' | ') : '—'}`, `thư mục Start Menu: ${d.dirs ? d.dirs.start.join(' | ') : '—'}`, `thời gian tìm sâu: ${d.ms ?? '?'} ms`]),
     keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: (a, ctx) => deskWrap(getDesk().look, a, ctx), act: (a, ctx) => deskWrap(getDesk().act, a, ctx), readText: (a, ctx) => deskWrap(getDesk().readText, a, ctx), pending: () => (desk && desk.active() ? desk.pending() : null), searchTodo: () => (desk && desk.active() ? desk.searchTodo() : null), searchFound: () => (desk && desk.active() ? desk.searchFound() : null), likely: (q) => (desk && desk.active() ? desk.likely(q) : null) } });
   mcp = require('./mcp').createMcpManager({ dir: app.getPath('userData'), log: (sc, m) => LOG.log(sc, m), onChange: () => send('mcp:changed', mcp.status()) });
   agent = createAgent({ engine: agentEngine, mcp, getSettings: () => settings.data, gateOk: () => lastGateOk, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: extractAny, embedForMemory, log, computer: computerTools,
@@ -390,6 +390,16 @@ function cleanLoad(o) {
   return r;
 }
 const modelLoadFor = (id) => cleanLoad(((settings.data.modelLoad || {})[id]) || {});
+let idleVramUsed = null;
+// sau khi nạp TRỌN lên GPU: VRAM tăng thêm = số đo thật cho mô hình này ở ngữ cảnh đã nạp (Khám phá / Mô hình của tôi dùng số này thay cho ước tính)
+async function measureVram(id, st) {
+  if (idleVramUsed == null || !st || st.mode === 'cpu-only' || !(Number.isInteger(st.gpuLayers) && st.gpuLayers > 0 && st.gpuLayers >= (st.totalLayers || 0))) return;
+  await sleep(1500); const h = await engine.hardwareInfo(); if (!h || !h.vram || !(h.vram.total > 0)) return;
+  const used = h.vram.total - h.vram.free - idleVramUsed; if (!(used > 200 * 1024 ** 2)) return;
+  const u = settings.data.modelUsage || (settings.data.modelUsage = {}); const e = u[id] || (u[id] = { uses: 0 });
+  e.vram = { bytes: Math.round(used), ctx: st.contextSize || null, at: Date.now() }; settings.save();
+  LOG.log('load', `Đo VRAM thật: ${id} dùng ${(used / 1024 ** 3).toFixed(2)} GB ở ngữ cảnh ${st.contextSize}`);
+}
 async function loadById(id, { force = false, ctx = null, reason = null, minCtx = null, load = null } = {}) {
   const m = listModels().find(x => x.id === id);
   if (!m) throw new Error(`Không tìm thấy mô hình "${id}"`);
@@ -424,6 +434,8 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
     const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj } : {}), ...(ml.mmap === false ? { useMmap: false } : {}), ...(ml.mlock ? { useMlock: true } : {}), ...(load ? { reload: true } : {}) };
     LOG.log('load', `Bắt đầu nạp ${m.file}`, { size: m.size, ctx: opts.contextSize, gpuLayers: opts.gpuLayers ?? 'tự động', vision: !!opts.mmproj });
     const tLoad = Date.now();
+    // B38: số đo VRAM thật — VRAM đã dùng lúc chưa nạp mô hình (màn hình, ứng dụng khác) làm mốc
+    try { if (!engine.status().loaded) { const h0 = await engine.hardwareInfo(); if (h0 && h0.vram && h0.vram.total > 0 && !h0.vram.integratedOnly) idleVramUsed = h0.vram.total - h0.vram.free; } } catch {}
     try {
       try { st = await engine.loadModel(m.id, m.path, opts); }
       catch (e) {
@@ -460,6 +472,7 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
     st = { ...st, loadParams: ml }; lastCtx = st.contextSize || lastCtx; engineDied = false;
     if (ctxNote) { st = { ...st, notice: [st.notice, ctxNote].filter(Boolean).join(' ') }; LOG.log('load', ctxNote); }
     if (reason) LOG.log('load', 'Lý do nạp lại: ' + reason);
+    measureVram(m.id, st).catch(() => {});
     LOG.log('load', `Đã nạp ${m.file} sau ${Date.now() - tLoad} ms`, { mode: st.mode, ctx: st.contextSize, gpu: st.gpu, gpuLayers: st.gpuLayers, totalLayers: st.totalLayers, toolMode: st.toolMode, fallbackFrom: st.fallbackFrom });
     noteUsage(null, m.id);
     settings.data.lastModel = m.id; settings.save(); lastUse = Date.now();
@@ -602,7 +615,7 @@ async function runAgentTurn({ reqId, convoId, messages, headless = false, signal
   }
   // B18 (QA lượt 2): MỌI lượt AIVN AGENT (bấm Gửi, việc theo Lịch tự động…) qua cùng một cổng mô hình; chỉ bài đo Điểm tác vụ được bỏ qua (gate: false)
   if (gate) {
-    const g = await agentModelGate();
+    const g = await agentModelGate(); agentStepScale = g.stepScale || 1;
     if (!g.ok) {
       const e = new Error(`${g.modelName || 'Mô hình đang nạp'} chưa dùng được cho AIVN AGENT: ${g.reason}.${g.best ? ` Hãy chuyển sang ${g.best.name} (đã có trên máy).` : (g.recommended || []).length ? ` Gợi ý cho máy này: ${g.recommended[0].name}.` : ''}`);
       e.code = 'AGENT_GATE'; e.gate = g; throw e;
@@ -622,10 +635,11 @@ async function runAgentTurn({ reqId, convoId, messages, headless = false, signal
 let desk = null;
 let mcp = null;
 const qaAsks = []; // chỉ khi phát triển (AIVN_DESK_AUTO): ghi lại các thẻ xin phép để kiểm thử
+let agentStepScale = 1; // ×3 khi mô hình đang nạp là “Rất chậm” (bật tay) — xem agent-eligibility.js
 function getDesk() {
   if (desk) return desk;
   const { createDesktopAgent } = require('./desktop-agent');
-  desk = createDesktopAgent({ engine, getSettings: () => settings.data, setSettings: (p) => { Object.assign(settings.data, p); settings.save(); send('settings:changed', p); },
+  desk = createDesktopAgent({ engine, stepScale: () => agentStepScale, getSettings: () => settings.data, setSettings: (p) => { Object.assign(settings.data, p); settings.save(); send('settings:changed', p); },
     log: (scope, m) => LOG.log(scope, m), getMainWindow: () => win, preload: path.join(__dirname, 'preload.js'), isTest: isTest && process.env.AIVN_DESK_KEEPWIN === '1', autoTest: !app.isPackaged && !!process.env.AIVN_DESK_AUTO,
     autoAnswer: !app.isPackaged && process.env.AIVN_DESK_AUTO ? (req) => (qaAsks.push({ risk: req.risk || null, desc: req.desc || '', text: req.text || null }), { ok: process.env.AIVN_DESK_AUTO !== 'deny' && !(req.risk && process.env.AIVN_DESK_AUTO === 'safe'), reason: req.risk && process.env.AIVN_DESK_AUTO === 'safe' ? 'Đừng gửi, chỉ soạn sẵn' : '' }) : null,
     onStop: (reason) => stopComputer(reason), grounder: (process.env.AIVN_QA_DESK016 || process.env.AIVN_QA_B21 || process.env.AIVN_QA_ZALO_DPI) && !app.isPackaged ? async () => null : getGrounder }); // QA phím/gõ: không cần mắt nhìn (CPU chậm)
@@ -750,7 +764,7 @@ function askScreen(req) {
 }
 function computerInfo() {
   const p = SC.permissions();
-  return { enabled: settings.data.agentComputer !== false, screen: !!settings.data.agentScreen, screenMode: settings.data.agentScreenMode || 'each', autonomy: settings.data.agentAutonomy === true, grounder: settings.data.agentGrounder || null, grounders: listModels().filter(m => m.mmproj).map(m => ({ id: m.id, name: m.catalog ? m.catalog.name : m.file })), screenBudget: settings.data.agentScreenBudget || 40, autoReadOnly: settings.data.agentAutoReadOnly === true, vision: !!engine.status().vision, platform: process.platform, perms: p, stopKey: process.platform === 'darwin' ? '⌘⌥Q' : 'Ctrl+Alt+Q' };
+  return { enabled: settings.data.agentComputer !== false, screen: !!settings.data.agentScreen, screenMode: settings.data.agentScreenMode || 'each', autonomy: settings.data.agentAutonomy === true, grounder: settings.data.agentGrounder || null, grounders: listModels().filter(m => m.mmproj).map(m => ({ id: m.id, name: m.catalog ? m.catalog.name : m.file })), screenBudget: settings.data.agentScreenBudget || 40, verySlow: settings.data.agentVerySlow === true, autoReadOnly: settings.data.agentAutoReadOnly === true, vision: !!engine.status().vision, platform: process.platform, perms: p, stopKey: process.platform === 'darwin' ? '⌘⌥Q' : 'Ctrl+Alt+Q' };
 }
 
 
@@ -911,7 +925,7 @@ function catalogList() {
   return hw().then(h => (H = h, catalog.map(c => {
     const job = downloader.get(`${c.repo}::${c.file}`);
     const part = downloader.partialFor(c.repo, [{ path: c.file, size: c.size }, ...(c.mmproj ? [{ path: c.mmproj.file, size: c.mmproj.size }] : [])]);
-    return { ...c, installed: part.complete || isInstalled(c.file), partial: part.complete ? 0 : part.received, job, fit: hf.fitFor(c.size, h, { id: c.id, params: c.params, mmprojSize: c.mmproj ? c.mmproj.size : 0 }), tools: toolSupport(c) };
+    return { ...c, installed: part.complete || isInstalled(c.file), partial: part.complete ? 0 : part.received, job, fit: hf.fitFor(c.size, h, fitMetaCat(c)), tools: toolSupport(c) };
   }))).then(list => {
     // B17: một cách tính duy nhất (agent-plan.js) cho ngữ cảnh AIVN AGENT, độ vừa máy của thẻ trong mục Điều khiển máy tính,
     // gợi ý ⭐ điều khiển máy và cổng AIVN AGENT
@@ -994,6 +1008,7 @@ function registerIpc() {
     if ('agentGrounder' in rest) { settings.data.agentGrounder = typeof rest.agentGrounder === 'string' && rest.agentGrounder ? rest.agentGrounder : null; if (!settings.data.agentGrounder && engine.groundUnload) engine.groundUnload().catch(() => {}); }
     if ('agentScreenMode' in rest) settings.data.agentScreenMode = rest.agentScreenMode === 'important' ? 'important' : 'each';
     if ('agentAutonomy' in rest) settings.data.agentAutonomy = rest.agentAutonomy === true;
+    if ('agentVerySlow' in rest) settings.data.agentVerySlow = rest.agentVerySlow === true;
     if ('agentScreenBudget' in rest) settings.data.agentScreenBudget = Math.max(5, Math.min(100, Math.round(Number(rest.agentScreenBudget) || 40)));
     if (typeof hfToken === 'string') settings.data.hfToken = hfToken.trim().slice(0, 300);
     if ('perfMode' in rest) { settings.data.perfMode = PERF.MODE_VI[rest.perfMode] ? rest.perfMode : 'auto'; perfProfile().then(p => send('perf:changed', p)).catch(() => {}); }
@@ -1122,6 +1137,8 @@ function registerIpc() {
   ipcMain.handle('bench:run', async (_e, { ids }) => { try { return { ok: true, results: await runAgentBench(Array.isArray(ids) ? ids.slice(0, 4) : []) }; } catch (e) { return { ok: false, error: e.message }; } });
   ipcMain.handle('bench:stop', () => { if (benchRun) benchRun.abort(); stopComputer('dừng bài đo'); return true; });
   ipcMain.handle('bench:scores', () => benchScores());
+  ipcMain.handle('bench:fullModels', () => fullBenchModels());
+  ipcMain.handle('bench:full', async (_e, { ids } = {}) => { try { return { ok: true, ...(await runFullBench(Array.isArray(ids) ? ids : [])) }; } catch (e) { return { ok: false, error: e.message }; } });
   // ---- Kinh doanh → Khách hàng (CRM, lưu cục bộ SQLite) ----
   let crmP = null;
   const getCrm = () => crmP || (crmP = (async () => { const { openDb } = require('./crm/db'); const { createCrm } = require('./crm/crm'); const db = await openDb(path.join(app.getPath('userData'), 'crm.db')); const crm = createCrm({ db, defaultOwner: () => settings.data.crmOwner || require('os').userInfo().username, log: (m) => LOG.log('crm', m) }); crm.biz = require('./crm/biz').createBiz({ db, crm, log: (m) => LOG.log('crm', m) }); return crm; })());
@@ -1513,22 +1530,25 @@ const BENCH_FILE = () => path.join(app.getPath('userData'), 'agent-bench.json');
 // AIVN AGENT chỉ nhận mô hình làm được việc (xem agent-eligibility.js); Trò chuyện thường thì mô hình nào cũng được
 const AE = require('./agent-eligibility');
 const AP = require('./agent-plan');
-const catAgentFit = (c, h, ctx = AGENT_CTX) => (h ? hf.fitFor(c.size || 0, h, { id: c.id, params: c.params, mmprojSize: (c.mmproj && c.mmproj.size) || 0, ctx }) : null);
+// B38: MỘT cách tính cho Khám phá và Mô hình của tôi (fit.metaOf): cùng dung lượng (mô hình + mmproj), cùng KV/bộ đệm, và số đo thật nếu đã nạp trên máy này
+const usageOfCatalog = (cid) => { const inst = cid ? listModels().find(m => m.catalog && m.catalog.id === cid) : null; return inst ? (settings.data.modelUsage || {})[inst.id] || null : null; };
+const fitMetaCat = (c) => { const u = usageOfCatalog(c.id); return { ...require('./fit').metaOf({ catalog: c, measured: u && u.vram }), measuredTps: u && u.tps }; };
+const catAgentFit = (c, h, ctx = AGENT_CTX) => (h ? hf.fitFor(c.size || 0, h, { ...fitMetaCat(c), ctx }) : null);
 // B17: kế hoạch AIVN AGENT cho máy này (ngữ cảnh 16K hoặc 12K, có cho “Chạy chậm” không) — xem agent-plan.js
 function agentPlanFor(h, sc, installed = []) {
   if (!h) return { ctx: AGENT_CTX, lowered: false, allowSlow: false, maxSpill: 0 };
   const cat = catalog.map(c => ({ id: c.id, vision: !!c.mmproj, catalog: c, size: c.size, _fit: (ctx) => catAgentFit(c, h, ctx) }));
   const inst = installed.map(m => ({ ...m, _fit: m._fit || ((ctx) => hf.fitFor(m.size || 0, h, { ...(m._meta || {}), ctx })) }));
-  return AP.plan([...cat, ...inst], (e, ctx) => e._fit(ctx), sc);
+  return { ...AP.plan([...cat, ...inst], (e, ctx) => e._fit(ctx), sc), allowVerySlow: settings.data.agentVerySlow === true };
 }
 async function withAgentCheck(list) {
   const h = await hw().catch(() => null); const sc = benchScores();
   const out = list.map(m => {
     let mm = 0; try { if (m.mmproj) mm = fs.statSync(m.mmproj).size; } catch {}
-    const meta = { id: m.catalog ? m.catalog.id : m.id, params: m.catalog ? m.catalog.params : null, mmprojSize: mm };
-    const fit = h ? hf.fitFor(m.size || 0, h, meta) : null;
     const u = (settings.data.modelUsage || {})[m.id] || null;
-    return { ...m, fit, _meta: meta, strength: require('./fit').strength({ ...m, ...meta }), quant: hf.parseQuant(m.file) || null, params: m.catalog ? m.catalog.params : null, usage: u ? { lastUsed: u.lastUsed || null, uses: u.uses || 0, tps: u.tps || null } : null };
+    const meta = { ...require('./fit').metaOf({ catalog: m.catalog || null, size: m.size, mmprojSize: mm, file: m.file, measured: u && u.vram }), id: m.catalog ? m.catalog.id : m.id, measuredTps: u && u.tps };
+    const fit = h ? hf.fitFor(m.size || 0, h, meta) : null;
+    return { ...m, fit, _meta: meta, strength: require('./fit').strength({ ...m, ...meta }), quant: hf.parseQuant(m.file) || null, params: m.catalog ? m.catalog.params : null, usage: u ? { lastUsed: u.lastUsed || null, uses: u.uses || 0, tps: u.tps || null, vram: u.vram || null } : null, mmprojSize: mm };
   });
   const P = agentPlanFor(h, sc, out);
   const res = out.map(({ _meta, ...m }) => { const agentFit = h ? hf.fitFor(m.size || 0, h, { ..._meta, ctx: P.ctx }) : null;
@@ -1556,7 +1576,7 @@ async function agentModelGate() {
   lastGateOk = !!(cloud || e.ok);
   return { ok: cloud || e.ok, cloud, cloudInfo: cloud ? { model: cloudCfg().model, host: (() => { try { return new URL(cloudCfg().baseUrl).host; } catch { return ''; } })(), eyes: !!st.vision } : null, code: e.code, reason: e.reason, modelName: cur ? (cur.catalog ? cur.catalog.name : cur.file) : (st.id || null),
     best: best && (!cur || best.id !== cur.id) ? { id: best.id, name: best.catalog ? best.catalog.name : best.file, slow: !!(best.agentFit && best.agentFit.level === 'slow') } : null, recommended: recOut,
-    slow: !!(e && e.slow), slowReason: e && e.slow ? e.reason : null, allowSlow, spill, ctx: P.ctx, planNote: AP.note(P) };
+    slow: !!(e && e.slow), verySlow: !!(e && e.verySlow), stepScale: (e && e.stepScale) || 1, slowReason: e && e.slow ? e.reason : null, allowSlow, spill, ctx: P.ctx, planNote: AP.note(P) };
 }
 // ---------- 0.16: bộ não đám mây (tuỳ chọn) cho AIVN AGENT — xem cloud-brain.js ----------
 const CB = require('./cloud-brain');
@@ -1604,6 +1624,69 @@ async function runAgentBench(ids, { only = null, onProgress = null } = {}) {
     }
   } finally { Object.assign(settings.data, keep); settings.save(); benchRun = null; }
   return results;
+}
+// ---------- Bộ đo AIVN AGENT đầy đủ (Nhà phát triển → “Chạy bộ đo”): 2B/4B/8B đã tải, 20–40 phút, một tệp kết quả ----------
+let benchSandbox = null;
+function fullBenchModels() { return require('./agent-bench-full').findQwenVL(listModels()); }
+async function runFullBench(ids, { parts = null, apps = null, out: outFile = null } = {}) {
+  const on = (k) => !parts || parts.includes(k);
+  if (benchRun) throw new Error('Bài đo đang chạy.');
+  const FB = require('./agent-bench-full'); const AB = require('./agent-bench'); const U = require('./agent/uitree'); const os = require('os');
+  const all = fullBenchModels(); const list = ids && ids.length ? all.filter(m => ids.includes(m.id)) : all;
+  if (!list.length) throw new Error('Chưa thấy Qwen3-VL 2B/4B/8B đã tải đủ (cần cả tệp mô hình và tệp thị giác mmproj).');
+  const ac = new AbortController(); benchRun = ac; const started = new Date();
+  const keep = { agentComputer: settings.data.agentComputer, agentScreen: settings.data.agentScreen, agentScreenMode: settings.data.agentScreenMode, agentToolsOff: settings.data.agentToolsOff };
+  Object.assign(settings.data, { agentComputer: true, agentScreen: true, agentScreenMode: 'important', agentToolsOff: [] });
+  const perModelMs = Math.max(8, Math.min(20, Math.floor(40 / list.length))) * 60000; // tổng ≤ ~40 phút
+  const prog = (p) => send('bench:fullProgress', { ...p, models: list.length });
+  const h = await hw().catch(() => ({}));
+  let disp = []; try { disp = require('electron').screen.getAllDisplays().map(d => ({ w: d.size.width, h: d.size.height, scale: d.scaleFactor, px: `${Math.round(d.size.width * d.scaleFactor)}x${Math.round(d.size.height * d.scaleFactor)}` })); } catch {}
+  const out = { kind: 'aivn-agent-bench', format: 1, app: app.getVersion(), started: started.toISOString(), thresholds: FB.THRESH, note: 'Không gửi tin/thư thật: chỉ ứng dụng giả “AIVN Bench”, âm lượng giả lập.',
+    machine: { platform: process.platform, os: os.release(), cpu: h.cpu || (os.cpus()[0] || {}).model, cores: h.cpus, ram: h.ram, gpu: h.gpu, vram: h.vram, displays: disp }, models: [] };
+  const file = outFile || path.join(app.getPath('downloads'), `AIVN-bench-${app.getVersion()}-${started.toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`);
+  const save = () => FB.writeResult(file, out);
+  try {
+    for (const [mi, m] of list.entries()) {
+      if (ac.signal.aborted) break;
+      const deadline = Date.now() + perModelMs; const r = { model: m, started: new Date().toISOString() }; out.models.push(r);
+      prog({ model: m.size, mi: mi + 1, phase: 'load' });
+      const t0 = Date.now();
+      try { const st = await loadById(m.id, { force: true }); send('model:status', engine.status()); r.load = { ms: Date.now() - t0, mode: st.mode, ctx: st.contextSize, gpuLayers: st.gpuLayers, vram: ((settings.data.modelUsage || {})[m.id] || {}).vram || null }; }
+      catch (e) { r.load = { error: e.message }; r.verdict = FB.verdict(r); save(); continue; }
+      LOG.log('bench', `Bộ đo đầy đủ: ${m.size} (${m.file})`);
+      const spillHeavy = r.load && Number.isInteger(r.load.gpuLayers) && engine.status().totalLayers > 0 && r.load.gpuLayers < engine.status().totalLayers * 0.6; const tScale = spillHeavy ? 3 : 1; agentStepScale = tScale; r.stepScale = tScale;
+      if (on('tools')) try { r.tools = await FB.runToolBench({ engine, defs: computerTools.defs || {}, signal: ac.signal, onProgress: (p) => prog({ model: m.size, mi: mi + 1, ...p }) }); } catch (e) { r.tools = { error: e.message }; }
+      save();
+      if (!ac.signal.aborted && on('grounding')) { prog({ model: m.size, mi: mi + 1, phase: 'grounding' }); try { const g = await runGroundingBench(m.id); r.grounding = { score: g.score, total: g.total, seconds: g.seconds, items: g.items }; } catch (e) { r.grounding = { error: e.message }; } save(); }
+      const U2 = require('./agent/uitree'); benchSandbox = FB.createSandbox({ windows: U2.windows, matchWindow: U2.matchWindow, allowApp: AB.OPEN_APP[process.platform] || 'Notepad' });
+      const runTurn = ({ messages, signal }) => runAgentTurn({ reqId: null, convoId: 'bench', messages, signal, gate: false });
+      try {
+        if (!ac.signal.aborted && on('apps')) { try { r.apps = await FB.runChatTasks({ only: apps, BrowserWindow, desk: getDesk(), runTurn, signal: ac.signal, deadline, perTaskMs: 180000 * tScale, sandboxCalls: (reset) => benchSandbox.calls(reset), onProgress: (p) => prog({ model: m.size, mi: mi + 1, ...p }) }); } catch (e) { r.apps = { error: e.message }; } save(); }
+        if (!ac.signal.aborted && on('tasks')) {
+          try { const b = await AB.runBench({ BrowserWindow, desk: getDesk(), windows: U.windows, modelId: m.id, signal: ac.signal, deadline, perTaskMs: 180000 * tScale, runTurn, killPid: (pid) => { try { process.kill(pid); } catch {} }, onProgress: (p) => prog({ model: m.size, mi: mi + 1, phase: 'tasks', ...p }) });
+            r.tasks = { score: b.score, total: 10, done: b.done, safety: b.safety, seconds: b.seconds, items: b.tasks };
+            let bf = {}; try { bf = JSON.parse(fs.readFileSync(BENCH_FILE(), 'utf8')); } catch {}
+            bf.models = bf.models || {}; bf.models[m.id] = { ...(bf.models[m.id] || {}), score: b.score, total: 10, done: b.done, safety: b.safety, seconds: b.seconds, date: b.started, machine: `${process.platform} · ${out.machine.cpu} · ${engine.status().mode || ''}` };
+            fs.writeFileSync(BENCH_FILE(), JSON.stringify(bf, null, 2));
+          } catch (e) { r.tasks = { error: e.message }; }
+        }
+      } finally { r.sandbox = { violations: benchSandbox.violations() }; benchSandbox = null; }
+      r.seconds = Math.round((Date.now() - t0) / 1000); r.verdict = FB.verdict(r); r.summary = FB.summaryLine(r);
+      // kết quả cho bộ chọn mô hình trên máy này (thang dự phòng: mô hình chưa đạt bị xếp sau) — chỉ khi đo ĐỦ (không dừng giữa chừng, không bỏ phần nào)
+      const complete = !ac.signal.aborted && !parts && !apps && !!(r.tools && r.tools.total && r.apps && r.apps.total === FB.CHAT_TASKS.length && !r.apps.items.some(x => x.skipped) && r.tasks && r.tasks.done === 10);
+      try { let bf = {}; try { bf = JSON.parse(fs.readFileSync(BENCH_FILE(), 'utf8')); } catch {} bf.models = bf.models || {};
+        bf.models[m.id] = { ...(bf.models[m.id] || {}), full: { agentOk: r.verdict.agentOk, complete, tools: r.tools && r.tools.rate, apps: r.apps && r.apps.score, appsTotal: r.apps && r.apps.total, wrongRecipient: r.apps && r.apps.wrongRecipient, date: r.started, app: app.getVersion() } };
+        fs.writeFileSync(BENCH_FILE(), JSON.stringify(bf, null, 2)); } catch {}
+      LOG.log('bench', r.summary); save();
+    }
+  } finally {
+    benchSandbox = null; agentStepScale = 1; Object.assign(settings.data, keep); settings.save(); benchRun = null;
+    out.finished = new Date().toISOString(); out.stopped = ac.signal.aborted;
+    const since = out.started; out.log = String(LOG.tail(800) || '').split('\n').filter((l, i, a) => { const t = /^\d{4}-\d\d-\d\dT[\d:.]+Z/.exec(l); return t ? t[0] >= since : true; }).slice(-600).join('\n');
+    save();
+  }
+  if (!outFile) try { shell.showItemInFolder(file); } catch {}
+  return { file, summary: out.models.map(r => r.summary || `${r.model.size}: ${r.load && r.load.error ? 'không nạp được — ' + r.load.error : 'đã dừng'}`) };
 }
 async function runGroundingBench(id) {
   const AB = require('./agent-bench'); const SC = require('./screen-control');
@@ -2749,6 +2832,7 @@ else {
     startGateTimers();
     if (app.isPackaged || process.env.AIVN_UPDATE_CHECK === '1') setTimeout(() => updater.check({ silent: true }), Number(process.env.AIVN_UPDATE_DELAY || 5000));
     if (process.env.AIVN_SHOTS141) win.webContents.once('did-finish-load', () => setTimeout(() => shots141().catch(e => { console.error('SHOTS lỗi', e); app.exit(2); }), 2500));
+    if (process.env.AIVN_FULLBENCH && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => runFullBench((process.env.AIVN_FULLBENCH_MODELS || '').split(',').filter(Boolean), { parts: process.env.AIVN_FULLBENCH_PARTS ? process.env.AIVN_FULLBENCH_PARTS.split(',') : null, apps: process.env.AIVN_FULLBENCH_APPS ? process.env.AIVN_FULLBENCH_APPS.split(',') : null, out: path.join(process.env.AIVN_FULLBENCH, 'result.json') }).then(r => { console.log('FULLBENCH', JSON.stringify(r)); app.quit(); }, e => { console.error('FULLBENCH lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_AGENTBENCH && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaBench().catch(e => { console.error('BENCH lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QAPAR && !app.isPackaged) { global.__qaErrs = []; win.webContents.on('console-message', (e, level, message, line, src) => { const lv = e && e.level != null ? e.level : level; const msg = (e && e.message) || message; if (lv === 3 || lv === 'error' || /Uncaught/.test(String(msg))) global.__qaErrs.push(String(msg).slice(0, 400) + ' @' + ((e && e.lineNumber) || line)); }); }
     if (process.env.AIVN_QAPAR && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaPar().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));

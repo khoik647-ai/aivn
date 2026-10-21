@@ -112,7 +112,7 @@ test('bestFor xét độ vừa máy theo ngữ cảnh AIVN AGENT (agentFit), kh�
 
 test('lời giải thích "Tràn … sang RAM" cùng đơn vị (GiB) với phần hiển thị bộ nhớ', () => {
   const F = require('../src/fit');
-  const f = F.machineFit({ id: 'qwen3-vl-8b', size: 5.38 * 1024 ** 3, mmprojSize: 0.7 * 1024 ** 3, params: 8 }, { gpu: 'cuda', vram: { total: 4 * 1024 ** 3 }, ram: 8 * 1024 ** 3, cpus: 8 }, { ctx: 16384 });
+  const f = F.machineFit({ id: 'qwen3-vl-8b', size: 5.38 * 1024 ** 3, mmprojSize: 0.7 * 1024 ** 3, params: 8 }, { gpu: 'cuda', vram: { total: 4 * 1024 ** 3 }, ram: 16 * 1024 ** 3, cpus: 8 }, { ctx: 16384 });
   assert.equal(f.group, 'slow');
   const spill = f.hint.match(/Tràn ([\d,]+) GB/)[1]; assert.ok(f.text.includes(spill + ' GB RAM'), f.hint + ' | ' + f.text);
 });

@@ -80,3 +80,35 @@ test('B55: desktop-agent từ chối id đổi nhãn / id đã biến mất / g�
   assert.match(s, /giờ là \$\{L\.now\.kind/); assert.match(s, /không còn trên màn hình/); assert.match(s, /không gõ chữ vào nút\/nhóm nút/);
   assert.match(s, /Đã đặt con trỏ vào ô nhập/); assert.match(s, /đây là ĐÃ có tác dụng/);
 });
+
+test('B57: AGENT trả lời theo ngôn ngữ câu lệnh / giao diện; câu trả lời tiếng Việt được dịch khi người dùng dùng zh/en', async () => {
+  const { createAgent } = require('../src/agent/agent');
+  let ui = 'zh'; const calls = [];
+  const engine = { status: () => ({ loaded: true, id: 'x', contextSize: 16384 }), countTokens: (x) => Math.ceil(String(x).length / 3),
+    chatStep: async (msgs, o) => { calls.push({ msgs, o }); if (/Dịch văn bản/.test(msgs[0].content)) return { text: '我还没有完成：添加文件的步骤没有生效。', toolCalls: [] }; return { text: 'Mình chưa làm được việc này: bước “Thêm tệp” chưa có tác dụng. Mình sẽ thử lại sau.', toolCalls: [] }; } };
+  const ag = createAgent({ engine, getSettings: () => ({ uiLang: ui, agentComputer: false, agentScreen: false, agentMemory: false }), memory: { count: () => 0 }, scheduler: {}, extractFile: async () => ({}), embedForMemory: async () => ({}) });
+  assert.strictEqual(ag.replyLang('在已打开的 Google Classroom 中打开作业', 'vi'), 'zh');
+  assert.strictEqual(ag.replyLang('Tell Le Van Hung I will be late', 'vi'), 'en');
+  assert.strictEqual(ag.replyLang('nói với Lê Văn Hùng là mai em nghỉ', 'vi'), 'vi');
+  assert.strictEqual(ag.replyLang('mở Zalo', 'zh'), 'zh');
+  const r = await ag.run({ messages: [{ role: 'user', content: '你好，今天几号？' }] });
+  assert.match(r.text, /[\u4e00-\u9fff]/); assert.strictEqual(r.lang, 'zh');
+  assert.match(calls[0].msgs[0].content, /Luôn trả lời bằng/);
+});
+
+test('B56: chữ trắng trên nút màu (“✉ Thư mới”, “Gửi”) đọc được bằng lượt OCR khối màu đảo màu', { skip: process.platform !== 'linux' ? 'cần xvfb' : false, timeout: 120000 }, () => {
+  const { spawnSync } = require('child_process');
+  const r = spawnSync('xvfb-run', ['-a', path.join(root, 'node_modules/.bin/electron'), path.join(root, 'test/fixtures/b56-ocr.js'), '--no-sandbox'], { cwd: root, encoding: 'utf8', timeout: 110000 });
+  const m = /B56RESULT (.*)/.exec(r.stdout || ''); assert.ok(m, (r.stderr || '').slice(-500));
+  const d = JSON.parse(m[1]); const all = d.boosted.join(' | ');
+  assert.match(all, /Thư mới/); assert.match(all, /Gửi/);
+  assert.ok(!d.plain.some(x => /Thư mới/.test(x)), 'OCR thường vốn bỏ sót (nếu không còn bỏ sót thì vẫn tốt, nhưng bài này để chứng minh)');
+});
+
+test('B56: truy vấn khớp đa ngôn ngữ (New mail ≈ Thư mới ≈ 新邮件, Subject ≈ Tiêu đề)', () => {
+  const els = U.normalize({ els: [{ r: 'Button', n: 'Thư mới', b: [1, 1, 50, 20] }, { r: 'Edit', n: 'Tiêu đề', b: [1, 40, 50, 20] }] }).elements;
+  assert.strictEqual(U.findElementAny(els, 'New mail').name, 'Thư mới');
+  assert.strictEqual(U.findElementAny(els, '新邮件').name, 'Thư mới');
+  assert.strictEqual(U.findElementAny(els, 'Subject').name, 'Tiêu đề');
+  assert.strictEqual(U.findElementAny(els, 'Reply'), null);
+});

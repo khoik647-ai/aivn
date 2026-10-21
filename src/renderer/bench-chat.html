@@ -1,0 +1,41 @@
+<!doctype html>
+<!-- Bộ đo AIVN AGENT: ứng dụng chat/thư GIẢ chạy trong cửa sổ của AIVN (không kết nối mạng, không gửi tin thật).
+     ?app=messenger|zalo|outlook — trạng thái đọc bằng window.benchRead(). -->
+<html lang="vi"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>AIVN Bench</title>
+<style>
+body{margin:0;font:18px "Segoe UI",sans-serif;height:100vh;display:grid;grid-template-columns:320px 1fr;color:#111;background:#fff}
+#left{border-right:1px solid #ccc;padding:10px;overflow:auto}#search{width:280px;font-size:18px;padding:6px}
+.it{padding:12px 8px;cursor:pointer;border-radius:6px}.it.sel{background:#e7f0ff}#right{display:flex;flex-direction:column}
+#hdr{font-weight:bold;padding:14px;border-bottom:1px solid #ccc}#msgs{flex:1;padding:14px;overflow:auto}#msgs div{margin:6px 0;padding:6px 10px;background:#dbeafe;border-radius:10px;width:max-content}
+#comp{font-size:18px;margin:10px;padding:8px}
+.primary{background:#0f6cbd;color:#fff;border:0;border-radius:4px;padding:8px 14px;font-size:16px}
+#mail{display:none;padding:14px;gap:8px;flex-direction:column}#mail label{display:flex;gap:8px;align-items:center}#mail input,#mail textarea{flex:1;font-size:17px;padding:6px}
+</style></head><body>
+<div id="left"><div id="tools"></div><input id="search" aria-label="Tìm kiếm" placeholder="Tìm kiếm"><div id="list"></div></div>
+<div id="right"><div id="hdr"></div><div id="msgs"></div><input id="comp" aria-label="Nhập tin nhắn" placeholder="Nhập tin nhắn">
+  <div id="mail"><label>Đến<input id="mTo" aria-label="Đến"></label><label>Tiêu đề<input id="mSub" aria-label="Tiêu đề"></label><textarea id="mBody" aria-label="Nội dung thư" rows="6" placeholder="Nội dung thư"></textarea>
+  <div><button class="primary" id="mSend">Gửi</button> <button id="mDraft">Lưu nháp</button> <button id="mDiscard">Huỷ thư</button></div></div></div>
+<script>
+const app = new URLSearchParams(location.search).get('app') || 'messenger';
+const APPN = { messenger: 'Messenger', zalo: 'Zalo', outlook: 'Outlook' }[app] || 'Messenger';
+const chats = app === 'zalo' ? ['Nhóm Lớp K27', 'AIVN test', 'AIVN test 2', 'Trần Quỳnh Anh'] : app === 'outlook' ? ['Trần Quỳnh Anh — Hỏi lịch họp nhóm', 'Lê Văn Hùng — Bài tập lớn'] : ['Nhóm Lớp K27', 'Trần Quỳnh Anh', 'Lê Quỳnh Anh', 'Trần Quỳnh Như'];
+window.S = { app, cur: chats[0], sent: [], searches: [], drafts: [], mailSent: [], composeOpen: false };
+const fold = (x) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase();
+const $ = (id) => document.getElementById(id);
+function list(f) { const el = $('list'); el.innerHTML = ''; for (const c of chats.filter(c => !f || fold(c).includes(fold(f)))) { const d = document.createElement('div'); d.className = 'it' + (c === S.cur ? ' sel' : ''); d.textContent = c; d.onclick = () => open(c); el.appendChild(d); } }
+function title() { document.title = `${S.composeOpen ? 'Thư mới' : S.cur} | ${APPN} | AIVN Bench`; }
+function open(c) { S.cur = c; S.composeOpen = false; $('hdr').textContent = c; $('msgs').innerHTML = ''; $('search').value = ''; list(''); $('mail').style.display = 'none'; $('comp').style.display = app === 'outlook' ? 'none' : ''; title(); if (app !== 'outlook') $('comp').focus(); }
+$('comp').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.value.trim()) { S.sent.push({ to: S.cur, text: e.target.value }); const b = document.createElement('div'); b.textContent = e.target.value; $('msgs').appendChild(b); e.target.value = ''; } });
+$('search').addEventListener('input', e => list(e.target.value));
+$('search').addEventListener('keydown', e => { if (e.key === 'Enter') { S.searches.push(e.target.value); list(e.target.value); } });
+if (app === 'outlook') {
+  const nb = document.createElement('button'); nb.className = 'primary'; nb.textContent = '✉ Thư mới'; nb.onclick = () => { S.composeOpen = true; $('mail').style.display = 'flex'; $('hdr').textContent = 'Thư mới'; $('msgs').innerHTML = ''; title(); $('mTo').focus(); }; $('tools').appendChild(nb);
+  const mail = () => ({ to: $('mTo').value, subject: $('mSub').value, body: $('mBody').value });
+  $('mSend').onclick = () => { S.mailSent.push(mail()); S.composeOpen = false; $('mail').style.display = 'none'; title(); };
+  $('mDraft').onclick = () => { S.drafts.push(mail()); };
+  $('mDiscard').onclick = () => { S.composeOpen = false; $('mail').style.display = 'none'; title(); };
+}
+window.benchRead = () => ({ ...S, sent: S.sent.slice(), compose: app === 'outlook' ? { to: $('mTo').value, subject: $('mSub').value, body: $('mBody').value, open: S.composeOpen } : null });
+list(''); open(chats[0]);
+</script></body></html>
