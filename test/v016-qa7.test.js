@@ -96,7 +96,7 @@ test('B59 (Khôi): người nhận chưa chắc → HỎI “Gửi cho ai?”, k
   const da = require('fs').readFileSync(require('path').join(__dirname, '..', 'src/desktop-agent.js'), 'utf8');
   assert.match(da, /if \(g && s\.askWho\) \{[^}]*stop: true, ask: q/);
   const ag = require('fs').readFileSync(require('path').join(__dirname, '..', 'src/agent/agent.js'), 'utf8');
-  assert.match(ag, /hardStop = out\.ask \? \{ why: String\(out\.error \|\| ''\), ask: String\(out\.ask\) \}/); assert.match(ag, /text = hardStop\.ask \? hardStop\.ask :/);
+  assert.match(ag, /hardStop = (?:out\.sendRefused \? [\s\S]*? : )?out\.ask \? \{ why: String\(out\.error \|\| ''\), ask: String\(out\.ask\) \}/); // B93: nhánh “gửi bị từ chối” đứng trước assert.match(ag, /text = hardStop\.ask \? hardStop\.ask :/);
   // bản dịch
   const CORE = require('../src/i18n/core'); const T = CORE.create({ en: require('../src/i18n/en'), zh: require('../src/i18n/zh') });
   assert.strictEqual(T.tr(SV.askWho(), 'en').slice(0, 24), 'Who should I send it to?'); assert.strictEqual(T.tr(SV.askWho(), 'zh').slice(0, 4), '发给谁？');
