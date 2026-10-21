@@ -50,7 +50,8 @@ fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');" "$OWNER" "$REPO
 
 if [[ "$SKIP_BUILD" != "1" ]]; then
   step "Kiểm thử trích xuất tài liệu"
-  node --test test/*.test.js
+  # chạy tuần tự: kiểm thử có mô hình thật cần CPU yên tĩnh (llama.cpp trên CPU quá tải không lặp lại đúng từng chữ dù cùng seed)
+  node --test --test-concurrency=1 test/*.test.js
 
   step "Tải Node.js thuần (bộ máy suy luận chạy ngoài Electron) cho Windows/macOS, kiểm SHA-256"
   node build/fetch-node.cjs
