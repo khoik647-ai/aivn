@@ -366,4 +366,83 @@ function chatGate({ query, text, searchField = false, submit = false, proc = '',
   return `CHƯA gõ tin: AIVN AGENT phải TÌM và MỞ cuộc trò chuyện với “${recipient}” trước (bấm vào ô soạn tin KHÔNG đổi được người nhận — đừng bấm ô soạn), không gõ vào cuộc trò chuyện đang mở sẵn${hdr.length ? ` (đang mở: “${String(hdr[0]).slice(0, 40)}”)` : ''}. Làm lần lượt: 1) screen_act click vào ô Tìm kiếm của ứng dụng; 2) type_text "${recipient}"; 3) click vào kết quả đúng tên “${recipient}”; 4) rồi mới gõ tin nhắn.`;
 }
 const SEEN_QUESTION = 'Trả lời đúng định dạng, chép đúng chữ trên màn hình:\nTÊN: <tên người/nhóm ở đầu khung trò chuyện đang mở>\nÔ SOẠN: <chữ còn trong ô soạn tin, hoặc TRỐNG>\nTIN: <tin nhắn cuối cùng trong khung trò chuyện>\nTIN: <tin nhắn trước đó>';
-module.exports = { composerTarget, COMPOSER_TO, namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };
+// B94 (máy thật beta.2.2): ô SOẠN TIN — chữ gợi ý “Nhập @, tin nhắn tới X” / “Type a message” / “Message X” / “输入消息”, hoặc ô nhập ở đáy khung chat; không bao giờ là ô tìm kiếm
+const SEARCHY_EL = /tìm|tim kiem|search|find|搜索|查找/iu;
+function isComposerEl(e, win) {
+  if (!e) return false;
+  if (SEARCHY_EL.test(`${e.name || ''} ${e.autoId || ''} ${e.placeholder || ''}`)) return false;
+  const ts = [e.placeholder, e.name].filter(Boolean).map(x => String(x).trim());
+  if (ts.some(x => composerTarget([x]) || COMPOSER_HINT.test(x))) return true;
+  // ô nhập (không phải OCR) nằm ở đáy cửa sổ, bên phải danh sách hội thoại: ô soạn tin đã có chữ (chữ gợi ý không còn)
+  const W = win && Array.isArray(win.b) && win.b[3] > 50 ? win.b : null;
+  return !!(W && e.editable && !e.ocr && Array.isArray(e.b) && (e.b[1] + e.b[3] / 2 - W[1]) / W[3] > 0.8 && (e.b[0] - W[0]) / W[2] > 0.08);
+}
+function findComposer(obs) {
+  // chỉ trong cửa sổ đích: có khung cửa sổ → tâm phần tử phải nằm trong khung; không có khung (OCR cả màn hình) → chữ OCR phải nêu tên cuộc trò chuyện (“… tới X”),
+  // không nhận chữ gợi ý chung chung (“Nhập tin nhắn...” có thể là ô của cửa sổ khác, vd. chính AIVN)
+  const W = obs && obs.win && Array.isArray(obs.win.b) && obs.win.b[2] > 50 && obs.win.b[3] > 50 ? obs.win.b : null;
+  const inWin = (e) => W ? (e.b[0] + e.b[2] / 2 >= W[0] && e.b[0] + e.b[2] / 2 <= W[0] + W[2] && e.b[1] + e.b[3] / 2 >= W[1] && e.b[1] + e.b[3] / 2 <= W[1] + W[3]) : (!e.ocr || !!composerTarget([e.placeholder, e.name]));
+  const els = ((obs && obs.elements) || []).filter(e => Array.isArray(e.b) && inWin(e) && isComposerEl(e, obs.win));
+  return els.sort((a, b) => (b.editable ? 1 : 0) - (a.editable ? 1 : 0) || (composerTarget([b.placeholder, b.name]) ? 1 : 0) - (composerTarget([a.placeholder, a.name]) ? 1 : 0) || b.b[1] - a.b[1])[0] || null;
+}
+// B94: ô tìm kiếm còn chữ sót (Zalo: khi đang tìm, cạnh ô hiện nút “Đóng”) — trả phần tử chữ trong ô để bấm vào rồi xoá
+const CLOSE_TOK = /(?:^|[\s|│])(?:đóng|dong|close|关闭)(?=$|[\s|│])/iu;
+function searchRowOf(obs) {
+  let W = obs && obs.win && Array.isArray(obs.win.b) && obs.win.b[3] > 50 ? obs.win.b : null;
+  if (!W) { const els = ((obs && obs.elements) || []).filter(e => Array.isArray(e.b) && e.b.length >= 4); if (els.length < 3) return null; // giống regionsOf: khung theo các phần tử
+    const x0 = Math.min(...els.map(e => e.b[0])), y0 = Math.min(...els.map(e => e.b[1])), x1 = Math.max(...els.map(e => e.b[0] + e.b[2])), y1 = Math.max(...els.map(e => e.b[1] + e.b[3])); W = [x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)]; }
+  const top = (e) => Array.isArray(e.b) && (e.b[1] + e.b[3] / 2 - W[1]) / W[3] < 0.16 && (e.b[0] - W[0]) / W[2] < 0.35;
+  return { W, top, els: ((obs && obs.elements) || []).filter(top) };
+}
+// chữ trong hàng ô tìm kiếm (để so trước/sau khi gõ)
+function searchRowText(obs) { const r = searchRowOf(obs); return r ? r.els.slice().sort((a, b) => a.b[0] - b.b[0]).map(e => String(e.name || e.value || '')).join(' ') : ''; }
+function searchLeftover(obs) {
+  const els = ((obs && obs.elements) || []).filter(e => Array.isArray(e.b));
+  const f = els.find(e => e.focused && !e.ocr && SEARCHY_EL.test(`${e.name || ''} ${e.autoId || ''} ${e.placeholder || ''}`));
+  if (f && String(f.value || '').trim()) return f;
+  const R = searchRowOf(obs); if (!R) return null;
+  const nf = (x) => String(x || '').normalize('NFC');
+  const close = R.els.find(e => CLOSE_TOK.test(nf(e.name)));
+  if (!close) return null;
+  const meaningful = (x) => String(x || '').replace(/(?:^|\s)[QqØø](?=\s|$)/g, ' ').replace(/[^\p{L}\p{N}]/gu, '').length >= 2;
+  // OCR gộp chữ trong ô với nút “Đóng” (“| Q AivN… Ø| Đóng”): phần đứng trước “Đóng”
+  const pre = nf(close.name).split(CLOSE_TOK)[0];
+  if (meaningful(pre) && !/^[|\s]*(?:tìm kiếm|tim kiem|search|搜索)[|\s…]*$/iu.test(pre)) return { ...close, name: pre.trim(), b: [close.b[0], close.b[1], Math.max(20, Math.round(close.b[2] * pre.length / Math.max(1, String(close.name).length))), close.b[3]] };
+  const cy = close.b[1] + close.b[3] / 2;
+  return R.els.filter(e => e !== close && Math.abs(e.b[1] + e.b[3] / 2 - cy) <= Math.max(14, close.b[3]) && e.b[0] < close.b[0] && !/^[|\s]*(?:tìm kiếm|tim kiem|search|搜索)[|\s…]*$/iu.test(String(e.name || '')) && meaningful(e.name))
+    .sort((a, b) => b.b[2] - a.b[2])[0] || null;
+}
+// B94: nút “Đóng” của ô tìm kiếm đang mở (Zalo) — bấm vào để thoát tìm kiếm + xoá chữ khi OCR không đọc được chữ trong ô. Trả điểm bấm (ước theo vị trí chữ trong cụm OCR)
+function searchClose(obs) {
+  const R = searchRowOf(obs); if (!R) return null;
+  for (const e of R.els) {
+    const n = String(e.name || '').normalize('NFC'); const m = /(^|[\s|│])(đóng|dong|close|关闭)(?=$|[\s|│])/iu.exec(n); if (!m) continue;
+    const i0 = m.index + m[1].length, i1 = i0 + m[2].length, L = Math.max(1, n.length);
+    return { x: Math.round(e.b[0] + e.b[2] * ((i0 + i1) / 2) / L), y: Math.round(e.b[1] + e.b[3] / 2), el: e };
+  }
+  return null;
+}
+// chữ gõ có phải TÊN người nhận (gõ vào ô tìm kiếm) hay là NỘI DUNG tin
+function nameLikeText(text, recipient) {
+  if (!recipient) return false;
+  const norm = (x) => fold(String(x || '')).replace(/[^\p{L}\p{N} ]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const ty = norm(text), nf = norm(recipient), nk = norm(nameKey(recipient));
+  return !!ty && (ty === nf || ty === nk || (ty.length >= 2 && (nf.includes(ty) || nk.includes(ty))) || namesFor(recipient).some(n => norm(n) === ty));
+}
+// B96: phần tử là tệp / tệp đính kèm / ô xem trước (danh sách File, ảnh, video…) — bấm vào sẽ MỞ tệp bằng ứng dụng khác
+const FILE_NAME = /\.(xlsx?|xlsm|csv|docx?|rtf|odt|pptx?|pdf|zip|rar|7z|txt|png|jpe?g|gif|webp|heic|bmp|mp4|mov|avi|mkv|mp3|wav|m4a|exe|msi|apk|psd)\b/i;
+const FILE_UI = /^(?:ảnh\s*\/\s*video|ảnh|video|file|tệp|tệp tin|tệp đính kèm|photos?(?:\s*\/\s*videos?)?|files?|attachments?|media|图片|视频|文件|附件|图片\/视频)$/iu;
+function isFileTarget(name, el) {
+  const n = String(name || '').trim();
+  return FILE_NAME.test(n) || FILE_UI.test(n) || !!(el && /image|thumbnail|hình|ảnh/iu.test(String(el.kind || el.role || '')) && !/button|nút/iu.test(String(el.kind || '')));
+}
+// tên tệp OCR bị xuống dòng (“marketing cleaned” + dòng dưới “data.xlsx”): xét cả dòng ngay trên/dưới cùng cột
+function fileAt(el, obs) {
+  if (!el) return false; if (isFileTarget(el.name, el)) return true;
+  if (!Array.isArray(el.b)) return false; const E = el.b;
+  return ((obs && obs.elements) || []).some(e => e !== el && Array.isArray(e.b) && FILE_NAME.test(String(e.name || '')) && Math.abs((e.b[1] + e.b[3] / 2) - (E[1] + E[3] / 2)) <= Math.max(E[3], e.b[3]) * 1.9 + 4 && e.b[0] < E[0] + E[2] && e.b[0] + e.b[2] > E[0]);
+}
+// việc có nhắc tới tệp/đính kèm (bỏ phần nội dung tin trong ngoặc kép)
+const WANTS_FILE = /tệp|tep|file|đính kèm|dinh kem|attach|tài liệu|ảnh|hình|photo|picture|video|mở\s+(?:tệp|file)|文件|附件|图片|照片/iu;
+function wantsFiles(query) { return WANTS_FILE.test(String(query || '').replace(/[“"«][^”"»]*[”"»]/g, ' ')); }
+module.exports = { searchClose, searchRowText, fileAt, searchLeftover, isComposerEl, findComposer, nameLikeText, isFileTarget, wantsFiles, FILE_NAME, composerTarget, COMPOSER_TO, namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };

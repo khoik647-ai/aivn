@@ -10,6 +10,7 @@ const BAD = [
   [/không thấy phần tử/i, 'không thấy phần tử'],
   [/Màn hình không thay đổi rõ ràng/i, 'màn hình không thay đổi'],
   [/CHƯA thấy chữ vừa gõ/i, 'chưa thấy chữ vừa gõ'],
+  [/vào NHẦM ô/i, 'chữ vào nhầm ô (không phải ô soạn tin)'],
   [/CHƯA kiểm chứng được là đã gửi/i, 'chưa kiểm chứng được là đã gửi'],
   [/Hộp thoại “[^”]*” VẪN đang mở/i, 'hộp thoại vẫn đang mở'],
   [/CHƯA thấy kết quả khớp/i, 'chưa thấy kết quả tìm kiếm'],
@@ -24,7 +25,7 @@ function outcome(out) {
   if (out.error) return String(out.error).slice(0, 60);
   return null;
 }
-// khoá "cùng một cách": thao tác + mục tiêu (+ chữ gõ)
+// khoá "cùng một cách": thao tác + mục tiêu (+ chữ gõ); B95: + ngữ cảnh (phần tử đang chọn + dấu màn hình) — bấm sang ô khác / màn hình đổi thì tính lại từ đầu
 function key(a = {}) {
   const tgt = a.element || a.target || (a.x != null && a.y != null ? `${Math.round(a.x / 25)},${Math.round(a.y / 25)}` : '') || '';
   return [String(a.action || '').toLowerCase(), fold(tgt), a.action === 'type_text' ? fold(a.text).slice(0, 40) : '', a.keys ? fold(a.keys) : ''].join('|');
@@ -40,10 +41,10 @@ function createRetryTracker() {
   const tries = new Map(); const log = []; const blocked = new Map(); let blockedTotal = 0, badStreak = 0;
   return {
     // trước khi làm: cách này đã hỏng 2 lần → trả kết quả thay thế (không làm lại)
-    before(a) { const k = key(a); const t = tries.get(k); if (t && t.fails >= 2) { blocked.set(k, (blocked.get(k) || 0) + 1); blockedTotal++; } if (t && t.fails >= 2) return { error: 'cách này đã thử 2 lần không có tác dụng', forModel: `(Kiểm tra tự động của AIVN) KHÔNG làm lại: ${describe(a)} đã thử ${t.fails} lần và đều chưa có tác dụng (${t.why}). Hãy đổi cách: ${alternatives(a).join('; ')}. Nếu đã thử hết mà vẫn không được thì dừng và báo người dùng rõ là CHƯA làm được bước này.`, summary: 'bỏ qua — cách này đã hỏng 2 lần, cần đổi cách' }; return null; },
+    before(a, c = '') { const k = key(a) + '@' + c; const t = tries.get(k); if (t && t.fails >= 2) { blocked.set(k, (blocked.get(k) || 0) + 1); blockedTotal++; } if (t && t.fails >= 2) return { error: 'cách này đã thử 2 lần không có tác dụng', forModel: `(Kiểm tra tự động của AIVN) KHÔNG làm lại: ${describe(a)} đã thử ${t.fails} lần và đều chưa có tác dụng (${t.why}). Hãy đổi cách: ${alternatives(a).join('; ')}. Nếu đã thử hết mà vẫn không được thì dừng và báo người dùng rõ là CHƯA làm được bước này.`, summary: 'bỏ qua — cách này đã hỏng 2 lần, cần đổi cách' }; return null; },
     // sau khi làm: ghi nhận; hỏng lần đầu → thêm gợi ý đổi cách vào kết quả
-    after(a, out) {
-      const why = outcome(out); const k = key(a); const t = tries.get(k) || { fails: 0, why: '' };
+    after(a, out, c = '') {
+      const why = outcome(out); const k = key(a) + '@' + c; const t = tries.get(k) || { fails: 0, why: '' };
       if (!why) { t.fails = 0; badStreak = 0; tries.set(k, t); log.push({ a, ok: true }); return { bad: null }; }
       badStreak++; t.fails++; t.why = why; tries.set(k, t); log.push({ a, ok: false, why });
       const hint = t.fails === 1 ? `\n(Kiểm tra tự động của AIVN) Bước này CHƯA có tác dụng (${why}). Chụp lại/xem kết quả kiểm tra ở trên; nếu thử lại thì đổi cách: ${alternatives(a).slice(0, 3).join('; ')}.` : `\n(Kiểm tra tự động của AIVN) Đã hỏng ${t.fails} lần với cùng cách này (${why}) — BẮT BUỘC đổi cách: ${alternatives(a).join('; ')}.`;
@@ -88,4 +89,7 @@ function honestStatus({ query = '', tracker = null, steps = [], reason = '', rec
     : 'Bạn có thể mở sẵn đúng cửa sổ/màn hình cần dùng rồi giao lại việc, hoặc tự làm bước này.');
   return lines.join('\n\n');
 }
-module.exports = { PROMISE_RE, promiseEnding, honestStatus, createRetryTracker, outcome, key, alternatives, finalCheck, describe, DONE_RE };
+// B95 (máy thật beta.2.2): câu cuối đổ lỗi cho ứng dụng (“Zalo có thể đang gặp sự cố / giao diện bị lỗi”) trong khi chính các bước của AIVN chưa có tác dụng
+const BLAME_RE = /(?:gặp|bị|có)\s+(?:sự cố|trục trặc|lỗi)|giao diện\s+(?:bị|có|đang)\s+(?:lỗi|vấn đề)|(?:ứng dụng|app|phần mềm)\s+(?:\S+\s+){0,3}(?:không hoạt động|bị treo|đang lỗi)|\b(?:is|may be|might be|seems to be)\s+(?:having (?:issues|problems)|broken|malfunctioning|not working)|\b(?:app|application|interface)\s+(?:error|issue|problem)s?\b|(?:出现|遇到)(?:了)?(?:问题|故障)|界面(?:出错|有问题)/iu;
+function blamesApp(text) { return BLAME_RE.test(String(text || '')); }
+module.exports = { BLAME_RE, blamesApp, PROMISE_RE, promiseEnding, honestStatus, createRetryTracker, outcome, key, alternatives, finalCheck, describe, DONE_RE };

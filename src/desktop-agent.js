@@ -318,6 +318,8 @@ function createDesktopAgent(deps) {
     return { ok: false, got, want };
   }
   async function fgWin() { if (deps.fakeScreen && !deps.fgWin) return null; try { if (deps.fgWin) return await deps.fgWin(); const w = (await U.windows()).find(x => x.active); return w ? { title: w.title, pid: w.pid, hwnd: w.hwnd } : null; } catch { return null; } }
+  // B94: xoá chữ trong ô đang chọn (Ctrl/Cmd+A rồi Delete) — chỉ dùng cho ô tìm kiếm / chữ vừa gõ nhầm, không bao giờ cho tài liệu
+  async function clearFocused() { try { const n = SC.libnut(); n.keyTap('a', require('./agent/keys').primaryOf(process.platform)); await sleep(120); n.keyTap('delete'); await sleep(150); } catch (e) { deps.log && deps.log('desk', 'Không xoá được chữ trong ô: ' + e.message); } }
   async function performAt(action, x, y, a) {
     // B69: chốt cuối, không dựa vào lời nhắc — thao tác có thể GỬI mà chưa qua chốt gửi trong act() thì không bao giờ được bấm
     if (a && !a.__sendOk && !a.__notSend) {
@@ -598,7 +600,7 @@ function createDesktopAgent(deps) {
     // mô hình nhỏ hay chép sai chữ hoa/dấu của đoạn người dùng đưa trong ngoặc kép: dùng đúng nguyên văn của người dùng
     if (action === 'type_text' && a.text && ctx && ctx.userQuery) a.text = U.restoreQuoted(String(a.text), ctx.userQuery);
     // mật khẩu: không bao giờ gõ
-    const focusedEl = s.obs && s.obs.elements.find(e => e.focused);
+    let focusedEl = s.obs && s.obs.elements.find(e => e.focused);
     const pwEl = action === 'type_text' ? (t && t.el ? t.el : focusedEl) : null;
     if (action === 'type_text' && ((pwEl && pwEl.password) || (t && t.query && U.PASSWORD_NAME.test(t.query)))) {
       return { refused: true, forModel: 'AIVN AGENT KHÔNG BAO GIỜ gõ mật khẩu/mã PIN/OTP. Dừng lại và nhờ người dùng tự gõ vào ô này, rồi tiếp tục khi họ báo xong.', summary: 'không gõ mật khẩu' };
@@ -617,6 +619,61 @@ function createDesktopAgent(deps) {
         if (s.gateBlocks >= 3) return { error: 'chưa mở đúng người nhận', stop: true, forModel: `ĐÃ BỊ CHẶN ${s.gateBlocks} lần vì màn hình vẫn chưa cho thấy cuộc trò chuyện với “${SV.recipientOf(ctx.userQuery)}”${hdrNow ? ` (đang thấy: “${String(hdrNow).slice(0, 60)}”)` : ''}. DỪNG, không thử lại nữa. Báo người dùng: chưa gửi được vì không xác nhận được đã mở đúng cuộc trò chuyện; nhờ họ mở cuộc trò chuyện đó rồi giao lại việc.`, summary: 'dừng: không xác nhận được người nhận' };
         const wrongEl = t && t.el && !/tìm|tim kiem|search|find/iu.test(`${t.el.name || ''} ${t.el.placeholder || ''}`) ? ` Phần tử [${t.el.id}] hiện là ${t.el.kind || 'phần tử'} “${String(t.el.name || '').slice(0, 40)}” — KHÔNG phải ô Tìm kiếm (id đổi sau mỗi lần quan sát). Cách đúng: screen_act click vào ô “Tìm kiếm” (lấy id MỚI bằng screen_look query "Tìm kiếm"), rồi type_text KHÔNG kèm element.` : '';
         return { error: 'chưa mở đúng người nhận', forModel: g + wrongEl, summary: wrongEl ? `[${t.el.id}] không phải ô Tìm kiếm — bấm ô Tìm kiếm rồi gõ` : 'chưa mở đúng người nhận — tìm người nhận trước' };
+      }
+    }
+    // B94 (máy thật beta.2.2: tin bị gõ vào ô TÌM KIẾM còn chữ “Cloud”): việc gửi/nhắn tin, gõ NỘI DUNG tin → chỉ gõ khi con trỏ ở Ô SOẠN TIN.
+    // Chưa chắc → AIVN tự bấm vào ô soạn (“Nhập @, tin nhắn tới …”), xoá chữ còn sót trong ô tìm kiếm nếu con trỏ đang ở đó; vẫn không ở ô soạn → từ chối gõ.
+    let bodyTyping = false;
+    if (action === 'type_text' && ctx && ctx.userQuery && !a.__clear) {
+      const rcpB = SV.recipientOf(ctx.userQuery) || s.chatOpen || null;
+      const msgTask = !!(SV.MSG_SEND.test(ctx.userQuery) && (rcpB || s.chatOpen)) && SV.isChatContext(ctx.userQuery, s.obs && s.obs.win ? s.obs.win.proc : '', s.obs && s.obs.win ? s.obs.win.title : ''); // chỉ ứng dụng chat (thư điện tử có ô Tiêu đề/thân thư riêng)
+      if (msgTask && !SV.nameLikeText(a.text, rcpB) && !(s.inSearch && Date.now() - s.inSearch < SEARCH_MS() && !s.chatOpen)) {
+        bodyTyping = true;
+        const win = s.obs && s.obs.win;
+        const uiaFocus = focusedEl && !focusedEl.ocr ? focusedEl : null;
+        const la = s.lastAction;
+        const tIsComp = !!(t && ((t.el && SV.isComposerEl(t.el, win)) || (!t.el && t.query && SV.isComposerEl({ name: t.query }, win))));
+        const focusOk = tIsComp || (uiaFocus ? SV.isComposerEl(uiaFocus, win) : !!(s.composerFocus && la && (la.action === 'type_text' || (['click', 'double_click'].includes(la.action) && SV.isComposerEl(la.el || { name: la.query }, win)))));
+        if (!focusOk) {
+          const comp = SV.findComposer(s.obs);
+          // không đọc được ô soạn (Messenger “Aa”, OCR bỏ sót) và KHÔNG có dấu hiệu con trỏ ở ô khác → cho gõ, kiểm chữ sau khi gõ (vào nhầm ô → báo + xoá)
+          const elsewhere = !!(uiaFocus && !SV.isComposerEl(uiaFocus, win)) || searchConfirmed(null, null, a) || !!SV.searchLeftover(s.obs) || !!SV.searchClose(s.obs);
+          if (!comp && !elsewhere) { deps.log && deps.log('desk', 'B94: không đọc được ô soạn tin nhưng không thấy dấu hiệu con trỏ ở ô khác — gõ rồi kiểm chữ có ở ô soạn không'); }
+          else if (!comp) {
+            deps.log && deps.log('desk', 'Chặn gõ tin (B94): không thấy ô soạn tin, con trỏ có thể đang ở ô khác');
+            return { refused: true, error: 'không thấy ô soạn tin', forModel: `KHÔNG gõ nội dung tin: chưa thấy Ô SOẠN TIN (ô “Nhập @, tin nhắn tới …” / “Type a message” ở đáy khung chat) và con trỏ có thể đang ở ô khác (ô tìm kiếm…). Gọi screen_look rồi bấm vào ô soạn tin (screen_act click element = id ô soạn) trước khi gõ.`, summary: 'chưa gõ — chưa thấy ô soạn tin' };
+          }
+          if (comp) {
+            // con trỏ đang ở ô tìm kiếm (đọc được, hoặc vừa tìm) → xoá chữ còn sót trước khi rời ô
+            const inSearchBox = (uiaFocus && /tìm|tim kiem|search|find|搜索/iu.test(`${uiaFocus.name || ''} ${uiaFocus.autoId || ''} ${uiaFocus.placeholder || ''}`)) || (!uiaFocus && searchConfirmed(null, null, a));
+            const left = SV.searchLeftover(s.obs);
+            deps.log && deps.log('desk', `B94: hàng ô tìm kiếm: “${String(SV.searchRowText(s.obs)).slice(0, 80)}” → ${left ? 'còn chữ “' + String(left.name || left.value || '').slice(0, 30) + '”' : 'không thấy chữ sót'}`);
+            const closeBtn = !left && !inSearchBox ? SV.searchClose(s.obs) : null;
+            if (closeBtn) { await refocus(); await performAt('click', closeBtn.x, closeBtn.y, { __el: null, __q: 'Đóng', __notSend: true }); await sleep(250); deps.log && deps.log('desk', 'B94: ô tìm kiếm đang mở (thấy nút “Đóng”) — bấm “Đóng” để xoá chữ còn sót trước khi chuyển sang ô soạn tin'); }
+            if (inSearchBox || left) {
+              await refocus();
+              if (left && !(uiaFocus && left === uiaFocus)) await performAt('click', left.b[0] + Math.min(left.b[2] / 2, 30), left.b[1] + left.b[3] / 2, { __el: left, __q: left.name, __notSend: true });
+              await clearFocused(); deps.log && deps.log('desk', `B94: xoá chữ còn sót trong ô tìm kiếm${left ? ` (“${String(left.name || left.value || '').slice(0, 30)}”)` : ''} trước khi chuyển sang ô soạn tin`);
+            }
+            await refocus();
+            await performAt('click', comp.b[0] + comp.b[2] / 2, comp.b[1] + comp.b[3] / 2, { __el: comp, __q: comp.name, __notSend: true });
+            deps.log && deps.log('desk', `B94: bấm vào ô soạn tin “${String(comp.placeholder || comp.name || '').slice(0, 50)}” trước khi gõ nội dung tin`);
+            await sleep(350);
+            await observe(ctx, { ocr: 'auto', thumb: false });
+            const f2 = s.obs && s.obs.elements.find(e => e.focused && !e.ocr);
+            if (f2 && !SV.isComposerEl(f2, s.obs.win)) {
+              s.composerFocus = false;
+              deps.log && deps.log('desk', `Chặn gõ tin (B94): đã bấm ô soạn tin nhưng con trỏ ở “${String(f2.name || f2.kind || '').slice(0, 40)}”`);
+              return { refused: true, error: 'con trỏ không ở ô soạn tin', forModel: `KHÔNG gõ nội dung tin: đã bấm ô soạn tin nhưng con trỏ vẫn ở [${f2.id}] ${f2.kind || ''} “${String(f2.name || '').slice(0, 40)}”, không phải ô soạn tin. Gọi screen_look rồi bấm đúng ô soạn tin.`, summary: 'chưa gõ — con trỏ không ở ô soạn tin' };
+            }
+            focusedEl = f2 || null;
+            const comp2 = SV.findComposer(s.obs) || comp;
+            t = { el: comp2, via: 'ô soạn tin (AIVN tự bấm)', query: comp2.placeholder || comp2.name, composerBox: Array.isArray(comp2.b) ? comp2.b.slice() : null };
+            s.lastAction = { action: 'click', el: comp2, at: Date.now(), doneAt: Date.now(), query: String(comp2.name || '') }; s.focusProxy = 'c:' + U.fold(String(comp2.name || comp2.placeholder || '')).slice(0, 40);
+          }
+        } else if (t && t.el && Array.isArray(t.el.b)) t = { ...t, composerBox: t.el.b.slice() };
+        s.composerFocus = true;
+        if (!(t && t.composerBox)) { const c0 = SV.findComposer(s.obs); if (c0 && Array.isArray(c0.b)) t = { ...(t || {}), composerBox: c0.b.slice() }; }
       }
     }
     // B24: gõ tên/từ khoá (+ Enter) vào ô tìm kiếm ĐÃ XÁC NHẬN là TÌM, không phải gửi — không coi là bước rủi ro, kể cả chế độ “chỉ soạn, đừng gửi”
@@ -665,15 +722,29 @@ function createDesktopAgent(deps) {
       const full = String(a.text).trim(); const m = /^(?:nhóm|nhom|group|群组|群組|群)\s*(.{2,})$/iu.exec(full);
       if (m && !(s.searches || []).some(x => x.text === m[1].trim())) { s.searchFull = full; a = { ...a, text: m[1].trim() }; deps.log && deps.log('desk', `Tìm “${a.text}” (bỏ chữ “${full.slice(0, full.length - m[1].length).trim()}” đứng đầu; không ra thì thử nguyên “${full}”)`); }
     }
+    // B96 (máy thật beta.2.2: bấm “marketing cleaned data.xlsx” ở danh sách File → Excel mở tệp): việc gửi/nhắn tin không bấm vào tệp / tệp đính kèm / ảnh xem trước.
+    // Việc có nhắc tới tệp → vẫn phải xin phép (kể cả “không cần hỏi lại”). Hộp thoại chọn tệp (Mở/Đính kèm) không tính: chọn tệp ở đó không mở tệp.
+    let forceAsk = null;
+    if (['click', 'double_click'].includes(action) && ctx && ctx.userQuery && !s.dialog) {
+      const nmF = String((t && t.el && t.el.name) || (t && t.query && !U.isIdRef(String(t.query)) ? t.query : '') || '').trim();
+      const msgTaskF = SV.MSG_SEND.test(ctx.userQuery) || !!SV.recipientOf(ctx.userQuery);
+      if (msgTaskF && nmF && (SV.isFileTarget(nmF, t && t.el) || SV.fileAt(t && t.el, s.obs))) {
+        if (!SV.wantsFiles(ctx.userQuery)) {
+          deps.log && deps.log('desk', `Chặn bấm tệp (B96): “${nmF.slice(0, 60)}” — việc gửi tin không mở tệp`);
+          return { refused: true, error: 'không mở tệp', forModel: `KHÔNG bấm “${nmF.slice(0, 60)}”: đây là tệp / tệp đính kèm, bấm vào sẽ MỞ tệp bằng ứng dụng khác — việc này chỉ là gửi tin, không cần mở tệp. Bấm vào Ô SOẠN TIN (“Nhập @, tin nhắn tới …”) ở đáy khung chat rồi gõ tin.`, summary: 'không mở tệp (không thuộc việc gửi tin)' };
+        }
+        forceAsk = `mở tệp “${nmF.slice(0, 60)}” — có thể mở bằng ứng dụng khác`;
+      }
+    }
     const desc = describeAct(action, a, t);
-    const risk = gate.send ? `${gate.why} — tin sẽ được GỬI đi, không hoàn tác được` : searchTyping ? null : riskOf(action, { el: t && t.el, query: t && t.query, text: action === 'type_text' && a.submit ? a.text + '\n' : a.text, keys: a.keys, lastAction: s.lastAction });
+    const risk = forceAsk || (gate.send ? `${gate.why} — tin sẽ được GỬI đi, không hoàn tác được` : searchTyping ? null : riskOf(action, { el: t && t.el, query: t && t.query, text: action === 'type_text' && a.submit ? a.text + '\n' : a.text, keys: a.keys, lastAction: s.lastAction }));
     const mode = S().agentScreenMode === 'important' ? 'important' : 'each';
     const box = t && t.x != null ? (t.el ? rectNorm(t.el.b) : t.box || (() => { const n = nativeToNorm(t.x, t.y); return { x1: n.nx - 0.012, y1: n.ny - 0.012, x2: n.nx + 0.012, y2: n.ny + 0.012 }; })()) : null;
     if (box) ov('target', { box, label: desc });
     // 0.16 “Tự làm không hỏi”: bước thường không hỏi; GỬI chỉ không hỏi khi nội dung đúng là tin người dùng đã nêu; xoá chỉ khi nêu đích danh
     const auto = ctx && ctx.auto;
     let autoGo = false;
-    if (auto && auto.on) {
+    if (auto && auto.on && !forceAsk) {
       if (!risk) autoGo = AU.skipAsk(auto, 'desk-step');
       else {
         const elName = String((t && t.el && t.el.name) || (t && t.query) || '');
@@ -753,6 +824,8 @@ function createDesktopAgent(deps) {
     if (['click', 'double_click'].includes(action) && rcp && !openPending && s.chatOpen) s.chatOpen = null; // bấm chỗ khác: có thể đã đổi cuộc trò chuyện
     if (!['type_text', 'wait', 'scroll'].includes(action)) { s.inSearch = 0; s.foundHit = null; }
     s.lastAction = { action, el: t && t.el, keys: a.keys, at: Date.now(), query: t && t.query ? t.query : String(a.element || a.target || '') };
+    if (['click', 'double_click'].includes(action)) s.focusProxy = 'c:' + U.fold(String((t && t.el && t.el.name) || (t && t.query) || '')).slice(0, 40); else if (action === 'hotkey') s.focusProxy = 'k:' + String(a.keys || '').toLowerCase(); // B95
+    if ((['click', 'double_click', 'right_click'].includes(action) && !SV.isComposerEl((t && t.el) || { name: t && t.query }, s.obs && s.obs.win)) || (action === 'hotkey' && !/^shift\+(enter|return)$/i.test(String(a.keys || '').replace(/\s/g, ''))) || action === 'focus_window') s.composerFocus = false; // B94
     if (opensSearch(action, a, t)) { s.searchMode = { at: 0, how: action === 'hotkey' ? a.keys : `bấm “${String((t && t.el && t.el.name) || (t && t.query) || '').slice(0, 30)}”` }; deps.log && deps.log('desk', `Chế độ tìm kiếm: bật (${s.searchMode.how}) — tính giờ từ lúc thao tác xong`); }
     else if (!['type_text', 'wait', 'scroll'].includes(action)) s.searchMode = null;
     if (action === 'type_text') { s.lastTyped = String(a.text || '').replace(/\n+$/, ''); s.curTyped = s.lastTyped; }
@@ -793,7 +866,30 @@ function createDesktopAgent(deps) {
     if (action === 'type_text') {
       const typed = U.fold(String(a.text).split('\n')[0]).slice(0, 40);
       const seen = o.obs.elements.some(e => (e.value && U.fold(e.value).includes(typed)) || (e.name && U.fold(e.name).includes(typed)) || (e.ocr && e.name && U.fuzzyHas(U.fold(e.name), typed.slice(0, 24)))); // B76: OCR đọc sai dấu (“Lich hop nhém”)
-      if (!a.submit) checks.push(seen ? 'Đã thấy chữ vừa gõ trên màn hình.' : 'CHƯA thấy chữ vừa gõ trong danh sách phần tử (có thể ô không hiện giá trị) — hãy kiểm tra trước khi làm tiếp.');
+      // B94: nội dung tin → phải nằm trong Ô SOẠN TIN; chữ mới xuất hiện ở ô khác (ô tìm kiếm…) = gõ NHẦM ô → báo + xoá
+      let landed = null;
+      if (bodyTyping && !a.submit) {
+        const W = o.obs.win && Array.isArray(o.obs.win.b) && o.obs.win.b[3] > 50 ? o.obs.win.b : null;
+        const cb = (t && t.composerBox) || (SV.findComposer(o.obs) || {}).b || null;
+        const hasTyped = (e) => (e.value && U.fold(e.value).includes(typed)) || (e.name && U.fold(e.name).includes(typed)) || (e.ocr && e.name && U.fuzzyHas(U.fold(e.name), typed.slice(0, 24)));
+        const preEls = (before && before.elements) || [];
+        const existed = (e) => preEls.some(p => p.b && e.b && hasTyped(p) && Math.abs(p.b[0] - e.b[0]) <= 16 && Math.abs(p.b[1] - e.b[1]) <= 16);
+        const inComp = (e) => (e.focused || e.editable) && SV.isComposerEl(e, o.obs.win) || (cb && e.b && Math.abs((e.b[1] + e.b[3] / 2) - (cb[1] + cb[3] / 2)) <= Math.max(24, cb[3]) && e.b[0] + e.b[2] > cb[0] - 10) || (W && e.b && (e.b[1] + e.b[3] / 2 - W[1]) / W[3] > 0.82 && !/tìm|tim kiem|search|find/iu.test(`${e.name || ''} ${e.placeholder || ''}`));
+        const hits = o.obs.elements.filter(e => hasTyped(e) && !existed(e));
+        const good = hits.filter(inComp); const bad = hits.filter(e => !inComp(e));
+        // ô tìm kiếm hẹp: OCR có thể không đọc được chữ vừa gõ nhưng hàng ô tìm kiếm ĐỔI trong khi ô soạn không có chữ mới → cũng là gõ nhầm ô
+        const rowB = U.fold(SV.searchRowText(before)), rowA = U.fold(SV.searchRowText(o.obs));
+        if (!good.length && !bad.length && rowA !== rowB) { const R0 = (o.obs.elements || []).filter(e => Array.isArray(e.b) && W && (e.b[1] + e.b[3] / 2 - W[1]) / W[3] < 0.16 && (e.b[0] - W[0]) / W[2] < 0.35); bad.push(R0.sort((x, y) => x.b[0] - y.b[0])[0] || { name: 'ô tìm kiếm', b: null }); }
+        if (good.length) landed = 'composer';
+        else if (bad.length) {
+          landed = 'wrong'; const w = bad[0]; const searchy = /tìm|tim kiem|search|find|搜索/iu.test(`${w.name || ''} ${w.placeholder || ''}`) || (W && w.b && (w.b[1] - W[1]) / W[3] < 0.2);
+          s.composerFocus = false;
+          deps.log && deps.log('desk', `B94: chữ vừa gõ vào NHẦM ô (“${String(w.name || '').slice(0, 40)}” @${w.b ? w.b.join(',') : '?'}), không phải ô soạn tin`);
+          if (searchy) { await clearFocused(); deps.log && deps.log('desk', 'B94: đã xoá chữ gõ nhầm trong ô đó'); }
+          checks.push(`Chữ vừa gõ đã vào NHẦM ô (“${String(w.name || '').slice(0, 40)}”${searchy ? ', có thể là ô tìm kiếm — AIVN đã xoá chữ gõ nhầm' : ''}), KHÔNG phải ô soạn tin. Tin CHƯA được soạn. Bấm vào ô soạn tin (“Nhập @, tin nhắn tới …”) rồi gõ lại.`);
+        }
+      }
+      if (!a.submit) checks.push(landed === 'composer' ? 'Đã thấy chữ vừa gõ trong Ô SOẠN TIN.' : landed === 'wrong' ? '' : seen ? 'Đã thấy chữ vừa gõ trên màn hình.' : 'CHƯA thấy chữ vừa gõ trong danh sách phần tử (có thể ô không hiện giá trị) — hãy kiểm tra trước khi làm tiếp.');
       else checks.push('Đã gõ (dán một lần) rồi bấm Enter.');
       // ô tìm kiếm: chờ kết quả tải, nhìn lại, rồi mới kết luận; gợi ý tìm không dấu / một phần tên
       const el = t && t.el ? t.el : focusedEl;
@@ -913,7 +1009,7 @@ function createDesktopAgent(deps) {
       deps.log && deps.log('desk', `Gửi chưa kiểm chứng → dừng, không gửi lại (B70): ${verify.why}`);
       return { stop: true, ask: msgV, error: 'đã gửi, chưa kiểm chứng', verify, forModel: msgV, summary: `${desc} · đã bấm gửi, CHƯA kiểm chứng — dừng, không gửi lại` };
     }
-    return { ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
+    return { ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.filter(Boolean).join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
   }
 
   async function look(a, ctx) {
@@ -980,7 +1076,15 @@ function createDesktopAgent(deps) {
   }
   // kết quả tìm kiếm đã hiện nhưng chưa bấm vào (mô hình nhỏ hay dừng lại hỏi thay vì mở)
   function searchFound() { const s = session; return s && s.inSearch && s.foundHit ? s.foundHit : null; }
-  return { likely: (q) => (session && session.obs ? U.likelyTarget(session.obs.elements, q) : null), diag: () => ({ calib: { ...calib }, displays: session && session.diag ? session.diag.displays : SC.displayInfo().text }), searchFound, searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, ensureApp, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
+  // B95: “ngữ cảnh” của một thao tác cho chống lặp — phần tử đang chọn (Trợ năng, hoặc chỗ vừa bấm / phím vừa bấm khi ứng dụng chỉ đọc được bằng OCR) + dấu của màn hình
+  function actKey() {
+    const s = session; if (!s || !s.obs) return '';
+    const f = (s.obs.elements || []).find(e => e.focused && !e.ocr);
+    const focus = f ? `f:${U.fold(String(f.kind || ''))}:${U.fold(String(f.name || f.placeholder || '')).slice(0, 40)}` : (s.focusProxy || '-');
+    const names = (s.obs.elements || []).map(e => U.fold(String(e.name || ''))).filter(Boolean).sort().join('|');
+    return focus + '#' + require('crypto').createHash('sha1').update(`${s.obs.win ? s.obs.win.title : ''}#${names}`).digest('hex').slice(0, 10);
+  }
+  return { actKey, likely: (q) => (session && session.obs ? U.likelyTarget(session.obs.elements, q) : null), diag: () => ({ calib: { ...calib }, displays: session && session.diag ? session.diag.displays : SC.displayInfo().text }), searchFound, searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, ensureApp, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
 }
 
 module.exports = { createDesktopAgent };

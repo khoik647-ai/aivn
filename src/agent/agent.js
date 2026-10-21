@@ -991,7 +991,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         const args = call.arguments && typeof call.arguments === 'object' ? Object.fromEntries(Object.entries(call.arguments).filter(([, v]) => v !== null)) : {};
         const step = { id: call.id, name: call.name, label: def ? def.label : call.name, icon: def ? def.icon : '🔧', args, status: 'running', startedAt: Date.now(), round, pre: r.text || '' };
         steps.push(step); onStep({ ...step });
-        let out;
+        let out; let rctx = ''; // B95: ngữ cảnh trước thao tác
         const sig = call.name + ':' + JSON.stringify(args);
         try {
           if (!names.includes(call.name)) throw new ToolError(`Công cụ "${call.name}" không có hoặc chưa được bật.`);
@@ -1015,7 +1015,8 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
                 step.status = 'running'; onStep({ ...step }); onStatus({ stage: 'act', round, tool: call.name });
               }
             }
-            let pre = !refusedOut && call.name === 'screen_act' ? retry.before(args) : null;
+            rctx = call.name === 'screen_act' && deps.computer && deps.computer.actContext ? deps.computer.actContext() : ''; // B95
+            let pre = !refusedOut && call.name === 'screen_act' ? retry.before(args, rctx) : null;
             // B40: quan sát lại màn hình không đổi lần thứ 3 trở đi → không quan sát nữa, bắt làm bước tiếp theo (gợi ý đích của việc)
             if (!refusedOut && call.name === 'screen_look' && look.same >= 2 && !args.window) { look.blocked++; pre = { forModel: `(Kiểm tra tự động của AIVN) KHÔNG quan sát lại: màn hình đã được quan sát ${look.same} lần liền và KHÔNG đổi. Danh sách phần tử ở lần quan sát trước vẫn đúng. Làm bước tiếp theo NGAY bằng screen_act${look.hint}. Nếu không làm được thì dừng và nói rõ đã làm tới đâu.`, summary: 'không quan sát lại (màn hình không đổi)' }; }
             if (refusedOut) out = refusedOut;
@@ -1031,7 +1032,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
             }
             if (call.name === 'screen_act' || (call.name === 'screen_look' && args.window)) { if (call.name === 'screen_act') { look.same = 0; look.sig = ''; } }
             // 0.16: kiểm tra sau mỗi thao tác màn hình; chưa có tác dụng → gợi ý đổi cách (lần 3 cùng cách thì không làm)
-            if (call.name === 'screen_act' && !pre && !refusedOut) { const rr = retry.after(args, out); if (rr.bad) { out = { ...out, forModel: String(out.forModel || out.summary || '') + rr.hint, summary: String(out.summary || '') + ' · chưa có tác dụng' }; step.check = rr.bad; } }
+            if (call.name === 'screen_act' && !pre && !refusedOut) { const rr = retry.after(args, out, rctx); if (rr.bad) { out = { ...out, forModel: String(out.forModel || out.summary || '') + rr.hint, summary: String(out.summary || '') + ' · chưa có tác dụng' }; step.check = rr.bad; } }
           }
         } catch (e) {
           const userErr = e instanceof ToolError || (deps.computer && e instanceof deps.computer.CompError);
@@ -1039,7 +1040,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
           out = { error: msg, forModel: `Lỗi: ${msg}`, summary: String(msg).split(/\s(?=Bước tiếp:|Gần giống:)/)[0] }; /* B33b: thẻ bước chỉ hiện câu đầu; hướng dẫn cho mô hình vẫn ở chi tiết */
           if (!userErr) deps.log && deps.log(`[aivn agent] ${call.name} lỗi: ${msg}`);
           // QA lượt 8 (B66): lỗi ném ra (vd. phím hỏng) cũng tính vào chống lặp — lần 3 cùng cách bị chặn, nhiều lỗi liền → dừng sớm
-          if (call.name === 'screen_act') { try { const rr = retry.after(args, out); if (rr.bad) { out = { ...out, forModel: String(out.forModel || '') + rr.hint }; step.check = rr.bad; } } catch {} }
+          if (call.name === 'screen_act') { try { const rr = retry.after(args, out, rctx); if (rr.bad) { out = { ...out, forModel: String(out.forModel || '') + rr.hint }; step.check = rr.bad; } } catch {} }
         }
         Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', check: step.check || null, summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, ms: Date.now() - step.startedAt });
         logTool(step);
@@ -1063,6 +1064,8 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       const why = String(e.summary || '').replace(/^\(lặp lại\)\s*/, '').split(/\s*(?:Bước tiếp|Gợi ý cho mô hình|Không mở trang web)/)[0].trim().replace(/[.\s]+$/, '');
       text = `Mình chưa làm được việc này: ${why}.` + (e.name === 'open_app' ? ' Bạn kiểm tra lại tên ứng dụng giúp mình (hoặc bấm "Kiểm tra quét ứng dụng" trong Cài đặt → Nâng cao để xem AIVN thấy những ứng dụng nào).' : '');
     }
+    // B95: các bước của AIVN chưa có tác dụng mà câu cuối lại đổ cho ứng dụng (“Zalo có thể đang gặp sự cố”) → nói trung thực những gì đã thử
+    if (!hardStop && finishReason !== 'abort' && !honestUsed && retry.failures().length && RT.blamesApp(text)) { deps.log && deps.log('[aivn agent] câu cuối đổ lỗi cho ứng dụng trong khi bước của AIVN chưa có tác dụng → báo trung thực (B95)'); text = honestOf('các bước gõ/bấm của AIVN AGENT chưa có tác dụng — không phải lỗi của ứng dụng'); warning = null; }
     if (!String(text || '').trim() && finishReason !== 'abort' && steps.some(x => x.status === 'ok')) {
       // hết vòng/giới hạn mà mô hình chưa kịp báo cáo: tự tóm tắt những gì công cụ đã làm thật
       const okSteps = steps.filter(x => x.status === 'ok');

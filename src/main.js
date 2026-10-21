@@ -2329,6 +2329,50 @@ q.addEventListener('input',e=>list(q.value));list('');open(${B90 ? "'My Document
       await step5('b85-send', { action: 'type_text', text: 'AIVN test - thử beta.3', submit: true });
       out.final = await st(); throw null;
     }
+    if (process.env.AIVN_QA_B21_MODE === 'b94') { // B94/B95/B96 (máy thật beta.2.2, self-send bước 3–9): Zalo giả, “My Documents” mở sẵn, ô TÌM KIẾM đang chọn còn chữ “Cloud”, danh sách File bên phải
+      const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:300px 1fr 260px;height:100vh}
+#l{border-right:1px solid #ccc;padding:8px}#sr{display:flex;gap:6px}#q{width:200px;font-size:20px;padding:5px}#cl{font-size:20px}.it{padding:8px 4px;cursor:pointer}
+#c{display:flex;flex-direction:column;border-right:1px solid #ccc}#h{font-weight:bold;padding:12px 16px;border-bottom:1px solid #ccc}#m{flex:1;padding:16px}#comp{font-size:20px;margin:10px;padding:8px}#comp::placeholder{color:#222}
+#r{padding:10px}#r b{display:block;margin-bottom:30px;text-align:center}.f{padding:10px 4px;cursor:pointer;font-size:19px}</style>
+<div id=l><div id=sr><input id=q placeholder="Tìm kiếm"><button id=cl hidden>Đóng</button></div><div id=list></div></div><div id=c><div id=h></div><div id=m></div><input id=comp></div>
+<div id=r><b>Thông tin hội thoại</b><div id=rn></div><div style="margin-top:40px;font-weight:bold">File</div><div class=f>marketing cleaned data.xlsx</div><div class=f>bao cao tuan.pdf</div></div>
+<script>const chats=[{n:'Nhóm Lớp K27'},{n:'My Documents',old:'Cloud của tôi'},{n:'Trần Văn Bình'}];window.S={cur:'',sent:[],opened:[]};window.TRAP=false;
+const fold=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').toLowerCase();
+function list(f){const el=document.getElementById('list');el.innerHTML='';for(const c of chats.filter(c=>!f||fold(c.n+' '+(c.old||'')).includes(fold(f)))){const d=document.createElement('div');d.className='it';d.textContent=c.n;d.onclick=()=>open(c.n);el.appendChild(d);}}
+function open(n){S.cur=n;h.textContent=n;rn.textContent=n;comp.placeholder='Nhập @, tin nhắn tới '+n;m.innerHTML='';q.value='';cl.hidden=true;list('');comp.focus();}
+function leftover(){q.value='Cloud';cl.hidden=false;comp.value='';q.focus();}
+comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sent.push({to:S.cur,text:comp.value});const b=document.createElement('div');b.textContent=comp.value;m.appendChild(b);comp.value='';}});
+comp.addEventListener('focus',()=>{if(TRAP)setTimeout(()=>q.focus(),0);});
+q.addEventListener('input',()=>{cl.hidden=!q.value;});cl.onclick=()=>{q.value='';cl.hidden=true;};
+for(const f of document.querySelectorAll('.f'))f.onclick=()=>S.opened.push(f.textContent);
+list('');open('My Documents');leftover();</script>`;
+      await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(zh)); t.setTitle('Zalo'); t.focus(); t.webContents.focus(); await sleep(700);
+      const st4 = () => t.webContents.executeJavaScript("({ ...JSON.parse(JSON.stringify(S)), comp: comp.value, q: q.value, focus: document.activeElement ? document.activeElement.id : '' })");
+      const MSG = 'AIVN test beta.2.3 - bỏ qua'; const q9 = `gửi tin "${MSG}" cho Cloud của tôi trên Zalo`;
+      const c9 = { ...ctx, userQuery: q9, auto: require('./agent/autonomy').forTurn({ setting: false, query: q9 + ' Không cần hỏi lại.' }) };
+      const step9 = async (name, a, c = c9) => { qaAsks.length = 0; let r; try { r = await d.act(a, c); } catch (e) { r = { error: String(e.message || e) }; } await sleep(600);
+        out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 3000), asks: qaAsks.slice(), state: await st4() }); save(); return r; };
+      out.start = await st4();
+      await d.look({ window: 'Zalo' }, c9);
+      // bước 3 (máy thật): type_text không bấm ô soạn trước → nay AIVN tự xoá “Cloud” ở ô tìm kiếm, bấm ô soạn rồi mới gõ
+      await step9('b94-type-body', { action: 'type_text', text: MSG });
+      // bước 6: bấm tệp “marketing cleaned data.xlsx” ở danh sách File → chặn, không mở tệp
+      await d.look({ window: 'Zalo' }, c9);
+      await step9('b96-click-file', { action: 'click', element: 'marketing cleaned data.xlsx' });
+      // bước 8–9: con trỏ lại ở ô tìm kiếm còn chữ; bấm ô soạn rồi gõ → chữ vào ô soạn
+      await t.webContents.executeJavaScript('leftover()'); await sleep(300); await d.look({ window: 'Zalo' }, c9);
+      await step9('b94-click-composer', { action: 'click', element: 'Nhập @, tin nhắn tới My Documents' });
+      await step9('b94-type-after-click', { action: 'type_text', text: MSG });
+      // ô soạn “bẫy”: bấm vào thì con trỏ nhảy về ô tìm kiếm → chữ vào NHẦM ô: phải phát hiện, xoá, báo
+      await t.webContents.executeJavaScript("TRAP=true;leftover()"); await sleep(300); await d.look({ window: 'Zalo' }, c9);
+      await step9('b94-wrong-field', { action: 'type_text', text: 'AIVN lần hai - bỏ qua' });
+      await t.webContents.executeJavaScript("TRAP=false;comp.value='';q.value='';cl.hidden=true;"); await sleep(300);
+      // việc CÓ nhắc tới tệp: bấm tệp vẫn phải hỏi (kể cả “không cần hỏi lại”)
+      const qf = 'mở file marketing cleaned data.xlsx trong cuộc trò chuyện Cloud của tôi trên Zalo rồi gửi tin "đã xem" cho Cloud của tôi. Không cần hỏi lại.';
+      await d.look({ window: 'Zalo' }, c9);
+      await step9('b96-file-task', { action: 'click', element: 'marketing cleaned data.xlsx' }, { ...ctx, userQuery: qf, auto: require('./agent/autonomy').forTurn({ setting: false, query: qf }) });
+      out.final = await st4(); throw null;
+    }
     if (process.env.AIVN_QA_B21_MODE === 'ensure') { // ensure_app: Zalo giả bị cửa sổ khác che → đưa lên + chờ sẵn sàng; open_chat dùng lại; cửa sổ ẩn → lỗi rõ, không treo
       const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:240px 1fr;height:100vh}#l{border-right:1px solid #ccc;padding:8px}#q{width:200px;font-size:20px;padding:5px}.it{padding:10px 4px;cursor:pointer}#c{display:flex;flex-direction:column}#h{font-weight:bold;padding:12px 16px;border-bottom:1px solid #ccc}#m{flex:1;padding:16px}#comp{font-size:20px;margin:10px;padding:8px}</style>
 <div id=l><input id=q placeholder="Tìm kiếm"><div id=list></div></div><div id=c><div id=h></div><div id=m></div><input id=comp placeholder="Nhập tin nhắn"></div>
