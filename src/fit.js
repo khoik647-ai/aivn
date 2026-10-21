@@ -78,6 +78,8 @@ const EFF_GPU = 0.75, EFF_CPU = 0.7, TOK_OVH_GPU = 0.0025, TOK_OVH_CPU = 0.001;
 function machineFit(m, hw, o = {}) {
   if (!hw || !hw.ram) return null;
   const ctx = o.ctx || 8192;
+  // B78: tệp quá nhỏ (GGUF giả/hỏng 2 KB từng được ước “Chạy mượt ~1000 token/giây”) — mô hình thật nhỏ nhất cũng ~100 MB
+  if ((m.size || 0) < 16 * MiB) return { group: 'no', label: LABEL.no, level: 'big', hint: 'Tệp quá nhỏ, không phải mô hình dùng được (có thể tải lỗi hoặc tệp hỏng)', ctx, need: m.size || 0, vram: 0, ram: 0, tps: 0, measured: false, invalid: true };
   const weights = (m.size || 0) + (m.mmprojSize || 0);
   const kv = kvPerToken(m) * ctx;
   let need = weights + kv + computeBuf(ctx) + (m.mmprojSize ? VISION_BUF : 0) + RUNTIME;
@@ -114,6 +116,8 @@ function machineFit(m, hw, o = {}) {
     need: Math.round(need), vram: Math.round(vramUse), ram: Math.round(ramUse), tps: tps ? Math.max(0.5, Math.round(tps * 10) / 10) : 0, measured: !!meas,
     parts: { weights: Math.round(m.size || 0), mmproj: Math.round(m.mmprojSize || 0), kv: Math.round(kv), compute: Math.round(computeBuf(ctx) + (m.mmprojSize ? VISION_BUF : 0) + RUNTIME) } };
   if (m.measuredTps > 0 && group !== 'no') { r.tps = Math.round(m.measuredTps * 10) / 10; r.tpsMeasured = true; }
+  // B78: số đo thật quá chậm (“Đo được 0,1 token/giây”) mà nhãn vẫn “Chạy mượt” → theo số đo: Chạy chậm
+  if (r.tpsMeasured && r.tps < 5 && r.group === 'smooth') Object.assign(r, { group: 'slow', label: LABEL.slow, level: 'slow', hint: `Đo được chỉ ~${String(r.tps).replace('.', ',')} token/giây trên máy này` });
   r.text = fmtFit(r); r.detail = fitDetail(r); return r;
 }
 const ORDER = { smooth: 0, slow: 1, no: 2 };
@@ -128,7 +132,7 @@ function groupByFit(list, fitOf) {
 }
 // “Khoảng 55 token/giây · 7,4 GB VRAM” / “~3 token/giây · 12 GB VRAM + 9,8 GB RAM”
 function fmtFit(f) {
-  if (!f) return '';
+  if (!f || f.invalid) return ''; // B78: tệp hỏng — không ghi số ước tính vô nghĩa (chú thích nằm ở hint)
   const gb = (b) => (b / 1024 ** 3).toFixed(1).replace('.', ',') + ' GB'; // GiB, khớp cách Windows/NVIDIA ghi dung lượng
   const mem = f.group === 'no' ? `cần ~${gb(f.need)}` : [f.vram ? gb(f.vram) + ' VRAM' : '', f.ram ? gb(f.ram) + ' RAM' : ''].filter(Boolean).join(' + ');
   const sp = f.tps ? `~${f.tps >= 10 ? Math.round(f.tps) : String(f.tps).replace('.', ',')} token/giây` : '';
