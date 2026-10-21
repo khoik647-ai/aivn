@@ -32,8 +32,30 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS quote_lines (id TEXT PRIMARY KEY, quote_id TEXT NOT NULL, product_id TEXT, name TEXT, unit TEXT, qty REAL DEFAULT 1, price INTEGER DEFAULT 0, discount_pct REAL DEFAULT 0, pos INTEGER DEFAULT 0)`,
   `CREATE INDEX IF NOT EXISTS ix_qlines ON quote_lines(quote_id)`,
   `CREATE TABLE IF NOT EXISTS views (id TEXT PRIMARY KEY, entity TEXT, name TEXT, spec TEXT, created_at INTEGER)`,
+  // 0.16 bộ Kinh doanh (theo Odoo): kho (phiếu nhập/xuất/điều chỉnh + dịch chuyển kho), hoá đơn khách hàng, thanh toán
+  `CREATE TABLE IF NOT EXISTS pickings (id TEXT PRIMARY KEY, number TEXT, kind TEXT NOT NULL, partner_id TEXT, so_id TEXT, origin TEXT, backorder_of TEXT, state TEXT NOT NULL DEFAULT 'draft',
+    scheduled TEXT, done_at INTEGER, notes TEXT, created_at INTEGER, updated_at INTEGER)`,
+  `CREATE INDEX IF NOT EXISTS ix_pick_so ON pickings(so_id)`,
+  `CREATE TABLE IF NOT EXISTS moves (id TEXT PRIMARY KEY, picking_id TEXT, product_id TEXT NOT NULL, so_line_id TEXT, kind TEXT NOT NULL, qty REAL NOT NULL DEFAULT 0, qty_done REAL DEFAULT 0,
+    unit_cost INTEGER DEFAULT 0, state TEXT NOT NULL DEFAULT 'draft', done_at INTEGER, created_at INTEGER)`,
+  `CREATE INDEX IF NOT EXISTS ix_moves_prod ON moves(product_id, state)`,
+  `CREATE INDEX IF NOT EXISTS ix_moves_pick ON moves(picking_id)`,
+  `CREATE TABLE IF NOT EXISTS invoices (id TEXT PRIMARY KEY, number TEXT, kind TEXT NOT NULL DEFAULT 'out_invoice', partner_id TEXT, so_id TEXT, reversed_id TEXT, state TEXT NOT NULL DEFAULT 'draft',
+    invoice_date TEXT, due_date TEXT, vat_pct REAL DEFAULT 10, amount_untaxed INTEGER DEFAULT 0, amount_tax INTEGER DEFAULT 0, amount_total INTEGER DEFAULT 0, amount_paid INTEGER DEFAULT 0,
+    notes TEXT, posted_at INTEGER, created_at INTEGER, updated_at INTEGER)`,
+  `CREATE INDEX IF NOT EXISTS ix_inv_so ON invoices(so_id)`,
+  `CREATE INDEX IF NOT EXISTS ix_inv_partner ON invoices(partner_id)`,
+  `CREATE TABLE IF NOT EXISTS invoice_lines (id TEXT PRIMARY KEY, invoice_id TEXT NOT NULL, so_line_id TEXT, product_id TEXT, name TEXT, unit TEXT, qty REAL DEFAULT 1, price INTEGER DEFAULT 0, discount_pct REAL DEFAULT 0, pos INTEGER DEFAULT 0)`,
+  `CREATE INDEX IF NOT EXISTS ix_invl ON invoice_lines(invoice_id)`,
+  `CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY, number TEXT, invoice_id TEXT, partner_id TEXT, amount INTEGER NOT NULL, date TEXT, method TEXT DEFAULT 'bank', memo TEXT, created_at INTEGER)`,
+  `CREATE INDEX IF NOT EXISTS ix_pay_inv ON payments(invoice_id)`,
 ];
-const VERSION = 1;
+// cột thêm cho bảng cũ (CSDL tạo từ 0.15.x): thêm nếu chưa có, giữ nguyên dữ liệu
+const ADD_COLUMNS = {
+  products: [['type', "TEXT DEFAULT 'product'"], ['cost', 'INTEGER DEFAULT 0'], ['barcode', 'TEXT'], ['min_qty', 'REAL DEFAULT 0'], ['category', 'TEXT']],
+  quotes: [['confirmed_at', 'INTEGER'], ['owner', 'TEXT'], ['payment_days', 'INTEGER DEFAULT 0'], ['commitment_date', 'TEXT']],
+};
+const VERSION = 2;
 
 async function openDb(file) {
   const S = await sqlJs();
@@ -48,7 +70,15 @@ async function openDb(file) {
   } else db = new S.Database();
   db.exec('PRAGMA foreign_keys = OFF;');
   for (const q of SCHEMA) db.exec(q);
-  db.run('INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)', ['schema', String(VERSION)]);
+  for (const [t, cols] of Object.entries(ADD_COLUMNS)) {
+    const have = new Set((db.exec(`PRAGMA table_info(${t})`)[0] || { values: [] }).values.map(r => r[1]));
+    for (const [c, def] of cols) if (!have.has(c)) db.exec(`ALTER TABLE ${t} ADD COLUMN ${c} ${def}`);
+  }
+  // 0.16: trạng thái báo giá theo Odoo (draft/sent/sale/cancel); bản cũ “accepted/rejected” đổi sang “sale/cancel”
+  db.exec("UPDATE quotes SET status = 'sale', confirmed_at = COALESCE(confirmed_at, updated_at) WHERE status = 'accepted'");
+  db.exec("UPDATE quotes SET status = 'cancel' WHERE status = 'rejected'");
+  const was = (db.exec("SELECT value FROM meta WHERE key = 'schema'")[0] || { values: [[null]] }).values[0][0];
+  db.run('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)', ['schema', String(Math.max(VERSION, Number(was) || 0))]);
   let timer = null, dirty = false;
   const flushSync = () => {
     clearTimeout(timer); timer = null; if (!dirty) return; dirty = false;

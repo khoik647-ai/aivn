@@ -1113,16 +1113,23 @@ function registerIpc() {
   ipcMain.handle('bench:scores', () => benchScores());
   // ---- Kinh doanh → Khách hàng (CRM, lưu cục bộ SQLite) ----
   let crmP = null;
-  const getCrm = () => crmP || (crmP = (async () => { const { openDb } = require('./crm/db'); const { createCrm } = require('./crm/crm'); const db = await openDb(path.join(app.getPath('userData'), 'crm.db')); return createCrm({ db, defaultOwner: () => settings.data.crmOwner || require('os').userInfo().username, log: (m) => LOG.log('crm', m) }); })());
-  const CRM_OK = new Set(['saveContact', 'listContacts', 'getContact', 'deleteContact', 'facets', 'saveLead', 'moveLead', 'listLeads', 'deleteLead', 'saveActivity', 'completeActivity', 'deleteActivity', 'listActivities', 'addNote', 'listQuotes', 'dashboard', 'findDuplicates', 'find']);
+  const getCrm = () => crmP || (crmP = (async () => { const { openDb } = require('./crm/db'); const { createCrm } = require('./crm/crm'); const db = await openDb(path.join(app.getPath('userData'), 'crm.db')); const crm = createCrm({ db, defaultOwner: () => settings.data.crmOwner || require('os').userInfo().username, log: (m) => LOG.log('crm', m) }); crm.biz = require('./crm/biz').createBiz({ db, crm, log: (m) => LOG.log('crm', m) }); return crm; })());
+  const CRM_OK = new Set(['saveContact', 'listContacts', 'getContact', 'deleteContact', 'facets', 'saveLead', 'moveLead', 'listLeads', 'deleteLead', 'saveActivity', 'completeActivity', 'deleteActivity', 'listActivities', 'addNote', 'listQuotes', 'dashboard', 'findDuplicates', 'find', 'saveProduct', 'listProducts', 'deleteProduct', 'saveQuote', 'getQuote', 'deleteQuote']);
+  const BIZ_OK = new Set(require('./crm/biz').BIZ_CALLS); // 0.16 Bán hàng / Kho / Hoá đơn / Báo cáo
   ipcMain.handle('crm:call', async (_e, { fn, args }) => {
-    if (!CRM_OK.has(fn)) return { ok: false, error: 'Không hỗ trợ.' };
-    try { const c = await getCrm(); return { ok: true, data: await c[fn](...(Array.isArray(args) ? args : [])) }; }
-    catch (e) { if (!e.userMessage) LOG.log('crm', `Lỗi ${fn}: ${e.message}`); return { ok: false, error: e.userMessage || e.message }; }
+    if (!CRM_OK.has(fn) && !BIZ_OK.has(fn)) return { ok: false, error: 'Không hỗ trợ.' };
+    try { const c = await getCrm(); const tgt = CRM_OK.has(fn) ? c : c.biz; return { ok: true, data: await tgt[fn](...(Array.isArray(args) ? args : [])) }; }
+    catch (e) { if (!e.userMessage) LOG.log('crm', `Lỗi ${fn}: ${e.message}`); return { ok: false, error: e.userMessage || e.message, code: e.code || null }; }
   });
   ipcMain.handle('crm:export', async () => {
     try { const c = await getCrm(); const r = await dialog.showSaveDialog(win, { buttonLabel: 'Lưu', title: 'Xuất danh sách khách hàng', defaultPath: 'khach-hang.csv', filters: [{ name: 'CSV', extensions: ['csv'] }] }); if (r.canceled || !r.filePath) return { ok: false, canceled: true };
       const rows = c.exportContacts(); const S = require('./crm/sheet'); fs.writeFileSync(r.filePath, S.toCsv(Array.isArray(rows) ? rows : rows.rows)); return { ok: true, file: r.filePath }; } catch (e) { return { ok: false, error: e.message }; }
+  });
+  // 0.16 Báo cáo Kinh doanh: lưu bảng đang xem ra CSV (Excel mở được, UTF-8 có BOM)
+  ipcMain.handle('crm:saveCsv', async (_e, { name, rows } = {}) => {
+    try { if (!Array.isArray(rows) || !rows.length || rows.length > 100000) return { ok: false, error: 'Không có dữ liệu để xuất.' };
+      const r = await dialog.showSaveDialog(win, { buttonLabel: 'Lưu', title: 'Xuất báo cáo', defaultPath: String(name || 'bao-cao').replace(/[\\/:*?"<>|]+/g, '-').slice(0, 80) + '.csv', filters: [{ name: 'CSV', extensions: ['csv'] }] }); if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+      fs.writeFileSync(r.filePath, require('./crm/sheet').toCsv(rows.map(x => (Array.isArray(x) ? x : []).slice(0, 200).map(v => v == null ? '' : typeof v === 'number' ? v : String(v).slice(0, 5000))))); return { ok: true, file: r.filePath }; } catch (e) { return { ok: false, error: e.message }; }
   });
   ipcMain.handle('crm:import', async () => {
     try { const c = await getCrm(); const r = await dialog.showOpenDialog(win, { buttonLabel: 'Mở', title: 'Nhập khách hàng từ CSV/Excel', properties: ['openFile'], filters: [{ name: 'CSV / Excel', extensions: ['csv', 'xlsx'] }] }); if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true };
@@ -1650,6 +1657,73 @@ async function qaPar() {
     } catch (e) { out[st.n] = 'LỖI: ' + e.message; }
   }
   out._consoleErrors = errs; fs.writeFileSync(path.join(dir, 'qapar.json'), JSON.stringify(out, null, 2)); app.exit(0);
+}
+// QA 0.16 Kinh doanh (AIVN_QA_BIZ=thư mục, chỉ khi phát triển): đi trọn luồng Odoo bằng giao diện — nhập kho → báo giá → xác nhận → giao một phần
+// (phiếu chờ) → hoá đơn → vào sổ → thu tiền → báo cáo; chụp từng màn hình, ghi trạng thái; AIVN_QA_BIZ_LANG=en|zh thì liệt kê chữ tiếng Việt còn sót
+async function qaBiz() {
+  const dir = process.env.AIVN_QA_BIZ; fs.mkdirSync(dir, { recursive: true });
+  const wc = win.webContents; const js = (c) => wc.executeJavaScript(c);
+  const errs = []; wc.on('console-message', (ev) => { const m = ev && ev.message; if (m && /error|lỗi|uncaught/i.test(m)) errs.push(String(m).slice(0, 300)); });
+  const until = async (c, ms = 60000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await js(c)) return true; } catch {} await sleep(150); } return false; };
+  const out = { steps: {}, errs }; win.setBounds({ x: 0, y: 0, width: 1366, height: 860 });
+  await until('typeof show === "function" && !!state.settings && !!window.BIZ', 60000);
+  await js(`localStorage.setItem('aivn.onboarded', '1'); document.querySelector('#onboard') && (document.querySelector('#onboard').hidden = true)`);
+  const lang = process.env.AIVN_QA_BIZ_LANG || 'vi';
+  if (lang !== 'vi') { await js(`I18N.setLang(${JSON.stringify(lang)})`); await sleep(300); }
+  const shot = async (n) => { await sleep(700); fs.writeFileSync(path.join(dir, `${lang}-${n}.png`), (await wc.capturePage()).toPNG()); };
+  const look = () => js(`({ crumbs: (document.querySelector('.biz-crumbs') || {}).innerText || '', status: (document.querySelector('.biz-status .on') || {}).innerText || '', toasts: [...document.querySelectorAll('.toast-stack .toast-item')].map(t => t.innerText.trim()), err: (document.querySelector('#bizErr') || {}).textContent || '' })`);
+  const left = () => js(`(() => { const VI = ${I18N_CORE.VI}; const hits = new Set(); const w = document.createTreeWalker(document.querySelector('#view-crm'), NodeFilter.SHOW_TEXT); for (let n = w.nextNode(); n; n = w.nextNode()) { const t = n.nodeValue.trim(); if (t && VI.test(t) && n.parentElement.offsetParent && !n.parentElement.closest('.biz-lines td:nth-child(-n+2), select, .biz-title')) hits.add(t.slice(0, 80)); } document.querySelectorAll('#view-crm button, #view-crm th, #view-crm label').forEach(e => { if (e.offsetParent && VI.test(e.getAttribute('aria-label') || '')) hits.add('@aria ' + e.getAttribute('aria-label')); }); return [...hits]; })()`);
+  const step = async (n, code, wait = 600) => { try { if (code) await js(code); await sleep(wait); await shot(n); out.steps[n] = await look(); if (lang !== 'vi') out.steps[n].leftover = await left(); } catch (e) { out.steps[n] = { error: e.message }; } };
+  const click = (sel) => `(() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b) throw new Error('không thấy ' + ${JSON.stringify(sel)}); b.click(); })()`;
+  const yes = `document.querySelector('#cfYes').click()`;
+  try {
+    await js(`(async () => { const C = async (fn, ...a) => { const r = await A.crm(fn, ...a); if (!r.ok) throw new Error(fn + ': ' + r.error); return r.data; };
+      await C('saveContact', { name: 'Công ty TNHH Sen Vàng', kind: 'company', phone: '02838123456', email: 'lienhe@senvang.vn', address: '12 Nguyễn Huệ, Q.1, TP.HCM', tax_id: '0312345678' });
+      await C('saveProduct', { name: 'Bàn làm việc gỗ sồi', sku: 'BAN-01', price: 2500000, cost: 1500000, type: 'product', unit: 'cái', min_qty: 2, category: 'Nội thất' });
+      await C('saveProduct', { name: 'Ghế xoay lưới', sku: 'GHE-01', price: 900000, cost: 500000, type: 'product', unit: 'cái', category: 'Nội thất' });
+      await C('saveProduct', { name: 'Lắp đặt tại nhà', price: 300000, type: 'service', unit: 'lần' }); })()`);
+    await step('00-tong-quan', 'show("crm"); crm.tab = "dash"; renderCrm()', 1200);
+    await step('01-san-pham', 'crm.tab = "sales"; BIZ.reset(); BIZ.state.sub.sales = "products"; renderCrm()');
+    await step('02-san-pham-form', click('[data-biz-open^="product:"]'));
+    await js(`document.querySelector('#bizModal').hidden = true`);
+    // nhập kho: 3 bàn, 1 ghế
+    await step('03-phieu-nhap-moi', 'crm.tab = "stock"; BIZ.reset(); BIZ.state.sub.stock = "in"; renderCrm().then(() => document.querySelector("#crmAdd").click())', 900);
+    await js(`(async () => { const sel = document.querySelector('tr[data-line="0"] [data-lf=product_id]'); sel.value = [...sel.options].find(o => o.text.startsWith('Bàn')).value; sel.dispatchEvent(new Event('change', { bubbles: true })); await new Promise(r => setTimeout(r, 300)); document.querySelector('tr[data-line="0"] [data-lf=qty]').value = '3';
+      document.querySelector('[data-biz-act=addLine]').click(); await new Promise(r => setTimeout(r, 300)); const s2 = document.querySelector('tr[data-line="1"] [data-lf=product_id]'); s2.value = [...s2.options].find(o => o.text.startsWith('Ghế')).value; s2.dispatchEvent(new Event('change', { bubbles: true })); await new Promise(r => setTimeout(r, 300)); document.querySelector('tr[data-line="1"] [data-lf=qty]').value = '1'; })()`);
+    await step('04-phieu-nhap-luu', click('[data-biz-act=saveReceipt]'), 1000);
+    await step('05-phieu-nhap-xong', click('[data-biz-act=validatePicking]'), 1200);
+    await step('06-ton-kho', 'BIZ.reset(); BIZ.state.sub.stock = "onhand"; renderCrm()');
+    // báo giá: 2 bàn + 3 ghế + lắp đặt
+    await step('07-bao-gia-moi', 'crm.tab = "sales"; BIZ.reset(); BIZ.state.sub.sales = "quotes"; renderCrm().then(() => document.querySelector("#crmAdd").click())', 1000);
+    await js(`(async () => { const w = () => new Promise(r => setTimeout(r, 350)); const c = document.querySelector('[data-f=contact_id]'); c.value = [...c.options].find(o => o.text.includes('Sen Vàng')).value; c.dispatchEvent(new Event('change', { bubbles: true })); await w();
+      document.querySelector('[data-f=payment_days]').value = '30';
+      for (const [i, name, q] of [[0, 'Bàn', '2'], [1, 'Ghế', '3'], [2, 'Lắp', '1']]) { document.querySelector('[data-biz-act=addLine]').click(); await w(); const s = document.querySelector('tr[data-line="' + i + '"] [data-lf=product_id]'); s.value = [...s.options].find(o => o.text.startsWith(name)).value; s.dispatchEvent(new Event('change', { bubbles: true })); await w(); const qn = document.querySelector('tr[data-line="' + i + '"] [data-lf=qty]'); qn.value = q; qn.dispatchEvent(new Event('change', { bubbles: true })); await w(); } })()`);
+    await step('08-bao-gia-dien', null, 300);
+    await step('09-bao-gia-luu', click('[data-biz-act=saveOrder]'), 1000);
+    await step('10-don-xac-nhan', click('[data-biz-act=confirmOrder]'), 1200);
+    out.order = await js(`({ total: document.querySelector('.biz-totals .grand b').innerText, smart: [...document.querySelectorAll('.biz-smart')].map(b => b.innerText) })`);
+    // giao: thiếu ghế (có 1, cần 3) → giao 2 bàn + 1 ghế, tạo phiếu chờ
+    await step('11-phieu-giao', click('[data-biz-act=openPickings]'), 1000);
+    await js(`(() => { const rows = [...document.querySelectorAll('[data-move]')]; for (const i of rows) { const name = i.closest('tr').cells[0].innerText; i.value = name.startsWith('Ghế') ? '1' : '2'; } })()`);
+    await js(click('[data-biz-act=validatePicking]')); await sleep(800); await step('12-hoi-phieu-cho', null, 200);
+    await js(yes); await sleep(1200); await step('13-phieu-giao-xong', null, 300);
+    out.backorder = await js(`(document.querySelector('[data-biz-open^="picking:"]') || {}).innerText || ''`);
+    // hoá đơn
+    await step('14-ve-don', click('[data-biz-act=openSo]'), 1000);
+    await step('15-hoa-don-nhap', click('[data-biz-act=invoiceOrder]'), 1200);
+    await step('16-hoa-don-vao-so', click('[data-biz-act=postInvoice]'), 1200);
+    await step('17-thanh-toan-hop', click('[data-biz-act=payInvoice]'), 800);
+    await js(`(() => { const f = document.querySelector('#bizForm'); f.querySelector('[name=amount]').value = '5000000'; f.requestSubmit(); })()`); await sleep(1200);
+    await step('18-thanh-toan-mot-phan', null, 300);
+    out.invoice = await js(`({ ribbon: (document.querySelector('.biz-ribbon') || {}).innerText || '', due: [...document.querySelectorAll('.biz-totals .grand b')].map(b => b.innerText) })`);
+    await step('19-ds-hoa-don', 'BIZ.reset(); renderCrm()', 800);
+    await step('20-bc-ban-hang', 'crm.tab = "reports"; BIZ.reset(); BIZ.state.sub.reports = "sales"; BIZ.state.rep.groupBy = "product"; renderCrm()', 900);
+    await step('21-bc-cong-no', 'BIZ.state.sub.reports = "invoice"; renderCrm()', 900);
+    await step('22-bc-ton-kho', 'BIZ.state.sub.reports = "stock"; renderCrm()', 900);
+    await step('23-tong-quan', 'crm.tab = "dash"; renderCrm()', 1200);
+    out.db = await js(`(async () => { const r = await A.crm('overview'); return r.data; })()`);
+  } catch (e) { out.error = e.message; }
+  fs.writeFileSync(path.join(dir, `qabiz-${lang}.json`), JSON.stringify(out, null, 2)); app.exit(0);
 }
 // QA 0.15.0 giao diện (AIVN_QAUI=thư mục, chỉ khi phát triển): chụp 1280x720 các màn hình mới
 async function qaUI() {
@@ -2527,6 +2601,7 @@ else {
     if (process.env.AIVN_AGENTBENCH && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaBench().catch(e => { console.error('BENCH lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QAPAR && !app.isPackaged) { global.__qaErrs = []; win.webContents.on('console-message', (e, level, message, line, src) => { const lv = e && e.level != null ? e.level : level; const msg = (e && e.message) || message; if (lv === 3 || lv === 'error' || /Uncaught/.test(String(msg))) global.__qaErrs.push(String(msg).slice(0, 400) + ' @' + ((e && e.lineNumber) || line)); }); }
     if (process.env.AIVN_QAPAR && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaPar().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
+    if (process.env.AIVN_QA_BIZ && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaBiz().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QAUI && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaUI().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QACU && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaCU().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QA_B21 && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaB21().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));

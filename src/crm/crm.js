@@ -9,7 +9,8 @@ const STAGES = [
 ];
 const STAGE_VI = Object.fromEntries(STAGES.map(s => [s.id, s.name]));
 const ACT_TYPES = { call: 'Gọi điện', meeting: 'Cuộc hẹn', email: 'Email', todo: 'Việc cần làm' };
-const QUOTE_STATUS = { draft: 'Nháp', sent: 'Đã gửi', accepted: 'Khách đồng ý', rejected: 'Khách từ chối' };
+const QUOTE_STATUS = { draft: 'Báo giá', sent: 'Báo giá đã gửi', sale: 'Đơn bán hàng', cancel: 'Đã huỷ' }; // theo Odoo sale.order
+const NO_OWNER = '(chưa giao)';
 const KIND_VI = { person: 'Cá nhân', company: 'Công ty' };
 const newId = (p) => p + '_' + crypto.randomBytes(6).toString('hex');
 const str = (v, max = 500) => (v == null ? '' : String(v)).trim().slice(0, max);
@@ -210,9 +211,16 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
   function saveProduct(input = {}) {
     const old = input.id ? db.get('SELECT * FROM products WHERE id = ?', [input.id]) : null;
     const p = { ...(old || {}), ...input }; p.name = str(p.name, 200); if (!p.name) throw new CrmError('Hãy nhập tên sản phẩm.');
-    p.sku = str(p.sku, 60); p.unit = str(p.unit, 30) || 'cái'; p.price = Math.max(0, T.parseVnd(p.price)); p.description = str(p.description, 1000); p.active = p.active === false || p.active === 0 ? 0 : 1; p.updated_at = now();
-    if (old) db.run('UPDATE products SET name=?, sku=?, unit=?, price=?, description=?, active=?, updated_at=? WHERE id=?', [p.name, p.sku, p.unit, p.price, p.description, p.active, p.updated_at, p.id]);
-    else { p.id = newId('p'); db.run('INSERT INTO products(id, name, sku, unit, price, description, active, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)', [p.id, p.name, p.sku, p.unit, p.price, p.description, p.active, now(), p.updated_at]); }
+    p.sku = str(p.sku, 60); p.unit = str(p.unit, 30) || 'cái'; p.price = Math.max(0, T.parseVnd(p.price)); p.description = str(p.description, 1000); p.active = p.active === false || p.active === 0 || p.active === '0' ? 0 : 1; p.updated_at = now();
+    // 0.16 (theo Odoo): loại sản phẩm — product = hàng lưu kho (theo dõi tồn), consu = hàng tiêu dùng (giao nhưng không tính tồn), service = dịch vụ
+    p.type = ['product', 'consu', 'service'].includes(p.type) ? p.type : 'product';
+    if (old && old.type !== p.type && db.get("SELECT id FROM moves WHERE product_id = ? AND state = 'done' LIMIT 1", [p.id])) throw new CrmError('Sản phẩm đã có dịch chuyển kho: không đổi loại sản phẩm được nữa.');
+    p.cost = Math.max(0, T.parseVnd(p.cost)); p.barcode = str(p.barcode, 60); p.category = str(p.category, 80); p.min_qty = Math.max(0, Number(String(p.min_qty ?? 0).replace(',', '.')) || 0);
+    if (p.sku && db.get('SELECT id FROM products WHERE sku = ? AND id != ? AND active = 1', [p.sku, p.id || ''])) throw new CrmError(`Mã sản phẩm "${p.sku}" đã dùng cho sản phẩm khác.`);
+    if (p.barcode && db.get('SELECT id FROM products WHERE barcode = ? AND id != ? AND active = 1', [p.barcode, p.id || ''])) throw new CrmError(`Mã vạch "${p.barcode}" đã dùng cho sản phẩm khác.`);
+    const cols = ['name', 'sku', 'unit', 'price', 'description', 'active', 'type', 'cost', 'barcode', 'category', 'min_qty', 'updated_at'];
+    if (old) db.run(`UPDATE products SET ${cols.map(k => k + '=?').join(', ')} WHERE id=?`, [...cols.map(k => p[k]), p.id]);
+    else { p.id = newId('p'); db.run(`INSERT INTO products(id, created_at, ${cols.join(', ')}) VALUES (?, ?, ${cols.map(() => '?').join(', ')})`, [p.id, now(), ...cols.map(k => p[k])]); }
     return db.get('SELECT * FROM products WHERE id = ?', [p.id]);
   }
   const listProducts = ({ q = '', all = false } = {}) => db.all(`SELECT * FROM products WHERE ${all ? '1' : 'active = 1'} ${q ? 'AND (lower(name) LIKE ? OR lower(sku) LIKE ?)' : ''} ORDER BY name`, q ? ['%' + q.toLowerCase() + '%', '%' + q.toLowerCase() + '%'] : []);
@@ -231,14 +239,18 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
     q.contact_id = q.contact_id && db.get('SELECT id FROM contacts WHERE id = ?', [q.contact_id]) ? q.contact_id : null;
     if (!q.contact_id) throw new CrmError('Báo giá cần chọn khách hàng.');
     q.lead_id = q.lead_id && db.get('SELECT id FROM leads WHERE id = ?', [q.lead_id]) ? q.lead_id : null;
-    q.status = QUOTE_STATUS[q.status] ? q.status : 'draft';
+    // xác nhận/huỷ đơn chỉ qua các nút của Bán hàng (biz.js: confirmOrder/cancelOrder) vì còn tạo phiếu giao hàng; đơn đã xác nhận/huỷ thì khoá dòng
+    if (old && ['sale', 'cancel'].includes(old.status) && Array.isArray(input.lines)) throw new CrmError(old.status === 'sale' ? 'Đơn bán hàng đã xác nhận: không sửa dòng được nữa. Huỷ đơn rồi “Đặt lại báo giá” nếu cần sửa.' : 'Đơn đã huỷ: bấm “Đặt lại báo giá” trước khi sửa.');
+    q.status = old && ['sale', 'cancel'].includes(old.status) ? old.status : ['draft', 'sent'].includes(q.status) ? q.status : old ? old.status : 'draft';
+    q.owner = str(q.owner || (old ? old.owner : defaultOwner()), 80); q.payment_days = Math.max(0, Math.min(365, parseInt(q.payment_days, 10) || 0));
+    q.commitment_date = /^\d{4}-\d{2}-\d{2}$/.test(q.commitment_date || '') ? q.commitment_date : null;
     q.date = /^\d{4}-\d{2}-\d{2}$/.test(q.date || '') ? q.date : today();
     q.valid_until = /^\d{4}-\d{2}-\d{2}$/.test(q.valid_until || '') ? q.valid_until : null;
     q.vat_pct = [0, 5, 8, 10].includes(Number(q.vat_pct)) ? Number(q.vat_pct) : 10; q.notes = str(q.notes, 3000); q.updated_at = now();
     const lines = Array.isArray(input.lines) ? input.lines.map((l, i) => ({ id: newId('ql'), product_id: l.product_id || null, name: str(l.name, 300), unit: str(l.unit, 30) || 'cái', qty: Math.max(0, Number(String(l.qty).replace(',', '.')) || 0), price: Math.max(0, T.parseVnd(l.price)), discount_pct: Math.max(0, Math.min(100, Number(l.discount_pct) || 0)), pos: i })).filter(l => l.name) : null;
     db.tx(() => {
-      if (old) db.run('UPDATE quotes SET contact_id=?, lead_id=?, status=?, date=?, valid_until=?, notes=?, vat_pct=?, updated_at=? WHERE id=?', [q.contact_id, q.lead_id, q.status, q.date, q.valid_until, q.notes, q.vat_pct, q.updated_at, q.id]);
-      else { q.id = newId('q'); q.number = nextQuoteNumber(); db.run('INSERT INTO quotes(id, number, contact_id, lead_id, status, date, valid_until, notes, vat_pct, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [q.id, q.number, q.contact_id, q.lead_id, q.status, q.date, q.valid_until, q.notes, q.vat_pct, now(), q.updated_at]); }
+      if (old) db.run('UPDATE quotes SET contact_id=?, lead_id=?, status=?, date=?, valid_until=?, notes=?, vat_pct=?, owner=?, payment_days=?, commitment_date=?, updated_at=? WHERE id=?', [q.contact_id, q.lead_id, q.status, q.date, q.valid_until, q.notes, q.vat_pct, q.owner, q.payment_days, q.commitment_date, q.updated_at, q.id]);
+      else { q.id = newId('q'); q.number = nextQuoteNumber(); db.run('INSERT INTO quotes(id, number, contact_id, lead_id, status, date, valid_until, notes, vat_pct, owner, payment_days, commitment_date, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [q.id, q.number, q.contact_id, q.lead_id, q.status, q.date, q.valid_until, q.notes, q.vat_pct, q.owner, q.payment_days, q.commitment_date, now(), q.updated_at]); }
       if (lines) { db.run('DELETE FROM quote_lines WHERE quote_id = ?', [q.id]); for (const l of lines) db.run('INSERT INTO quote_lines(id, quote_id, product_id, name, unit, qty, price, discount_pct, pos) VALUES (?,?,?,?,?,?,?,?,?)', [l.id, q.id, l.product_id, l.name, l.unit, l.qty, l.price, l.discount_pct, l.pos]); }
     });
     const full = getQuote(q.id);
@@ -257,7 +269,7 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
     return q;
   }
   const listQuotes = ({ q = '', status = '' } = {}) => db.all(`SELECT q.*, c.name AS contact_name FROM quotes q LEFT JOIN contacts c ON c.id = q.contact_id WHERE 1 ${status ? 'AND q.status = ?' : ''} ${q ? 'AND (lower(q.number) LIKE ? OR c.name_norm LIKE ?)' : ''} ORDER BY q.created_at DESC`, [...(status ? [status] : []), ...(q ? ['%' + q.toLowerCase() + '%', '%' + T.fold(q) + '%'] : [])]).map(x => ({ ...x, ...quoteTotals(x.id, x.vat_pct), status_vi: QUOTE_STATUS[x.status] }));
-  const deleteQuote = (id) => { const q = db.get('SELECT * FROM quotes WHERE id = ?', [id]); if (!q) return false; db.tx(() => { db.run('DELETE FROM quote_lines WHERE quote_id = ?', [id]); db.run('DELETE FROM quotes WHERE id = ?', [id]); }); hist(q.contact_id, q.lead_id, 'quote', `Xoá báo giá ${q.number}`); return true; };
+  const deleteQuote = (id) => { const q = db.get('SELECT * FROM quotes WHERE id = ?', [id]); if (!q) return false; if (q.status === 'sale') throw new CrmError('Không xoá được đơn bán hàng đã xác nhận — hãy huỷ đơn trước.'); if (db.get("SELECT id FROM invoices WHERE so_id = ? AND state != 'cancel' LIMIT 1", [id]) || db.get("SELECT id FROM pickings WHERE so_id = ? AND state = 'done' LIMIT 1", [id])) throw new CrmError('Đơn đã có hoá đơn hoặc đã giao hàng: không xoá được, chỉ huỷ.'); db.run("DELETE FROM moves WHERE picking_id IN (SELECT id FROM pickings WHERE so_id = ?)", [id]); db.run('DELETE FROM pickings WHERE so_id = ?', [id]); db.tx(() => { db.run('DELETE FROM quote_lines WHERE quote_id = ?', [id]); db.run('DELETE FROM quotes WHERE id = ?', [id]); }); hist(q.contact_id, q.lead_id, 'quote', `Xoá báo giá ${q.number}`); return true; };
 
   // ---------- Chế độ xem đã lưu ----------
   const listViews = (entity) => db.all('SELECT * FROM views WHERE entity = ? ORDER BY created_at', [entity]).map(v => ({ ...v, spec: JSON.parse(v.spec || '{}') }));
@@ -274,8 +286,8 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
     const closed90 = db.get(`SELECT sum(stage='won') AS won, sum(stage='lost') AS lost FROM leads WHERE stage IN ('won','lost') AND closed_at >= ?${ow}`, [since90, ...op]);
     const rate = (c) => (c.won || 0) + (c.lost || 0) ? Math.round(100 * (c.won || 0) / ((c.won || 0) + (c.lost || 0))) : null;
     const byStage = STAGES.map(s => { const r = db.get(`SELECT count(*) AS n, coalesce(sum(expected_revenue),0) AS sum FROM leads WHERE stage = ?${ow}`, [s.id, ...op]); return { id: s.id, name: s.name, n: r.n, sum: r.sum }; });
-    const byOwner = db.all(`SELECT coalesce(nullif(owner,''),'(chưa giao)') AS owner, sum(stage NOT IN ('won','lost')) AS open, coalesce(sum(CASE WHEN stage NOT IN ('won','lost') THEN expected_revenue * probability / 100.0 END),0) AS weighted,
-      coalesce(sum(CASE WHEN stage='won' THEN expected_revenue END),0) AS won_sum, sum(stage='won') AS won, sum(stage='lost') AS lost FROM leads GROUP BY 1 ORDER BY weighted DESC`).map(r => ({ ...r, weighted: Math.round(r.weighted), rate: rate(r) }));
+    const byOwner = db.all(`SELECT coalesce(nullif(owner,''),?) AS owner, sum(stage NOT IN ('won','lost')) AS open, coalesce(sum(CASE WHEN stage NOT IN ('won','lost') THEN expected_revenue * probability / 100.0 END),0) AS weighted,
+      coalesce(sum(CASE WHEN stage='won' THEN expected_revenue END),0) AS won_sum, sum(stage='won') AS won, sum(stage='lost') AS lost FROM leads GROUP BY 1 ORDER BY weighted DESC`, [NO_OWNER]).map(r => ({ ...r, weighted: Math.round(r.weighted), rate: rate(r) }));
     const t0 = new Date(); t0.setHours(0, 0, 0, 0);
     const acts = db.get(`SELECT sum(due_at < ?) AS overdue, sum(due_at >= ? AND due_at < ?) AS today, count(*) AS open FROM activities WHERE done_at IS NULL${ow}`, [now(), t0.getTime(), t0.getTime() + 864e5, ...op]);
     const upcoming = db.all(`SELECT * FROM activities WHERE done_at IS NULL${ow} ORDER BY coalesce(due_at, 9e15) LIMIT 8`, op).map(pubAct);

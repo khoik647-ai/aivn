@@ -1501,14 +1501,16 @@ A.onAgentApproveCancel(({ id }) => { if (apOpen && apOpen.id === id) { apOpen = 
 
 if (A.onNotice) A.onNotice((n) => toast((n.kind === 'warn' ? '⚠ ' : '') + n.text, n.kind === 'warn'));
 
-// --- Kinh doanh → Khách hàng (CRM) --- 0.15.1: ẩn cho tới khi bộ Kinh doanh hoàn chỉnh ra mắt ở 0.16.0 (bật xem trước: localStorage aivn.crmPreview=1)
-const CRM_ON = localStorage.getItem('aivn.crmPreview') === '1' || !!(A.qaMode && A.qaCrm);
+// --- Kinh doanh (CRM + Bán hàng, Kho, Hoá đơn, Báo cáo ở biz.js) --- 0.16.0: bộ Kinh doanh hoàn chỉnh, hiện cho mọi người
+const CRM_ON = true;
 $$('[data-crm-nav]').forEach(el => { el.hidden = !CRM_ON; });
 const crm = { tab: 'dash', contacts: [] };
 const vnd = (n) => `${(Number(n) || 0).toLocaleString(LOC())} đ`;
 async function C(fn, ...a) { const r = await A.crm(fn, ...a); if (!r.ok) throw new Error(r.error); return r.data; }
 async function renderCrm() {
-  $$('.crm-tabs button').forEach(b => b.classList.toggle('on', b.dataset.crm === crm.tab));
+  $$('.crm-tabs button').forEach(b => { b.classList.toggle('on', b.dataset.crm === crm.tab); b.setAttribute('aria-selected', String(b.dataset.crm === crm.tab)); });
+  const bizTab = !!(window.BIZ && BIZ.tabs.includes(crm.tab)); $('#crmImport').hidden = bizTab; $('#crmExport').hidden = bizTab;
+  if (bizTab) return BIZ.render(crm.tab);
   const q = $('#crmQ').value.trim(); const body = $('#crmBody');
   $('#crmAdd').textContent = crm.tab === 'leads' ? '＋ Cơ hội' : crm.tab === 'acts' ? '＋ Việc' : '＋ Liên hệ';
   try {
@@ -1517,6 +1519,7 @@ async function renderCrm() {
       body.innerHTML = `<div class="kpis"><div class="kpi">Cơ hội đang mở<b>${d.open.n}</b><span class="small muted">${vnd(d.open.sum)} · dự kiến ${vnd(d.open.weighted)}</span></div><div class="kpi">Thắng trong tháng<b>${d.wonMonth.n}</b><span class="small muted">${vnd(d.wonMonth.sum)}</span></div><div class="kpi">Tỉ lệ thắng<b>${d.winRate == null ? '—' : Math.round(d.winRate) + '%'}</b><span class="small muted">90 ngày: ${d.winRate90 == null ? '—' : Math.round(d.winRate90) + '%'}</span></div><div class="kpi">Việc cần làm<b>${d.activities.open}</b><span class="small muted">${d.activities.overdue} quá hạn · ${d.activities.today} hôm nay</span></div></div>
         <h3>Theo giai đoạn</h3><table class="crm-table"><tr><th>Giai đoạn</th><th>Số cơ hội</th><th>Giá trị</th></tr>${d.byStage.map(x => `<tr><td>${esc(x.name)}</td><td>${x.n}</td><td>${vnd(x.sum)}</td></tr>`).join('')}</table>
         <h3>Sắp tới</h3>${(d.upcoming || []).length ? `<table class="crm-table">${d.upcoming.map(a => `<tr><td>${esc(a.type_vi || '')}</td><td>${esc(a.title)}</td><td>${esc(a.contact_name || '')}</td><td>${a.due_at ? new Date(a.due_at).toLocaleString(LOC(), { dateStyle: 'short', timeStyle: 'short' }) : 'chưa hẹn giờ'}</td></tr>`).join('')}</table>` : '<div class="empty-state"><div class="big">📅</div>Chưa có việc nào sắp tới.</div>'}`;
+      if (window.BIZ) BIZ.dashExtra(body);
     } else if (crm.tab === 'contacts') {
       const r = await C('listContacts', { q }); crm.contacts = r.rows;
       body.innerHTML = r.rows.length ? `<table class="crm-table"><tr><th>Tên</th><th>Loại</th><th>Điện thoại</th><th>Email</th><th>Thẻ</th><th>Phụ trách</th><th></th></tr>${r.rows.map(c => `<tr><td><b>${esc(c.name)}</b>${c.job_title ? `<div class="small muted">${esc(c.job_title)}</div>` : ''}</td><td>${esc(c.kind_vi)}</td><td>${esc(c.phone_fmt || c.phone || '')}</td><td>${esc(c.email || '')}</td><td>${(c.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join(' ')}</td><td>${esc(c.owner || '')}</td><td><button class="btn sm" data-crm-edit="${esc(c.id)}">Sửa</button> <button class="btn sm ghost" data-crm-del="${esc(c.id)}" title="Xoá liên hệ">🗑</button></td></tr>`).join('')}</table><p class="small muted">${r.total} liên hệ</p>`
@@ -1549,9 +1552,9 @@ $('#crmForm').addEventListener('submit', async (e) => {
 });
 $('#crmCancel').addEventListener('click', () => { $('#crmModal').hidden = true; });
 $('#crmModal').addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#crmModal').hidden = true; });
-$$('.crm-tabs button').forEach(b => b.addEventListener('click', () => { crm.tab = b.dataset.crm; renderCrm(); }));
-let crmT = null; $('#crmQ').addEventListener('input', () => { clearTimeout(crmT); crmT = setTimeout(() => { if (crm.tab === 'dash') crm.tab = 'contacts'; renderCrm(); }, 220); });
-$('#crmAdd').addEventListener('click', async () => { if (!crm.contacts.length) crm.contacts = (await C('listContacts', {}).catch(() => ({ rows: [] }))).rows; crmForm(crm.tab === 'leads' ? 'lead' : crm.tab === 'acts' ? 'act' : 'contact'); });
+$$('.crm-tabs button').forEach(b => b.addEventListener('click', () => { crm.tab = b.dataset.crm; if (window.BIZ) BIZ.reset(); renderCrm(); }));
+let crmT = null; $('#crmQ').addEventListener('input', () => { clearTimeout(crmT); crmT = setTimeout(() => { if (crm.tab === 'dash') crm.tab = 'contacts'; if (window.BIZ) BIZ.reset(); renderCrm(); }, 220); });
+$('#crmAdd').addEventListener('click', async () => { if (window.BIZ && BIZ.tabs.includes(crm.tab)) return BIZ.add(crm.tab); if (!crm.contacts.length) crm.contacts = (await C('listContacts', {}).catch(() => ({ rows: [] }))).rows; crmForm(crm.tab === 'leads' ? 'lead' : crm.tab === 'acts' ? 'act' : 'contact'); });
 $('#crmExport').addEventListener('click', async () => { const r = await A.crmExport(); if (r.ok) toast('Đã xuất ' + r.file); else if (!r.canceled) toast('⚠ ' + r.error, true); });
 $('#crmImport').addEventListener('click', async () => { const r = await A.crmImport(); if (r.ok) { toast(`Đã nhập: ${r.result.created} mới, ${r.result.merged} gộp, ${r.result.skipped} bỏ qua${r.result.errors.length ? `, ${r.result.errors.length} lỗi` : ''}`); crm.tab = 'contacts'; renderCrm(); } else if (!r.canceled) toast('⚠ ' + r.error, true); });
 $('#crmBody').addEventListener('click', async (e) => {
@@ -1585,7 +1588,9 @@ function paletteCommands() {
     { i: '🤖', t: 'AIVN AGENT', run: () => show('agent') },
     { i: '＋', t: 'Cuộc trò chuyện mới', k: 'Ctrl+N', run: () => $('#newChat').click() },
     { i: '🔎', t: 'Khám phá (tìm và tải mô hình)', k: 'Ctrl+4', run: () => show('discover') },
-    ...(CRM_ON ? [{ i: '👥', t: 'Kinh doanh → Khách hàng', run: () => show('crm') }] : []),
+    ...(CRM_ON ? [{ i: '👥', t: 'Kinh doanh → Liên hệ', run: () => { crm.tab = 'contacts'; show('crm'); } }, { i: '🧾', t: 'Kinh doanh → Bán hàng', run: () => { crm.tab = 'sales'; if (window.BIZ) BIZ.reset(); show('crm'); } },
+      { i: '🏬', t: 'Kinh doanh → Kho', run: () => { crm.tab = 'stock'; if (window.BIZ) BIZ.reset(); show('crm'); } }, { i: '💳', t: 'Kinh doanh → Hoá đơn', run: () => { crm.tab = 'invoices'; if (window.BIZ) BIZ.reset(); show('crm'); } },
+      { i: '📊', t: 'Kinh doanh → Báo cáo', run: () => { crm.tab = 'reports'; if (window.BIZ) BIZ.reset(); show('crm'); } }] : []),
     { i: '📦', t: 'Mô hình của tôi', k: 'Ctrl+3', run: () => show('models') },
     { i: '⏰', t: 'Lịch tự động', run: () => show('schedule') },
     { i: '🧠', t: 'Ghi nhớ', run: () => show('memory') },

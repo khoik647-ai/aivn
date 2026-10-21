@@ -20,7 +20,7 @@
     <button class="nav-item" data-view="schedule" data-tip="Lịch tự động" aria-label="Lịch tự động"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.3"/><path d="M12 7.5V12l3 2"/></svg><span class="lbl">Lịch tự động</span><b class="pill-count" id="schedCount" hidden></b></button>
     <button class="nav-item" data-view="memory" data-tip="Ghi nhớ" aria-label="Ghi nhớ"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-3.8-5.5 3.8z"/></svg><span class="lbl">Ghi nhớ</span><b class="pill-count" id="memCount" hidden></b></button>
     <div class="nav-sep" data-crm-nav hidden><span class="lbl">Kinh doanh</span></div>
-    <button data-crm-nav hidden class="nav-item" data-view="crm" data-tip="Khách hàng" aria-label="Khách hàng"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3.3"/><path d="M3.5 19.5c0-3.1 2.5-5.5 5.5-5.5s5.5 2.4 5.5 5.5"/><path d="M15.5 5.3a3.3 3.3 0 010 6.4M17.5 14.3c1.8.6 3 2.6 3 5.2"/></svg><span class="lbl">Khách hàng</span></button>
+    <button data-crm-nav hidden class="nav-item" data-view="crm" data-tip="Kinh doanh" aria-label="Kinh doanh"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="3.3"/><path d="M3.5 19.5c0-3.1 2.5-5.5 5.5-5.5s5.5 2.4 5.5 5.5"/><path d="M15.5 5.3a3.3 3.3 0 010 6.4M17.5 14.3c1.8.6 3 2.6 3 5.2"/></svg><span class="lbl">Kinh doanh</span></button>
     <div class="rail-spacer"></div>
     <button class="nav-item" data-view="settings" data-tip="Cài đặt (Ctrl+,)" aria-label="Cài đặt"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5h9M17 7.5h3M4 16.5h3M11 16.5h9"/><circle cx="15" cy="7.5" r="2"/><circle cx="9" cy="16.5" r="2"/></svg><span class="lbl">Cài đặt</span><kbd class="nk">,</kbd></button>
   </nav>
@@ -40,12 +40,12 @@
 
     <!-- KINH DOANH → KHÁCH HÀNG -->
     <section class="view" id="view-crm">
-      <div class="crm-head"><h2>👥 Khách hàng</h2>
-        <nav class="crm-tabs" role="tablist"><button data-crm="dash" class="on" role="tab">Tổng quan</button><button data-crm="contacts" role="tab">Liên hệ</button><button data-crm="leads" role="tab">Cơ hội</button><button data-crm="acts" role="tab">Việc cần làm</button></nav>
-        <div class="crm-actions"><input type="search" id="crmQ" placeholder="Tìm tên, số điện thoại, email…" aria-label="Tìm khách hàng"><button class="btn sm primary" id="crmAdd">＋ Thêm</button><button class="btn sm" id="crmImport" title="Nhập từ CSV/Excel">⬆ Nhập</button><button class="btn sm" id="crmExport" title="Xuất CSV (mở được bằng Excel)">⬇ Xuất</button></div>
+      <div class="crm-head"><h2>💼 <span>Kinh doanh</span></h2>
+        <nav class="crm-tabs" role="tablist" aria-label="Kinh doanh"><button data-crm="dash" class="on" role="tab">Tổng quan</button><button data-crm="contacts" role="tab">Liên hệ</button><button data-crm="leads" role="tab">CRM</button><button data-crm="acts" role="tab">Việc cần làm</button><button data-crm="sales" role="tab">Bán hàng</button><button data-crm="stock" role="tab">Kho</button><button data-crm="invoices" role="tab">Hoá đơn</button><button data-crm="reports" role="tab">Báo cáo</button></nav>
+        <div class="crm-actions"><input type="search" id="crmQ" placeholder="Tìm tên, số chứng từ, số điện thoại, email…" aria-label="Tìm trong Kinh doanh"><button class="btn sm primary" id="crmAdd">＋ Thêm</button><button class="btn sm" id="crmImport" title="Nhập từ CSV/Excel">⬆ Nhập</button><button class="btn sm" id="crmExport" title="Xuất CSV (mở được bằng Excel)">⬇ Xuất</button></div>
       </div>
       <div class="crm-body" id="crmBody"></div>
-      <p class="small muted crm-foot">Dữ liệu khách hàng lưu trên máy này (SQLite), không gửi đi đâu.</p>
+      <p class="small muted crm-foot">Dữ liệu kinh doanh (khách hàng, đơn hàng, kho, hoá đơn) lưu trên máy này (SQLite), không gửi đi đâu.</p>
     </section>
     <div class="modal-back" id="crmModal" hidden><form class="modal crm-form" id="crmForm"><h3 id="crmFormTitle"></h3><div id="crmFields"></div><p class="small" id="crmErr" style="color:#82071e"></p><div class="row"><button type="button" class="btn" id="crmCancel">Huỷ</button><button type="submit" class="btn primary">Lưu</button></div></form></div>
 
@@ -490,5 +490,6 @@
 <script src="../i18n/zh.js"></script>
 <script src="i18n-dom.js"></script>
 <script src="app.js"></script>
+<script src="biz.js"></script>
 </body>
 </html>
