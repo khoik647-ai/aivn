@@ -18,8 +18,9 @@ function geoOf(d, { platform = process.platform, dipToScreenRect = null, primary
     let p = null; try { p = dipToScreenRect ? dipToScreenRect(b) : null; } catch {}
     phys = p && p.width > 0 ? { x: r(p.x), y: r(p.y), width: r(p.width), height: r(p.height) }
       : { x: r(b.x * s), y: r(b.y * s), width: r(b.width * s), height: r(b.height * s) };
-    // kích thước vật lý luôn = DIP × tỉ lệ (làm tròn) — sửa nếu Electron trả lệch vài điểm
-    phys.width = r(b.width * s); phys.height = r(b.height * s);
+    // kích thước vật lý: tin Electron (DIP đã làm tròn: 2560 px @150% = 1707 DIP → DIP × tỉ lệ = 2561, lệch 1 px); chỉ sửa khi Electron trả lệch nhiều
+    if (!(p && Math.abs(phys.width - b.width * s) <= 3)) phys.width = r(b.width * s);
+    if (!(p && Math.abs(phys.height - b.height * s) <= 3)) phys.height = r(b.height * s);
   } else if (platform === 'linux') phys = { x: r(b.x * s), y: r(b.y * s), width: r(b.width * s), height: r(b.height * s) };
   else phys = { x: b.x, y: b.y, width: b.width, height: b.height }; // macOS: điểm
   return { id: d.id, scale: s, primary: primaryId != null ? String(d.id) === String(primaryId) : (b.x === 0 && b.y === 0), dip: { x: b.x, y: b.y, width: b.width, height: b.height }, phys };
@@ -67,4 +68,26 @@ function fakeWinDisplays(spec) {
   const dipToScreenRect = (b) => { const d = ds.find(x => x.bounds.x === b.x && x.bounds.y === b.y) || ds[0]; return { ...d._phys }; };
   return { displays: ds, dipToScreenRect };
 }
-module.exports = { geoOf, geometry, displayAtPhys, displayAtDip, displayForRect, normToPhys, physToNorm, shotToPhys, physToDip, dipToPhys, calibrate, applyCal, near, describe, fakeWinDisplays, primaryOf };
+// B62 (máy thật 2560×1440 @125%): một dòng nhật ký cho MỖI cú bấm — QA đọc trong %APPDATA%\AIVN\logs\aivn.log
+// el: phần tử đích (id, b = khung theo px vật lý), shot: ảnh chụp ({width,height,full,geo}), pt: điểm vật lý sẽ bấm,
+// api: cách đưa chuột ('libnut moveMouse' | 'SetCursorPos'), got: vị trí con trỏ đọc lại, fg0/fg1: cửa sổ ở trước trước/sau khi bấm
+function clickDiag({ el = null, query = '', shot = null, pt, geos = [], api = 'libnut', cal = null, got = null, fg0 = null, fg1 = null, under = null, overlayIgnore = null, phase = 'trước' } = {}) {
+  const g = (shot && shot.geo) || displayAtPhys(geos, pt.x, pt.y) || primaryOf(geos);
+  const out = [`Bấm (${phase})`, el ? `đích ${el.id || '?'} “${String(el.name || '').slice(0, 40)}”${el.ocr ? ' [OCR]' : ''}` : query ? `đích “${String(query).slice(0, 40)}”` : 'đích toạ độ'];
+  if (el && Array.isArray(el.b) && g && shot && shot.width) {
+    const n1 = physToNorm(g, el.b[0], el.b[1]), n2 = physToNorm(g, el.b[0] + el.b[2], el.b[1] + el.b[3]);
+    const sx = (v) => r(v * (shot.width - 1)), sy = (v) => r(v * (shot.height - 1));
+    out.push(`khung ảnh chụp [${sx(n1.nx)},${sy(n1.ny)},${sx(n2.nx) - sx(n1.nx)},${sy(n2.ny) - sy(n1.ny)}] px trên ảnh ${shot.width}×${shot.height}${shot.full ? ` (gốc ${shot.full.width}×${shot.full.height})` : ''}`);
+    out.push(`khung vật lý [${el.b.map(r).join(',')}]`);
+  }
+  if (pt && g) { const d = { x: g.dip.x + (pt.x - g.phys.x) / g.scale, y: g.dip.y + (pt.y - g.phys.y) / g.scale }; out.push(`điểm vật lý (${r(pt.x)},${r(pt.y)}) = logic (${r(d.x)},${r(d.y)})`); }
+  if (g) out.push(`tỉ lệ ${pct(g.scale)} · màn hình vật lý ${g.phys.x},${g.phys.y} ${g.phys.width}×${g.phys.height} / logic ${g.dip.x},${g.dip.y} ${g.dip.width}×${g.dip.height}`);
+  out.push(`API ${api}${cal ? ` ×${cal.kx.toFixed(3)}/×${cal.ky.toFixed(3)}` : ''} + libnut mouseClick`);
+  if (got) out.push(`con trỏ đọc lại (${got.x},${got.y})`);
+  if (under) out.push(`cửa sổ dưới điểm bấm: “${String(under.title || '').slice(0, 50)}” pid ${under.pid ?? '?'}${under.pid === process.pid ? ' (CHÍNH AIVN!)' : ''}`);
+  if (overlayIgnore != null) out.push(`lớp phủ ${overlayIgnore ? 'xuyên chuột' : 'ĐANG NHẬN CHUỘT'}`);
+  const w = (f) => f ? `“${String(f.title || '').slice(0, 50)}” pid ${f.pid ?? '?'}` : '?';
+  if (fg0 !== null || fg1 !== null) out.push(`cửa sổ trước: ${w(fg0)}${phase === 'sau' ? ` → sau: ${w(fg1)}` : ''}`);
+  return out.join(' · ');
+}
+module.exports = { clickDiag, geoOf, geometry, displayAtPhys, displayAtDip, displayForRect, normToPhys, physToNorm, shotToPhys, physToDip, dipToPhys, calibrate, applyCal, near, describe, fakeWinDisplays, primaryOf };

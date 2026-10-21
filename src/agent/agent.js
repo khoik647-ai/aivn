@@ -759,6 +759,18 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const look = { same: 0, sig: '', hint: '', blocked: 0 }; // B40
     const honestOf = (reason) => { let rcp = null; try { rcp = require('./send-verify').recipientOf(query); } catch {} const m = /\b(zalo|messenger|telegram|teams|slack|discord|whatsapp|viber)\b/i.exec(String(query || '')); return RT.honestStatus({ query, tracker: retry, steps, reason, recipient: rcp, app: m ? m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() : '' }); };
     (runStore.getStore() || {}).steps = steps;
+    // B67: “Xong” CHỈ khi mục tiêu đã kiểm chứng. Việc trên màn hình (screen_act) cần kiểm chứng thật (đã gửi/đã thấy kết quả);
+    // bước cuối là kết quả cũ “(lặp lại)” hoặc lần thao tác cuối chưa có tác dụng → nói thật đã thử gì, chưa xong ở đâu
+    const deskVerified = () => steps.some(x => x.verify && x.verify.sent) && !retry.lastBad();
+    const doneText = () => {
+      const lastOk = [...steps].reverse().find(x => x.status === 'ok');
+      const desk = steps.some(x => x.name === 'screen_act');
+      if (!lastOk) return '';
+      if (/^\(lặp lại\)/.test(String(lastOk.summary || ''))) return honestOf('bước cuối chỉ lặp lại một việc đã làm');
+      if (desk && !deskVerified()) return honestOf('chưa kiểm chứng được trên màn hình là việc đã xong');
+      return 'Xong: ' + String(lastOk.summary || '').replace(/^\(lặp lại\)\s*/, '') + '.';
+    };
+    const cyc = require('./cycle').createCycleGuard(); // B66b: chu kỳ thao tác 2–6 bước / nhiều bước không tiến triển → dừng, báo trung thực
     let hardStop = null; let text = '', finishReason = 'stop', calls = 0, searchNudged = false, openNudged = false, nudged = false, deskNudged = false, forcedTried = false, warning = null, fakeSeen = false, emptyNudged = false, loopRetried = false;
     const smp = SMP.samplingFor(st.id || '', 'agent', { temperature: typeof s.agentTemperature === 'number' && s.agentTemperature !== 0.2 ? s.agentTemperature : null }); // 0.2 = mặc định cũ (dễ lặp) → tự động theo mô hình
     const turnBudget = Number(s.agentTurnMaxTokens) || 6000;
@@ -849,7 +861,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
           const sigOf = (c) => c.name + ':' + JSON.stringify(Object.fromEntries(Object.entries(c.arguments && typeof c.arguments === 'object' ? c.arguments : {}).filter(([, v]) => v !== null)));
           const fresh = p.toolCalls.filter(c => !seen.has(sigOf(c)));
           if (fresh.length) r = { ...r, text: p.text, toolCalls: fresh, finishReason: 'tool_calls' };
-          else { const lastOk = [...steps].reverse().find(x => x.status === 'ok'); r = { ...r, text: p.text || (lastOk ? 'Xong: ' + lastOk.summary + '.' : '') }; }
+          else { const lastOk = [...steps].reverse().find(x => x.status === 'ok'); r = { ...r, text: p.text || doneText() }; }
         }
       }
       if (!r.toolCalls || !r.toolCalls.length) {
@@ -887,7 +899,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
             const did = steps.some(x => COMP.includes(x.name) && x.status === 'ok');
             if (!did) warning = noActionWarn(steps, gateOk());
             text = stripFake(String(text || '').replace(/<tool_call>[\s\S]*?(<\/tool_call>|$)/g, '').replace(/<\/?tool_result[^>]*>/g, '')).trim();
-            if (!text && did) { const lastOk = [...steps].reverse().find(x => x.status === 'ok'); text = 'Xong: ' + lastOk.summary + '.'; }
+            if (!text && did) text = doneText();
           }
           break;
         }
@@ -913,7 +925,9 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
             else if (approve && !headless && AP.needsApproval(call.name) && !(AP.policy(call.name).allowAlways && (S_().agentAlwaysAllow || []).includes(call.name))) {
               const card = AP.buildCard(call.name, args, { label: step.label, icon: step.icon, resolvePath: (p, o) => resolvePath(p, o) });
               step.status = 'asking'; onStep({ ...step }); onStatus({ stage: 'ask', round, tool: call.name });
+              deps.log && deps.log(`[aivn agent] xin phép (đã hỏi): ${call.name} · ${String(card.title || '').slice(0, 80)}`);
               const ans = await approve(card);
+              deps.log && deps.log(`[aivn agent] xin phép: người dùng ${ans && ans.ok ? 'CHO PHÉP' : ans && ans.timeout ? 'không trả lời (hết giờ)' : 'TỪ CHỐI'} — ${call.name}${ans && ans.always ? ' (luôn cho phép)' : ''}`);
               if (ans && ans.timeout) refusedOut = { refused: true, timeout: true, forModel: `Không ai trả lời thẻ xin phép “${card.title}” trong thời gian chờ (HẾT THỜI GIAN). Người dùng KHÔNG từ chối — có thể họ không ở máy. Không làm bước này; báo người dùng là bước chưa làm vì chưa được duyệt kịp, đừng nói là họ không đồng ý.`, summary: 'Hết thời gian chờ duyệt' };
               else if (!ans || !ans.ok) refusedOut = { refused: true, forModel: AP.refusalText(card, ans && ans.reason), summary: 'Bạn từ chối' + (ans && ans.reason ? `: “${String(ans.reason).slice(0, 80)}”` : '') };
               else {
@@ -948,6 +962,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         }
         Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', check: step.check || null, summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, ms: Date.now() - step.startedAt });
         logTool(step);
+        cyc.push(call.name, args, { error: out.error, refused: out.refused, bad: !!step.check, summary: out.summary, verified: !!(out.verify && out.verify.sent) });
         onStep({ ...step });
         msgs.push({ role: 'tool', tool_call_id: call.id, content: typeof out.forModel === 'string' && out.forModel ? out.forModel : String(out.forModel ?? out.message ?? out.summary ?? JSON.stringify(out)) || '(không có kết quả)' });
         // B49/B36: công cụ yêu cầu DỪNG (chặn người nhận 3 lần) hoặc tin đã bị GỬI NHẦM → dừng thật, không để mô hình làm tiếp
@@ -958,6 +973,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       if (hardStop) { text = hardStop.ask ? hardStop.ask : hardStop.wrong ? `⚠ ${hardStop.why}. AIVN AGENT đã dừng, không gửi thêm gì. Bạn mở cuộc trò chuyện đó để thu hồi/xoá tin giúp mình.` : honestOf(hardStop.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng theo yêu cầu của công cụ: ${hardStop.why}`); break; }
       // B39: cùng một cách đã hỏng mà mô hình cứ quay lại (bị chặn 2–3 lần) → dừng sớm, báo trung thực những gì đã thử
       if (look.blocked >= 2) { text = honestOf('quan sát màn hình nhiều lần liền mà mô hình không làm bước nào'); warning = null; finishReason = 'stop'; deps.log && deps.log('[aivn agent] dừng sớm (B40): quan sát lặp lại'); break; }
+      { const cs = cyc.stuck(); if (cs) { text = honestOf(cs.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng sớm (B66b ${cs.kind}): ${cs.why}`); break; } }
       { const gu = retry.giveUp(); if (gu) { text = honestOf(gu.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng sớm (B39): ${gu.why}`); break; } }
     }
     // mô hình nhỏ hay chép nguyên kết quả lỗi của công cụ (kèm chỉ dẫn dành cho mô hình) làm câu trả lời → nói lại cho người dùng

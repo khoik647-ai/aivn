@@ -88,6 +88,24 @@ Start-Sleep -Milliseconds 150
 [ordered]@{ ok = ([AivnW]::GetForegroundWindow() -eq $h) } | ConvertTo-Json -Compress
 `;
 
+// B62: cửa sổ NẰM DƯỚI điểm sắp bấm (WindowFromPoint → cửa sổ gốc): nếu là cửa sổ của chính AIVN (lớp phủ…) thì cú bấm bị nuốt
+const PS_WINAT = PS_PRELUDE + String.raw`
+if (-not ('AivnP' -as [type])) { Add-Type @"
+using System; using System.Text; using System.Runtime.InteropServices;
+public struct AivnPt { public int X; public int Y; }
+public static class AivnP {
+  [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(AivnPt p);
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint f);
+  [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int i);
+}
+"@ }
+$pt = New-Object AivnPt; $pt.X = [int]$env:AIVN_X; $pt.Y = [int]$env:AIVN_Y
+$w = [AivnP]::WindowFromPoint($pt); $r = [AivnP]::GetAncestor($w, 2)
+$sb = New-Object System.Text.StringBuilder 256; [void][AivnW]::GetWindowText($r, $sb, 256); [uint32]$wpid = 0; [void][AivnW]::GetWindowThreadProcessId($r, [ref]$wpid)
+$ex = [AivnP]::GetWindowLong($r, -20)
+[ordered]@{ hwnd = $r.ToInt64(); title = $sb.ToString(); pid = [int]$wpid; transparent = (($ex -band 0x20) -ne 0); layered = (($ex -band 0x80000) -ne 0) } | ConvertTo-Json -Compress
+`;
+async function windowAt(x, y) { if (process.platform !== 'win32') return null; try { const o = await ps(PS_WINAT, { AIVN_X: String(Math.round(x)), AIVN_Y: String(Math.round(y)) }, 8000); return JSON.parse(o.trim()); } catch { return null; } }
 // Đặt con trỏ bằng SetCursorPos (PowerShell per-monitor-v2: toạ độ vật lý, mọi màn hình) — đường dự phòng khi chuột của libnut lệch
 const PS_SETCURSOR = PS_PRELUDE + String.raw`
 [void][AivnW]::SetCursorPos([int]$env:AIVN_X, [int]$env:AIVN_Y)
@@ -418,4 +436,4 @@ function newTexts(beforeEls, afterEls, max = 4) {
   return out.slice(0, max);
 }
 const isIdRef = (q) => { const r = parseIdRef(q); return !!(r && !r.label); };
-module.exports = { parseIdRef, isIdRef, resolveIdRef, newTexts, ID_REF, queryVariants, findElementAny, stabilizeIds, isButtonish, taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };
+module.exports = { windowAt, PS_WINAT, parseIdRef, isIdRef, resolveIdRef, newTexts, ID_REF, queryVariants, findElementAny, stabilizeIds, isButtonish, taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };

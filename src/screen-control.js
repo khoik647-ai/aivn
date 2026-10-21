@@ -155,18 +155,9 @@ function toNut(nx, ny, display) {
   const G = geos(); const g = (display && G.find(x => String(x.id) === String(display.id))) || D.primaryOf(G);
   return D.normToPhys(g, nx, ny);
 }
-const KEYMAP = { ctrl: 'control', control: 'control', cmd: 'command', command: 'command', win: 'command', meta: 'command', alt: 'alt', option: 'alt', shift: 'shift', enter: 'enter', return: 'enter', esc: 'escape', escape: 'escape', tab: 'tab', space: 'space', backspace: 'backspace', delete: 'delete', del: 'delete', up: 'up', down: 'down', left: 'left', right: 'right', home: 'home', end: 'end', pageup: 'pageup', pagedown: 'pagedown' };
-function parseKeys(combo) {
-  const parts = String(combo || '').toLowerCase().split('+').map(s => s.trim()).filter(Boolean);
-  if (!parts.length || parts.length > 4) throw new Error('Phím không hợp lệ: ' + combo);
-  const keys = parts.map(p => KEYMAP[p] || (/^f([1-9]|1[0-2])$/.test(p) || /^[a-z0-9]$/.test(p) ? p : null));
-  if (keys.some(k => !k)) throw new Error('Phím không hỗ trợ: ' + combo);
-  const key = keys.pop(); const mods = keys.filter(k => ['control', 'command', 'alt', 'shift'].includes(k));
-  // chặn tổ hợp nguy hiểm/hệ thống
-  const c = [...mods, key].join('+');
-  if (/(control\+alt\+delete|command\+alt\+escape|control\+alt\+escape|command\+q$|alt\+f4$|command\+shift\+q$)/.test(c)) throw new Error('AIVN không bấm tổ hợp phím hệ thống/đóng ứng dụng này: ' + combo);
-  return { key, mods };
-}
+// B66c: bảng phím theo hệ điều hành ở agent/keys.js (cờ “command” không tồn tại trên Windows/Linux)
+const K = require('./agent/keys');
+function parseKeys(combo) { const k = K.parse(combo); return { key: k.key, mods: k.mods }; }
 async function perform({ action, nx, ny, text, keys, display, amount }) {
   const n = libnut();
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -182,7 +173,7 @@ async function perform({ action, nx, ny, text, keys, display, amount }) {
     // dán từ bộ nhớ tạm: gõ đúng tiếng Việt có dấu. Electron 44: clipboard.readText/writeText có thể trả Promise → luôn await
     const prev = await Promise.resolve(clipboard.readText()).catch(() => '');
     await Promise.resolve(clipboard.writeText(t));
-    n.keyTap('v', process.platform === 'darwin' ? 'command' : 'control'); await sleep(250);
+    n.keyTap('v', K.primaryOf(process.platform)); await sleep(250);
     setTimeout(async () => { try { if (await Promise.resolve(clipboard.readText()) === t) await Promise.resolve(clipboard.writeText(prev)); } catch {} }, 1500);
   }
   if (action === 'key') { const k = parseKeys(keys); if (k.mods.length) n.keyTap(k.key, k.mods); else n.keyTap(k.key); await sleep(150); }

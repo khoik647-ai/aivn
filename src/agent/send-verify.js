@@ -61,10 +61,10 @@ function recipientOf0(query) {
   const grp = /(?:vào|tới|đến|lên|trong|to|into)\s+(?:the\s+)?((?:nhóm|group)\s+[^,.!?:;"“”'‘’«»]{1,50}?)(?=\s+(?:trên|qua|bằng|ở|với nội dung|nội dung|là|rằng|on|via|saying)(?=[\s,.:!?]|$)|[,.!?:;"“”«»]|$)/iu.exec(q);
   if (grp && grp[1].trim().split(' ').length <= 7) return grp[1].trim().replace(/\s+(?:zalo|messenger|telegram)$/i, '');
   { const st = sayTo(q); if (st) { const n = String(st).replace(/^[\s,.;:!?]+|[\s,.;:!?]+$/g, '').replace(/\s+(?:trên|qua|ở|bằng|on|via|in)\s+(?:zalo|messenger|telegram|teams|microsoft teams|facebook|discord|slack|whatsapp|viber)$/iu, ''); if (n && !NOT_NAME.test(n) && n.split(' ').length <= 6 && !/^(?:tôi|mình|em|tao|tớ|me|i|họ|nó|mọi người|everyone)$/iu.test(n)) return n; } }
-  const verb = /(?:^|[\s:,.(])(nhắn tin|nhắn|gửi tin nhắn|gửi tin|gửi email|gửi mail|gửi thư|gửi|chat với|chat|trò chuyện với|text|message|msg|send|email|dm)(?=\s)/iu.exec(q);
+  const verb = /(?:^|[\s:,.(])((?:soạn|viết|thảo)\s+(?:một\s+)?(?:email|e-mail|mail|thư điện tử|thư|tin nhắn|tin)(?:\s+mới)?|nhắn tin|nhắn|gửi tin nhắn|gửi tin|gửi email|gửi mail|gửi thư|gửi|chat với|chat|trò chuyện với|text|message|msg|send|email|dm)(?=\s)/iu.exec(q);
   if (!verb) return null;
   // phần đầu câu: từ động từ tới chỗ bắt đầu nội dung (là/rằng/:/ngoặc kép/tiêu đề…)
-  let head = q.slice(verb.index + verb[0].length).replace(/^\s+(?:giúp|hộ|giùm|dùm)(?:\s+(?:mình|tôi|em))?(?=\s)/iu, '');
+  let head = q.slice(verb.index + verb[0].length).replace(/^\s+(?:giúp|hộ|giùm|dùm)(?:\s+(?:mình|tôi|em))?(?=\s)/iu, '').replace(/^\s+(?:mới\s+)?gửi(?=\s+\S)/iu, ''); // “soạn email gửi thầy Nam” → “thầy Nam”
   const cut = head.search(/\s(?:là|rằng|nội dung|với nội dung|tiêu đề|chủ đề|saying|that)(?=[\s,.:!?]|$)|[:"“”«»]/iu);
   if (cut >= 0) head = head.slice(0, cut);
   const clean = (n) => { n = String(n || '').replace(/^[\s,.;:!?]+|[\s,.;:!?]+$/g, ''); if (!n || NOT_NAME.test(n) || /^(tôi|mình|tao|tớ|me|ai|họ|nó|mọi|tin|email|thư|mail|file|tệp)$/iu.test(n.split(' ')[0]) || n.split(' ').length > 6) return null; return n; };

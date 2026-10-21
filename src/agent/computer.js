@@ -369,4 +369,42 @@ async function systemAction(action, { platform = process.platform, keyTap = null
   return SYS[action].label;
 }
 
-module.exports = { PS_VOLUME, lnkTarget, winDirs, psEncoded, PS_APPS, deepApps, parseWinApps, macSpotlight, mergeApps, exeFromIcon, checkCommand, listApps, findApp, score, fold, expandPath, knownFolder, EXEC_EXT, runCommand, runningApps, matchRunning, closeApp, systemAction, SYS, sysAsked, WIN_BUILTIN, PROTECTED, BLOCK };
+// B66a (máy thật: open_app('Gmail') bị tìm như ứng dụng cài trên máy): ứng dụng WEB → trước hết tìm cửa sổ/thẻ trình duyệt đang mở có tên đó,
+// không có thì mở đúng địa chỉ trên trình duyệt. web: true = chỉ có bản web (không tìm ứng dụng cài, trừ khi có ứng dụng trùng tên hẳn, vd. PWA “Gmail”);
+// web: false = thường có bản cài (Messenger, Teams, Telegram…) → thử ứng dụng cài trước, không được mới mở bản web.
+const WEB_APPS = [
+  [/^(?:gmail|g mail|google mail|hop thu gmail)$/, 'Gmail', 'https://mail.google.com/', true],
+  [/^(?:outlook web|outlook online|outlook\.com|hotmail|outlook live)$/, 'Outlook', 'https://outlook.live.com/mail/', true],
+  [/^(?:outlook)$/, 'Outlook', 'https://outlook.live.com/mail/', false],
+  [/^(?:messenger web|facebook messenger web)$/, 'Messenger', 'https://www.messenger.com/', true],
+  [/^(?:messenger|facebook messenger)$/, 'Messenger', 'https://www.messenger.com/', false],
+  [/^(?:facebook|fb|face book)$/, 'Facebook', 'https://www.facebook.com/', true],
+  [/^(?:youtube|you tube|yt)$/, 'YouTube', 'https://www.youtube.com/', true],
+  [/^(?:google docs|docs|google tai lieu|tai lieu google)$/, 'Google Docs', 'https://docs.google.com/document/', true],
+  [/^(?:google sheets|sheets|google trang tinh)$/, 'Google Sheets', 'https://docs.google.com/spreadsheets/', true],
+  [/^(?:google slides|slides|google trang trinh bay)$/, 'Google Slides', 'https://docs.google.com/presentation/', true],
+  [/^(?:google drive|drive)$/, 'Google Drive', 'https://drive.google.com/', true],
+  [/^(?:google classroom|classroom)$/, 'Google Classroom', 'https://classroom.google.com/', true],
+  [/^(?:google calendar|lich google)$/, 'Google Calendar', 'https://calendar.google.com/', true],
+  [/^(?:google meet|meet)$/, 'Google Meet', 'https://meet.google.com/', true],
+  [/^(?:google|google search)$/, 'Google', 'https://www.google.com/', true],
+  [/^(?:zalo web)$/, 'Zalo', 'https://chat.zalo.me/', true],
+  [/^(?:telegram web)$/, 'Telegram', 'https://web.telegram.org/', true],
+  [/^(?:telegram)$/, 'Telegram', 'https://web.telegram.org/', false],
+  [/^(?:whatsapp web)$/, 'WhatsApp', 'https://web.whatsapp.com/', true],
+  [/^(?:whatsapp)$/, 'WhatsApp', 'https://web.whatsapp.com/', false],
+  [/^(?:teams web)$/, 'Microsoft Teams', 'https://teams.microsoft.com/', true],
+  [/^(?:instagram|insta)$/, 'Instagram', 'https://www.instagram.com/', true],
+  [/^(?:tiktok|tik tok)$/, 'TikTok', 'https://www.tiktok.com/', true],
+  [/^(?:shopee)$/, 'Shopee', 'https://shopee.vn/', true],
+  [/^(?:chatgpt|chat gpt)$/, 'ChatGPT', 'https://chatgpt.com/', true],
+  [/^(?:gemini|google gemini)$/, 'Gemini', 'https://gemini.google.com/', true],
+  [/^(?:canva)$/, 'Canva', 'https://www.canva.com/', true],
+];
+function webApp(name) {
+  const f = fold(String(name || '')).replace(/[^\p{L}\p{N}.]+/gu, ' ').replace(/\b(?:trang|web ?site|app|ung dung|tren trinh duyet|trinh duyet|mo)\b/g, ' ').replace(/\s+/g, ' ').trim();
+  const r = WEB_APPS.find(([re]) => re.test(f)); if (r) return { name: r[1], url: r[2], webOnly: r[3] };
+  const nw = f.replace(/\b(?:web|online)\b/g, ' ').replace(/\s+/g, ' ').trim(); // “Gmail web”, “YouTube online” → bản web
+  const r2 = nw !== f && WEB_APPS.find(([re]) => re.test(nw)); return r2 ? { name: r2[1], url: r2[2], webOnly: true } : null;
+}
+module.exports = { WEB_APPS, webApp, PS_VOLUME, lnkTarget, winDirs, psEncoded, PS_APPS, deepApps, parseWinApps, macSpotlight, mergeApps, exeFromIcon, checkCommand, listApps, findApp, score, fold, expandPath, knownFolder, EXEC_EXT, runCommand, runningApps, matchRunning, closeApp, systemAction, SYS, sysAsked, WIN_BUILTIN, PROTECTED, BLOCK };

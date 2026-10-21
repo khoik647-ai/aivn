@@ -1,8 +1,8 @@
 // Chính sách an toàn khi AIVN AGENT điều khiển máy (không phụ thuộc Electron, để kiểm thử)
 // thao tác "quan trọng": luôn hỏi người dùng trước, kể cả ở chế độ "Chỉ hỏi bước quan trọng"
 const RISKY_NAME = /(gửi|send|thanh\s*toán|pay(ment)?|mua( ngay)?|buy|đặt\s*(hàng|mua)|order|chuyển\s*(khoản|tiền)|transfer|xo[áa]|delete|remove|gỡ\s*(bỏ|cài)|uninstall|thùng rác|trash|nộp|submit|đăng\s*(bài|tin|lên)?\b|post|publish|chia sẻ|share|xác\s*nhận|confirm|đồng\s*ý|accept|agree|đăng\s*ký|sign\s*up|checkout|ký|sign|cài\s*đặt\s*(lại|gốc)|reset|format|đăng\s*xuất|log\s*out|sign\s*out)/i;
-const ACT_LABEL = { click: 'Bấm', double_click: 'Bấm đúp', right_click: 'Bấm chuột phải', type_text: 'Gõ chữ', hotkey: 'Bấm phím', scroll: 'Cuộn', wait: 'Chờ', focus_window: 'Chuyển cửa sổ' };
-const ALIASES = { type: 'type_text', key: 'hotkey', keys: 'hotkey', press: 'hotkey', doubleclick: 'double_click', rightclick: 'right_click', focus: 'focus_window', switch_window: 'focus_window' };
+const ACT_LABEL = { click: 'Bấm', double_click: 'Bấm đúp', right_click: 'Bấm chuột phải', type_text: 'Gõ chữ', hotkey: 'Bấm phím', scroll: 'Cuộn', wait: 'Chờ', focus_window: 'Chuyển cửa sổ', open_chat: 'Mở cuộc trò chuyện' };
+const ALIASES = { type: 'type_text', key: 'hotkey', keys: 'hotkey', press: 'hotkey', doubleclick: 'double_click', rightclick: 'right_click', focus: 'focus_window', switch_window: 'focus_window', openchat: 'open_chat', open_conversation: 'open_chat' };
 
 function riskOf(action, { el, query, text, keys, lastAction } = {}) {
   const name = [el && el.name, query].filter(Boolean).join(' ');

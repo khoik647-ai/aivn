@@ -83,7 +83,7 @@ test('Chat: không được gõ tin vào cuộc trò chuyện đang mở sẵn k
 });
 test('Chat: desktop-agent nối chatGate trước khi gõ và đánh dấu đã mở sau khi bấm kết quả tìm kiếm', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src/desktop-agent.js'), 'utf8');
-  assert.ok(src.indexOf('SV.chatGate(') > 0 && src.indexOf('SV.chatGate(') < src.indexOf('const risk = searchTyping ? null : riskOf('), 'chặn trước khi hỏi/gõ');
+  assert.ok(src.indexOf('SV.chatGate(') > 0 && src.indexOf('SV.chatGate(') < src.indexOf('const risk = gate.send ? '), 'chặn trước khi hỏi/gõ');
   assert.match(src, /s\.chatOpen = SV\.nameKey\(rcp\)/);
   assert.match(src, /SV\.SEEN_QUESTION/); assert.match(src, /regions: SV\.regionsOf\(o2\.obs\)/);
 });

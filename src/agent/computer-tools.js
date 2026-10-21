@@ -21,7 +21,7 @@ const DEFS = {
   run_command: { label: 'Chạy lệnh', icon: '⌨️', description: 'Chạy một lệnh terminal (Windows: PowerShell; macOS: zsh/sh). LUÔN hiện thẻ để người dùng duyệt trước khi chạy; lệnh nguy hiểm bị chặn. Tối đa 60 giây.', parameters: O({ command: S('Lệnh cần chạy, một dòng'), cwd: S('(Không bắt buộc) thư mục chạy lệnh; mặc định thư mục cá nhân') }, ['command']) },
   system_action: { label: 'Thao tác hệ thống', icon: '🖥', description: 'lock: khoá màn hình; sleep: cho máy ngủ; shutdown/restart: tắt/khởi động lại (Windows chờ 30 giây); volume_up/volume_down/mute/volume_set (level 0–100): âm lượng; open_settings: mở Cài đặt; show_desktop: thu nhỏ mọi cửa sổ; empty_trash: dọn Thùng rác.', parameters: O({ action: { type: 'string', enum: Object.keys(C.SYS) }, level: { type: 'integer' } }, ['action']) },
   screen_look: { label: 'Quan sát màn hình', icon: '👁', description: 'Quan sát cửa sổ đang dùng: trả danh sách phần tử giao diện có id [eN] (loại, tên, giá trị, vị trí x,y thang 0-1000) lấy từ cây giao diện của hệ điều hành và chữ đọc được (OCR). Gọi trước khi thao tác bằng screen_act. window: tên cửa sổ/ứng dụng cần chuyển tới trước khi quan sát; query: lọc phần tử theo chữ.', parameters: O({ window: S('(Không bắt buộc) tên cửa sổ hoặc ứng dụng, vd. "Zalo"'), query: S('(Không bắt buộc) chữ cần tìm, vd. "Trần Quỳnh Anh"'), question: S('(Không bắt buộc) câu hỏi cho mô hình nhìn ảnh, nếu có') }, []) },
-  screen_act: { label: 'Thao tác màn hình', icon: '🖱', description: 'Làm một thao tác trên máy. click/double_click/right_click: element = id [eN] mới nhất hoặc tên; hoặc x,y (0-1000). type_text: dán cả đoạn một lần (tiếng Việt có dấu); kèm element thì tự bấm vào ô trước; submit: true thì bấm Enter ngay sau đó — bấm ô + gõ + Enter chỉ cần MỘT lần gọi. hotkey: keys, vd. "ctrl+f", "enter". scroll: amount âm = xuống. wait: seconds. focus_window: window. Nhiều thao tác chắc chắn liên tiếp (vd. bấm ô theo tên → gõ → Enter) có thể gộp bằng then. Kết quả đã kèm kiểm tra và danh sách phần tử MỚI. AIVN tự hỏi người dùng trước bước quan trọng (gửi, thanh toán, xoá, nộp); không bao giờ gõ mật khẩu.', parameters: O({ action: { type: 'string', enum: ['click', 'double_click', 'right_click', 'type_text', 'hotkey', 'scroll', 'wait', 'focus_window'] }, element: S('id phần tử, vd. "e12", hoặc tên, vd. "nút Gửi"'), x: { type: 'integer', description: 'Toạ độ ngang 0-1000 (khi không có element)' }, y: { type: 'integer', description: 'Toạ độ dọc 0-1000' }, text: S('Chữ cần gõ (type_text)'), submit: { type: 'boolean', description: 'type_text: true = gõ xong bấm Enter luôn (gửi tin, tìm kiếm)' }, replace: { type: 'boolean', description: 'type_text: true = xoá nội dung cũ của ô một dòng rồi mới gõ' }, keys: S('Phím (hotkey), vd. "ctrl+s"'), amount: { type: 'integer', description: 'Số nấc cuộn, âm = xuống' }, seconds: { type: 'number', description: 'Số giây chờ (wait)' }, window: S('Tên cửa sổ (focus_window)'), then: { type: 'array', maxItems: 4, description: '(Không bắt buộc) tối đa 4 thao tác làm TIẾP ngay sau thao tác này trong cùng bước (cùng dạng tham số: action, element theo TÊN — không dùng id [eN], text, submit, keys…). Dừng ngay khi một thao tác chưa có tác dụng.', items: { type: 'object' } } }, ['action']) },
+  screen_act: { label: 'Thao tác màn hình', icon: '🖱', description: 'Làm một thao tác trên máy. open_chat: LUÔN dùng trước khi nhắn tin trong app chat (Zalo, Messenger, Telegram, Teams…), window = tên app; AIVN tự tìm đúng người nhận, mở và kiểm tra — rồi chỉ type_text nội dung. click/double_click/right_click: element = id [eN] hoặc tên; hoặc x,y (0-1000). type_text: dán cả đoạn một lần (có dấu); kèm element thì tự bấm ô trước; submit: true = bấm Enter luôn — bấm ô + gõ + Enter chỉ cần MỘT lần gọi. hotkey: keys, vd. "ctrl+f". scroll: amount âm = xuống. wait: seconds. focus_window: window. Gộp thao tác chắc chắn liên tiếp bằng then. Kết quả kèm kiểm tra và phần tử MỚI. AIVN tự hỏi trước bước quan trọng (gửi, thanh toán, xoá); không gõ mật khẩu.', parameters: O({ action: { type: 'string', enum: ['open_chat', 'click', 'double_click', 'right_click', 'type_text', 'hotkey', 'scroll', 'wait', 'focus_window'] }, element: S('id phần tử, vd. "e12", hoặc tên, vd. "nút Gửi"'), x: { type: 'integer', description: 'Toạ độ ngang 0-1000 (khi không có element)' }, y: { type: 'integer', description: 'Toạ độ dọc 0-1000' }, text: S('Chữ cần gõ (type_text)'), submit: { type: 'boolean', description: 'type_text: true = gõ xong bấm Enter luôn (gửi tin, tìm kiếm)' }, replace: { type: 'boolean', description: 'type_text: true = xoá nội dung cũ của ô một dòng rồi mới gõ' }, keys: S('Phím (hotkey), vd. "ctrl+s"'), amount: { type: 'integer', description: 'Số nấc cuộn, âm = xuống' }, seconds: { type: 'number', description: 'Số giây chờ (wait)' }, window: S('Tên cửa sổ (focus_window)'), then: { type: 'array', maxItems: 4, description: '(Không bắt buộc) tối đa 4 thao tác làm TIẾP ngay sau thao tác này trong cùng bước (cùng dạng tham số: action, element theo TÊN — không dùng id [eN], text, submit, keys…). Dừng ngay khi một thao tác chưa có tác dụng.', items: { type: 'object' } } }, ['action']) },
   read_screen_text: { label: 'Đọc chữ trên màn hình', icon: '🔤', description: 'Đọc toàn bộ chữ đang hiển thị trên màn hình bằng OCR (tiếng Việt + tiếng Anh). Dùng khi cần đọc nội dung (tin nhắn, bài viết) chứ không phải để bấm.', parameters: O({}, []) },
 };
 const LEVEL1 = ['list_apps', 'open_app', 'open_path', 'open_url', 'running_apps', 'close_app', 'run_command', 'system_action'];
@@ -123,7 +123,9 @@ function createComputerTools(deps) {
   async function confirmOrRefuse(ctx, req, refusedMsg) {
     // “Tự làm không hỏi”: chỉ bỏ hỏi khi đóng đúng ứng dụng người dùng nêu tên; lệnh/tệp chạy được/thao tác hệ thống vẫn hỏi
     if (ctx.auto && req.kind === 'close-app' && require('./autonomy').skipAsk(ctx.auto, 'close-app', { name: req.name })) return null;
+    deps.log && deps.log(`[aivn agent] xin phép (đã hỏi): ${req.kind || 'tool'} · ${String(req.title || req.short || '').slice(0, 80)}`);
     const ok = await ctx.confirm({ ...req, fromAgent: true });
+    deps.log && deps.log(`[aivn agent] xin phép: người dùng ${ok ? 'CHO PHÉP' : 'TỪ CHỐI'} — ${req.kind || 'tool'} · ${String(req.short || req.title || '').slice(0, 60)}`);
     if (!ok) return { refused: true, forModel: refusedMsg, summary: 'Người dùng từ chối: ' + (req.short || req.title) };
     return null;
   }
@@ -151,7 +153,7 @@ function createComputerTools(deps) {
   const macOpenApp = (nameOrPath) => new Promise(res => require('child_process').execFile('open', ['-a', nameOrPath], { timeout: 15000 }, (e) => res(!e)));
 
   // B23 (QA lượt 3): ứng dụng/trang web đã có cửa sổ ĐANG MỞ (Outlook, Gmail, Docs…) → chuyển tới cửa sổ đó, không mở bản mới (outlook.live.com…)
-  const WEB_KEYS = [[/outlook\.(live|office)\.com|outlook\.com/i, 'outlook'], [/mail\.google\.com/i, 'gmail'], [/docs\.google\.com/i, 'google docs'], [/classroom\.google\.com/i, 'classroom'], [/teams\.(microsoft|live)\.com/i, 'teams'], [/messenger\.com|facebook\.com\/messages/i, 'messenger'], [/chat\.zalo\.me|zalo\.me/i, 'zalo'], [/web\.telegram\.org/i, 'telegram']];
+  const WEB_KEYS = [[/outlook\.(live|office)\.com|outlook\.com/i, 'outlook'], [/mail\.google\.com/i, 'gmail'], [/docs\.google\.com/i, 'google docs'], [/classroom\.google\.com/i, 'classroom'], [/teams\.(microsoft|live)\.com/i, 'teams'], [/messenger\.com|facebook\.com\/messages/i, 'messenger'], [/chat\.zalo\.me|zalo\.me/i, 'zalo'], [/web\.telegram\.org/i, 'telegram'], [/youtube\.com/i, 'youtube'], [/(?:www\.)?facebook\.com(?!\/messages)/i, 'facebook'], [/drive\.google\.com/i, 'google drive'], [/web\.whatsapp\.com/i, 'whatsapp']];
   async function openWindowFor(q) {
     if (!q || !deps.listWindows) return null; // chỉ khi main.js cấp danh sách cửa sổ (kiểm thử đơn vị không đụng cửa sổ thật)
     try { const U = require('./uitree'); const list = (await deps.listWindows()).filter(w => w && w.title && !/^aivn\b/i.test(w.title));
@@ -206,9 +208,20 @@ function createComputerTools(deps) {
         const q = String(a.name || '').trim(); if (!q) throw new CompError('Thiếu tên ứng dụng');
         { const g = await unrelated(ctx, q); if (g) return g; }
         if (a.new_window !== true) { const w = await openWindowFor(q); if (w) { if (ctx) ctx.lastOpenedApp = q; return { forModel: `“${q}” ĐÃ có cửa sổ đang mở: “${w.title}”. Đã chuyển tới cửa sổ đó (không mở thêm). Dùng screen_look để xem rồi thao tác trên cửa sổ này.`, summary: `Dùng cửa sổ đang mở “${w.title}”` }; } }
+        // B66a: ứng dụng WEB (Gmail, YouTube, Google Docs…) → cửa sổ/thẻ trình duyệt đang mở có tên đó, không có thì mở đúng địa chỉ
+        const web = C.webApp(q);
+        if (web && a.new_window !== true && C.fold(web.name) !== C.fold(q)) { const w = await openWindowFor(web.name); if (w) { if (ctx) ctx.lastOpenedApp = web.name; return { forModel: `“${web.name}” ĐÃ có cửa sổ trình duyệt đang mở: “${w.title}”. Đã chuyển tới cửa sổ đó (không mở thêm). Dùng screen_look với window = "${web.name}" rồi thao tác.`, summary: `Dùng cửa sổ “${String(w.title).slice(0, 40)}”` }; } }
+        const openWeb = async (why) => {
+          deps.log && deps.log(`[ứng dụng] “${q}” là ứng dụng web → mở ${web.url}${why ? ` (${why})` : ''}`);
+          const r = await exec0('open_url', { url: web.url, new_window: a.new_window }, ctx, s);
+          if (r && !r.refused) { if (ctx) ctx.lastOpenedApp = web.name; r.forModel = `“${web.name}” là ứng dụng web: ${r.forModel.replace(/ \(Bạn không đọc được[^)]*\)/, '')} Chờ trang tải rồi dùng screen_look với window = "${web.name}" để thao tác (không tìm ứng dụng cài trên máy).`; }
+          return r;
+        };
         const all = await apps();
         let hit = C.findApp(q, all);
         if (!hit && process.platform === 'darwin') hit = C.findApp(q, await C.macSpotlight(q));
+        // chỉ có bản web: chỉ dùng ứng dụng cài khi trùng tên hẳn (vd. ứng dụng PWA “Gmail” do Chrome tạo)
+        if (web && web.webOnly && !(hit && hit.s >= 90 && C.fold(hit.name) === C.fold(web.name))) return openWeb(hit ? `ứng dụng gần giống “${hit.name}” không phải ${web.name}` : 'không có ứng dụng cài');
         // macOS: tên gần đúng (điểm thấp) → thử "open -a <tên>" trước, vì LaunchServices biết cả ứng dụng ngoài /Applications (vd. Zalo cài từ App Store)
         if (process.platform === 'darwin' && (!hit || hit.s < 60) && await macOpenApp(q)) return { forModel: `Đã mở ứng dụng "${q}".`, summary: `Đã mở ${q}` };
         if (ctx) ctx.lastOpenedApp = q;
@@ -217,6 +230,7 @@ function createComputerTools(deps) {
           if (!hit) { const b = C.WIN_BUILTIN[q.toLowerCase()]; if (b) { if (b.endsWith(':')) await deps.openExternal(b); else { const { spawn } = require('child_process'); spawn(b, [], { detached: true, stdio: 'ignore' }).unref(); } return { forModel: `Đã mở "${q}".`, summary: `Đã mở ${q}` }; } }
           const r = await launchChain(q, hit);
           if (r.ok) { if (ctx) ctx.lastOpenedApp = r.name; return { forModel: `Đã mở ứng dụng "${r.name}" (${r.how}${r.window ? `; đã thấy cửa sổ “${r.window.title}”` : ''}).${r.tried.length ? ` Các cách trước không được: ${r.tried.join('; ')}.` : ''}`, summary: `Đã mở ${r.name}${r.window ? ' · đã thấy cửa sổ' : ''} (${r.how})`, launch: r }; }
+          if (r.tried.length && web) return openWeb('ứng dụng cài chưa mở được: ' + r.tried.join('; ').slice(0, 160));
           if (r.tried.length) {
             const near = all.map(x => ({ n: x.name, s: C.score(q.split(/\s+/)[0], x.name) })).filter(x => x.s > 0).sort((x, y) => y.s - x.s).slice(0, 8).map(x => x.n);
             throw new CompError(`Chưa mở được "${q}". Đã thử: ${r.tried.join('; ')}.${near.length ? ' Gần giống: ' + near.join(', ') + '.' : ''} Bước tiếp: nếu đã bật điều khiển màn hình, bấm nút Start rồi gõ tên ứng dụng và Enter (screen_act); nếu không, hỏi người dùng tên chính xác; đừng khẳng định ứng dụng không có trên máy.${failedNote()}`);
@@ -225,6 +239,7 @@ function createComputerTools(deps) {
           if (hit) { await openApp(hit); if (ctx) ctx.lastOpenedApp = hit.name; return { forModel: `Đã mở ứng dụng "${hit.name}".`, summary: `Đã mở ${hit.name}` }; }
           if (process.platform === 'darwin') { const r = await new Promise(res => require('child_process').execFile('open', ['-a', q], (e) => res(!e))); if (r) return { forModel: `Đã mở ứng dụng "${q}".`, summary: `Đã mở ${q}` }; }
         }
+        if (web) return openWeb('không thấy ứng dụng cài');
         const near = all.map(x => ({ n: x.name, s: C.score(q.split(/\s+/)[0], x.name) })).filter(x => x.s > 0).sort((x, y) => y.s - x.s).slice(0, 8).map(x => x.n);
         throw new CompError(`Không tìm thấy ứng dụng "${q}" sau khi đã kiểm tra ${SOURCES}.${near.length ? ' Gần giống: ' + near.join(', ') + '.' : ''} Bước tiếp: thử list_apps với từ khoá ngắn${isWin() ? '; nếu đã bật điều khiển màn hình, bấm nút Start rồi gõ tên ứng dụng và Enter' : ''}; nếu vẫn không được, hỏi người dùng tên chính xác. Không mở trang web thay thế khi chưa hỏi người dùng; đừng khẳng định ứng dụng không có trên máy.${failedNote()}`);
       }
@@ -288,6 +303,8 @@ function createComputerTools(deps) {
         const d = C.SYS[act]; if (!d) throw new CompError('Thao tác không hỗ trợ: ' + act);
         // chưa được yêu cầu đúng thao tác này → luôn hỏi (kể cả khi đã bật “Luôn cho phép” hay “Tự làm không hỏi”); thao tác nguy hiểm luôn hỏi
         const asked = C.sysAsked(act, ctx.userQuery);
+        // B66d: thu nhỏ MỌI cửa sổ chỉ khi người dùng xin — mô hình hay dùng nó như “mẹo” rồi lạc vào màn hình nền (Program Manager)
+        if (act === 'show_desktop' && !asked) throw new CompError('Không hiện màn hình chính: người dùng không yêu cầu. Thao tác này thu nhỏ mọi cửa sổ và không giúp làm việc được giao — hãy làm trực tiếp trong cửa sổ ứng dụng (focus_window / open_app).');
         if (d.confirm || !asked) { const r = await confirmOrRefuse(ctx, { kind: 'system', icon: d.danger ? '⚠️' : '🖥', title: d.label + '?', short: d.label.toLowerCase(), message: `AIVN AGENT muốn: ${d.label}.${asked ? '' : ' Bạn CHƯA yêu cầu thao tác này trong tin nhắn.'}${act === 'shutdown' || act === 'restart' ? ' Hãy lưu công việc đang làm trước.' : ''}`, okLabel: d.label, noLabel: 'Không', unrequested: !asked }, `Người dùng KHÔNG đồng ý (${d.label})${asked ? '' : ' — người dùng không hề yêu cầu thao tác này'}. Đừng thử lại; quay lại đúng việc người dùng hỏi.`); if (r) return r; }
         const lbl = await C.systemAction(act, { keyTap: deps.keyTap, openExternal: deps.openExternal, level: a.level != null ? a.level : act === 'volume_set' ? require('./sys-intent').volumeLevel(ctx.userQuery) : null });
         return { forModel: `Đã thực hiện: ${lbl}.`, summary: lbl };

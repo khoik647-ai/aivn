@@ -2143,7 +2143,7 @@ async function qaB21() {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const out = { steps: [] }; const save = () => fs.writeFileSync(path.join(dir, 'qab21.json'), JSON.stringify(out, null, 2));
   // B27 (QA lượt 4): AIVN_QA_B21_MODE=telegram — Telegram giả, “Trần Quỳnh Như” (bẫy) mở sẵn; tiêu đề cửa sổ “Telegram - <tên>”
-  const tg = process.env.AIVN_QA_B21_MODE === 'telegram'; const APP = tg ? 'Telegram' : 'Messenger';
+  const tg = ['telegram', 'openchat', 'b69'].includes(process.env.AIVN_QA_B21_MODE); const APP = tg ? 'Telegram' : 'Messenger';
   const html0 = `<!doctype html><meta charset="utf-8"><title>Nhóm Lớp K27 | Messenger</title>
 <style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:340px 1fr;height:100vh}#left{border-right:1px solid #ccc;padding:10px}#search{width:300px;font-size:22px;padding:6px}
 .it{padding:14px 8px;cursor:pointer}#right{display:flex;flex-direction:column}#hdr{font-weight:bold;padding:16px;border-bottom:1px solid #ccc}#msgs{flex:1;padding:16px}#comp{font-size:22px;margin:12px;padding:8px}</style>
@@ -2167,7 +2167,7 @@ list(''); open('Nhóm Lớp K27');
   const st = () => t.webContents.executeJavaScript('JSON.parse(JSON.stringify(S))');
   // B24: AIVN_QA_B21_MODE=draft (chạy cùng AIVN_DESK_AUTO=safe): “chỉ soạn, đừng gửi” — mọi bước rủi ro bị từ chối; gõ tên + Enter ở ô tìm kiếm vẫn phải được làm
   const draft = process.env.AIVN_QA_B21_MODE === 'draft'; out.mode = draft ? 'draft' : 'auto';
-  const q = tg ? 'Nhắn tin cho Trần Quỳnh Anh trên Telegram: "Gửi mình file slide nhé". Không cần hỏi lại.' : draft ? 'Nhắn tin cho Trần Quỳnh Anh trên Messenger: "Mai 8h họp nhóm nhé". Chỉ soạn sẵn, đừng gửi.' : 'Nhắn tin cho Trần Quỳnh Anh trên Messenger: "Mai 8h họp nhóm nhé". Không cần hỏi lại.';
+  const q = process.env.AIVN_QA_B21_MODE === 'b69' ? 'Nhắn tin cho Trần Quỳnh Anh trên Telegram: "Gửi mình file slide nhé"' : tg ? 'Nhắn tin cho Trần Quỳnh Anh trên Telegram: "Gửi mình file slide nhé". Không cần hỏi lại.' : draft ? 'Nhắn tin cho Trần Quỳnh Anh trên Messenger: "Mai 8h họp nhóm nhé". Chỉ soạn sẵn, đừng gửi.' : 'Nhắn tin cho Trần Quỳnh Anh trên Messenger: "Mai 8h họp nhóm nhé". Không cần hỏi lại.';
   const ctx = { signal: new AbortController().signal, userQuery: q, confirm: async () => true, auto: require('./agent/autonomy').forTurn({ setting: false, query: q }) };
   const d = getDesk();
   const step = async (name, a) => { qaAsks.length = 0; let r; try { r = await d.act(a, ctx); } catch (e) { r = { error: String(e.message || e) }; } await sleep(700);
@@ -2180,6 +2180,19 @@ list(''); open('Nhóm Lớp K27');
       await step('k1-type-stale', { action: 'type_text', element: idK27 || 'Nhóm Lớp K27', text: 'Trần Quỳnh Anh', submit: true });
       await step('k1-click-result', { action: 'click', element: 'Trần Quỳnh Anh' });
       await step('k1-send', { action: 'type_text', text: 'Mai 8h họp nhóm nhé', submit: true });
+      out.final = await st(); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'b69') { // B69/B70: KHÔNG có câu “không cần hỏi lại” → bước gửi phải hỏi; gửi xong không bao giờ gửi lại
+      await step('b69-open', { action: 'open_chat', window: 'Telegram' });
+      await step('b69-send', { action: 'type_text', text: 'Gửi mình file slide nhé', submit: true });
+      await step('b70-resend', { action: 'type_text', text: 'Gửi mình file slide nhé', submit: true });
+      await step('b70-enter', { action: 'hotkey', keys: 'enter' });
+      await step('b70-click-send', { action: 'click', element: 'Gửi' });
+      out.final = await st(); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'openchat') { // B65: open_chat bằng mã — mô hình đưa tên sai/nội dung, AIVN vẫn tìm đúng “Trần Quỳnh Anh”, rồi chỉ gõ nội dung
+      await step('oc-open', { action: 'open_chat', window: 'Telegram', recipient: 'Gửi mình file slide nhé' });
+      await step('oc-send', { action: 'type_text', text: 'Gửi mình file slide nhé', submit: true });
       out.final = await st(); throw null;
     }
     if (tg) { out.look0 = String((await d.look({ window: 'Telegram' }, ctx)).forModel || '').slice(0, 1500);
