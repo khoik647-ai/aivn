@@ -193,7 +193,7 @@ function createComputerTools(deps) {
     const best = C.findApp(query, all);
     return { platform: process.platform, total: all.length, ms: Date.now() - t, sources: lastDiag ? lastDiag.sources : {}, errors: lastDiag ? lastDiag.errors : [], dirs: lastDiag ? lastDiag.dirs : null, deepMs: lastDiag ? lastDiag.ms : null, query, best: best ? { name: best.name, path: best.path || null, target: best.target || null, appId: best.appId || null } : null, matches };
   }
-  return { defs: DEFS, names, exec, has: (n) => n in DEFS, CompError, scanReport, pending: async () => (deps.screen && deps.screen.pending ? deps.screen.pending() : null) };
+  return { defs: DEFS, names, exec, has: (n) => n in DEFS, CompError, scanReport, pending: async () => (deps.screen && deps.screen.pending ? deps.screen.pending() : null), searchTodo: () => (deps.screen && deps.screen.searchTodo ? deps.screen.searchTodo() : null), searchFound: () => (deps.screen && deps.screen.searchFound ? deps.screen.searchFound() : null) };
 }
 
 module.exports = { createComputerTools, DEFS: DEFS, LEVEL1, LEVEL2, CompError, isSendAction };

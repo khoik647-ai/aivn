@@ -189,7 +189,7 @@ async function renderCatalog() {
   $('#screenCards').innerHTML = comp.map(catCard).join('');
   $('#catalog').innerHTML = list.filter(c => !c.role).map(catCard).join('');
 }
-const roleTag = (c) => c.role === 'planner' ? '<span class="tag comp" title="Bộ lập kế hoạch: đọc danh sách nút/ô của cửa sổ (Trợ năng của hệ điều hành) rồi chọn bước tiếp theo. Không cần nhìn ảnh.">🧠 Lập kế hoạch</span>' : c.role === 'grounder' ? '<span class="tag comp" title="Bộ định vị (chế độ hai mô hình): khi danh sách nút/ô thiếu phần tử, mô hình này nhìn ảnh chụp màn hình và chỉ ra toạ độ cần bấm. Chạy cùng một mô hình Qwen3 lập kế hoạch.">🎯 Định vị (nhìn ảnh)</span>' : '';
+const roleTag = (c) => c.role === 'planner' ? '<span class="tag comp" title="Bộ lập kế hoạch: chọn bước tiếp theo. Mô hình này KHÔNG nhìn được màn hình — để điều khiển máy cần đi kèm một mô hình nhìn ảnh (mắt nhìn), AIVN tự nạp khi cần.">🧠 Lập kế hoạch · cần mắt nhìn</span>' : c.role === 'grounder' ? '<span class="tag comp" title="Nhìn được ảnh chụp màn hình: đọc màn hình và chỉ ra toạ độ cần bấm, kể cả với Zalo/ứng dụng Electron không cho đọc nút/ô.">🎯 Nhìn màn hình</span>' : '';
 function benchTag(c) {
   const b = c.bench; if (!c.role && !b) return '';
   const out = [];
@@ -202,7 +202,7 @@ function benchTag(c) {
 const catCard = (c) => `<div class="card" data-id="${esc(c.id)}">
     <div class="card-top"><div class="av">${esc(c.family.slice(0, 2))}</div><div><h4>${esc(c.name)}</h4><div class="sub">${esc(c.params)} tham số · ${esc(c.quant)} · ${fmtBytes(c.size + (c.mmproj ? c.mmproj.size : 0))}</div></div></div>
     <p>${esc(c.desc)}</p>
-    <div class="tags">${c.recommended ? '<span class="tag rec" title="Qwen3 gọi công cụ tốt nhất trong các mô hình vừa máy này">⭐ Gợi ý: trò chuyện &amp; công cụ</span>' : ''}${c.recScreen ? '<span class="tag rec" title="Đã qua bài đo Điểm tác vụ (≥ 7/10 và hỏi trước bước quan trọng)">⭐ Gợi ý: điều khiển máy</span>' : ''}${c.recGround ? '<span class="tag rec" title="Đã qua bài đo định vị (≥ 7/10) và vừa máy này">⭐ Gợi ý: định vị (hai mô hình)</span>' : ''}${roleTag(c)}${benchTag(c)}${fitBadge(c.fit)}${c.vision ? `<span class="tag vis" title="Tải kèm tệp thị giác ${esc(c.mmproj.file)} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán">👁 Nhìn được ảnh</span>` : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}${c.tags.filter(t => t !== 'Nhìn được ảnh' && t !== 'Điều khiển máy tính').map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
+    <div class="tags">${c.recommended ? '<span class="tag rec" title="Qwen3 gọi công cụ tốt nhất trong các mô hình vừa máy này">⭐ Gợi ý: trò chuyện &amp; công cụ</span>' : ''}${c.recScreen ? '<span class="tag rec" title="Một mô hình vừa lập kế hoạch vừa nhìn màn hình, chọn theo VRAM máy này. Nhà phát triển (Qwen) ghi: Visual Agent — Operates PC/mobile GUIs.">⭐ Gợi ý: điều khiển máy (tự nhìn màn hình)</span>' : ''}${c.recGround ? `<span class="tag rec" title="${esc('Mắt nhìn cho mô hình lập kế hoạch Qwen3, chọn theo VRAM máy này.' + (/phi thương mại/i.test(c.license || '') ? ' Lưu ý giấy phép: ' + c.license + '.' : ''))}">⭐ Gợi ý: mắt nhìn (cặp hai mô hình)</span>` : ''}${c.recPairPlanner ? '<span class="tag rec" title="Lập kế hoạch trong cặp hai mô hình — dùng kèm mắt nhìn được gợi ý.">⭐ Gợi ý: lập kế hoạch (cặp)</span>' : ''}${roleTag(c)}${benchTag(c)}${fitBadge(c.fit)}${c.vision ? `<span class="tag vis" title="Tải kèm tệp thị giác ${esc(c.mmproj.file)} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán">👁 Nhìn được ảnh</span>` : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}${c.tags.filter(t => t !== 'Nhìn được ảnh' && t !== 'Điều khiển máy tính').map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
     <div class="card-foot" data-job="${esc(jobIdFor(c.repo, c.file))}">${footHtml({ ...c, size: c.size + (c.mmproj ? c.mmproj.size : 0) }, `data-act="dl-cat" data-id="${esc(c.id)}"`, c.file)}</div>
     <button class="linkish" data-act="open-repo" data-repo="${esc(c.repo)}">Các bản lượng tử khác · ${esc(c.repo)}</button></div>`;
 
@@ -1147,12 +1147,18 @@ function paintAgentWarn(adv) {
   const rec = (adv && adv.recommended) || [];
   const recBtns = rec.map(r => `<button class="btn sm" data-rec="${esc(r.id)}" data-installed="${r.installed ? 1 : 0}">${r.installed ? 'Nạp' : 'Tải'} ${esc(r.name)}</button>`).join(' ');
   if (!state.status.loaded) { w.innerHTML = `<span>🤖 Hãy nạp một mô hình ở thanh phía trên. AIVN AGENT chạy tốt nhất với <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b>.</span>`; w.hidden = false; return; }
-  if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN AGENT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để mở ứng dụng, đọc tệp, điều khiển máy đáng tin cậy, hãy dùng <b>Qwen3 4B/8B</b>.</span> ${recBtns}`; w.hidden = false; return; }
+  if (adv && adv.tools && adv.tools.level !== 'good') { w.innerHTML = `<span>🛠 <b>${esc(adv.model)}</b>: hỗ trợ công cụ <b>${esc(adv.tools.label)}</b>. ${adv.tools.level === 'none' ? 'AIVN AGENT gần như không thao tác được với mô hình này.' : 'AIVN dùng giao thức công cụ dạng văn bản; mô hình có thể bỏ bước hoặc không gọi công cụ.'} Để gọi công cụ (mở ứng dụng, đọc tệp) đáng tin cậy, hãy dùng <b>Qwen3 4B/8B</b>; điều khiển màn hình còn cần mô hình nhìn ảnh (Qwen3-VL).</span> ${recBtns}`; w.hidden = false; return; }
   if (adv && adv.small) { w.innerHTML = `<span>⚠ <b>${esc(adv.model)}</b>${adv.params ? ` (khoảng ${String(adv.params).replace('.', ',')} tỉ tham số)` : ''} khá nhỏ cho AIVN AGENT: có thể gọi sai công cụ, bỏ bước hoặc nói đã làm khi chưa làm. Nên dùng <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b>.</span> ${recBtns}`; w.hidden = false; return; }
-  if (adv && adv.planner === false && state.settings && state.settings.agentScreen) { w.innerHTML = `<span>🖥 Điều khiển máy đang bật với <b>${esc(adv.model)}</b>. Mô hình này chưa qua bài đo Điểm tác vụ của AIVN; để bấm/gõ đáng tin cậy, dùng <b>Qwen3 4B Instruct 2507</b> hoặc <b>Qwen3 8B</b> làm mô hình chính (mô hình nhìn ảnh có thể đặt làm “Mô hình định vị” trong Cài đặt).</span> ${recBtns}`; w.hidden = false; return; }
+  if (adv && adv.eyes && adv.eyes.needed) {
+    const r = adv.eyes.rec; const busy = adv.eyes.pending && jobs && [...jobs.values()].some(j => j.catalogId === adv.eyes.pending && j.status !== 'done');
+    w.innerHTML = `<span>👁 <b>Điều khiển màn hình cần mắt nhìn.</b> <b>${esc(adv.model)}</b> chỉ đọc chữ, không nhìn được màn hình — Zalo và các ứng dụng Electron gần như không cho đọc nút/ô, nên AIVN AGENT sẽ bấm nhầm hoặc báo “không tìm thấy”. ${r ? `Nạp thêm <b>${esc(r.name)}</b> (${fmtBytes(r.size)}): AIVN tự dùng nó để nhìn ảnh chụp mỗi bước.` : ''}</span> ${r ? `<button class="btn sm primary" data-eyes="${esc(r.id)}" ${busy ? 'disabled' : ''}>${busy ? 'Đang tải mắt nhìn…' : r.installed ? '👁 Nạp thêm mắt nhìn' : '👁 Tải & nạp thêm mắt nhìn'}</button>` : ''}`;
+    w.hidden = false; return;
+  }
   w.hidden = true;
 }
 $('#agentWarn').addEventListener('click', async (e) => {
+  const ey = e.target.closest('[data-eyes]');
+  if (ey) { ey.disabled = true; try { const r = await A.agentEyes(ey.dataset.eyes); if (r.installed) toast(`Đã bật mắt nhìn: ${r.name} ✓`); else { if (r.job) paintJob(r.job); toast(`Đang tải ${r.name}. Tải xong AIVN tự dùng làm mắt nhìn.`); } } catch (err) { toast(cleanErr(err.message), true); ey.disabled = false; } refreshAgent(); return; }
   const b = e.target.closest('[data-rec]'); if (!b) return;
   if (b.dataset.installed === '1') { const c = state.catalog.find(x => x.id === b.dataset.rec) || (await A.catalog()).find(x => x.id === b.dataset.rec); await refreshModels(); const m = state.models.find(x => c && x.file.toLowerCase() === c.file.toLowerCase()); if (m) loadModel(m.id); }
   else { show('discover'); try { const j = await A.dlStart({ catalogId: b.dataset.rec }); paintJob(j); toast('Đang tải mô hình cho AIVN AGENT, xem tiến độ ở mục Đang tải'); } catch (err) { toast(cleanErr(err.message), true); } }
@@ -1262,7 +1268,7 @@ function paintComputer(c) {
   if (!c) return;
   $('#agComp').checked = c.enabled; $('#agAutoRO').checked = c.autoReadOnly; $('#agAutoRO').disabled = !c.enabled;
   $('#agScreen').checked = c.screen;
-  $('#agScreenNote').innerHTML = `AIVN AGENT tự mở ứng dụng và thao tác như bạn: đọc danh sách nút/ô của cửa sổ (Trợ năng của hệ điều hành) và chữ trên màn hình, bấm/gõ từng bước rồi kiểm tra lại. Mô hình thường (Qwen3 4B/8B) dùng được; mô hình nhìn ảnh giúp tìm phần tử khó. Luôn hỏi trước khi gửi tin nhắn, thanh toán, xoá, nộp biểu mẫu; không bao giờ gõ mật khẩu. Dừng: <b>Esc</b>, <b>${esc(c.stopKey)}</b> hoặc nút “Dừng ngay”.`;
+  $('#agScreenNote').innerHTML = `AIVN AGENT tự mở ứng dụng và thao tác như bạn: đọc danh sách nút/ô của cửa sổ (Trợ năng của hệ điều hành) và chữ trên màn hình, bấm/gõ từng bước rồi kiểm tra lại. Cần <b>nhìn được màn hình</b>: dùng mô hình nhìn ảnh (Qwen3-VL) làm mô hình chính, hoặc mô hình chữ + mắt nhìn (AIVN tự nạp mô hình nhìn ảnh đã cài). Luôn hỏi trước khi gửi tin nhắn, thanh toán, xoá, nộp biểu mẫu; không bao giờ gõ mật khẩu. Dừng: <b>Esc</b>, <b>${esc(c.stopKey)}</b> hoặc nút “Dừng ngay”.`;
   $('#agGrounder').innerHTML = '<option value="">Không dùng — chỉ cây giao diện + đọc chữ</option>' + (c.grounders || []).map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join(''); $('#agGrounder').value = c.grounder || '';
   $('#agScreenOpts').hidden = !c.screen; $('#agScreenMode').value = c.screenMode || 'each'; $('#agScreenBudget').value = String(c.screenBudget || 40);
   paintBench();
@@ -1381,9 +1387,9 @@ async function refreshSecurity() {
     <span>Kiểm tra thu hồi</span><b>${l.lastCheckOk ? 'lần cuối ' + new Date(l.lastCheckOk).toLocaleString('vi-VN') : 'chưa kiểm tra được'}${l.graceLeftMs != null ? ` · còn dùng ngoại tuyến ${Math.max(0, Math.floor(l.graceLeftMs / 864e5))} ngày` : ''}</b></div>
     <div class="row"><button class="btn sm" id="secRecheck">Kiểm tra lại qua Internet</button></div>`;
   const k = await A.lockInfo();
-  $('#lockState').innerHTML = k.enabled ? '🔒 Khóa ứng dụng đang <b>bật</b>.' : 'Khóa ứng dụng đang <b>tắt</b>.';
+  $('#lockState').innerHTML = k.enabled ? '🔒 Khoá ứng dụng đang <b>bật</b>.' : 'Khoá ứng dụng đang <b>tắt</b>.';
   $('#lkCur').hidden = !k.enabled; $('#lkOff').hidden = !k.enabled; $('#lkNow').hidden = !k.enabled;
-  $('#lkSave').textContent = k.enabled ? 'Đổi mật khẩu' : 'Bật Khóa ứng dụng';
+  $('#lkSave').textContent = k.enabled ? 'Đổi mật khẩu' : 'Bật Khoá ứng dụng';
   $('#lkIdle').value = String(k.idleMinutes || 0); $('#lkSleep').checked = k.lockOnSleep;
   paintAdmin(await A.adminState());
 }
@@ -1413,7 +1419,7 @@ $('#view-security').addEventListener('click', async (e) => {
   try {
     if (t.id === 'secCopyMc') { await A.copyText($('#secMachine').textContent); toast('Đã chép Mã máy ✓'); }
     if (t.id === 'secRecheck') { const r = await A.licenseCheck(); toast(r.ok ? 'Đã kiểm tra danh sách thu hồi ✓' : 'Chưa kết nối được: ' + (r.error || ''), !r.ok); refreshSecurity(); }
-    if (t.id === 'lkOff') { await A.lockDisable({ current: $('#lkCur').value }); $('#lkCur').value = ''; toast('Đã tắt Khóa ứng dụng'); refreshSecurity(); }
+    if (t.id === 'lkOff') { await A.lockDisable({ current: $('#lkCur').value }); $('#lkCur').value = ''; toast('Đã tắt Khoá ứng dụng'); refreshSecurity(); }
     if (t.id === 'lkNow') await A.lockNow();
     if (t.id === 'admImport') { const r = await A.adminImport({ pass: $('#admNewPass').value }); if (!r.canceled) toast('Đã nhập khoá quản trị ✓'); paintAdmin(await A.adminState()); }
     if (t.id === 'admForget') { if (await modalAsk({ icon: '⚠️', title: 'Gỡ khoá quản trị khỏi máy này?', message: 'Bản mã hoá của khoá riêng trên máy này sẽ bị xoá. Hãy chắc chắn bạn còn giữ tệp aivn-admin-key.json ở nơi an toàn.', okLabel: 'Gỡ khoá', noLabel: 'Huỷ' })) paintAdmin(await A.adminForget()); }
@@ -1434,7 +1440,7 @@ async function doRevoke(id, name) {
 $('#view-security').addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
-    if (e.target.id === 'lockForm') { await A.lockSet({ password: $('#lkNew').value, confirm: $('#lkNew2').value, current: $('#lkCur').value }); for (const i of ['#lkNew', '#lkNew2', '#lkCur']) $(i).value = ''; toast('Đã bật Khóa ứng dụng ✓'); refreshSecurity(); }
+    if (e.target.id === 'lockForm') { await A.lockSet({ password: $('#lkNew').value, confirm: $('#lkNew2').value, current: $('#lkCur').value }); for (const i of ['#lkNew', '#lkNew2', '#lkCur']) $(i).value = ''; toast('Đã bật Khoá ứng dụng ✓'); refreshSecurity(); }
     if (e.target.id === 'admUnlockForm') paintAdmin(await A.adminUnlock($('#admPass').value));
     if (e.target.id === 'admIssueForm') {
       const r = await A.adminIssue({ name: $('#admName').value, machineCode: $('#admMc').value, days: $('#admDays').value || null });
@@ -1608,3 +1614,5 @@ document.addEventListener('click', async (e) => {
   } catch (err) { toast(cleanErr(err.message), true); }
   b.disabled = false; b.textContent = 'Tăng ngữ cảnh';
 });
+// tải xong mắt nhìn: AIVN tự đặt làm mô hình định vị (main) — làm mới biểu ngữ AIVN AGENT
+A.onDlDone(() => setTimeout(() => { if (typeof refreshAgent === 'function') refreshAgent().catch(() => {}); }, 800));
