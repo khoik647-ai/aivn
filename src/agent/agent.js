@@ -685,6 +685,11 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       const prevA_t = prevA ? (typeof prevA.content === 'string' ? prevA.content : '') : '';
       if (compOn && SVq.ASKED_WHO.test(prevA_t.trim()) && query.trim().length <= 80) {
         const prevTask = [...messages].slice(0, -1).reverse().filter(m => m.role === 'user' && typeof m.content === 'string').map(m => m.content)[0];
+        // B75: “không / thôi, huỷ đi / no / 取消” = huỷ việc (không làm lại, không điều khiển máy); câu không giống tên → hỏi lại
+        if (prevTask && SVq.cancelWho(query)) { deps.log && deps.log(`[aivn agent] trả lời “Gửi cho ai?”: "${query.slice(0, 40)}" → HUỶ việc, không làm gì`);
+          return { text: SVq.CANCELLED_WHO, steps: [], usage: {}, finishReason: 'stop', urls: [], memories: [], tools: names, warning: null, outcome: 'done', cancelled: true }; }
+        if (prevTask && SVq.unclearWho(query)) { deps.log && deps.log(`[aivn agent] trả lời “Gửi cho ai?”: "${query.slice(0, 40)}" không giống tên người nhận → hỏi lại`);
+          return { text: SVq.askWho(), steps: [], usage: {}, finishReason: 'stop', urls: [], memories: [], tools: names, warning: null, asked: 'recipient', outcome: 'asked_user' }; }
         if (prevTask) { const nq = SVq.answerWho(prevTask, query); deps.log && deps.log(`[aivn agent] trả lời “Gửi cho ai?”: "${query.slice(0, 40)}" → làm lại việc trước`);
           messages = [...messages.slice(0, -1), { ...lastUser, content: `${query}\n\n(Việc cần làm ngay bây giờ, bằng công cụ: “${nq}”)` }]; query = nq; } } }
     // câu nối tiếp ("tôi muốn hãy làm cho tôi"): lấy việc cần làm từ câu yêu cầu trước của người dùng

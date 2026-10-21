@@ -2121,6 +2121,7 @@
     "Đã huỷ": "已取消",
     "Đã huỷ chuyển mô hình.": "已取消移动模型。",
     "Đã huỷ chép lời.": "已取消转写。",
+    "Đã huỷ — mình không gửi gì cả.": "已取消——我没有发送任何内容。",
     "Đã khôi phục tham số nạp mặc định": "已恢复默认加载参数",
     "Đã kiểm chứng": "已验证",
     "Đã kiểm chứng (AIVN tự chạy thử, có trang kết quả) ·": "已验证（AIVN 实际试运行，附结果页） ·",

@@ -2121,6 +2121,7 @@
     "Đã huỷ": "Cancelled",
     "Đã huỷ chuyển mô hình.": "Model move canceled.",
     "Đã huỷ chép lời.": "Transcription cancelled.",
+    "Đã huỷ — mình không gửi gì cả.": "Cancelled — I didn't send anything.",
     "Đã khôi phục tham số nạp mặc định": "Default load parameters restored",
     "Đã kiểm chứng": "Verified",
     "Đã kiểm chứng (AIVN tự chạy thử, có trang kết quả) ·": "Verified (AIVN test-ran it, with a results page) ·",
