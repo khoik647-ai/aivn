@@ -355,7 +355,7 @@ const CATALOG = [
   "computer": true,
   "toolLevel": "good",
   "screenPriority": 6,
-  "grounding": "qwen25vl",
+  "grounding": "holo",
   "computerNote": "Đã kiểm tra 0.14.3: gọi open_app thật; vị trí nút trả trong câu, AIVN tự tách toạ độ."
  },
  {
@@ -880,7 +880,7 @@ const CATALOG = [
   "vision": true,
   "desc": "Mô hình chuyên tìm vị trí nút, ô, mục trên ảnh chụp màn hình (dựa trên Qwen2.5-VL 7B). Dùng làm “mắt nhìn” cho cặp điều khiển máy.",
   "computer": true,
-  "grounding": "qwen25vl",
+  "grounding": "holo",
   "screenPriority": 5
  },
  {
@@ -904,7 +904,7 @@ const CATALOG = [
   "vision": true,
   "desc": "Mô hình định vị phần tử giao diện của Ant Group (dựa trên Qwen2.5-VL 7B), chỉ dùng ảnh chụp màn hình.",
   "computer": true,
-  "grounding": "qwen25vl",
+  "grounding": "venus",
   "screenPriority": 4
  }
 ];

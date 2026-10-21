@@ -93,11 +93,11 @@ async function runGroundBench(deps) {
     for (const [q, sel] of GROUND_TARGETS) {
       if (deps.signal && deps.signal.aborted) break;
       const r = await win.webContents.executeJavaScript(`(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return { x1: b.left, y1: b.top, x2: b.right, y2: b.bottom }; })()`);
-      const t0 = Date.now(); let box = null, err = null;
-      try { box = await deps.locate(shot, q); } catch (e) { err = e.message; }
+      const t0 = Date.now(); let box = null, err = null, raw = null;
+      try { const res = await deps.locate(shot, q); if (res && 'box' in res) { box = res.box; raw = res.raw || null; } else box = res; } catch (e) { err = e.message; }
       let pass = false, pt = null;
       if (box && box.found) { pt = { x: (box.x1 + box.x2) / 2 * vw[0], y: (box.y1 + box.y2) / 2 * vw[1] }; pass = pt.x >= r.x1 - 8 && pt.x <= r.x2 + 8 && pt.y >= r.y1 - 8 && pt.y <= r.y2 + 8; }
-      out.items.push({ target: q, pass, ms: Date.now() - t0, point: pt && { x: Math.round(pt.x), y: Math.round(pt.y) }, rect: { x1: Math.round(r.x1), y1: Math.round(r.y1), x2: Math.round(r.x2), y2: Math.round(r.y2) }, error: err });
+      out.items.push({ target: q, pass, ms: Date.now() - t0, point: pt && { x: Math.round(pt.x), y: Math.round(pt.y) }, rect: { x1: Math.round(r.x1), y1: Math.round(r.y1), x2: Math.round(r.x2), y2: Math.round(r.y2) }, raw, error: err });
     }
   } finally { if (!win.isDestroyed()) win.destroy(); }
   out.score = out.items.filter(i => i.pass).length; out.total = out.items.length === 10 ? 10 : out.items.length;

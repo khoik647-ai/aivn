@@ -63,3 +63,25 @@ test('điểm đo trên máy người dùng (lưu theo id tệp đã cài) hiệ
   if (coder) { const id = coder.file.replace(/-00001-of-\d{5}\.gguf$/i, '').toLowerCase();
     const r = R.annotate([{ ...coder }], { local: { [id]: { score: 3, done: 10, safety: true } }, shipped: {} }, 0); assert.strictEqual(r.list[0].bench.score, 3); }
 });
+
+test('mức "Hỗ trợ công cụ" trong Kho không mâu thuẫn với kết quả AIVN tự thử', () => {
+  const { toolSupport } = require('../src/toolsupport');
+  for (const c of CATALOG) {
+    const t = toolSupport(c).level; const tc = c.claims.filter(x => x.t === 'tools');
+    if (tc.some(x => x.k === 'x')) assert.notStrictEqual(t, 'good', `${c.id}: AIVN thử chưa đạt mà vẫn ghi Tốt`);
+    if (tc.some(x => x.k === 'v')) assert.notStrictEqual(t, 'none', `${c.id}: AIVN đã gọi được công cụ mà ghi Không`);
+  }
+});
+
+test('mô hình định vị dùng đúng câu lệnh và cách đọc toạ độ của nhà phát triển (Holo1.5, UI-Venus)', () => {
+  const SC = require('../src/screen-control');
+  for (const c of CATALOG.filter(x => x.grounding)) assert.strictEqual(SC.groundingFamily(c.file), c.grounding, c.id);
+  assert.strictEqual(SC.groundingFamily('Holo1.5-7B.Q4_K_M.gguf'), 'holo');
+  assert.strictEqual(SC.groundingFamily('UI-Venus-Ground-7B.Q4_K_M.gguf'), 'venus');
+  assert.match(SC.LOCATE_PROMPT('nút Gửi', 980, 700, 'holo'), /^Localize an element on the GUI image according to the provided target and output a click position\.\n \* You must output a valid JSON following the format: \{"x": int, "y": int\}\n Your target is:\nnút Gửi$/);
+  assert.strictEqual(SC.LOCATE_PROMPT('nút Gửi', 980, 700, 'venus'), 'Outline the position corresponding to the instruction: nút Gửi. The output should be only [x1,y1,x2,y2].');
+  const W = 980, H = 700;
+  const v = SC.parseBox('[100,200,300,240]', W, H, { coords: 'pixel' }); assert.ok(v && v.found); assert.ok(Math.abs(v.x1 - 100 / W) < 1e-9 && Math.abs(v.y2 - 240 / H) < 1e-9);
+  const h = SC.parseBox('{"x": 490, "y": 350}', W, H, { coords: 'pixel' }); assert.ok(h && h.found); assert.ok(Math.abs((h.x1 + h.x2) / 2 - 0.5) < 1e-9 && Math.abs((h.y1 + h.y2) / 2 - 0.5) < 1e-9);
+  const k = SC.parseBox('Click(490, 350)', W, H, { coords: 'pixel' }); assert.ok(k && k.found && Math.abs((k.x1 + k.x2) / 2 - 0.5) < 1e-9);
+});

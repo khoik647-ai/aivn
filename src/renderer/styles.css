@@ -733,3 +733,12 @@ textarea.bad{border-color:var(--danger)!important}
 .slash-pop button.on,.slash-pop button:hover{background:var(--accent-soft)}
 .slash-pop code{min-width:150px;color:var(--accent-ink)}.slash-pop span{color:var(--muted)}
 #promptModal input{width:100%;padding:9px 12px;font-size:14px}
+
+/* 0.16 — nhãn khả năng có nguồn */
+button.tag{font:inherit;font-size:11px;background:none;cursor:pointer}
+.tags.claims{margin-top:6px}
+.tag.claim-v{border-color:var(--ok-line);color:var(--ok)}
+.tag.claim-d{border-style:dashed}
+.tag.claim-x{border-color:var(--warm-line);color:var(--warm)}
+.tag.claim:hover,.tag.vis.claim-v:hover,.tag.vis.claim-d:hover{text-decoration:underline}
+.claim-legend b{font-weight:700}

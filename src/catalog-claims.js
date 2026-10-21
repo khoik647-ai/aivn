@@ -62,7 +62,7 @@ const CLAIMS = {
     d('screen', S.qvl3_8, 'Visual Agent: Operates PC/mobile GUIs—recognizes elements, understands functions, invokes tools, completes tasks')],
   'qwen2.5-vl-3b-instruct-q4_k_m': [v('vision', 'v0143-nhin-anh', 'Đọc đúng chữ và màu trên ảnh thử.'), v('gui', 'v0143-nhin-anh', 'Chỉ đúng nút Gửi trên ảnh chụp Zalo.'), v('tools', 'v0143-nhin-anh', 'Mở được Zalo bằng công cụ.'),
     d('screen', S.qvl25_3, 'capable of computer use and phone use')],
-  'holo1.5-3b-q4_k_m': [v('vision', 'v0143-nhin-anh', 'Đọc đúng chữ và màu trên ảnh thử.'), d('gui', S.holo3, 'Holo1.5 models excel at user interface (UI) localization')],
+  'holo1.5-3b-q4_k_m': [v('vision', 'v0143-nhin-anh', 'Đọc đúng chữ và màu trên ảnh thử.'), v('tools', 'v0143-nhin-anh', 'Mở được Zalo bằng công cụ.'), d('gui', S.holo3, 'Holo1.5 models excel at user interface (UI) localization')],
   'qwen2.5-vl-7b-instruct-q4_k_m': [v('vision', 'v0143-nhin-anh', 'Đọc đúng chữ và màu trên ảnh thử.'), v('gui', 'v0143-nhin-anh', 'Chỉ đúng nút Gửi trên ảnh chụp Zalo.'), x('tools', 'v0143-nhin-anh', 'Từ chối gọi công cụ mở ứng dụng.'),
     d('screen', S.qvl25_7, 'capable of computer use and phone use')],
   'ui-tars-1.5-7b-q4_k_m': [v('vision', 'v0143-nhin-anh', 'Đọc đúng chữ và màu trên ảnh thử.'), v('gui', 'v0143-nhin-anh', 'Chỉ đúng nút Gửi trên ảnh chụp Zalo.'), x('tools', 'v0143-nhin-anh', 'Không gọi được công cụ mở ứng dụng.'),

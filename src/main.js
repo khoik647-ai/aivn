@@ -1389,7 +1389,7 @@ async function runGroundingBench(id) {
   const AB = require('./agent-bench'); const SC = require('./screen-control');
   const g = await getGrounder(id); if (!g) throw new Error('Không nạp được mô hình định vị (cần mô hình nhìn ảnh đã tải kèm tệp thị giác).');
   const fi = SC.familyInfo(g.id);
-  const r = await AB.runGroundBench({ BrowserWindow, modelId: id, align: fi.align, locate: async (shot, q) => (await SC.locate(g.engine, shot, q, { modelId: g.id })).box });
+  const r = await AB.runGroundBench({ BrowserWindow, modelId: id, align: fi.align, locate: async (shot, q) => { const r = await SC.locate(g.engine, shot, q, { modelId: g.id }); return { box: r.box, raw: r.raw }; } });
   let all = {}; try { all = JSON.parse(fs.readFileSync(BENCH_FILE(), 'utf8')); } catch {}
   all.models = all.models || {}; all.models[id] = { ...(all.models[id] || {}), grounding: { score: r.score, total: r.total, seconds: r.seconds, date: r.started } };
   fs.writeFileSync(BENCH_FILE(), JSON.stringify(all, null, 2));

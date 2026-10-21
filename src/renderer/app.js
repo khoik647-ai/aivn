@@ -385,10 +385,29 @@ function benchTag(c) {
   else if (c.role === 'grounder') out.push('<span class="tag bench" title="Chưa đo trên máy nào; chưa được gắn nhãn Gợi ý.">Điểm định vị: chưa đo</span>');
   return out.join('');
 }
+// Nhãn khả năng có nguồn (src/catalog-claims.js): ✓ AIVN đã tự kiểm chứng · ⓘ theo lời nhà phát triển · ⚠ AIVN thử chưa đạt
+const CLAIM_MARK = { v: '✓', d: 'ⓘ', x: '⚠' };
+const srcHost = (u) => { try { const h = new URL(u).hostname.replace(/^www\./, ''); return /verified\.md/.test(u) ? 'docs/verified.md' : h; } catch { return u; } };
+function claimTitle(cl) {
+  const body = cl.k === 'd' ? `Nhà phát triển ghi: “${cl.q}”` : cl.note || '';
+  return `${cl.kindLabel}: ${cl.label}. ${body} — Nguồn: ${srcHost(cl.src)} (bấm để mở)`;
+}
+const claimChip = (cl) => `<button class="tag claim claim-${cl.k}" data-act="open-hf" data-url="${esc(cl.src)}" title="${esc(claimTitle(cl))}"><b>${CLAIM_MARK[cl.k]}</b> ${esc(cl.label)}</button>`;
+function claimsRow(c) {
+  const list = (c.claims || []).filter(cl => !(cl.t === 'vision' && c.vision)).sort((a, b) => 'vdx'.indexOf(a.k) - 'vdx'.indexOf(b.k));
+  return list.length ? `<div class="tags claims" aria-label="Khả năng (có nguồn)">${list.map(claimChip).join('')}</div>` : '';
+}
+function visTag(c) {
+  const cl = (c.claims || []).find(x => x.t === 'vision');
+  const base = `Tải kèm tệp thị giác ${c.mmproj.file} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán.`;
+  return cl ? `<button class="tag vis claim-${cl.k}" data-act="open-hf" data-url="${esc(cl.src)}" title="${esc(base + ' ' + claimTitle(cl))}">👁 ${CLAIM_MARK[cl.k]} Nhìn được ảnh</button>`
+    : `<span class="tag vis" title="${esc(base)}">👁 Nhìn được ảnh</span>`;
+}
 const catCard = (c) => `<div class="card" data-id="${esc(c.id)}">
     <div class="card-top"><div class="av">${esc(c.family.slice(0, 2))}</div><div><h4>${esc(c.name)}</h4><div class="sub">${esc(c.params)} tham số · ${esc(c.quant)} · ${fmtBytes(c.size + (c.mmproj ? c.mmproj.size : 0))}</div></div></div>
     <p>${esc(c.desc)}</p>
-    <div class="tags">${c.recommended ? '<span class="tag rec" title="Qwen3 gọi công cụ tốt nhất trong các mô hình vừa máy này">⭐ Gợi ý: trò chuyện &amp; công cụ</span>' : ''}${c.recScreen ? '<span class="tag rec" title="Một mô hình vừa lập kế hoạch vừa nhìn màn hình, chọn theo VRAM máy này. Nhà phát triển (Qwen) ghi: Visual Agent — Operates PC/mobile GUIs.">⭐ Gợi ý: điều khiển máy (tự nhìn màn hình)</span>' : ''}${c.recGround ? `<span class="tag rec" title="${esc('Mắt nhìn cho mô hình lập kế hoạch Qwen3, chọn theo VRAM máy này.' + (/phi thương mại/i.test(c.license || '') ? ' Lưu ý giấy phép: ' + c.license + '.' : ''))}">⭐ Gợi ý: mắt nhìn (cặp hai mô hình)</span>` : ''}${c.recPairPlanner ? '<span class="tag rec" title="Lập kế hoạch trong cặp hai mô hình — dùng kèm mắt nhìn được gợi ý.">⭐ Gợi ý: lập kế hoạch (cặp)</span>' : ''}${roleTag(c)}${benchTag(c)}${fitBadge(c.fit)}${c.vision ? `<span class="tag vis" title="Tải kèm tệp thị giác ${esc(c.mmproj.file)} (${fmtBytes(c.mmproj.size)}); mô hình xem trực tiếp ảnh bạn dán">👁 Nhìn được ảnh</span>` : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}${c.tags.filter(t => t !== 'Nhìn được ảnh' && t !== 'Điều khiển máy tính').map(t => `<span class="tag">${esc(t)}</span>`).join('')}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
+    <div class="tags">${c.recommended ? '<span class="tag rec" title="Qwen3 gọi công cụ tốt nhất trong các mô hình vừa máy này">⭐ Gợi ý: trò chuyện &amp; công cụ</span>' : ''}${c.recScreen ? '<span class="tag rec" title="Một mô hình vừa lập kế hoạch vừa nhìn màn hình, chọn theo VRAM máy này. Nhà phát triển (Qwen) ghi: Visual Agent — Operates PC/mobile GUIs.">⭐ Gợi ý: điều khiển máy (tự nhìn màn hình)</span>' : ''}${c.recGround ? `<span class="tag rec" title="${esc('Mắt nhìn cho mô hình lập kế hoạch Qwen3, chọn theo VRAM máy này.' + (/phi thương mại/i.test(c.license || '') ? ' Lưu ý giấy phép: ' + c.license + '.' : ''))}">⭐ Gợi ý: mắt nhìn (cặp hai mô hình)</span>` : ''}${c.recPairPlanner ? '<span class="tag rec" title="Lập kế hoạch trong cặp hai mô hình — dùng kèm mắt nhìn được gợi ý.">⭐ Gợi ý: lập kế hoạch (cặp)</span>' : ''}${roleTag(c)}${benchTag(c)}${fitBadge(c.fit)}${c.vision ? visTag(c) : ''}${c.tools ? `<span class="tag tools-${c.tools.level}" title="${esc(c.tools.hint)}">🛠 Hỗ trợ công cụ: ${esc(c.tools.label)}</span>` : ''}<span class="tag">${esc(c.ram)}</span><span class="tag lic" title="Giấy phép">${esc(c.license)}</span>${c.visionNote ? `<span class="tag" title="${esc(c.visionNote)}">Chỉ văn bản</span>` : ''}</div>
+    ${claimsRow(c)}
     <div class="card-foot" data-job="${esc(jobIdFor(c.repo, c.file))}">${footHtml({ ...c, size: c.size + (c.mmproj ? c.mmproj.size : 0) }, `data-act="dl-cat" data-id="${esc(c.id)}"`, c.file)}</div>
     <button class="linkish" data-act="open-repo" data-repo="${esc(c.repo)}">Các bản lượng tử khác · ${esc(c.repo)}</button></div>`;
 

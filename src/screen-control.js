@@ -47,18 +47,27 @@ function groundingFamily(id) {
   if (/ui-?tars/.test(s)) return 'uitars';
   if (/qwen2\.?5-?vl|qwen2-?vl/.test(s)) return 'qwen25vl';
   if (/qwen3-?vl/.test(s)) return 'qwen3vl';
-  if (/holo|showui|os-?atlas|gui-?actor|ui-?venus/.test(s)) return 'qwen25vl'; // đều dựa trên Qwen2.5-VL, toạ độ điểm ảnh
+  // Holo1.5 và UI-Venus-Ground dựa trên Qwen2.5-VL (toạ độ điểm ảnh) nhưng được huấn luyện với câu lệnh riêng: dùng đúng câu lệnh của nhà phát triển
+  if (/holo/.test(s)) return 'holo';
+  if (/ui-?venus/.test(s)) return 'venus';
+  if (/showui|os-?atlas|gui-?actor/.test(s)) return 'qwen25vl';
   return 'generic';
 }
 const FAMILY = {
   qwen25vl: { coords: 'pixel', align: 28 },
   uitars: { coords: 'pixel', align: 28 },
   qwen3vl: { coords: 'norm1000', align: 32 },
+  holo: { coords: 'pixel', align: 28 },
+  venus: { coords: 'pixel', align: 28 },
   generic: { coords: 'auto', align: 0 },
 };
 const familyInfo = (id) => FAMILY[groundingFamily(id)];
 const LOCATE_PROMPT = (target, W, H, fam = 'generic') => {
   if (fam === 'qwen25vl') return `Ảnh chụp màn hình rộng ${W}, cao ${H} điểm ảnh. Tìm phần tử giao diện: "${target}". Trả lời đúng MỘT dòng JSON: {"bbox_2d": [x1, y1, x2, y2], "label": "chữ trên phần tử"} với toạ độ điểm ảnh tuyệt đối trên ảnh này. Nếu không thấy: {"found": false, "why": "lý do ngắn"}.`;
+  // Holo1.5 (H Company, localization.py / tài liệu "Element localization"): trả {"x": int, "y": int} theo điểm ảnh của ảnh gửi vào
+  if (fam === 'holo') return `Localize an element on the GUI image according to the provided target and output a click position.\n * You must output a valid JSON following the format: {"x": int, "y": int}\n Your target is:\n${target}`;
+  // UI-Venus-Ground (thẻ mô hình inclusionAI): trả [x1,y1,x2,y2] theo điểm ảnh
+  if (fam === 'venus') return `Outline the position corresponding to the instruction: ${target}. The output should be only [x1,y1,x2,y2].`;
   if (fam === 'uitars') return `You are a GUI agent. Screenshot size ${W}x${H}. Task: click on "${target}". Output only one line: click(start_box='(x,y)') using absolute pixel coordinates of the screenshot. If the element is not visible output: not_found`;
   if (fam === 'qwen3vl') return `Ảnh chụp màn hình máy tính. Tìm phần tử giao diện: "${target}". Trả lời đúng MỘT dòng JSON: {"bbox_2d": [x1, y1, x2, y2], "label": "chữ trên phần tử"} với toạ độ tương đối thang 0-1000 (0,0 góc trên trái; 1000,1000 góc dưới phải). Nếu không thấy: {"found": false, "why": "lý do ngắn"}.`;
   return `Đây là ảnh chụp màn hình máy tính (rộng ${W}, cao ${H} điểm ảnh). Hãy tìm phần tử giao diện sau: "${target}".
@@ -72,6 +81,9 @@ function parseBox(text, W, H, { coords = 'auto' } = {}) {
   // UI-TARS: click(start_box='(x,y)') / '<|box_start|>(x,y)<|box_end|>' / (x1,y1,x2,y2); <point>x y</point>
   const pt = t.match(/start_box=['"]?\(?\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?:\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?))?/) || t.match(/<\|box_start\|>\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)(?:\s*,?\s*\(\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\))?/) || t.match(/<point>\s*(-?\d+(?:\.\d+)?)[\s,]+(-?\d+(?:\.\d+)?)\s*<\/point>/);
   if (pt) { const [x, y] = [+pt[1], +pt[2]]; nums = pt[3] != null ? [x, y, +pt[3], +pt[4]] : [x - 12, y - 12, x + 12, y + 12]; }
+  // mảng trần [x1,y1,x2,y2] (UI-Venus-Ground) hoặc [x,y]
+  if (!nums && !/[{]/.test(t)) { const a = t.match(/\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?:\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?))?\s*\]/);
+    if (a) { const [x, y] = [+a[1], +a[2]]; nums = a[3] != null ? [x, y, +a[3], +a[4]] : [x - 12, y - 12, x + 12, y + 12]; } }
   if (!nums) {
     const m = t.match(/\{[\s\S]*?\}(?=[^{}]*$|\s*[,\]\n])/) || t.match(/\{[\s\S]*?\}/) || (/\(\s*\d+(?:\.\d+)?\s*,\s*\d+(?:\.\d+)?\s*\)/.test(t) ? ['{}'] : null); if (!m) return null;
     try { j = JSON.parse(m[0].replace(/'/g, '"')); } catch { const m2 = t.match(/\{[^{}]*\}/); try { j = JSON.parse(m2 && m2[0]); } catch { j = { found: !/"found"\s*:\s*false/.test(t) || undefined }; if (/"found"\s*:\s*false/.test(t)) return { found: false, why: '' }; } } // JSON hỏng (dấu nháy trong câu): vẫn thử lấy điểm (x, y)
