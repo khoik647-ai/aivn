@@ -46,7 +46,7 @@ function i18nIssues(texts, lang) {
   const out = [];
   // B87: KEEP chỉ BỎ phần tên riêng rồi xét phần còn lại (trước đây bỏ cả dòng — đường dẫn …\AIVN\models làm sót “ổ C: còn trống … mô hình đang chiếm …”)
   for (const t0 of texts) { const t = String(t0).trim(); if (!t) continue; const rest = t.replace(new RegExp(KEEP.source, 'gi'), ' ').trim(); if (!rest) continue;
-    if (lang !== 'vi' && /\d,\d{1,3}\s?(?:[KMGT]?B|%|tok\/s|GHz|MHz)\b/.test(t)) out.push({ kind: 'vi-number-in-' + lang, text: t.slice(0, 160) }); // “170,42 GB” trong en/zh
+    if (lang !== 'vi' && /\d,\d{1,2}\s?(?:[KMGT]i?B\b|%|tokens?\/(?:s\b|秒)|token\/giây|tok\/s\b|GHz\b|MHz\b)/.test(t)) out.push({ kind: 'vi-number-in-' + lang, text: t.slice(0, 160) }); // “170,42 GB” trong en/zh
     if (/[\p{L}\d]::(?:\s|$)/u.test(t) && !/https?:|::\w/.test(t)) out.push({ kind: 'double-colon', text: t.slice(0, 160) }); // “drive C:: ”
     if (lang !== 'vi' && VI_CH.test(rest)) { out.push({ kind: 'vi-in-' + lang, text: t.slice(0, 160) }); if (out.length >= 60) break; continue; }
     if (/^[a-z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9_-]+){1,4}$/.test(t) && !/\.(gguf|json|csv|pdf|xlsx|png|jpg|exe|dmg|md|txt|com|vn|io|org|net|ai)$/i.test(t)) out.push({ kind: 'raw-key', text: t });
@@ -82,7 +82,7 @@ const DRIVER = String.raw`(() => { if (window.__qa) return true;
     dnd(a, b) { const s = pick(a), t = pick(b); if (!s || !t) return false; const dt = new DataTransfer(); const ev = (el, type) => el.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt })); ev(s, 'dragstart'); ev(t, 'dragenter'); ev(t, 'dragover'); ev(t, 'drop'); ev(s, 'dragend'); return true; },
     dialogs(a) { if (a) dlgQ.push(a); return dlgLog.slice(); },
     idle() { const st = typeof state !== 'undefined' ? state : null; const stop = document.querySelector('#stopBtn'); return !(st && st.generating) && !(stop && vis(stop)); },
-    texts() { const out = []; const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, { acceptNode: (n) => { const p = n.parentElement; if (!p || !n.nodeValue.trim()) return 2; if (p.closest('[data-qa-i18n-skip], .msg .body, .bubble, .md, textarea, input, select option, script, style, code, pre, .convo-title, .model-name')) return 2; return vis(p) ? 1 : 2; } }); let n; while ((n = w.nextNode()) && out.length < 4000) out.push(n.nodeValue); for (const el of document.querySelectorAll('[placeholder],[title],[aria-label]')) { if (!vis(el)) continue; for (const k of ['placeholder', 'aria-label']) { const v = el.getAttribute(k); if (v) out.push(v); } } return out; },
+    texts() { const out = []; const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, { acceptNode: (n) => { const p = n.parentElement; if (!p || !n.nodeValue.trim()) return 2; if (p.closest('[data-qa-i18n-skip], [data-noi18n], .msg .body, .bubble, .md, textarea, input, select option, script, style, code, pre, .convo-title, .model-name')) return 2; return vis(p) ? 1 : 2; } }); let n; while ((n = w.nextNode()) && out.length < 4000) out.push(n.nodeValue); for (const el of document.querySelectorAll('[placeholder],[title],[aria-label]')) { if (!vis(el)) continue; for (const k of ['placeholder', 'aria-label']) { const v = el.getAttribute(k); if (v) out.push(v); } } return out; },
     setClock(ms) { off = ms; if (window.Date === RD && ms) { const D = class extends RD { constructor(...a) { if (a.length) super(...a); else super(RD.now() + off); } static now() { return RD.now() + off; } }; window.Date = D; } return true; },
   };
   return true; })()`;

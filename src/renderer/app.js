@@ -2124,7 +2124,7 @@ async function refreshSecurity() {
   const l = await A.licenseInfo();
   $('#secLicense').innerHTML = `<h3>✅ Kích hoạt</h3>
     <div class="kv"><span>Mã máy</span><b><code id="secMachine">${esc(l.machineCode)}</code> <button class="btn sm" id="secCopyMc">Sao chép</button></b>
-    <span>Trạng thái</span><b>${l.status === 'ok' ? 'Đã kích hoạt' : esc(l.message || l.status)}${l.name ? ' · cấp cho ' + esc(l.name) : ''}</b>
+    <span>Trạng thái</span><b>${l.status === 'ok' ? 'Đã kích hoạt' : esc(l.message || l.status)}${l.name ? ` · cấp cho <span data-noi18n>${esc(l.name)}</span>` : ''}</b>
     <span>Hạn dùng</span><b>${l.expiresAt ? 'đến ' + fmtDate(l.expiresAt) : 'vĩnh viễn'}</b>
     <span>Kiểm tra thu hồi</span><b>${l.lastCheckOk ? `lần cuối ${new Date(l.lastCheckOk).toLocaleString(LOC())}` : 'chưa kiểm tra được'}${l.graceLeftMs != null ? ` · còn dùng ngoại tuyến ${Math.max(0, Math.floor(l.graceLeftMs / 864e5))} ngày` : ''}</b></div>
     <div class="row"><button class="btn sm" id="secRecheck">Kiểm tra lại qua Internet</button></div>`;

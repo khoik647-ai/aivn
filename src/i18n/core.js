@@ -77,13 +77,17 @@
       return r;
     }
     // giữ khoảng trắng đầu/cuối của nút chữ
+    // B92: số thập phân kiểu Việt (dấu phẩy) đứng trước đơn vị trong chuỗi ĐÃ dịch sang en/zh → dấu chấm (“9,2 GB VRAM” → “9.2 GB VRAM”, “~6,4 tokens/s”).
+    // Chỉ 1–2 chữ số sau dấu phẩy (không đụng “1,000 GB” kiểu nghìn của tiếng Anh)
+    const VI_DEC = /(\d),(\d{1,2})(?=\s?(?:[KMGT]i?B\b|%|tokens?\/|token\/|GHz|MHz))/g;
+    const decFix = (x) => String(x).replace(VI_DEC, '$1.$2');
     function tr(text, lang) {
       if (!lang || lang === 'vi' || text == null) return text;
       const s = String(text); const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(s);
       let t = /\n/.test(m[2]) ? null : trCore(m[2], lang, 0); // nhiều dòng → giữ ngắt dòng, dịch từng dòng
       if (t == null && /\n/.test(m[2])) { const c = C[lang]; const k = norm(m[2]); if (c && c.exact.has(k)) t = c.exact.get(k); } // nhiều dòng: chỉ nhận khoá trọn vẹn, không để mẫu {n} nuốt cả đoạn
       if (t == null) t = trSeg(m[2], lang);
-      return t == null ? s : m[1] + t + m[3];
+      return t == null ? s : m[1] + decFix(t) + m[3];
     }
     // dịch đối tượng tuỳ chọn (menu, hộp thoại, thông báo): label/title/buttonLabel/message/detail/name/buttons/submenu
     function trOpts(o, lang) {
