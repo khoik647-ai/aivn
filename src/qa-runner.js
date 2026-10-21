@@ -7,7 +7,8 @@
 // Mã thoát: 0 = done · 2 = failed/blocked · 3 = asked_user.
 const fs = require('fs'); const path = require('path');
 
-const FLAGS = { '--agent-task': 'task', '--qa-ui': 'script', '--profile': 'profile', '--model': 'model', '--out': 'out', '--shots': 'shots', '--timeout': 'timeout', '--lang': 'lang' };
+const FLAGS = { '--agent-task': 'task', '--qa-ui': 'script', '--profile': 'profile', '--model': 'model', '--out': 'out', '--shots': 'shots', '--timeout': 'timeout', '--lang': 'lang', '--qa-input-diag': 'inputDiag' };
+const BOOL = new Set(['--qa-input-diag']); // cờ không nhận giá trị
 const LANGS = ['vi', 'en', 'zh'];
 // lệnh nói rõ “chỉ soạn, đừng gửi”: lời từ chối mang lý do đó để AIVN AGENT dừng trước bước gửi (vẫn KHÔNG cho phép)
 const DRAFT_RE = /(chỉ soạn|soạn sẵn|không gửi|đừng gửi|chưa gửi|don't send|do not send|draft only|只起草|不要发送|别发送|先不要发)/iu;
@@ -20,6 +21,7 @@ function parseArgs(argv = []) {
     let k = String(argv[i]); let v;
     const eq = k.indexOf('='); if (k.startsWith('--') && eq > 0) { v = k.slice(eq + 1); k = k.slice(0, eq); }
     if (!(k in FLAGS)) continue; seen = true;
+    if (v === undefined && BOOL.has(k)) v = '1';
     if (v === undefined) { v = argv[i + 1]; if (v === undefined || String(v).startsWith('--')) v = ''; else i++; }
     a[FLAGS[k]] = String(v);
   }
@@ -39,12 +41,14 @@ function validate(a, { cwd = process.cwd() } = {}) {
 // cổng bật: AIVN_QA_MODE=1 VÀ có cờ. Trả { enabled, args, warn }
 function fromArgv(argv, env = process.env, opts) {
   const raw = parseArgs(argv); if (!raw) return { enabled: false, args: null, warn: null };
-  if (String(env.AIVN_QA_MODE || '') !== '1') return { enabled: false, args: null, warn: 'Có cờ --agent-task nhưng thiếu biến môi trường AIVN_QA_MODE=1 → bỏ qua cờ QA, mở AIVN bình thường.' };
-  const kind = raw.script != null ? 'qa-ui' : 'agent-task';
-  if (raw.script != null && raw.task != null) return { enabled: false, args: null, invalid: true, warn: 'Cờ QA không hợp lệ: chỉ dùng một trong --agent-task hoặc --qa-ui mỗi lần chạy' };
-  const v = kind === 'qa-ui' ? require('./qa-ui').validate(raw, opts) : validate(raw, opts); if (!v.ok) return { enabled: false, args: null, invalid: true, warn: `Cờ QA không hợp lệ: ${v.error}` };
+  if (String(env.AIVN_QA_MODE || '') !== '1') return { enabled: false, args: null, warn: 'Có cờ QA (--agent-task / --qa-ui / --qa-input-diag) nhưng thiếu biến môi trường AIVN_QA_MODE=1 → bỏ qua cờ QA, mở AIVN bình thường.' };
+  const kinds = [raw.task != null && 'agent-task', raw.script != null && 'qa-ui', raw.inputDiag != null && 'input-diag'].filter(Boolean);
+  if (kinds.length > 1) return { enabled: false, args: null, invalid: true, warn: 'Cờ QA không hợp lệ: chỉ dùng một trong --agent-task, --qa-ui hoặc --qa-input-diag mỗi lần chạy' };
+  const kind = kinds[0] || 'agent-task';
+  const v = validateKind(kind, raw, opts); if (!v.ok) return { enabled: false, args: null, invalid: true, warn: `Cờ QA không hợp lệ: ${v.error}` };
   return { enabled: true, kind, args: v.args, warn: null };
 }
+function validateKind(kind, raw, opts) { return kind === 'qa-ui' ? require('./qa-ui').validate(raw, opts) : kind === 'input-diag' ? require('./qa-input-diag').validate(raw, opts) : validate(raw, opts); }
 // 2b/4b/8b → Qwen3-VL Instruct đã có trên máy; còn lại: đúng id / tên tệp
 function resolveModel(want, models = []) {
   if (!want) return null; const w = String(want).toLowerCase();
@@ -130,4 +134,4 @@ async function waitResult(out, runId, ms, sleep = (t) => new Promise(r => setTim
   while (Date.now() < end) { try { const j = JSON.parse(fs.readFileSync(out, 'utf8')); if (j && j.runId === runId) return j; } catch {} await sleep(500); }
   return null;
 }
-module.exports = { parseArgs, validate, fromArgv, resolveModel, isRiskyAsk, answerFor, statusOf, exitCodeOf, run, waitResult, writeJson, DRAFT_RE };
+module.exports = { parseArgs, validate, validateKind, fromArgv, resolveModel, isRiskyAsk, answerFor, statusOf, exitCodeOf, run, waitResult, writeJson, DRAFT_RE };

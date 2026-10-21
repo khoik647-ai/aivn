@@ -205,3 +205,27 @@ Kịch bản mẫu chạy thật trong CI trên box: `test/fixtures/qa-ui/smoke.
 * `result.json` và `aivn.log` là UTF-8; `aivn.log` có BOM nên PowerShell 5.1 đọc đúng tiếng Việt.
   Đọc `result.json` bằng `Get-Content -Encoding UTF8`.
 * Trước khi in chữ ra console, đặt `[Console]::OutputEncoding = [Text.Encoding]::UTF8` để tiếng Việt không thành `?`.
+
+## `--qa-input-diag` — kiểm tra chuột/phím trên Windows thật (B62/B66)
+
+```powershell
+$env:AIVN_QA_MODE = "1"
+& "$env:LOCALAPPDATA\Programs\AIVN\AIVN.exe" --qa-input-diag --out C:\qa\diag.json
+echo $LASTEXITCODE   # 0 = mọi bước đạt · 2 = có bước hỏng (xem summary)
+```
+
+- Cùng cổng bật như trên (biến môi trường **và** cờ). Không mở cổng mạng/CDP. Có thể thêm `--profile <thư mục>` (không bắt buộc — lệnh này không đọc/ghi dữ liệu người dùng).
+- AIVN mở **cửa sổ kiểm tra riêng** (6 nút, 1 ô một dòng, 1 ô nhiều dòng) rồi **bấm/gõ thật** bằng đúng đường AIVN AGENT dùng (libnut + quy đổi DPI `toNut`). Lệnh này **có giành tiêu điểm và di chuột thật** (giống `--agent-task`): **đừng dùng chuột/bàn phím trong ~30 giây**. `win+s` sẽ mở ô tìm kiếm của Windows và `alt+tab` sẽ chuyển cửa sổ — AIVN tự bấm Esc / bấm lại vào cửa sổ kiểm tra.
+- Các phép thử:
+  - **Bấm chuột**: di chuột → chờ 0 / 50 / 120 / 300 ms → bấm, ở 2 vị trí; thêm 1 lần qua `screen-control.perform` (đúng 120 ms như AIVN AGENT). Mỗi lần ghi: toạ độ DIP, chuẩn hoá, vật lý; **WindowFromPoint trước khi bấm** (cửa sổ, cửa sổ gốc, tiêu đề, lớp, PID, tiến trình, có quyền admin không, DPI) — `pointIsOurWindow=false` nghĩa là có cửa sổ khác (lớp phủ…) che điểm bấm; cửa sổ trên cùng trước khi bấm; sự kiện cửa sổ kiểm tra nhận được và lệch bao nhiêu px so với tâm nút; sự kiện chuột ở móc cấp thấp (`injected`).
+  - **Tổ hợp phím**: `ctrl+l`, `ctrl+t`, `ctrl+f`, `ctrl+h`, `ctrl + a`, `" Ctrl + Shift + Z "`, `enter`, `up`, `home`, `delete`, `win+s`, `win + s`, `alt+tab`. Mỗi tổ hợp ghi: kết quả phân tích, dòng `sendInputExpected` (VK, mã quét, +EXTENDEDKEY mà AIVN định gửi), lỗi libnut nếu có (vd. “Invalid key flag specified.”), **từng sự kiện ở móc bàn phím cấp thấp** (`vk`, `scan`, `flags` + tên cờ `EXTENDED/INJECTED/UP/ALTDOWN` — đúng như hệ điều hành nhận) và phím cửa sổ kiểm tra nhận được. `win+…`/`alt+tab` do Windows xử lý nên “đạt” khi không lỗi và móc phím thấy VK_LWIN `0x5B` có cờ EXTENDED lúc nhấn **và** lúc nhả.
+  - **Gõ chữ**: tiếng Việt có dấu và tiếng Trung, bằng dán (cách AIVN AGENT gõ — tính đạt/hỏng) và `typeString` của libnut (chỉ để so sánh).
+- Thông tin máy: mọi màn hình (vùng, tỉ lệ, DPI của Electron và **DPI hiệu dụng/thô của Windows** theo từng màn hình), quyền admin của tiến trình chính và renderer AIVN, cửa sổ trên cùng lúc đầu/lúc cuối (+ quyền admin của nó), `focusChanges` (sau tổ hợp nào tiêu điểm bị mất về đâu).
+- Phần chỉ có trên Windows chạy bằng trình phụ PowerShell (mã C# biên dịch lúc chạy, nằm trong thư mục tạm, tự xoá). Trình phụ đặt **DPI theo từng màn hình v2** (`helper.dpiAwareness.perMonitor`) để toạ độ không bị ảo hoá. Móc phím chỉ chạy trong lúc kiểm tra và chỉ ghi **mã phím**, không ghi chữ. Nếu PowerShell bị chặn: `helper.ok=false` + lý do, các phép thử bấm/gõ vẫn chạy.
+- Đọc nhanh: `summary` (`clicks`, `keys`, `typing`, `failedClicks`, `failedKeys`, `failedTyping`, `typeStringCompare`).
+
+```powershell
+$d = Get-Content C:\qa\diag.json -Raw -Encoding UTF8 | ConvertFrom-Json
+$d.summary; $d.clicks | Select target, delayMs, ok, pointIsOurWindow, @{n='wfp';e={$_.windowFromPoint.root.process}}
+$d.keys | ? combo -like 'win*' | % { $_.combo; $_.error; $_.hook | ft vk, scan, flags, flagNames }
+```

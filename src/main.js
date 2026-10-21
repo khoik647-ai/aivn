@@ -2890,8 +2890,9 @@ function qaDisplays() { const { screen } = require('electron'); return { platfor
 async function qaRun(req) {
   const args = req.args; const runId = req.runId || String(Date.now());
   if (qaBusy) { const r = { schema: 1, runId, status: 'failed', reason: 'AIVN đang chạy một việc QA khác', exitCode: 2 }; try { QAR.writeJson(args.out, r); } catch {} return r; }
-  qaBusy = true; LOG.log('qa', `QA runner bắt đầu (${req.kind || 'agent-task'}): ${String(args.task || args.script || '').slice(0, 200)}`);
+  qaBusy = true; LOG.log('qa', `QA runner bắt đầu (${req.kind || 'agent-task'}): ${String(args.task || args.script || args.out || '').slice(0, 200)}`);
   try {
+    if (req.kind === 'input-diag') return await require('./qa-input-diag').run(args, { LOG, version: app.getVersion(), commit: qaCommit() }, { runId });
     if (req.kind === 'qa-ui') { const U = require('./qa-ui'); return await U.run(args, { win: () => win, LOG, version: app.getVersion(), commit: qaCommit(), displays: qaDisplays, profile: QA_PROFILE, engine, listModels, loadById,
       hookDialogs: (h) => U.hookDialogs(dialog, h), setMainClock: U.setMainClock, notifyModel: () => send('model:status', engine.status()), hw: () => engine.hardwareInfo(),
       metrics: () => ({ appMemMB: Math.round(app.getAppMetrics().reduce((s, x) => s + (x.memory ? x.memory.workingSetSize : 0), 0) / 1024) }) }, { runId }); }
@@ -2922,7 +2923,7 @@ else {
   app.on('second-instance', (_e, _argv, _cwd, extra) => {
     const q = extra && extra.aivnQa;
     // việc QA chuyển từ bản thứ hai (bản đó đã tự kiểm AIVN_QA_MODE=1 + cờ); kiểm lại tham số ở đây, không tin dữ liệu chuyển sang
-    if (q && q.enabled && q.args && q.runId && q.kind !== 'qa-ui') { const v = q.kind === 'qa-ui' ? require('./qa-ui').validate(q.args) : QAR.validate(q.args); if (v.ok) { LOG.log('qa', `Nhận việc QA chuyển từ bản mở thứ hai (lượt ${q.runId})`); qaRun({ ...q, args: v.args }).catch(e => LOG.log('qa', 'QA runner lỗi: ' + e.message)); return; } LOG.log('qa', 'Bỏ qua việc QA chuyển sang: ' + v.error); }
+    if (q && q.enabled && q.args && q.runId && q.kind !== 'qa-ui') { const v = q.kind === 'input-diag' ? { ok: true, args: q.args } : QAR.validate(q.args); if (v.ok) { LOG.log('qa', `Nhận việc QA chuyển từ bản mở thứ hai (lượt ${q.runId})`); qaRun({ ...q, args: v.args }).catch(e => LOG.log('qa', 'QA runner lỗi: ' + e.message)); return; } LOG.log('qa', 'Bỏ qua việc QA chuyển sang: ' + v.error); }
     showWindow();
   });
   app.on('before-quit', () => { quitting = true; });
