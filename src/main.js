@@ -1895,7 +1895,7 @@ document.getElementById('search').addEventListener('input', e => list(e.target.v
 document.getElementById('search').addEventListener('keydown', e => { if (e.key === 'Enter') { S.searches.push(e.target.value); list(e.target.value); } });
 list(''); open('Nhóm Lớp K27');
 </script>`;
-  const html = !tg ? html0 : html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm</label><input id="search"').replace('<title>Nhóm Lớp K27 | Messenger</title>', '<title>Telegram - Trần Quỳnh Như</title>').replace(/Tìm kiếm trên Messenger/g, 'Tìm kiếm')
+  const html = process.env.AIVN_QA_B21_MODE === 'k1' ? html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm trên Messenger</label><input id="search"') : !tg ? html0 : html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm</label><input id="search"').replace('<title>Nhóm Lớp K27 | Messenger</title>', '<title>Telegram - Trần Quỳnh Như</title>').replace(/Tìm kiếm trên Messenger/g, 'Tìm kiếm')
     .replace("const chats = ['Nhóm Lớp K27', 'Trần Quỳnh Anh', 'Lê Quỳnh Anh']", "const chats = ['Trần Quỳnh Như', 'Nhóm Lớp K27', 'Trần Quỳnh Anh']")
     .replace("document.title = c + ' | Messenger'", "document.title = 'Telegram - ' + c").replace("list(''); open('Nhóm Lớp K27');", "list(''); open('Trần Quỳnh Như');");
   const t = new BrowserWindow({ x: 40, y: 40, width: 1000, height: 600, show: true, title: APP, webPreferences: { contextIsolation: true } });
@@ -1909,6 +1909,15 @@ list(''); open('Nhóm Lớp K27');
   const step = async (name, a) => { qaAsks.length = 0; let r; try { r = await d.act(a, ctx); } catch (e) { r = { error: String(e.message || e) }; } await sleep(700);
     const s = await st(); out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 500), asks: qaAsks.slice(), state: s }); save(); return { r, s }; };
   try {
+    if (process.env.AIVN_QA_B21_MODE === 'k1') { // B34 (QA lượt 5, k1): bấm ô Tìm kiếm → type_text kèm id CŨ nay là chữ “Nhóm Lớp K27” → vẫn phải gõ vào ô tìm kiếm
+      const l0 = String((await d.look({ window: 'Messenger' }, ctx)).forModel || ''); out.look0 = l0.slice(0, 1500);
+      await step('k1-click-search', { action: 'click', element: 'Tìm kiếm trên Messenger' });
+      const l1 = String((await d.look({}, ctx)).forModel || ''); const idK27 = (l1.match(/\[(e\d+)\][^\n]*"Nhóm Lớp K27"/) || [])[1]; out.idK27 = idK27;
+      await step('k1-type-stale', { action: 'type_text', element: idK27 || 'Nhóm Lớp K27', text: 'Trần Quỳnh Anh', submit: true });
+      await step('k1-click-result', { action: 'click', element: 'Trần Quỳnh Anh' });
+      await step('k1-send', { action: 'type_text', text: 'Mai 8h họp nhóm nhé', submit: true });
+      out.final = await st(); throw null;
+    }
     if (tg) { out.look0 = String((await d.look({ window: 'Telegram' }, ctx)).forModel || '').slice(0, 1500);
       // đúng chuỗi của lượt t1: bấm Tìm kiếm → gõ tên + Enter → một thao tác khác → bấm kết quả theo TÊN → gõ tin
       await step('tg-before-open', { action: 'type_text', text: 'Gửi mình file slide nhé', submit: true });

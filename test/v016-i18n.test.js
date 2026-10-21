@@ -5,7 +5,7 @@ const fs = require('fs'); const os = require('os'); const path = require('path')
 const root = path.join(__dirname, '..'); const rd = (f) => fs.readFileSync(path.join(root, f), 'utf8');
 const CORE = require('../src/i18n/core'); const en = require('../src/i18n/en'); const zh = require('../src/i18n/zh');
 const X = require('../build/i18n-extract.cjs');
-const KEYS = [...require('../src/i18n/strings.json'), ...require('../src/i18n/strings-main.json'), ...require('../src/i18n/strings-data.json')];
+const KEYS = [...require('../src/i18n/strings.json'), ...require('../src/i18n/strings-main.json'), ...require('../src/i18n/strings-data.json'), ...require('../src/i18n/strings-agent.json')];
 const T = CORE.create({ en, zh });
 const ph = (s) => (String(s).match(/\{\d+\}/g) || []).sort().join(',');
 const hasX = spawnSync('sh', ['-c', 'command -v xvfb-run'], { encoding: 'utf8' }).status === 0 && fs.existsSync(path.join(root, 'node_modules/.bin/electron'));
@@ -14,7 +14,9 @@ test('danh sách khoá luôn mới: trích lại từ mã nguồn khớp strings
   const ui = X.extract(X.UI_FILES); assert.deepStrictEqual(ui, require('../src/i18n/strings.json'));
   const main = X.extractMain().filter(k => !ui.includes(k)); assert.deepStrictEqual(main, require('../src/i18n/strings-main.json'));
   const data = X.extract(X.DATA_FILES).filter(k => !ui.includes(k) && !main.includes(k)); assert.deepStrictEqual(data, require('../src/i18n/strings-data.json'));
-  assert.ok(KEYS.length > 1600, 'số khoá ' + KEYS.length);
+  const extra = require('../build/i18n-agent-patterns.json');
+  const ag = X.agentKeys(extra).filter(k => !ui.includes(k) && !main.includes(k) && !data.includes(k)); assert.deepStrictEqual(ag, require('../src/i18n/strings-agent.json'));
+  assert.ok(KEYS.length > 1800, 'số khoá ' + KEYS.length);
 });
 test('từ điển en và zh đủ mọi khoá, không rỗng, cùng chỗ thay thế {n}', () => {
   for (const [name, D] of [['en', en], ['zh', zh]]) {

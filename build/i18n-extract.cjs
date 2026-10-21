@@ -85,7 +85,28 @@ function extractMain(files = MAIN_FILES) {
 }
 // mô-đun dữ liệu mà giao diện hiển thị nguyên văn (danh mục mô hình, cấu hình mẫu, mức máy, giấy phép, mức vừa máy, hỗ trợ công cụ…)
 const DATA_FILES = ['src/catalog.js', 'src/catalog-claims.js', 'src/presets.js', 'src/perf.js', 'src/license.js', 'src/fit.js', 'src/toolsupport.js', 'src/agent-eligibility.js', 'src/recommend.js', 'src/agent-bench.js', 'src/hf.js', 'src/applock.js', 'src/updater.js', 'src/gate.js'];
-module.exports = { extract, extractMain, UI_FILES, MAIN_FILES, DATA_FILES, VI, ASCII_VI };
+// 0.16 (QA lượt 5, B33): chữ động của AIVN AGENT mà người dùng THẤY (nhãn công cụ, tóm tắt bước, cảnh báo, thẻ duyệt, câu trả lời do mã tạo) —
+// không lấy forModel (lời dành cho mô hình). Khoá: label/summary/warning/title/desc/okLabel/noLabel/short/message/check/why/text và hằng *_WARN / *_NOTE.
+const AGENT_FILES = ['src/agent/agent.js', 'src/agent/approval.js', 'src/agent/computer-tools.js', 'src/agent/computer.js', 'src/desktop-agent.js', 'src/agent/retry.js', 'src/agent/repeat.js', 'src/agent/desk-policy.js', 'src/agent/autonomy.js', 'src/agent/send-verify.js', 'src/screen-control.js', 'src/agent/compact.js', 'src/agent/scheduler.js', 'src/agent/memory.js', 'src/agent-plan.js', 'src/cloud-brain.js'];
+function extractAgent(files = AGENT_FILES) {
+  const out = new Set();
+  for (const f of files) {
+    if (!fs.existsSync(path.join(ROOT, f))) continue;
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const re = /\b(?:label|summary|warning|title|desc|okLabel|noLabel|short|message|why|reason|hint)\s*[:=]\s*|\b(?:const|let)\s+[A-Z][A-Z0-9_]*(?:WARN|NOTE|LABEL|ANSWER|MSG)\s*=\s*|\bsummary:\s*|\btext\s*=\s*(?=['`"])|\bACT_LABEL\s*=\s*|\bKIND\w*\s*=\s*/g; let m;
+    while ((m = re.exec(src))) {
+      let i = m.index + m[0].length, d = 0, st = i;
+      for (; i < src.length; i++) { const c = src[i];
+        if (c === '`' || c === '"' || c === "'") { const q = c; i++; while (i < src.length && src[i] !== q) { if (src[i] === '\\') i++; else if (q === '`' && src[i] === '$' && src[i + 1] === '{') { let k = 1; i += 2; while (i < src.length && k) { if (src[i] === '{') k++; else if (src[i] === '}') k--; i++; } i--; } i++; } continue; }
+        if (c === '(' || c === '[' || c === '{') d++; else if (c === ')' || c === ']' || c === '}') { if (d === 0) break; d--; } else if ((c === ',' || c === ';' || c === '\n') && d === 0) break; }
+      jsStrings(src.slice(st, i), out);
+    }
+  }
+  return [...out].sort();
+}
+// mẫu có chỗ thay thế dính chữ (“ứng dụng{1}”) hoặc hai chỗ liền nhau (“{0}{1}”) khớp quá rộng → bỏ; chuỗi đó dịch theo từng đoạn “ · ”, câu, “(…)”
+const agentKeys = (extra = []) => [...new Set([...extractAgent(), ...extra])].sort().filter(k => !/\p{L}\{\d+\}|\{\d+\}\{\d+\}/u.test(k));
+module.exports = { agentKeys, extractAgent, AGENT_FILES, extract, extractMain, UI_FILES, MAIN_FILES, DATA_FILES, VI, ASCII_VI };
 if (require.main === module) {
   const list = extract(UI_FILES);
   fs.writeFileSync(path.join(ROOT, 'src/i18n/strings.json'), JSON.stringify(list, null, 1) + '\n');
@@ -96,4 +117,8 @@ if (require.main === module) {
   const data = extract(DATA_FILES).filter(k => !list.includes(k) && !main.includes(k));
   fs.writeFileSync(path.join(ROOT, 'src/i18n/strings-data.json'), JSON.stringify(data, null, 1) + '\n');
   console.log(data.length, 'đoạn dữ liệu (danh mục mô hình, cấu hình mẫu…)');
+  const extra = JSON.parse(fs.readFileSync(path.join(__dirname, 'i18n-agent-patterns.json'), 'utf8')); // mẫu ghép câu của bước màn hình (desktop-agent describeAct, loại phần tử)
+  const ag = agentKeys(extra).filter(k => !list.includes(k) && !main.includes(k) && !data.includes(k));
+  fs.writeFileSync(path.join(ROOT, 'src/i18n/strings-agent.json'), JSON.stringify(ag, null, 1) + '\n');
+  console.log(ag.length, 'đoạn chữ động của AIVN AGENT (nhãn, tóm tắt bước, cảnh báo, thẻ duyệt)');
 }

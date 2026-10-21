@@ -23,12 +23,15 @@ const STAND_RE = new RegExp([
   String.raw`\b(?:don'?t|do not|no need to) (?:ask|confirm)\b`, String.raw`\bwithout (?:asking|confirm(?:ation)?)\b`,
 ].join('|'));
 // câu bắt buộc hỏi trước khi gửi (thắng mọi thứ)
-const ASK_SEND_RE = /\bhoi (truoc|lai|y kien)? ?(truoc )?khi (gui|nhan)\b|\b(cho|de) (toi|minh|em) (xem|duyet|kiem tra) (truoc|lai) (khi|roi) (gui|nhan)\b|\bdung gui (voi|ngay|luon)?\b|\bchi soan( san)?\b|\bask (me )?before sending\b/;
+const ASK_SEND_RE = /\bhoi (truoc|lai|y kien)? ?(truoc )?khi (gui|nhan)\b|\b(cho|de) (toi|minh|em) (xem|duyet|kiem tra) (truoc|lai) (khi|roi) (gui|nhan)\b|\bdung gui (voi|ngay|luon)?\b|\bchi soan( san)?\b|\bask (me )?(before sending|first)\b|\bcheck with me (before|first)\b/;
 // chữ trong ngoặc kép người dùng đã nêu
 function quoted(query) { const out = []; const re = /["“”«»'‘’]([^"“”«»'‘’]{1,500})["“”«»'‘’]/g; let m; while ((m = re.exec(String(query || '')))) if (m[1].trim()) out.push(m[1].trim()); return out; }
 
-function standing(query) { return STAND_RE.test(fold(query)); }
-function askBeforeSend(query) { return ASK_SEND_RE.test(fold(query)); }
+// B32 (QA lượt 5): câu tiếng Trung (giao diện zh hướng dẫn “无需再问” / “发送前询问”)
+const STAND_ZH = /(?:无需|无须|不用|不必|不需要|别|不要)再?(?:询问|问|确认|请示)(?:我|了)?(?=$|[，。！；,.!;\s吧啦])|直接(?:发送?|做|执行|操作)(?:吧|就行|即可)?(?=$|[，。！；,.!;\s])/u;
+const ASK_ZH = /(?:发送?(?:之|以)?前|发出前)(?:先)?(?:询问|问我?|确认|让我(?:看|确认))|先问(?:我)?再发|(?:只|仅)(?:写|起草|拟)(?:好)?(?:草稿)?(?:，|,)?\s*(?:不要|别|先不)发|(?:不要|别|先别|先不要)发(?:送|出)?(?!现)/u;
+function standing(query) { return STAND_RE.test(fold(query)) || STAND_ZH.test(String(query || '')); }
+function askBeforeSend(query) { return ASK_SEND_RE.test(fold(query)) || ASK_ZH.test(String(query || '')); }
 // nội dung sắp gửi có đúng là tin người dùng đã nêu trong yêu cầu không (nguyên văn trong ngoặc, hoặc nằm nguyên trong câu yêu cầu)
 function namedMessage(query, text) {
   const t = fold(text).replace(/[.!?…]+$/, ''); if (t.length < 2) return false;

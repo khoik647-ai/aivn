@@ -292,6 +292,10 @@ function createDesktopAgent(deps) {
     // B21 (QA lượt 3): cụm chữ OCR → BẤM vào toạ độ của nó trước rồi mới gõ (không gõ mù vào ô đang chọn — đó có thể là ô soạn tin của chat sai).
     // Nhãn của cây giao diện (có ô nhập đi kèm đang được chọn) giữ cách cũ: gõ vào ô đang chọn.
     if (action === 'type_text' && t && t.el && !t.el.editable && !U.inputLike(t.el) && !t.el.ocr) { t = null; needPoint = false; }
+    // B34: vừa bấm ô Tìm kiếm (≤ 60 giây) mà type_text lại kèm id CŨ nay trỏ vào chữ/nút khác (không phải ô nhập, không phải “Tìm kiếm”) → bỏ id đó, gõ vào ô vừa chọn
+    let staleEl = null;
+    { const la = s.lastAction; const justSearch = la && Date.now() - la.at < 60000 && ['click', 'double_click'].includes(la.action) && /tìm|tim kiem|search|find/iu.test(`${la.query || ''} ${la.el ? la.el.name || '' : ''}`);
+      if (action === 'type_text' && justSearch && t && t.el && !t.el.editable && !U.inputLike(t.el) && !/tìm|tim kiem|search|find/iu.test(`${t.el.name || ''} ${t.el.placeholder || ''}`)) { staleEl = t.el; t = null; needPoint = false; } }
     if (needPoint && (!t || t.x == null)) {
       const q = t && t.query ? t.query : '';
       if (q && !/^\[?e\d+\]?$/i.test(q)) t = await groundWithVision(q, ctx) || t;
@@ -318,7 +322,8 @@ function createDesktopAgent(deps) {
         s.gateBlocks = (s.gateBlocks || 0) + 1; deps.log && deps.log('desk', `Chặn gõ tin: chưa mở đúng người nhận (lần ${s.gateBlocks})`);
         const hdrNow = [s.obs && s.obs.win ? s.obs.win.title : '', ...(R ? R.header : [])].filter(Boolean)[0] || '';
         if (s.gateBlocks >= 3) return { error: 'chưa mở đúng người nhận', stop: true, forModel: `ĐÃ BỊ CHẶN ${s.gateBlocks} lần vì màn hình vẫn chưa cho thấy cuộc trò chuyện với “${SV.recipientOf(ctx.userQuery)}”${hdrNow ? ` (đang thấy: “${String(hdrNow).slice(0, 60)}”)` : ''}. DỪNG, không thử lại nữa. Báo người dùng: chưa gửi được vì không xác nhận được đã mở đúng cuộc trò chuyện; nhờ họ mở cuộc trò chuyện đó rồi giao lại việc.`, summary: 'dừng: không xác nhận được người nhận' };
-        return { error: 'chưa mở đúng người nhận', forModel: g, summary: 'chưa mở đúng người nhận — tìm người nhận trước' };
+        const wrongEl = t && t.el && !/tìm|tim kiem|search|find/iu.test(`${t.el.name || ''} ${t.el.placeholder || ''}`) ? ` Phần tử [${t.el.id}] hiện là ${t.el.kind || 'phần tử'} “${String(t.el.name || '').slice(0, 40)}” — KHÔNG phải ô Tìm kiếm (id đổi sau mỗi lần quan sát). Cách đúng: screen_act click vào ô “Tìm kiếm” (lấy id MỚI bằng screen_look query "Tìm kiếm"), rồi type_text KHÔNG kèm element.` : '';
+        return { error: 'chưa mở đúng người nhận', forModel: g + wrongEl, summary: wrongEl ? `[${t.el.id}] không phải ô Tìm kiếm — bấm ô Tìm kiếm rồi gõ` : 'chưa mở đúng người nhận — tìm người nhận trước' };
       }
     }
     // B24: gõ tên/từ khoá (+ Enter) vào ô tìm kiếm ĐÃ XÁC NHẬN là TÌM, không phải gửi — không coi là bước rủi ro, kể cả chế độ “chỉ soạn, đừng gửi”
@@ -470,10 +475,14 @@ function createDesktopAgent(deps) {
       checks.push(verify.wrongChat ? `⚠ GỬI NHẦM: ${verify.why}. KHÔNG được gửi thêm gì. Dừng lại và BÁO NGAY cho người dùng là tin đã bị gửi nhầm vào “${verify.wrongTo || 'cuộc trò chuyện khác'}” để họ thu hồi/xoá tin đó.` : verify.sent ? `ĐÃ KIỂM CHỨNG trên màn hình: tiêu đề cuộc trò chuyện là “${recipient || '(không nêu tên)'}”, ô soạn đã trống, thấy bong bóng tin “${String(msg).slice(0, 40)}”.` : `CHƯA kiểm chứng được là đã gửi: ${verify.why}. Không được báo “đã gửi”; hãy screen_look để kiểm tra rồi làm lại cho đúng.`);
       s.lastTyped = null;
     }
+    if (staleEl) checks.unshift(`(Đã bỏ id [${staleEl.id}] vì nó đang là “${String(staleEl.name || '').slice(0, 40)}”, không phải ô nhập; đã gõ vào ô Tìm kiếm vừa bấm.)`);
     if (beforeDialog && s.dialog === beforeDialog) checks.push(`Hộp thoại “${beforeDialog}” VẪN đang mở — việc trong hộp thoại CHƯA xong. Xác nhận bằng nút của hộp thoại (Save/Lưu/OK/Mở) hoặc hotkey "enter"; đừng báo đã xong.`);
     else if (beforeDialog && !s.dialog) checks.push(`Hộp thoại “${beforeDialog}” đã đóng.`);
     const foc = o.obs.elements.find(e => e.focused); if (foc) checks.push(`Đang chọn: [${foc.id}] ${foc.kind} "${foc.name}".`);
     if (before && o.obs.elements.length && Math.abs(o.obs.elements.length - before.elements.length) > 3) checks.push(`Số phần tử: ${before.elements.length} → ${o.obs.elements.length}.`);
+    // B34 (QA lượt 5): bấm vào Ô NHẬP (ô tìm kiếm…) thường chỉ đặt con trỏ, màn hình gần như không đổi — đó vẫn là có tác dụng
+    const clickedInput = ['click', 'double_click'].includes(action) && ((t && t.el && (t.el.editable || U.inputLike(t.el))) || /tìm|tim kiem|search|find/iu.test(`${t && t.el ? t.el.name || '' : ''} ${t && t.query ? t.query : ''}`));
+    if (!checks.length && clickedInput) checks.push(`Đã đặt con trỏ vào ô “${String((t && t.el && t.el.name) || (t && t.query) || '').slice(0, 40)}” (ô nhập thường không đổi hình khi được chọn). Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.`);
     if (!checks.length) checks.push('Màn hình không thay đổi rõ ràng — nếu cần, thử cách khác.');
     return { ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
   }

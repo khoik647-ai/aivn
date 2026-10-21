@@ -182,7 +182,8 @@ const NO_COMP_WARN = 'Mô hình chưa thao tác được trên máy tính trong 
 const openWinNudge = (ws) => `(Kiểm tra tự động của AIVN) SAI: ứng dụng này ĐANG MỞ trên máy — cửa sổ ${ws.map(w => `“${String(w.title).slice(0, 60)}”`).join(', ')}. Không được nói là chưa cài/không có. Gọi screen_look với window = tên cửa sổ đó rồi làm tiếp việc người dùng giao.`;
 const NO_ACTION_OK_WARN = 'Lượt này mô hình chưa thực sự thao tác gì — chưa có việc nào được làm. Bạn thử giao lại việc, nói rõ ứng dụng hay cửa sổ cần dùng.';
 const noActionWarn = (steps, gateOk = false) => steps.some(x => COMP.includes(x.name) && x.status === 'ok') ? null : steps.some(x => x.status === 'ok') ? NO_COMP_WARN : gateOk ? NO_ACTION_OK_WARN : NO_ACTION_WARN;
-const EMPTY_ANSWER = (sec) => `Mô hình không trả lời (câu trả lời trống${sec ? ` sau ${sec} giây` : ''}) và chưa làm việc nào. Bạn thử giao lại việc, hoặc chia thành bước ngắn hơn; nếu máy đang bận nhiều, hãy chờ máy rảnh rồi thử lại.`;
+const EMPTY_TRY = 'Bạn thử giao lại việc, hoặc chia thành bước ngắn hơn; nếu máy đang bận nhiều, hãy chờ máy rảnh rồi thử lại.';
+const EMPTY_ANSWER = (sec) => (sec ? `Mô hình không trả lời (câu trả lời trống sau ${sec} giây) và chưa làm việc nào.` : 'Mô hình không trả lời (câu trả lời trống) và chưa làm việc nào.') + ' ' + EMPTY_TRY;
 // Gửi tin/thao tác quan trọng chỉ được báo thành công khi desktop-agent đã KIỂM CHỨNG trên màn hình (step.verify.sent):
 // thấy chữ vừa gửi trong cuộc trò chuyện và thấy tên người nhận (nếu người dùng nêu tên). Không có bằng chứng thì không được nói đã gửi.
 const SEND_CLAIM_RE = /(đã|vừa)\s+(được\s+)?(gửi|nhắn)(?!\p{L})|gửi[^.\n]{0,40}thành công|đã được gửi|(tin nhắn|lời chúc)[^.\n]{0,40}(đã|vừa)\s+(xuất hiện|tới|đến)/iu;
@@ -547,6 +548,21 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     }
   }
 
+  // B33: câu trả lời/cảnh báo do CODE viết sẵn (tiếng Việt) → dịch theo ngôn ngữ giao diện. Chỉ thay khi dịch TRỌN (ngoài phần trong “…” không còn chữ Việt),
+  // để câu do mô hình viết bằng tiếng Việt (người dùng viết tiếng Việt) không bị dịch nửa vời.
+  let trI18n = null;
+  function localizeText(text, lang) {
+    if (!text || !lang || lang === 'vi') return text;
+    const C = require('../i18n/core');
+    if (!C.VI.test(text)) return text;
+    if (!trI18n) trI18n = C.create({ en: require('../i18n/en'), zh: require('../i18n/zh') });
+    const out = trI18n.tr(text, lang);
+    return out !== text && !C.VI.test(out.replace(/“[^”]*”|"[^"]*"|\([^()]*\)/g, '')) ? out : text;
+  }
+  function localizeResult(r) {
+    try { const lang = S_().uiLang; if (r && lang && lang !== 'vi') { if (typeof r.text === 'string') r.text = localizeText(r.text, lang); if (typeof r.warning === 'string') r.warning = localizeText(r.warning, lang); } } catch {}
+    return r;
+  }
   const gateOk = () => { try { return !!(deps.gateOk && deps.gateOk() === true); } catch { return false; } };
   async function systemPrompt({ query, names, headless }) {
     const s = S_();
@@ -601,7 +617,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
   function run(args) {
     const store = { attachments: (args && args.attachments) || [] };
     // 0.15.2: lỗi giữa lượt mang theo số bước công cụ đã chạy, để bên ngoài KHÔNG chạy lại cả lượt khi đã có thao tác thật (tránh gửi tin hai lần)
-    return runStore.run(store, () => runInner(args)).catch((e) => { try { if (e && typeof e === 'object') e.stepsDone = (store.steps || []).filter(x => x.status !== 'running' || x.auto).length; } catch {} throw e; });
+    return runStore.run(store, () => runInner(args)).then(localizeResult).catch((e) => { try { if (e && typeof e === 'object') e.stepsDone = (store.steps || []).filter(x => x.status !== 'running' || x.auto).length; } catch {} throw e; });
   }
   async function runInner({ messages, convoId = null, signal, onToken = () => {}, onStep = () => {}, onStatus = () => {}, headless = false, confirm, confirmScreen, approve = null }) {
     const s = S_();
@@ -857,7 +873,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     return { text: (text || '').trim(), steps, usage, finishReason, urls, memories: sys.memories.map(m => m.text), tools: names, warning };
   }
 
-  return { run, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck };
+  return { run, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck, localizeText };
 }
 
 module.exports = { noActionWarn, NO_ACTION_WARN, NO_ACTION_OK_WARN, EMPTY_ANSWER, editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };

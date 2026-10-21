@@ -4,6 +4,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const C = require('./computer');
+const RT = require('./retry');
+const MAX_THEN = 4; // screen_act then: tối đa 4 thao tác nối tiếp trong một bước
 
 const O = (properties, required) => ({ type: 'object', properties, required: required || Object.keys(properties) });
 const S = (description) => ({ type: 'string', description });
@@ -19,7 +21,7 @@ const DEFS = {
   run_command: { label: 'Chạy lệnh', icon: '⌨️', description: 'Chạy một lệnh terminal (Windows: PowerShell; macOS: zsh/sh). LUÔN hiện thẻ để người dùng duyệt trước khi chạy; lệnh nguy hiểm bị chặn. Tối đa 60 giây.', parameters: O({ command: S('Lệnh cần chạy, một dòng'), cwd: S('(Không bắt buộc) thư mục chạy lệnh; mặc định thư mục cá nhân') }, ['command']) },
   system_action: { label: 'Thao tác hệ thống', icon: '🖥', description: 'Thao tác hệ thống cơ bản. lock: khoá màn hình; sleep: cho máy ngủ; shutdown/restart: tắt/khởi động lại (Windows chờ 30 giây); volume_up/volume_down/mute: âm lượng; open_settings: mở Cài đặt; show_desktop: thu nhỏ mọi cửa sổ; empty_trash: dọn Thùng rác.', parameters: O({ action: { type: 'string', enum: Object.keys(C.SYS) } }) },
   screen_look: { label: 'Quan sát màn hình', icon: '👁', description: 'Quan sát cửa sổ đang dùng: trả danh sách phần tử giao diện có id [eN] (loại, tên, giá trị, vị trí x,y thang 0-1000) lấy từ cây giao diện của hệ điều hành và chữ đọc được (OCR). Gọi trước khi thao tác bằng screen_act. window: tên cửa sổ/ứng dụng cần chuyển tới trước khi quan sát; query: lọc phần tử theo chữ.', parameters: O({ window: S('(Không bắt buộc) tên cửa sổ hoặc ứng dụng, vd. "Zalo"'), query: S('(Không bắt buộc) chữ cần tìm, vd. "Trần Quỳnh Anh"'), question: S('(Không bắt buộc) câu hỏi cho mô hình nhìn ảnh, nếu có') }, []) },
-  screen_act: { label: 'Thao tác màn hình', icon: '🖱', description: 'Làm một thao tác trên máy. click/double_click/right_click: element = id [eN] mới nhất hoặc tên; hoặc x,y (0-1000). type_text: dán cả đoạn một lần (tiếng Việt có dấu); kèm element thì tự bấm vào ô trước; submit: true thì bấm Enter ngay sau đó — bấm ô + gõ + Enter chỉ cần MỘT lần gọi. hotkey: keys, vd. "ctrl+f", "enter". scroll: amount âm = xuống. wait: seconds. focus_window: window. Kết quả đã kèm kiểm tra và danh sách phần tử MỚI. AIVN tự hỏi người dùng trước bước quan trọng (gửi, thanh toán, xoá, nộp); không bao giờ gõ mật khẩu.', parameters: O({ action: { type: 'string', enum: ['click', 'double_click', 'right_click', 'type_text', 'hotkey', 'scroll', 'wait', 'focus_window'] }, element: S('id phần tử, vd. "e12", hoặc tên, vd. "nút Gửi"'), x: { type: 'integer', description: 'Toạ độ ngang 0-1000 (khi không có element)' }, y: { type: 'integer', description: 'Toạ độ dọc 0-1000' }, text: S('Chữ cần gõ (type_text)'), submit: { type: 'boolean', description: 'type_text: true = gõ xong bấm Enter luôn (gửi tin, tìm kiếm)' }, replace: { type: 'boolean', description: 'type_text: true = xoá nội dung cũ của ô một dòng rồi mới gõ' }, keys: S('Phím (hotkey), vd. "ctrl+s"'), amount: { type: 'integer', description: 'Số nấc cuộn, âm = xuống' }, seconds: { type: 'number', description: 'Số giây chờ (wait)' }, window: S('Tên cửa sổ (focus_window)') }, ['action']) },
+  screen_act: { label: 'Thao tác màn hình', icon: '🖱', description: 'Làm một thao tác trên máy. click/double_click/right_click: element = id [eN] mới nhất hoặc tên; hoặc x,y (0-1000). type_text: dán cả đoạn một lần (tiếng Việt có dấu); kèm element thì tự bấm vào ô trước; submit: true thì bấm Enter ngay sau đó — bấm ô + gõ + Enter chỉ cần MỘT lần gọi. hotkey: keys, vd. "ctrl+f", "enter". scroll: amount âm = xuống. wait: seconds. focus_window: window. Nhiều thao tác chắc chắn liên tiếp (vd. bấm ô theo tên → gõ → Enter) có thể gộp bằng then. Kết quả đã kèm kiểm tra và danh sách phần tử MỚI. AIVN tự hỏi người dùng trước bước quan trọng (gửi, thanh toán, xoá, nộp); không bao giờ gõ mật khẩu.', parameters: O({ action: { type: 'string', enum: ['click', 'double_click', 'right_click', 'type_text', 'hotkey', 'scroll', 'wait', 'focus_window'] }, element: S('id phần tử, vd. "e12", hoặc tên, vd. "nút Gửi"'), x: { type: 'integer', description: 'Toạ độ ngang 0-1000 (khi không có element)' }, y: { type: 'integer', description: 'Toạ độ dọc 0-1000' }, text: S('Chữ cần gõ (type_text)'), submit: { type: 'boolean', description: 'type_text: true = gõ xong bấm Enter luôn (gửi tin, tìm kiếm)' }, replace: { type: 'boolean', description: 'type_text: true = xoá nội dung cũ của ô một dòng rồi mới gõ' }, keys: S('Phím (hotkey), vd. "ctrl+s"'), amount: { type: 'integer', description: 'Số nấc cuộn, âm = xuống' }, seconds: { type: 'number', description: 'Số giây chờ (wait)' }, window: S('Tên cửa sổ (focus_window)'), then: { type: 'array', maxItems: 4, description: '(Không bắt buộc) tối đa 4 thao tác làm TIẾP ngay sau thao tác này trong cùng bước (cùng dạng tham số: action, element theo TÊN — không dùng id [eN], text, submit, keys…). Dừng ngay khi một thao tác chưa có tác dụng.', items: { type: 'object' } } }, ['action']) },
   read_screen_text: { label: 'Đọc chữ trên màn hình', icon: '🔤', description: 'Đọc toàn bộ chữ đang hiển thị trên màn hình bằng OCR (tiếng Việt + tiếng Anh). Dùng khi cần đọc nội dung (tin nhắn, bài viết) chứ không phải để bấm.', parameters: O({}, []) },
 };
 const LEVEL1 = ['list_apps', 'open_app', 'open_path', 'open_url', 'running_apps', 'close_app', 'run_command', 'system_action'];
@@ -285,7 +287,27 @@ function createComputerTools(deps) {
         return { forModel: `Đã thực hiện: ${lbl}.`, summary: lbl };
       }
       case 'screen_look': return deps.screen.look(a, ctx);
-      case 'screen_act': return deps.screen.act(a, ctx); // xin phép + bước quan trọng (gửi/thanh toán/xoá) do desktop-agent xử lý
+      case 'screen_act': { // xin phép + bước quan trọng (gửi/thanh toán/xoá) do desktop-agent xử lý
+        let then_ = a.then; if (typeof then_ === 'string') { try { then_ = JSON.parse(then_); } catch { then_ = null; } } // mô hình nhỏ hay gửi mảng dạng chuỗi JSON
+        const more = Array.isArray(then_) ? then_.filter(x => x && typeof x === 'object').slice(0, MAX_THEN) : [];
+        const first = { ...a }; delete first.then;
+        if (!more.length) return deps.screen.act(first, ctx);
+        // 0.16: nhiều thao tác trong MỘT bước — chạy lần lượt, mỗi thao tác vẫn được kiểm tra (chụp lại) và xin phép riêng; dừng ngay ở thao tác đầu tiên chưa có tác dụng.
+        // id [eN] đổi sau mỗi thao tác → các thao tác sau chỉ được nhắm theo TÊN, toạ độ, phím hoặc ô đang chọn.
+        const badId = more.find(x => /^\[?e\d+\]?$/i.test(String(x.element || x.target || '').trim()));
+        if (badId) throw new CompError(`Trong "then", không dùng id [eN] (id đổi sau mỗi thao tác): hãy nhắm theo tên phần tử, vd. "nút Gửi", hoặc bỏ element để gõ vào ô đang chọn. Phần tử sai: ${String(badId.element || badId.target)}.`);
+        const done = []; let out = null;
+        for (const [i, sub] of [first, ...more].entries()) {
+          if (ctx.signal && ctx.signal.aborted) break;
+          const x = { ...sub }; delete x.then;
+          out = await deps.screen.act(x, ctx);
+          const why = RT.outcome(out);
+          done.push(out && out.summary ? out.summary : String(x.action || ''));
+          if (out.refused || out.stop || why) { if (i < more.length) out = { ...out, forModel: `(Dừng chuỗi thao tác ở bước ${i + 1}/${more.length + 1}${why ? ': ' + why : ''}; các bước sau CHƯA làm.)\n` + String(out.forModel || '') }; break; }
+        }
+        const head = done.length > 1 ? `Đã làm lần lượt ${done.length} thao tác: ${done.slice(0, -1).map((d, i) => `${i + 1}) ${d}`).join('; ')}; rồi:\n` : '';
+        return { ...out, forModel: head + String(out.forModel || ''), summary: done.join(' → ') };
+      }
       case 'read_screen_text': return deps.screen.readText(a, ctx);
       default: throw new CompError(`Không có công cụ "${name}".`);
     }

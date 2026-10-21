@@ -139,7 +139,7 @@ function renderModelTable() {
   const col = MM_COLS.find(c => c[0] === mmSort.key) || MM_COLS[0];
   const list = mmVisible().sort((a, b) => { const x = col[2](a), y = col[2](b); return (x < y ? -1 : x > y ? 1 : 0) * mmSort.dir; });
   $('#mmCount').textContent = `${list.length}/${state.models.length} mô hình`;
-  const head = MM_COLS.map(([k, label]) => `<button type="button" class="th" data-sort="${k}" role="columnheader" aria-sort="${mmSort.key === k ? (mmSort.dir > 0 ? 'ascending' : 'descending') : 'none'}">${esc(label)}${mmSort.key === k ? (mmSort.dir > 0 ? ' ▲' : ' ▼') : ''}</button>`).join('');
+  const head = MM_COLS.map(([k, label]) => `<button type="button" class="th" data-sort="${k}" role="columnheader" aria-sort="${mmSort.key === k ? (mmSort.dir > 0 ? 'ascending' : 'descending') : 'none'}"><span>${esc(label)}</span>${mmSort.key === k ? `<span aria-hidden="true">${mmSort.dir > 0 ? ' ▲' : ' ▼'}</span>` : ''}</button>`).join('');
   t.innerHTML = `<div class="tr head" role="row">${head}<span role="columnheader">Thao tác</span></div>` + (list.length ? list.map(m => `<div class="tr" role="row" data-id="${esc(m.id)}">
       <span title="${esc(m.path)}"><b>${esc(m.catalog ? m.catalog.name : m.file)}</b>${m.loaded ? '<span class="badge">Đang nạp</span>' : ''}${m.vision ? '<span class="badge vis" title="Có tệp thị giác (mmproj) cạnh mô hình">👁 Nhìn được ảnh</span>' : ''}${m.agent && m.agent.ok ? '<span class="badge" title="Dùng được cho AIVN AGENT">🤖</span>' : ''}<div class="muted" style="font-size:11.5px">${esc([m.params && m.params + ' tham số', m.source === 'imported' ? 'đã nhập' : 'đã tải', m.id].filter(Boolean).join(' · '))}</div></span>
       <span>${esc(m.quant || '—')}</span><span>${fmtBytes(m.size)}</span><span>${fitBadge(m.fit)}</span>
@@ -1115,7 +1115,7 @@ function curlExample(port, keySet) {
   -H "Content-Type: application/json" \\${keySet ? '\n  -H "Authorization: Bearer $AIVN_API_KEY" \\' : ''}
   -d '{
     "model": "${state.status.loaded ? state.status.id : 'qwen2.5-0.5b-instruct-q4_k_m'}",
-    "messages": [{"role": "user", "content": "Xin chào!"}],
+    "messages": [{"role": "user", "content": "${({ en: 'Hello!', zh: '你好！' })[window.I18N && I18N.lang] || 'Xin chào!'}"}],
     "stream": false
   }'`;
 }
@@ -1415,7 +1415,7 @@ async function sendAgent(text) {
     if (r.blocked) { reply.content = `⛔ ${r.gate.modelName || 'Mô hình này'} chưa dùng được cho AIVN AGENT: ${r.gate.reason}. Hãy chuyển sang mô hình phù hợp ở thanh phía trên.`; reply.warning = 'blocked'; r.text = reply.content; r.usage = { completion_tokens: 0, seconds: 0 }; refreshAgent(); }
     Object.assign(reply, { content: r.text || (r.finishReason === 'abort' ? '' : r.warning ? '' : '(AIVN AGENT không trả lời)'), warning: r.warning || null, steps: r.steps, urls: r.urls, memories: r.memories, model: r.model || reply.model });
     const tools = r.steps.length;
-    $('#genStats').textContent = `${tools ? tools + ' bước dùng công cụ · ' : ''}${r.usage.completion_tokens} token · ${r.usage.seconds.toFixed(1)} giây${r.finishReason === 'abort' ? ' · đã dừng' : r.finishReason === 'length' ? ' · chạm giới hạn token' : ''}`;
+    $('#genStats').textContent = [tools ? `${tools} bước dùng công cụ` : null, `${r.usage.completion_tokens} token`, `${r.usage.seconds.toFixed(1).replace(".", DEC())} giây`, r.finishReason === 'abort' ? 'đã dừng' : r.finishReason === 'length' ? 'chạm giới hạn token' : null].filter(Boolean).join(' · ');
     if (r.finishReason === 'abort') reply.content = (reply.content ? reply.content + '\n\n' : '') + `_Đã dừng${r.stoppedBy ? ' (' + r.stoppedBy + ')' : ''}._`;
   } catch (err) {
     reply.error = true; reply.content = (reply.content ? reply.content + '\n\n' : '') + '⚠ ' + cleanErr(err.message);

@@ -31,7 +31,7 @@
       let out = null;
       for (const p of c.pats) {
         const m = p.re.exec(key); if (!m) continue;
-        out = p.val.replace(/\{(\d+)\}/g, (_, n) => { const i = p.order.indexOf(Number(n)); const g = i < 0 ? '' : m[i + 1]; return depth < 2 && VI.test(g) ? (trCore(g, lang, depth + 1) ?? (depth < 1 ? trSeg(g, lang) : null) ?? g) : g; });
+        out = p.val.replace(/\{(\d+)\}/g, (_, n) => { const i = p.order.indexOf(Number(n)); const g = i < 0 ? '' : m[i + 1]; if (!(depth < 2 && VI.test(g))) return g; const w = /^(\s*)([\s\S]*?)(\s*)$/.exec(g); const x = trCore(w[2], lang, depth + 1) ?? (depth < 1 ? trSeg(w[2], lang) : null); return x == null ? g : w[1] + x + w[3]; });
         break;
       }
       if (c.cache.size > 4000) c.cache.clear();
@@ -79,7 +79,8 @@
       if (!lang || lang === 'vi' || text == null) return text;
       const s = String(text); const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(s);
       let t = /\n/.test(m[2]) ? null : trCore(m[2], lang, 0); // nhiều dòng → giữ ngắt dòng, dịch từng dòng
-      if (t == null) t = trCore(m[2], lang, 0) == null ? trSeg(m[2], lang) : trCore(m[2], lang, 0);
+      if (t == null && /\n/.test(m[2])) { const c = C[lang]; const k = norm(m[2]); if (c && c.exact.has(k)) t = c.exact.get(k); } // nhiều dòng: chỉ nhận khoá trọn vẹn, không để mẫu {n} nuốt cả đoạn
+      if (t == null) t = trSeg(m[2], lang);
       return t == null ? s : m[1] + t + m[3];
     }
     // dịch đối tượng tuỳ chọn (menu, hộp thoại, thông báo): label/title/buttonLabel/message/detail/name/buttons/submenu
