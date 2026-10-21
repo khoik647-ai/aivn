@@ -1341,6 +1341,21 @@ function registerIpc() {
     convos.data.list.sort((a, b) => b.updatedAt - a.updatedAt);
     convos.save(); return true;
   });
+  // B82: xuất cuộc trò chuyện ra tệp (.md/.txt/.json theo đuôi người dùng chọn trong hộp thoại Lưu)
+  ipcMain.handle('convos:export', async (_e, id, fmt0) => {
+    const c = convos.data.list.find(x => x.id === id); if (!c) throw new Error('Không tìm thấy cuộc trò chuyện');
+    const EX = require('./chat-export'); const fmt = EX.FORMATS.includes(fmt0) ? fmt0 : 'md';
+    const flt = { md: { name: T('Markdown'), extensions: ['md'] }, txt: { name: T('Văn bản'), extensions: ['txt'] }, json: { name: 'JSON', extensions: ['json'] } };
+    // chỉ kiểm thử (bản chưa đóng gói): AIVN_QA_SAVE_PATH thay hộp thoại Lưu
+    const r = !app.isPackaged && process.env.AIVN_QA_SAVE_PATH ? { filePath: process.env.AIVN_QA_SAVE_PATH } : await dialog.showSaveDialog(win, { title: T('Xuất cuộc trò chuyện'), buttonLabel: T('Lưu'), defaultPath: path.join(app.getPath('documents'), EX.fileName(c, fmt)), filters: [flt[fmt], ...EX.FORMATS.filter(f => f !== fmt).map(f => flt[f])] });
+    if (r.canceled || !r.filePath) return { canceled: true };
+    const labels = { you: T('Bạn'), assistant: 'AIVN', exported: T('Xuất từ AIVN'), attachments: T('Đính kèm'), tools: T('Công cụ đã dùng'), refused: T('bị từ chối'), failed: T('lỗi'), untitled: T('Cuộc trò chuyện') };
+    const loc = ({ en: 'en-US', zh: 'zh-CN' })[uiLang()] || 'vi-VN'; const tx = (s) => T(s);
+    const c2 = { ...c, messages: (c.messages || []).map(m => m.steps ? { ...m, steps: m.steps.map(s => ({ ...s, label: tx(s.label || ''), summary: s.summary && tx(s.summary) })) } : m) };
+    const out = EX.render(c2, EX.fmtOf(r.filePath), { labels, locale: loc, version: app.getVersion() });
+    await fs.promises.writeFile(r.filePath, out, 'utf8'); log(`Đã xuất cuộc trò chuyện: ${path.basename(r.filePath)}`);
+    return { ok: true, path: r.filePath, format: EX.fmtOf(r.filePath), bytes: Buffer.byteLength(out) };
+  });
   ipcMain.handle('convos:delete', (_e, id) => { convos.data.list = convos.data.list.filter(x => x.id !== id); convos.save(); if (rag) rag.remove(id); return true; });
   ipcMain.handle('rag:info', () => embedInfo());
   ipcMain.handle('rag:download', () => downloader.enqueue({ repo: EMBED.repo, files: [{ path: EMBED.file, size: EMBED.size }], name: EMBED.name, quant: 'Q8_0', catalogId: EMBED.id, urlFor: hf.resolveUrl }));
@@ -3104,7 +3119,7 @@ else {
       const list = JSON.parse(fs.readFileSync(process.env.AIVN_SHOTSET_LIST, 'utf8'));
       for (const s of list) {
         try { win.setBounds({ x: 0, y: 0, width: s.w || 1280, height: s.h || 720 }); await new Promise(r => setTimeout(r, 300));
-          if (s.js) await win.webContents.executeJavaScript(s.js); await new Promise(r => setTimeout(r, s.wait || 900));
+          if (s.js) { const v = await win.webContents.executeJavaScript(s.js); if (s.save) fs.writeFileSync(path.join(dir, s.name + '.json'), JSON.stringify(v ?? null)); } await new Promise(r => setTimeout(r, s.wait || 900)); // save: ghi kết quả JS (kiểm thử)
           fs.writeFileSync(path.join(dir, s.name + '.png'), (await win.webContents.capturePage()).toPNG()); console.log('[shot] ' + s.name);
         } catch (e) { console.error('[shot] ' + s.name, e.message); }
       }

@@ -593,11 +593,28 @@ $('#tokenClear').addEventListener('click', async () => { state.settings = await 
 
 // ---------- Trò chuyện ----------
 async function loadConvos() { state.convos = await A.convos(); renderConvos(); }
-function renderConvos() {
-  $('#convoList').innerHTML = state.convos.filter(c => convoMode(c) === state.mode).map(c => `<div class="convo ${state.current && c.id === state.current.id ? 'active' : ''}" data-id="${c.id}"><span data-noi18n title="${esc(c.title)}">${esc(c.title)}</span><button class="del" title="Xoá">✕</button></div>`).join('') || `<div class="muted" style="padding:8px;font-size:12.5px">${isAgent() ? 'Chưa giao việc nào cho AIVN AGENT' : 'Chưa có cuộc trò chuyện nào'}</div>`;
+// B82: tìm trong lịch sử (tiêu đề + nội dung, không phân biệt hoa thường/dấu) — gõ “ca phe” vẫn thấy “cà phê”
+const fold = (x) => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();
+function convoHit(c, q) {
+  if (!q) return { ok: true };
+  if (fold(c.title).includes(q)) return { ok: true };
+  for (const m of c.messages || []) { const t = String(m.content || ''); const k = fold(t).indexOf(q); if (k >= 0) { let a = Math.max(0, k - 14); if (a > 0) { const sp = t.indexOf(' ', a); if (sp >= 0 && sp < k) a = sp + 1; } return { ok: true, snip: (a ? '…' : '') + t.slice(a, k + q.length + 40).replace(/\s+/g, ' ') + (k + q.length + 40 < t.length ? '…' : '') }; } }
+  return { ok: false };
 }
+function renderConvos() {
+  const q = fold(($('#convoQ') && $('#convoQ').value || '').trim());
+  const mine = state.convos.filter(c => convoMode(c) === state.mode); const rows = mine.map(c => [c, convoHit(c, q)]).filter(([, h]) => h.ok);
+  $('#convoList').innerHTML = rows.map(([c, h]) => `<div class="convo ${state.current && c.id === state.current.id ? 'active' : ''}" data-id="${c.id}"><span data-noi18n title="${esc(c.title)}">${esc(c.title)}${h.snip ? `<small class="convo-snip">${esc(h.snip)}</small>` : ''}</span><button class="exp" title="Xuất ra tệp (.md/.txt/.json)" aria-label="Xuất ra tệp" data-testid="convo-export">⤓</button><button class="del" title="Xoá">✕</button></div>`).join('')
+    || `<div class="muted" style="padding:8px;font-size:12.5px">${q && mine.length ? `Không có cuộc trò chuyện nào khớp “${esc($('#convoQ').value.trim())}”` : isAgent() ? 'Chưa giao việc nào cho AIVN AGENT' : 'Chưa có cuộc trò chuyện nào'}</div>`;
+}
+// B82: xuất ra tệp — hộp thoại Lưu, định dạng theo đuôi chọn (.md/.txt/.json)
+async function exportConvo(id) {
+  try { const r = await A.exportConvo(id, 'md'); if (r && r.ok) toast(`Đã xuất ra ${r.path.split(/[\\/]/).pop()} ✓`); } catch (err) { toast(cleanErr(err.message), true); }
+}
+$('#convoQ').addEventListener('input', () => renderConvos());
 $('#convoList').addEventListener('click', async (e) => {
   const row = e.target.closest('.convo'); if (!row) return;
+  if (e.target.closest('.exp')) { await exportConvo(row.dataset.id); return; }
   if (e.target.classList.contains('del')) { await A.deleteConvo(row.dataset.id); if (state.current && state.current.id === row.dataset.id) state.current = null; await loadConvos(); renderMessages(); return; }
   state.current = state.convos.find(c => c.id === row.dataset.id); renderConvos(); renderMessages();
 });
@@ -1113,6 +1130,7 @@ const SLASH = [
   { c: '/preset', a: '<tên>', d: 'Chuyển cấu hình mẫu (vd. /preset Lập trình viên)', run: async (arg) => { const p = presetsAll().find(x => x.name.toLowerCase() === arg.toLowerCase()) || presetsAll().find(x => x.name.toLowerCase().includes(arg.toLowerCase())); if (!p) return toast('Không thấy cấu hình mẫu “' + arg + '”', true); await applyPreset(p); toast(`Đang dùng cấu hình mẫu “${p.name}”`); } },
   { c: '/he-thong', a: '<lời nhắc>', d: 'Đặt lời nhắc hệ thống', run: async (arg) => { if (!arg) return cpTab('sys'), $('#sysPrompt').focus(); await cpSave({ systemPrompt: arg }); paintCp(); toast('Đã đặt lời nhắc hệ thống'); } },
   { c: '/nhiet-do', a: '<0–2>', d: 'Đặt nhiệt độ', run: async (arg) => { const v = Number(String(arg).replace(',', '.')); if (!(v >= 0 && v <= 2)) return toast('Nhiệt độ phải từ 0 đến 2', true); await cpSave({ temperature: v }); paintCp(); toast('Nhiệt độ: ' + v); } },
+  { c: '/xuat', d: 'Xuất cuộc trò chuyện ra tệp (.md/.txt/.json)', run: async () => { const c = state.current; if (!c || !c.messages.length) return toast('Chưa có gì để xuất', true); if (!state.convos.some(x => x.id === c.id)) await A.saveConvo(c); await exportConvo(c.id); } },
   { c: '/sao-chep', d: 'Sao chép cả cuộc trò chuyện (Markdown)', run: async () => { const c = state.current; if (!c || !c.messages.length) return toast('Chưa có gì để sao chép', true); await A.copyText(c.messages.map(m => `**${m.role === 'user' ? 'Bạn' : 'AIVN'}:** ${m.content}`).join('\n\n')); toast('Đã sao chép cuộc trò chuyện ✓'); } },
   { c: '/nap', d: 'Mở hộp nạp mô hình (Ctrl+L)', run: () => openLoader() },
 ];
@@ -1927,11 +1945,15 @@ async function refreshMem() {
   const [list, info] = await Promise.all([A.memList(), A.agentInfo()]);
   $('#memOn').checked = info.memory.enabled;
   $('#memMode').textContent = `Những điều AIVN AGENT đã ghi nhớ về bạn (${list.length}). Chỉ lưu trên máy này. Điều liên quan tới câu hỏi được đưa vào lời nhắc của AIVN AGENT, tìm ${info.memory.semantic ? 'theo ý nghĩa bằng BGE-M3' : 'theo từ khoá (tải BGE-M3 trong Cài đặt trò chuyện để tìm theo ý nghĩa)'}.`;
-  $('#memList').innerHTML = list.length ? list.map(m => `<div class="mem" data-id="${esc(m.id)}"><div class="txt">${esc(m.text)}<div class="meta">${m.source === 'user' ? 'Bạn thêm' : 'AIVN AGENT ghi nhớ'} · ${new Date(m.updatedAt).toLocaleString(LOC())}${m.uses ? ` · đã dùng ${m.uses} lần` : ''}</div></div><div class="acts"><button class="btn sm" data-mact="edit">Sửa</button><button class="btn sm danger" data-mact="del" title="Xoá ghi nhớ này">🗑</button></div></div>`).join('')
+  const q = fold($('#memQ').value.trim()); const shown = q ? list.filter(m => fold(m.text).includes(q)) : list; // B82: ô tìm trong Ghi nhớ
+  $('#memQn').textContent = q ? `${shown.length}/${list.length}` : '';
+  $('#memList').innerHTML = shown.length ? shown.map(m => `<div class="mem" data-id="${esc(m.id)}"><div class="txt">${esc(m.text)}<div class="meta">${m.source === 'user' ? 'Bạn thêm' : 'AIVN AGENT ghi nhớ'} · ${new Date(m.updatedAt).toLocaleString(LOC())}${m.uses ? ` · đã dùng ${m.uses} lần` : ''}</div></div><div class="acts"><button class="btn sm" data-mact="edit">Sửa</button><button class="btn sm danger" data-mact="del" title="Xoá ghi nhớ này">🗑</button></div></div>`).join('')
+    : q && list.length ? `<div class="sched-empty">Không có ghi nhớ nào khớp “${esc($('#memQ').value.trim())}”.</div>`
     : '<div class="sched-empty">Chưa có ghi nhớ nào. Hãy nói với AIVN AGENT, ví dụ: “Hãy nhớ: tôi thích uống cà phê sữa đá”.</div>';
   refreshMemCount(list);
 }
 async function refreshMemCount(list) { list ||= await A.memList(); $('#memCount').hidden = !list.length; $('#memCount').textContent = list.length; }
+{ let tq; $('#memQ').addEventListener('input', () => { clearTimeout(tq); tq = setTimeout(() => refreshMem(), 120); }); }
 $('#memForm').addEventListener('submit', async (e) => { e.preventDefault(); const v = $('#memNew').value.trim(); if (!v) return; try { await A.memAdd(v); $('#memNew').value = ''; refreshMem(); } catch (err) { toast(cleanErr(err.message), true); } });
 $('#memList').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-mact]'); if (!b) return;

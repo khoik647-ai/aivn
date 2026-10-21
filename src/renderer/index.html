@@ -54,6 +54,7 @@
     <section class="view active" id="view-chat" data-testid="view-chat">
       <aside class="convos">
         <button class="btn primary block" id="newChat" data-testid="new-chat">＋ Cuộc trò chuyện mới</button>
+        <input type="search" id="convoQ" class="convo-q" placeholder="Tìm trong lịch sử…" aria-label="Tìm trong lịch sử trò chuyện" data-testid="convo-search">
         <div class="convo-list" id="convoList" data-testid="convo-list"></div>
       </aside>
       <div class="chat" id="chatPane" data-testid="chat-pane">
@@ -339,6 +340,7 @@
           <div class="row mem-tools"><label class="check"><input type="checkbox" id="memOn" data-testid="mem-on"> Cho phép ghi nhớ</label><button class="btn danger sm" id="memClear" data-testid="mem-clear">Xoá tất cả</button></div>
         </div>
         <form class="row mem-add" id="memForm" data-testid="mem-form"><input id="memNew" maxlength="500" placeholder="Thêm một điều cần nhớ, vd. Tôi học ngành Công nghệ thông tin ở VLU" data-testid="mem-new"><button class="btn primary" type="submit" data-testid="mem-form-submit">Thêm</button></form>
+        <div class="row mem-find"><input type="search" id="memQ" placeholder="Tìm trong ghi nhớ…" aria-label="Tìm trong ghi nhớ" data-testid="mem-search"><span class="muted small" id="memQn" data-testid="mem-search-count"></span></div>
         <div class="mem-list" id="memList" data-testid="mem-list"></div>
       </div>
     </section>

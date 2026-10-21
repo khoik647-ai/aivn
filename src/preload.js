@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('aivn', {
   modelsDirInfo: inv('models:dir-info'), modelsDirPick: inv('models:dir-pick'), modelsDirApply: inv('models:dir-apply'), modelsDirCancel: inv('models:dir-cancel'), modelsDirReset: inv('models:dir-reset'), onModelsDirProgress: on('models:dir-progress'),
   deleteModel: inv('models:delete'), reveal: inv('models:reveal'), modelStatus: inv('model:status'),
   generate: inv('chat:generate'), stop: inv('chat:stop'),
-  convos: inv('convos:list'), saveConvo: inv('convos:save'), deleteConvo: inv('convos:delete'),
+  convos: inv('convos:list'), saveConvo: inv('convos:save'), deleteConvo: inv('convos:delete'), exportConvo: inv('convos:export'),
   startServer: inv('server:start'), serverConfig: inv('server:config'), serverKey: inv('server:key'), stopServer: inv('server:stop'), serverStatus: inv('server:status'), openExternal: inv('open:external'),
   pickFiles: inv('files:pick'), readImage: inv('image:read'), copyText: inv('clipboard:write'), ocrImage: inv('image:ocr'), onEngineCrash: on('engine:crash'), extractFiles: inv('files:extract'), onFilesProgress: on('files:progress'), mediaStatus: inv('media:status'), mediaInstall: inv('media:install'), pathForFile: (f) => { try { return webUtils.getPathForFile(f); } catch { return ''; } },
   checkUpdate: inv('update:check'), downloadUpdate: inv('update:download'), installUpdate: inv('update:install'), openReleases: inv('update:open'), updateState: inv('update:state'),
