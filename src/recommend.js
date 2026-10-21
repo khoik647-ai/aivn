@@ -18,8 +18,12 @@ const VISION_IDS = new Set([...VISION_SOLO, ...PAIR_GROUNDER].map(x => x.id).con
 const passes = (b) => !!(b && b.done === 10 && b.score >= 7 && b.safety !== false);
 const gPasses = (b) => !!(b && b.grounding && b.grounding.total === 10 && b.grounding.score >= 7);
 
-function pickBench(id, scores) {
-  const l = scores && scores.local && scores.local[id]; const s = scores && scores.shipped && scores.shipped[id];
+// Kết quả đo trên máy người dùng được lưu theo id của mô hình đã cài (tên tệp, vd. "holo1.5-3b.q4_k_m"),
+// còn Kho mô hình dùng id riêng ("holo1.5-3b-q4_k_m"): tra cả hai.
+const fileId = (f) => { const b = String(f || '').split('/').pop(); const m = b.match(/^(.*)-\d{5}-of-\d{5}\.gguf$/i); return (m ? m[1] : b.replace(/\.gguf$/i, '')).toLowerCase(); };
+function pickBench(id, scores, file) {
+  const get = (o) => o && (o[id] || (file && o[fileId(file)]));
+  const l = get(scores && scores.local); const s = get(scores && scores.shipped);
   return l ? { ...(s || {}), ...l, where: 'máy bạn', grounding: (l.grounding || (s && s.grounding)) } : s ? { ...s, where: 'máy thử của AIVN' } : null;
 }
 const fitRank = (f) => (!f ? 0 : f.level === 'fit' ? 3 : f.level === 'slow' ? 1 : 0);
@@ -30,9 +34,9 @@ function recommend(list, scores = {}) {
   const planners = PLANNERS.map(by).filter(Boolean);
   const chat = planners.find(c => fitRank(c.fit) >= 3) || planners[planners.length - 1] || null;
   // bộ lập kế hoạch cho điều khiển máy: mô hình chữ đạt bài đo (ưu tiên mô hình chat đã gợi ý)
-  const plannerOk = [chat, ...planners].filter(Boolean).find(c => passes(pickBench(c.id, scores))) || null;
+  const plannerOk = [chat, ...planners].filter(Boolean).find(c => passes(pickBench(c.id, scores, c.file))) || null;
   const grounders = GROUNDERS.map(by).filter(Boolean);
-  const grounder = grounders.find(c => fitRank(c.fit) >= 3 && gPasses(pickBench(c.id, scores))) || null;
+  const grounder = grounders.find(c => fitRank(c.fit) >= 3 && gPasses(pickBench(c.id, scores, c.file))) || null;
   return { chat: chat && chat.id, planner: plannerOk && plannerOk.id, grounder: grounder && grounder.id, plannerCandidate: chat && chat.id };
 }
 // Điều khiển màn hình: một mô hình nhìn ảnh (solo) hoặc cặp lập kế hoạch + mắt nhìn, chọn theo VRAM (byte).
@@ -56,7 +60,7 @@ function eyesFor(list, vramBytes = 0) {
 function annotate(list, scores = {}, vramBytes = 0) {
   const r = recommend(list, scores); const ss = screenSetup(list, vramBytes); r.screen = ss;
   return { rec: r, list: list.map(c => {
-    const b = pickBench(c.id, scores);
+    const b = pickBench(c.id, scores, c.file);
     const o = { ...c, bench: b ? { score: b.score, done: b.done, safety: b.safety, where: b.where, date: b.date, seconds: b.seconds, grounding: b.grounding || null } : null };
     o.recommended = c.id === r.chat; o.recScreen = c.id === ss.solo; o.recGround = c.id === r.grounder || !!(ss.pair && c.id === ss.pair.grounder); o.recPairPlanner = !!(ss.pair && c.id === ss.pair.planner);
     o.role = PLANNERS.includes(c.id) ? 'planner' : VISION_IDS.has(c.id) ? 'grounder' : null;

@@ -23,7 +23,7 @@ def collect():
             d = json.load(open(p, encoding='utf-8'))
             for v in list(d.get('text', {}).values()) + list(d.get('attr', {}).values()) + list(d.get('meta', {}).values()):
                 en['site/i18n/en.json'].add(strip_tags(str(v)))
-    files = ['src/renderer/index.html', 'src/renderer/app.js', 'src/main.js', 'src/preload.js', 'src/desktop-agent.js', 'src/agent/agent.js', 'src/recommend.js', 'src/catalog.js', 'src/updater.js']
+    files = ['src/renderer/index.html', 'src/renderer/app.js', 'src/main.js', 'src/preload.js', 'src/desktop-agent.js', 'src/agent/agent.js', 'src/recommend.js', 'src/catalog.js', 'src/catalog-claims.js', 'src/updater.js']
     for f in files:
         p = os.path.join(ROOT, f)
         if not os.path.exists(p): continue
@@ -32,6 +32,9 @@ def collect():
         else:
             src = re.sub(r'^\s*//.*$', '', src, flags=re.M)  # bỏ chú thích dòng
             vi[f].update(js_strings(src))
+    for f in ['docs/verified.md']:  # tài liệu tiếng Việt phát hành kèm (bỏ khối mã, đường dẫn, thẻ HTML)
+        p = os.path.join(ROOT, f)
+        if os.path.exists(p): vi[f + '.html'].add(strip_tags(re.sub(r'`[^`]*`|\]\([^)]*\)', ' ', open(p, encoding='utf-8').read())))
     for p in ['src/i18n/en.json']:
         q = os.path.join(ROOT, p)
         if os.path.exists(q): en[p].update(map(str, json.load(open(q, encoding='utf-8')).values()))

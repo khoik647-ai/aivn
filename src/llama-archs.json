@@ -151,6 +151,15 @@
   "nanbeige",
   "qwen3tts",
   "pockettts",
-  "k2-horizon"
+  "k2-horizon",
+  "t5",
+  "rwkv7",
+  "qwen2",
+  "qwen",
+  "plm",
+  "mpt",
+  "glm4",
+  "deepseek2ocr",
+  "bert"
  ]
 }

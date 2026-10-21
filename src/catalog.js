@@ -1,6 +1,7 @@
-// Danh mục "Gợi ý" do AIVN tự tuyển chọn. Mọi URL đã được kiểm tra bằng HEAD (200) và kích thước khớp API Hugging Face (20/10/2026).
+// Danh mục "Gợi ý" do AIVN tự tuyển chọn. Mọi URL đã được kiểm tra bằng HEAD (200) và kích thước khớp API Hugging Face (21/10/2026, 49 mô hình).
 // Không repo nào yêu cầu đăng nhập (gated). Mỗi mô hình tuân theo giấy phép riêng của nhà phát hành.
-// "agent": true = gọi công cụ tốt, hợp cho chế độ Trợ lý (đã thử Qwen3 4B Instruct 2507).
+// "agent": true = gọi công cụ tốt, hợp cho chế độ Trợ lý.
+// Nhãn khả năng (claims) nằm ở catalog-claims.js: mỗi nhãn có nguồn, phân biệt "Đã kiểm chứng" và "Theo nhà phát triển".
 // Mô hình "Nhìn được ảnh" có thêm tệp mmproj (bộ chiếu thị giác), được tải cùng mô hình.
 const CATALOG = [
  {
@@ -17,11 +18,7 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen2",
   "vision": false,
-  "desc": "Siêu nhỏ, chạy được trên hầu hết mọi máy. Phù hợp để thử nghiệm nhanh.",
-  "tags": [
-   "Siêu nhẹ",
-   "Đa ngôn ngữ"
-  ]
+  "desc": "Siêu nhỏ, chạy được trên hầu hết mọi máy. Phù hợp để thử nghiệm nhanh."
  },
  {
   "id": "qwen2.5-1.5b-instruct-q4_k_m",
@@ -37,11 +34,7 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen2",
   "vision": false,
-  "desc": "Cân bằng tốt giữa tốc độ và chất lượng, trả lời tiếng Việt khá ổn.",
-  "tags": [
-   "Khuyên dùng",
-   "Đa ngôn ngữ"
-  ]
+  "desc": "Cân bằng tốt giữa tốc độ và chất lượng, trả lời tiếng Việt khá ổn."
  },
  {
   "id": "qwen2.5-3b-instruct-q4_k_m",
@@ -57,10 +50,7 @@ const CATALOG = [
   "license": "Qwen Research (phi thương mại)",
   "arch": "qwen2",
   "vision": false,
-  "desc": "Thông minh hơn rõ rệt, tốt cho tóm tắt, viết lách và lập trình cơ bản.",
-  "tags": [
-   "Đa ngôn ngữ"
-  ]
+  "desc": "Thông minh hơn rõ rệt, tốt cho tóm tắt, viết lách và lập trình cơ bản."
  },
  {
   "id": "qwen2.5-7b-instruct-q4_k_m",
@@ -77,10 +67,6 @@ const CATALOG = [
   "arch": "qwen2",
   "vision": false,
   "desc": "Mạnh, đa năng, tiếng Việt tốt. Cần máy có từ 8 GB RAM trở lên.",
-  "tags": [
-   "Đa ngôn ngữ",
-   "Mạnh"
-  ],
   "agent": true
  },
  {
@@ -97,11 +83,7 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen3",
   "vision": false,
-  "desc": "Thế hệ Qwen3 siêu nhỏ, có chế độ suy nghĩ (thinking) trước khi trả lời.",
-  "tags": [
-   "Siêu nhẹ",
-   "Suy luận"
-  ]
+  "desc": "Thế hệ Qwen3 siêu nhỏ, có chế độ suy nghĩ (thinking) trước khi trả lời."
  },
  {
   "id": "qwen_qwen3-1.7b-q4_k_m",
@@ -117,10 +99,7 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen3",
   "vision": false,
-  "desc": "Nhỏ gọn nhưng suy luận tốt, hợp với laptop phổ thông.",
-  "tags": [
-   "Suy luận"
-  ]
+  "desc": "Nhỏ gọn nhưng suy luận tốt, hợp với laptop phổ thông."
  },
  {
   "id": "qwen3-4b-instruct-2507-q4_k_m",
@@ -137,10 +116,6 @@ const CATALOG = [
   "arch": "qwen3",
   "vision": false,
   "desc": "Bản Qwen3 4B trả lời trực tiếp (không thinking), nhanh và chất lượng cao.",
-  "tags": [
-   "Khuyên dùng",
-   "Đa ngôn ngữ"
-  ],
   "agent": true
  },
  {
@@ -158,10 +133,6 @@ const CATALOG = [
   "arch": "qwen3",
   "vision": false,
   "desc": "Qwen3 cỡ vừa, suy luận và lập trình mạnh. Cần từ 8 GB RAM.",
-  "tags": [
-   "Suy luận",
-   "Lập trình"
-  ],
   "agent": true
  },
  {
@@ -178,10 +149,7 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen2",
   "vision": false,
-  "desc": "Chuyên viết, giải thích và sửa mã nguồn.",
-  "tags": [
-   "Lập trình"
-  ]
+  "desc": "Chuyên viết, giải thích và sửa mã nguồn."
  },
  {
   "id": "llama-3.2-1b-instruct-q4_k_m",
@@ -197,10 +165,7 @@ const CATALOG = [
   "license": "Llama 3.2 Community",
   "arch": "llama",
   "vision": false,
-  "desc": "Nhỏ gọn, phản hồi nhanh. Mạnh nhất với tiếng Anh.",
-  "tags": [
-   "Nhanh"
-  ]
+  "desc": "Nhỏ gọn, phản hồi nhanh. Mạnh nhất với tiếng Anh."
  },
  {
   "id": "llama-3.2-3b-instruct-q4_k_m",
@@ -216,10 +181,7 @@ const CATALOG = [
   "license": "Llama 3.2 Community",
   "arch": "llama",
   "vision": false,
-  "desc": "Đa năng, ngữ cảnh dài, phù hợp làm trợ lý hằng ngày.",
-  "tags": [
-   "Đa năng"
-  ]
+  "desc": "Đa năng, ngữ cảnh dài, phù hợp làm trợ lý hằng ngày."
  },
  {
   "id": "meta-llama-3.1-8b-instruct-q4_k_m",
@@ -236,9 +198,6 @@ const CATALOG = [
   "arch": "llama",
   "vision": false,
   "desc": "Mô hình 8B phổ biến, cân bằng giữa chất lượng và tốc độ.",
-  "tags": [
-   "Đa năng"
-  ],
   "agent": true
  },
  {
@@ -255,10 +214,7 @@ const CATALOG = [
   "license": "Gemma",
   "arch": "gemma2",
   "vision": false,
-  "desc": "Văn phong tự nhiên, gọn nhẹ, chạy tốt trên laptop không có card rời.",
-  "tags": [
-   "Gọn nhẹ"
-  ]
+  "desc": "Văn phong tự nhiên, gọn nhẹ, chạy tốt trên laptop không có card rời."
  },
  {
   "id": "google_gemma-3-1b-it-q4_k_m",
@@ -274,10 +230,7 @@ const CATALOG = [
   "license": "Gemma",
   "arch": "gemma3",
   "vision": false,
-  "desc": "Gemma thế hệ 3 bản siêu nhẹ, nhanh trên mọi máy.",
-  "tags": [
-   "Siêu nhẹ"
-  ]
+  "desc": "Gemma thế hệ 3 bản siêu nhẹ, nhanh trên mọi máy."
  },
  {
   "id": "gemma-3-4b-it-q4_k_m",
@@ -297,10 +250,6 @@ const CATALOG = [
   "license": "Gemma",
   "arch": "gemma3",
   "desc": "Đa ngôn ngữ tốt, đọc và mô tả ảnh. Bản chính thức của ggml-org kèm tệp thị giác (mmproj).",
-  "tags": [
-   "Nhìn được ảnh",
-   "Đa ngôn ngữ"
-  ],
   "url": "https://huggingface.co/ggml-org/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf",
   "vision": true,
   "agent": true
@@ -323,10 +272,6 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen3vl",
   "desc": "Nhìn màn hình, chỉ đúng nút cần bấm (toạ độ 0-1000) và gọi công cụ gốc. Hợp laptop GPU 4 GB và Mac M1 8 GB.",
-  "tags": [
-   "Nhìn được ảnh",
-   "Điều khiển máy tính"
-  ],
   "url": "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
   "vision": true,
   "computer": true,
@@ -353,10 +298,6 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen3vl",
   "desc": "Bản lớn hơn của Qwen3-VL: hiểu giao diện và làm nhiều bước chắc chắn hơn. Cho máy GPU 8 GB trở lên hoặc Mac 16 GB.",
-  "tags": [
-   "Nhìn được ảnh",
-   "Điều khiển máy tính"
-  ],
   "url": "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/main/Qwen3VL-8B-Instruct-Q4_K_M.gguf",
   "vision": true,
   "computer": true,
@@ -383,10 +324,6 @@ const CATALOG = [
   "license": "Qwen Research (phi thương mại)",
   "arch": "qwen2vl",
   "desc": "Hiểu ảnh, đọc chữ trong ảnh tốt; định vị nút theo điểm ảnh. Nhỏ, hợp máy yếu.",
-  "tags": [
-   "Nhìn được ảnh",
-   "Điều khiển máy tính"
-  ],
   "url": "https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf",
   "vision": true,
   "computer": true,
@@ -413,10 +350,6 @@ const CATALOG = [
   "license": "Holo / Qwen Research (phi thương mại)",
   "arch": "qwen2vl",
   "desc": "Mô hình chuyên tìm phần tử giao diện (dựa trên Qwen2.5-VL). Nhỏ, gọi công cụ qua giao thức văn bản.",
-  "tags": [
-   "Nhìn được ảnh",
-   "Điều khiển máy tính"
-  ],
   "url": "https://huggingface.co/mradermacher/Holo1.5-3B-GGUF/resolve/main/Holo1.5-3B.Q4_K_M.gguf",
   "vision": true,
   "computer": true,
@@ -443,10 +376,6 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen2vl",
   "desc": "Định vị nút rất chính xác; nhưng khi tự quyết gọi công cụ đôi lúc từ chối. Dùng tốt cho \"Nhìn màn hình\".",
-  "tags": [
-   "Nhìn được ảnh",
-   "Điều khiển máy tính"
-  ],
   "url": "https://huggingface.co/ggml-org/Qwen2.5-VL-7B-Instruct-GGUF/resolve/main/Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf",
   "vision": true,
   "computer": true,
@@ -473,10 +402,6 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen2vl",
   "desc": "Huấn luyện riêng để bấm/gõ trên giao diện: định vị chuẩn (click(start_box)). Không theo định dạng gọi công cụ chung nên mở ứng dụng kém.",
-  "tags": [
-   "Nhìn được ảnh",
-   "Điều khiển máy tính"
-  ],
   "url": "https://huggingface.co/mradermacher/UI-TARS-1.5-7B-GGUF/resolve/main/UI-TARS-1.5-7B.Q4_K_M.gguf",
   "vision": true,
   "computer": true,
@@ -503,10 +428,6 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen3vl",
   "desc": "Mô hình nhìn ảnh thế hệ Qwen3, nhỏ gọn, mô tả ảnh bằng tiếng Việt tốt.",
-  "tags": [
-   "Nhìn được ảnh",
-   "Khuyên dùng"
-  ],
   "url": "https://huggingface.co/ggml-org/Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen3-VL-2B-Instruct-Q8_0.gguf",
   "vision": true
  },
@@ -528,10 +449,6 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "llama",
   "desc": "Siêu nhẹ, mô tả ảnh nhanh, chủ yếu bằng tiếng Anh.",
-  "tags": [
-   "Nhìn được ảnh",
-   "Siêu nhẹ"
-  ],
   "url": "https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/main/SmolVLM-500M-Instruct-Q8_0.gguf",
   "vision": true
  },
@@ -550,9 +467,6 @@ const CATALOG = [
   "arch": "gemma3",
   "vision": false,
   "desc": "Chất lượng cao, cần máy mạnh (từ 16 GB RAM). Chưa hỗ trợ đầu vào ảnh.",
-  "tags": [
-   "Mạnh"
-  ],
   "visionNote": "Mô hình gốc nhìn được ảnh, nhưng bản này không kèm mmproj trong danh mục: AIVN dùng phần văn bản.",
   "agent": true
  },
@@ -570,10 +484,7 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "llama",
   "vision": false,
-  "desc": "Mô hình 7B kinh điển của Mistral AI, mạnh với tiếng Anh và châu Âu.",
-  "tags": [
-   "Đa năng"
-  ]
+  "desc": "Mô hình 7B kinh điển của Mistral AI, mạnh với tiếng Anh và châu Âu."
  },
  {
   "id": "mistral-nemo-instruct-2407-q4_k_m",
@@ -590,10 +501,6 @@ const CATALOG = [
   "arch": "llama",
   "vision": false,
   "desc": "12B đa ngôn ngữ, ngữ cảnh 128K. Cần từ 16 GB RAM.",
-  "tags": [
-   "Mạnh",
-   "Đa ngôn ngữ"
-  ],
   "agent": true
  },
  {
@@ -610,10 +517,7 @@ const CATALOG = [
   "license": "MIT",
   "arch": "phi3",
   "vision": false,
-  "desc": "Mô hình nhỏ của Microsoft, giỏi suy luận và toán.",
-  "tags": [
-   "Suy luận"
-  ]
+  "desc": "Mô hình nhỏ của Microsoft, giỏi suy luận và toán."
  },
  {
   "id": "microsoft_phi-4-mini-instruct-q4_k_m",
@@ -629,10 +533,7 @@ const CATALOG = [
   "license": "MIT",
   "arch": "phi3",
   "vision": false,
-  "desc": "Phi thế hệ 4 bản nhỏ, đa ngôn ngữ tốt hơn Phi-3.5.",
-  "tags": [
-   "Suy luận"
-  ]
+  "desc": "Phi thế hệ 4 bản nhỏ, đa ngôn ngữ tốt hơn Phi-3.5."
  },
  {
   "id": "phi-4-q4_k_m",
@@ -649,10 +550,6 @@ const CATALOG = [
   "arch": "phi3",
   "vision": false,
   "desc": "Phi-4 đầy đủ 14B, suy luận và toán rất mạnh. Cần từ 16 GB RAM.",
-  "tags": [
-   "Mạnh",
-   "Suy luận"
-  ],
   "agent": true
  },
  {
@@ -669,10 +566,7 @@ const CATALOG = [
   "license": "MIT",
   "arch": "qwen2",
   "vision": false,
-  "desc": "Học từ DeepSeek-R1: suy nghĩ từng bước trước khi trả lời.",
-  "tags": [
-   "Suy luận"
-  ]
+  "desc": "Học từ DeepSeek-R1: suy nghĩ từng bước trước khi trả lời."
  },
  {
   "id": "deepseek-r1-distill-qwen-7b-q4_k_m",
@@ -688,11 +582,7 @@ const CATALOG = [
   "license": "MIT",
   "arch": "qwen2",
   "vision": false,
-  "desc": "Suy luận nhiều bước mạnh hơn, hợp cho toán và lập trình.",
-  "tags": [
-   "Suy luận",
-   "Lập trình"
-  ]
+  "desc": "Suy luận nhiều bước mạnh hơn, hợp cho toán và lập trình."
  },
  {
   "id": "smollm2-1.7b-instruct-q4_k_m",
@@ -708,10 +598,7 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "llama",
   "vision": false,
-  "desc": "Mô hình nhỏ của Hugging Face, nhanh, chủ yếu tiếng Anh.",
-  "tags": [
-   "Nhanh"
-  ]
+  "desc": "Mô hình nhỏ của Hugging Face, nhanh, chủ yếu tiếng Anh."
  },
  {
   "id": "arcee-vylinh.q4_k_m",
@@ -727,10 +614,7 @@ const CATALOG = [
   "license": "Apache 2.0",
   "arch": "qwen2",
   "vision": false,
-  "desc": "Mô hình 3B tinh chỉnh riêng cho tiếng Việt (Arcee AI, nền Qwen2.5).",
-  "tags": [
-   "Tiếng Việt"
-  ]
+  "desc": "Mô hình 3B tinh chỉnh riêng cho tiếng Việt (Arcee AI, nền Qwen2.5)."
  },
  {
   "id": "gpt-oss-20b-mxfp4",
@@ -747,13 +631,282 @@ const CATALOG = [
   "arch": "gpt-oss",
   "vision": false,
   "desc": "Mô hình mở của OpenAI (MoE), suy luận mạnh. Cần từ 16 GB RAM.",
-  "tags": [
-   "Mạnh",
-   "Suy luận"
-  ],
   "agent": true
+ },
+ {
+  "id": "qwen3-4b-thinking-2507-q4_k_m",
+  "name": "Qwen3 4B Thinking 2507",
+  "family": "Qwen",
+  "params": "4B",
+  "quant": "Q4_K_M",
+  "repo": "unsloth/Qwen3-4B-Thinking-2507-GGUF",
+  "file": "Qwen3-4B-Thinking-2507-Q4_K_M.gguf",
+  "size": 2497281152,
+  "ram": "≥ 6 GB RAM",
+  "url": "https://huggingface.co/unsloth/Qwen3-4B-Thinking-2507-GGUF/resolve/main/Qwen3-4B-Thinking-2507-Q4_K_M.gguf",
+  "license": "Apache 2.0",
+  "arch": "qwen3",
+  "vision": false,
+  "desc": "Bản 4B luôn suy nghĩ trước khi trả lời: chậm hơn bản Instruct nhưng giỏi toán, logic và các bài nhiều bước."
+ },
+ {
+  "id": "qwen3-14b-q4_k_m",
+  "name": "Qwen3 14B",
+  "family": "Qwen",
+  "params": "14B",
+  "quant": "Q4_K_M",
+  "repo": "Qwen/Qwen3-14B-GGUF",
+  "file": "Qwen3-14B-Q4_K_M.gguf",
+  "size": 9001752960,
+  "ram": "≥ 16 GB RAM",
+  "url": "https://huggingface.co/Qwen/Qwen3-14B-GGUF/resolve/main/Qwen3-14B-Q4_K_M.gguf",
+  "license": "Apache 2.0",
+  "arch": "qwen3",
+  "vision": false,
+  "desc": "Mạnh hơn rõ so với 8B, có chế độ suy nghĩ / không suy nghĩ. Cần máy 16 GB RAM, chạy mượt với GPU 12 GB.",
+  "agent": true
+ },
+ {
+  "id": "qwen3-30b-a3b-instruct-2507-q4_k_m",
+  "name": "Qwen3 30B-A3B Instruct 2507",
+  "family": "Qwen",
+  "params": "30B (MoE, 3B hoạt động)",
+  "quant": "Q4_K_M",
+  "repo": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF",
+  "file": "Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf",
+  "size": 18556686752,
+  "ram": "≥ 24 GB RAM",
+  "url": "https://huggingface.co/unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF/resolve/main/Qwen3-30B-A3B-Instruct-2507-Q4_K_M.gguf",
+  "license": "Apache 2.0",
+  "arch": "qwen3moe",
+  "vision": false,
+  "desc": "Mô hình MoE: tổng 30B tham số nhưng mỗi token chỉ dùng khoảng 3B, nên chạy nhanh hơn nhiều so với cỡ. Tệp 18,6 GB, cần 24 GB RAM trở lên.",
+  "agent": true
+ },
+ {
+  "id": "gemma-3n-e2b-it-q4_k_m",
+  "name": "Gemma 3n E2B",
+  "family": "Gemma",
+  "params": "E2B (5B, tương đương 2B)",
+  "quant": "Q4_K_M",
+  "repo": "unsloth/gemma-3n-E2B-it-GGUF",
+  "file": "gemma-3n-E2B-it-Q4_K_M.gguf",
+  "size": 3026881888,
+  "ram": "≥ 4 GB RAM",
+  "url": "https://huggingface.co/unsloth/gemma-3n-E2B-it-GGUF/resolve/main/gemma-3n-E2B-it-Q4_K_M.gguf",
+  "license": "Gemma",
+  "arch": "gemma3n",
+  "vision": false,
+  "desc": "Gemma thế hệ cho điện thoại và laptop: tiết kiệm bộ nhớ khi chạy. Trong AIVN chỉ dùng phần chữ."
+ },
+ {
+  "id": "gemma-3n-e4b-it-q4_k_m",
+  "name": "Gemma 3n E4B",
+  "family": "Gemma",
+  "params": "E4B (8B, tương đương 4B)",
+  "quant": "Q4_K_M",
+  "repo": "unsloth/gemma-3n-E4B-it-GGUF",
+  "file": "gemma-3n-E4B-it-Q4_K_M.gguf",
+  "size": 4539054208,
+  "ram": "≥ 6 GB RAM",
+  "url": "https://huggingface.co/unsloth/gemma-3n-E4B-it-GGUF/resolve/main/gemma-3n-E4B-it-Q4_K_M.gguf",
+  "license": "Gemma",
+  "arch": "gemma3n",
+  "vision": false,
+  "desc": "Bản lớn hơn của Gemma 3n, trả lời tốt hơn E2B. Trong AIVN chỉ dùng phần chữ."
+ },
+ {
+  "id": "glm-4-9b-0414-q4_k_m",
+  "name": "GLM-4 9B 0414",
+  "family": "GLM",
+  "params": "9B",
+  "quant": "Q4_K_M",
+  "repo": "bartowski/THUDM_GLM-4-9B-0414-GGUF",
+  "file": "THUDM_GLM-4-9B-0414-Q4_K_M.gguf",
+  "size": 6166574464,
+  "ram": "≥ 10 GB RAM",
+  "url": "https://huggingface.co/bartowski/THUDM_GLM-4-9B-0414-GGUF/resolve/main/THUDM_GLM-4-9B-0414-Q4_K_M.gguf",
+  "license": "MIT",
+  "arch": "glm4",
+  "vision": false,
+  "desc": "Mô hình của Zhipu (Trung Quốc), mạnh về tiếng Trung, tiếng Anh, lập trình và gọi hàm."
+ },
+ {
+  "id": "granite-4.0-h-micro-q4_k_m",
+  "name": "Granite 4.0 H Micro",
+  "family": "Granite",
+  "params": "3B",
+  "quant": "Q4_K_M",
+  "repo": "ibm-granite/granite-4.0-h-micro-GGUF",
+  "file": "granite-4.0-h-micro-Q4_K_M.gguf",
+  "size": 1942564512,
+  "ram": "≥ 4 GB RAM",
+  "url": "https://huggingface.co/ibm-granite/granite-4.0-h-micro-GGUF/resolve/main/granite-4.0-h-micro-Q4_K_M.gguf",
+  "license": "Apache 2.0",
+  "arch": "granitehybrid",
+  "vision": false,
+  "desc": "Mô hình doanh nghiệp của IBM, kiến trúc lai (Mamba + Transformer) tốn ít bộ nhớ khi hội thoại dài."
+ },
+ {
+  "id": "granite-4.0-h-tiny-q4_k_m",
+  "name": "Granite 4.0 H Tiny",
+  "family": "Granite",
+  "params": "7B (MoE, 1B hoạt động)",
+  "quant": "Q4_K_M",
+  "repo": "ibm-granite/granite-4.0-h-tiny-GGUF",
+  "file": "granite-4.0-h-tiny-Q4_K_M.gguf",
+  "size": 4230976352,
+  "ram": "≥ 6 GB RAM",
+  "url": "https://huggingface.co/ibm-granite/granite-4.0-h-tiny-GGUF/resolve/main/granite-4.0-h-tiny-Q4_K_M.gguf",
+  "license": "Apache 2.0",
+  "arch": "granitehybrid",
+  "vision": false,
+  "desc": "Bản MoE của Granite 4.0: tổng 7B, mỗi token dùng khoảng 1B nên nhanh trên CPU."
+ },
+ {
+  "id": "smollm3-3b-q4_k_m",
+  "name": "SmolLM3 3B",
+  "family": "SmolLM",
+  "params": "3B",
+  "quant": "Q4_K_M",
+  "repo": "ggml-org/SmolLM3-3B-GGUF",
+  "file": "SmolLM3-Q4_K_M.gguf",
+  "size": 1915305312,
+  "ram": "≥ 4 GB RAM",
+  "url": "https://huggingface.co/ggml-org/SmolLM3-3B-GGUF/resolve/main/SmolLM3-Q4_K_M.gguf",
+  "license": "Apache 2.0",
+  "arch": "smollm3",
+  "vision": false,
+  "desc": "Mô hình mở hoàn toàn của Hugging Face (công bố cả dữ liệu huấn luyện), có chế độ suy nghĩ."
+ },
+ {
+  "id": "lfm2-1.2b-q4_k_m",
+  "name": "LFM2 1.2B",
+  "family": "LFM",
+  "params": "1.2B",
+  "quant": "Q4_K_M",
+  "repo": "LiquidAI/LFM2-1.2B-GGUF",
+  "file": "LFM2-1.2B-Q4_K_M.gguf",
+  "size": 730893248,
+  "ram": "≥ 2 GB RAM",
+  "url": "https://huggingface.co/LiquidAI/LFM2-1.2B-GGUF/resolve/main/LFM2-1.2B-Q4_K_M.gguf",
+  "license": "LFM Open License v1.0 (doanh thu dưới 10 triệu USD/năm)",
+  "arch": "lfm2",
+  "vision": false,
+  "desc": "Mô hình rất nhỏ và nhanh của Liquid AI, kiến trúc riêng hợp với CPU."
+ },
+ {
+  "id": "mistral-small-3.2-24b-instruct-2506-q4_k_m",
+  "name": "Mistral Small 3.2 24B",
+  "family": "Mistral",
+  "params": "24B",
+  "quant": "Q4_K_M",
+  "repo": "bartowski/mistralai_Mistral-Small-3.2-24B-Instruct-2506-GGUF",
+  "file": "mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf",
+  "size": 14333915264,
+  "mmproj": {
+   "file": "mmproj-mistralai_Mistral-Small-3.2-24B-Instruct-2506-f16.gguf",
+   "size": 878054144,
+   "url": "https://huggingface.co/bartowski/mistralai_Mistral-Small-3.2-24B-Instruct-2506-GGUF/resolve/main/mmproj-mistralai_Mistral-Small-3.2-24B-Instruct-2506-f16.gguf"
+  },
+  "ram": "≥ 20 GB RAM",
+  "url": "https://huggingface.co/bartowski/mistralai_Mistral-Small-3.2-24B-Instruct-2506-GGUF/resolve/main/mistralai_Mistral-Small-3.2-24B-Instruct-2506-Q4_K_M.gguf",
+  "license": "Apache 2.0",
+  "arch": "llama",
+  "vision": true,
+  "desc": "Mô hình lớn của Mistral, nhìn được ảnh và gọi hàm. Cần máy mạnh (tệp 14,3 GB + 0,9 GB thị giác).",
+  "agent": true
+ },
+ {
+  "id": "internvl3-2b-instruct-q4_k_m",
+  "name": "InternVL3 2B",
+  "family": "InternVL",
+  "params": "2B",
+  "quant": "Q4_K_M",
+  "repo": "ggml-org/InternVL3-2B-Instruct-GGUF",
+  "file": "InternVL3-2B-Instruct-Q4_K_M.gguf",
+  "size": 1116758816,
+  "mmproj": {
+   "file": "mmproj-InternVL3-2B-Instruct-Q8_0.gguf",
+   "size": 337012000,
+   "url": "https://huggingface.co/ggml-org/InternVL3-2B-Instruct-GGUF/resolve/main/mmproj-InternVL3-2B-Instruct-Q8_0.gguf"
+  },
+  "ram": "≥ 3 GB RAM",
+  "url": "https://huggingface.co/ggml-org/InternVL3-2B-Instruct-GGUF/resolve/main/InternVL3-2B-Instruct-Q4_K_M.gguf",
+  "license": "Apache 2.0 (phần ngôn ngữ: Qwen)",
+  "arch": "qwen2",
+  "vision": true,
+  "desc": "Mô hình nhìn ảnh nhỏ của OpenGVLab, đọc ảnh và tài liệu tốt so với cỡ."
+ },
+ {
+  "id": "internvl3-8b-instruct-q4_k_m",
+  "name": "InternVL3 8B",
+  "family": "InternVL",
+  "params": "8B",
+  "quant": "Q4_K_M",
+  "repo": "ggml-org/InternVL3-8B-Instruct-GGUF",
+  "file": "InternVL3-8B-Instruct-Q4_K_M.gguf",
+  "size": 4681132224,
+  "mmproj": {
+   "file": "mmproj-InternVL3-8B-Instruct-Q8_0.gguf",
+   "size": 357082400,
+   "url": "https://huggingface.co/ggml-org/InternVL3-8B-Instruct-GGUF/resolve/main/mmproj-InternVL3-8B-Instruct-Q8_0.gguf"
+  },
+  "ram": "≥ 8 GB RAM",
+  "url": "https://huggingface.co/ggml-org/InternVL3-8B-Instruct-GGUF/resolve/main/InternVL3-8B-Instruct-Q4_K_M.gguf",
+  "license": "Apache 2.0 (phần ngôn ngữ: Qwen)",
+  "arch": "qwen2",
+  "vision": true,
+  "desc": "Bản lớn của InternVL3: hiểu ảnh, biểu đồ, giấy tờ chi tiết hơn."
+ },
+ {
+  "id": "holo1.5-7b-q4_k_m",
+  "name": "Holo1.5 7B (định vị giao diện)",
+  "family": "Holo",
+  "params": "7B",
+  "quant": "Q4_K_M",
+  "repo": "mradermacher/Holo1.5-7B-GGUF",
+  "file": "Holo1.5-7B.Q4_K_M.gguf",
+  "size": 4683072896,
+  "mmproj": {
+   "file": "Holo1.5-7B.mmproj-Q8_0.gguf",
+   "size": 856130720,
+   "url": "https://huggingface.co/mradermacher/Holo1.5-7B-GGUF/resolve/main/Holo1.5-7B.mmproj-Q8_0.gguf"
+  },
+  "ram": "≥ 8 GB RAM",
+  "url": "https://huggingface.co/mradermacher/Holo1.5-7B-GGUF/resolve/main/Holo1.5-7B.Q4_K_M.gguf",
+  "license": "Apache 2.0",
+  "arch": "qwen2vl",
+  "vision": true,
+  "desc": "Mô hình chuyên tìm vị trí nút, ô, mục trên ảnh chụp màn hình (dựa trên Qwen2.5-VL 7B). Dùng làm “mắt nhìn” cho cặp điều khiển máy.",
+  "computer": true,
+  "grounding": "qwen25vl",
+  "screenPriority": 5
+ },
+ {
+  "id": "ui-venus-ground-7b-q4_k_m",
+  "name": "UI-Venus Ground 7B (định vị giao diện)",
+  "family": "UI-Venus",
+  "params": "7B",
+  "quant": "Q4_K_M",
+  "repo": "mradermacher/UI-Venus-Ground-7B-GGUF",
+  "file": "UI-Venus-Ground-7B.Q4_K_M.gguf",
+  "size": 4683073920,
+  "mmproj": {
+   "file": "UI-Venus-Ground-7B.mmproj-Q8_0.gguf",
+   "size": 853119744,
+   "url": "https://huggingface.co/mradermacher/UI-Venus-Ground-7B-GGUF/resolve/main/UI-Venus-Ground-7B.mmproj-Q8_0.gguf"
+  },
+  "ram": "≥ 8 GB RAM",
+  "url": "https://huggingface.co/mradermacher/UI-Venus-Ground-7B-GGUF/resolve/main/UI-Venus-Ground-7B.Q4_K_M.gguf",
+  "license": "Apache 2.0",
+  "arch": "qwen2vl",
+  "vision": true,
+  "desc": "Mô hình định vị phần tử giao diện của Ant Group (dựa trên Qwen2.5-VL 7B), chỉ dùng ảnh chụp màn hình.",
+  "computer": true,
+  "grounding": "qwen25vl",
+  "screenPriority": 4
  }
-
 ];
 
 // Mô hình nhúng cho hỏi đáp tài liệu (RAG): tải khi dùng lần đầu
@@ -768,6 +921,10 @@ const EMBEDDING = {
  "dims": 1024,
  "prefix": null
 };
+
+// gắn nhãn có nguồn; tags giữ cho mã cũ (chỉ nhãn đã kiểm chứng / theo nhà phát triển)
+const { claimsFor } = require('./catalog-claims');
+for (const c of CATALOG) { c.claims = claimsFor(c.id); c.tags = [...new Set(c.claims.filter(x => x.k !== 'x').map(x => x.label))]; }
 
 module.exports = CATALOG;
 module.exports.CATALOG = CATALOG;
