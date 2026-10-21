@@ -362,7 +362,7 @@ function createComputerTools(deps) {
     if (!hit) return { ok: false, tried: [`không thấy “${q}” trong ${SOURCES}`] };
     await openApp(hit); return { ok: true, name: hit.name, how: 'mở theo danh sách ứng dụng', window: null, tried: [] };
   }
-  return { launch, launchProcOf: (q) => (lcLoad()[lcKey(q)] || {}).proc || null, likelyTarget: (q) => (deps.screen && deps.screen.likely ? deps.screen.likely(q) : null), relevantWindows, defs: DEFS, names, exec, has: (n) => n in DEFS, CompError, scanReport, pending: async () => (deps.screen && deps.screen.pending ? deps.screen.pending() : null), searchTodo: () => (deps.screen && deps.screen.searchTodo ? deps.screen.searchTodo() : null), searchFound: () => (deps.screen && deps.screen.searchFound ? deps.screen.searchFound() : null) };
+  return { launch, launchProcOf: (q) => (lcLoad()[lcKey(q)] || {}).proc || null, likelyTarget: (q) => (deps.screen && deps.screen.likely ? deps.screen.likely(q) : null), relevantWindows, defs: DEFS, names, exec, has: (n) => n in DEFS && (n !== 'ensure_app' || !!(deps.screen && deps.screen.ensureApp)), CompError, scanReport, pending: async () => (deps.screen && deps.screen.pending ? deps.screen.pending() : null), searchTodo: () => (deps.screen && deps.screen.searchTodo ? deps.screen.searchTodo() : null), searchFound: () => (deps.screen && deps.screen.searchFound ? deps.screen.searchFound() : null) };
 }
 
 module.exports = { createComputerTools, DEFS: DEFS, LEVEL1, LEVEL2, CompError, isSendAction };

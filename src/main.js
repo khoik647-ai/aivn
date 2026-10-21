@@ -2328,6 +2328,46 @@ comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sen
       try { cover.destroy(); } catch {}
       out.final = await st(); throw null;
     }
+    if (process.env.AIVN_QA_B21_MODE === 'ab') { // kịch bản A/B trên trình duyệt GIẢ (renderer/bench-web.html, không mạng) — công cụ thật của desktop-agent, không mô hình
+      const AG = require('./agent/agent'); const rd = (w) => w.webContents.executeJavaScript('benchRead()');
+      const load = async (w, a) => { await w.loadFile(path.join(__dirname, 'renderer', 'bench-web.html'), { query: { app: a } }); w.focus(); w.webContents.focus(); await sleep(700); };
+      const stepX = async (name, ctxX, fn, w) => { qaAsks.length = 0; let r; const t0 = Date.now(); try { r = await fn(); } catch (e) { r = { error: String(e.message || e) }; } await sleep(600);
+        out.steps.push({ name, summary: r.summary || r.error || '', ok: !r.error, code: r.code || null, ask: r.ask || null, stop: !!r.stop, ms: Date.now() - t0, forModel: String(r.forModel || '').slice(0, 2500), asks: qaAsks.slice(), state: await rd(w) }); save(); return r; };
+      // A) Chrome: thanh địa chỉ → tìm → mở kết quả đầu → đọc giá + URL THẬT trên thanh địa chỉ
+      await load(t, 'chrome');
+      const qa = "Trên Chrome đang mở: tìm 'giá vàng SJC hôm nay', mở kết quả đầu tiên và cho mình biết giá mua vào, kèm đường dẫn nguồn.";
+      const ca = { ...ctx, userQuery: qa, auto: require('./agent/autonomy').forTurn({ setting: false, query: qa }) }; const msgs = [];
+      const lookA = async (name, a) => { const r = await stepX(name, ca, () => d.look(a, ca), t); msgs.push({ role: 'tool', content: String(r.forModel || '') }); return r; };
+      let lastFM = ''; const idOf = (re) => { for (const line of lastFM.split('\n')) { const m = /^\[(e\d+)\][^"]*"([^"]*)"/.exec(line); if (m && re.test(m[2])) return m[1]; } return null; };
+      const keep = (r) => { if (r && r.forModel) lastFM = String(r.forModel); return r; };
+      keep(await lookA('a-look', { window: 'Google Chrome' }));
+      keep(await stepX('a-ctrl-l', ca, () => d.act({ action: 'hotkey', keys: 'ctrl+l' }, ca), t));
+      { const r = keep(await stepX('a-type-query', ca, () => d.act({ action: 'type_text', text: 'giá vàng SJC hôm nay', submit: true }, ca), t)); msgs.push({ role: 'tool', content: String(r.forModel || '') }); }
+      keep(await lookA('a-look-results', {}));
+      out.firstId = idOf(/Giá vàng SJC hôm nay - Công ty/i);
+      { const r = keep(await stepX('a-click-first', ca, () => d.act({ action: 'click', element: out.firstId || 'Giá vàng SJC hôm nay - Công ty' }, ca), t)); msgs.push({ role: 'tool', content: String(r.forModel || '') }); }
+      keep(await lookA('a-look-page', {}));
+      out.answerA = AG.withSource('Giá vàng SJC mua vào hôm nay là 118.500 nghìn đồng/lượng.', qa, msgs);
+      out.answerAwrong = AG.withSource('Giá mua vào 118.500, nguồn: https://giavang.example.vn/sjc', qa, msgs);
+      // B') Google Docs đang ở màn hình đăng nhập → screen_look DỪNG và hỏi, không gõ gì
+      await load(t, 'docs_login');
+      const qb = "Trong Google Docs đang mở, mở tài liệu 'QA nháp' rồi thay tất cả 'ngày mai' bằng 'thứ Hai', không cần hỏi lại.";
+      const cb = { ...ctx, userQuery: qb, auto: require('./agent/autonomy').forTurn({ setting: false, query: qb }) };
+      await stepX('b-login-look', cb, () => d.look({ window: 'Google Chrome' }, cb), t);
+      // B) Google Docs: mở “QA nháp” → Ctrl+H (con trỏ ở ô Tìm) → gõ → Tab sang “Thay bằng” → gõ → Thay thế tất cả
+      await load(t, 'docs');
+      keep(await stepX('b-look', cb, () => d.look({ window: 'Google Chrome' }, cb), t));
+      out.docId = idOf(/QA ?nh/i);
+      await stepX('b-open-doc', cb, () => d.act({ action: 'click', element: out.docId || 'QA nháp' }, cb), t);
+      await stepX('b-ctrl-h', cb, () => d.act({ action: 'hotkey', keys: 'ctrl+h' }, cb), t);
+      await stepX('b-type-find', cb, () => d.act({ action: 'type_text', text: 'ngày mai' }, cb), t);
+      await stepX('b-tab', cb, () => d.act({ action: 'hotkey', keys: 'tab' }, cb), t);
+      await stepX('b-type-rep', cb, () => d.act({ action: 'type_text', text: 'thứ Hai' }, cb), t);
+      keep(await stepX('b-look2', cb, () => d.look({}, cb), t));
+      out.repId = idOf(/^Thay thế tất cả$/i);
+      await stepX('b-replace-all', cb, () => d.act({ action: 'click', element: out.repId || 'Thay thế tất cả' }, cb), t);
+      out.final = await rd(t); throw null;
+    }
     if (process.env.AIVN_QA_B21_MODE === 'b76') { // B76 (QA lượt 8, Outlook o10): nội dung thư bị gõ vào ô Tiêu đề 3 lần (id đổi theo chữ trong ô)
       const ol = `<!doctype html><meta charset=utf-8><title>Thư mới - Outlook</title><style>body{font:16px sans-serif;margin:20px}input,textarea{display:block;width:700px;font:26px sans-serif;margin:18px 0;padding:10px;border:1px solid #888}textarea{height:220px}::placeholder{color:#222;opacity:1}</style>
 <input id=to placeholder="Người nhận"><input id=subj placeholder="Thêm tiêu đề"><textarea id=body placeholder="Nhập nội dung thư tại đây"></textarea>

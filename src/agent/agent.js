@@ -324,11 +324,50 @@ const FOLLOW_RE = /^\s*(?:(?:ok(?:e|ay)?|ừ|ừm|vâng|dạ|có|được|rồi|
 // B43: nêu TÊN ứng dụng/trang + động từ làm việc (“soạn email trên Outlook web…”, “đặt lịch trong Google Calendar”) = thao tác ứng dụng đó.
 // “chỉ soạn, không gửi” chỉ có nghĩa là DỪNG TRƯỚC nút Gửi, không phải “viết ra khung chat”.
 const APP_NAMES = String.raw`outlook(?:\s+web)?|gmail|zalo|messenger|facebook|instagram|teams|slack|discord|telegram|whatsapp|viber|word|excel|powerpoint|google\s+(?:docs|sheets|slides|drive|calendar|lịch|meet|forms)|notion|canva|chrome|edge|firefox|cốc cốc|coc coc|youtube|shopee|lazada|tiktok|onedrive|one\s*drive|lịch google|thunderbird|libreoffice(?:\s+\w+)?|writer|calc|paint|notepad|file explorer|vs ?code|trình duyệt`;
-const APP_TASK_RE = new RegExp(String.raw`(?:^|[\s,.(])(soạn|viết|tạo|đặt|lên lịch|đăng|điền|gửi|nhắn|trả lời|chuyển tiếp|tải lên|đính kèm|tìm|xoá|xóa|sửa|đổi|thêm|mở|compose|write|draft|send|create|post|reply|forward|schedule|upload|fill)(?=\s)[^
+const APP_TASK_RE = new RegExp(String.raw`(?:^|[\s,.(])(soạn|viết|tạo|đặt|lên lịch|đăng|điền|gửi|nhắn|trả lời|chuyển tiếp|tải lên|đính kèm|tìm|xoá|xóa|sửa|đổi|thêm|mở|thay|thay thế|chèn|compose|write|draft|send|create|post|reply|forward|schedule|upload|fill|replace|edit|insert)(?=\s)[^
 ]{0,160}?(?:trên|trong|bằng|qua|ở|vào|tại|on|in|using|via)\s+(?:ứng dụng\s+|app\s+|trang\s+|web\s+)?(?:${APP_NAMES})(?=[\s,.:;!?"“”)]|$)`, 'iu');
 const APP_OF_RE = new RegExp(String.raw`(?:trên|trong|bằng|qua|ở|vào|tại|on|in|using|via)\s+(?:ứng dụng\s+|app\s+|trang\s+|web\s+)?(${APP_NAMES})`, 'iu');
 const HOWTO_RE = /^\s*(?:giải thích|cho (?:tôi|mình|em) biết|hướng dẫn|chỉ (?:tôi|mình|em)|làm (?:sao|thế nào)|tại sao|vì sao|cách|có cách|how|what|why|explain|can you explain)\b|(?:là gì|như thế nào|thế nào|ra sao|được không|không vậy)\s*\??\s*$|\?\s*$/iu;
-const isAppTask = (q) => { const t = String(q || ''); return APP_TASK_RE.test(t) && !HOWTO_RE.test(t); };
+// kịch bản B: nơi làm nêu TRƯỚC động từ — “trong Google Docs 'QA nháp', thay tất cả 'ngày mai' bằng 'thứ Hai'”
+const APP_TASK_RE2 = new RegExp(String.raw`(?:^|[\s,.(])(?:trên|trong|ở|tại|on|in)\s+(?:ứng dụng\s+|app\s+|trang\s+|web\s+)?(?:${APP_NAMES})(?=[\s,.:;!?"“”)'‘’]|$)[^\n]{0,160}?(?:^|[\s,.(])(?:soạn|viết|tạo|điền|gửi|nhắn|trả lời|tìm|xoá|xóa|sửa|đổi|thêm|thay|thay thế|chèn|compose|write|draft|send|create|reply|fill|replace|edit|insert|change|delete)(?=\s)`, 'iu');
+// kịch bản A: “… kèm đường dẫn nguồn” — câu trả lời phải có URL THẬT đã thấy trên thanh địa chỉ trình duyệt (không bịa)
+const SOURCE_RE = /cho\s+(?:mình|tôi|em|tớ|mình xin|tôi xin)\s+(?:cả\s+)?(?:đường dẫn|link|url|nguồn)|(?:kèm|ghi|cho biết|có|gửi kèm|dẫn)\s+(?:cả\s+|theo\s+)?(?:đường dẫn|link|liên kết|url|nguồn)|(?:đường dẫn|link|url|trang)\s+nguồn|(?:^|[\s,.(])nguồn(?:\s+(?:tin|tham khảo|ở đâu|lấy từ))?(?=[\s,.:;!?)]|$)|(?:^|[\s,.(])(?:sources?|cite)(?=[\s,.:;!?)]|$)|(?:with|include|plus|and)\s+(?:the\s+|a\s+)?(?:link|url|source)|来源|出处|附上(?:链接|网址)/iu;
+const URL_IN_RE = /\bhttps?:\/\/[^\s<>"'“”)\]]+|\b(?:[a-z0-9-]+\.)+(?:com|vn|net|org|info|io|gov|edu)(?:\.[a-z]{2})?(?:\/[^\s<>"'“”)\]]*)?/giu;
+const SEARCH_PAGE_RE = /^(?:https?:\/\/)?(?:www\.)?(?:google\.[a-z.]+\/search|bing\.com\/search|coccoc\.com\/search|duckduckgo\.com\/\?|search\.yahoo\.com)/i;
+const SOURCE_MSG = 'Nguồn: {0}';
+const SOURCE_FIX_MSG = 'Nguồn (đường dẫn thật trên thanh địa chỉ): {0}';
+const SOURCE_NONE_MSG = 'Mình chưa đọc được đường dẫn của trang trên thanh địa chỉ nên chưa ghi được nguồn.';
+const hostOf = (u) => String(u || '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').split(/[/?#]/)[0].toLowerCase();
+// URL đã thấy: giá trị ô địa chỉ của trình duyệt trong các lần quan sát (mới nhất trước); trang kết quả tìm kiếm chỉ dùng khi không còn gì khác
+function seenUrls(msgs) {
+  const out = [];
+  for (const m of [...(msgs || [])].reverse()) {
+    if (!m || m.role !== 'tool') continue;
+    for (const line of String(m.content || '').split('\n')) {
+      const v = /"[^"\n]*(?:address|địa chỉ|url|omnibox|search bar|地址)[^"\n]*"\s*=\s*"([^"\n]+)"/iu.exec(line);
+      const u = v && v[1].trim();
+      if (u && /^(?:https?:\/\/)?(?:[\w-]+\.)+[a-z]{2,}(?:[/?#]\S*)?$/i.test(u) && !out.includes(u)) out.push(u);
+    }
+    // không có cây giao diện (chỉ OCR): thanh địa chỉ là chữ dạng URL nằm TRÊN CÙNG của lần quan sát đó (chữ URL trong trang — vd. dòng trích dẫn kết quả tìm kiếm — nằm thấp hơn)
+    const ocr = [];
+    for (const line of String(m.content || '').split('\n')) {
+      const v = /chữ \(OCR\) "([^"\n]*)" @\d+,(\d+)/iu.exec(line); // OCR hay đọc biểu tượng ổ khoá thành 1–2 ký tự đầu (“m sjc.com.vn/…”)
+      const u = v && /^\W{0,3}(?:\S{1,2}\s+)?((?:https?:\/\/)?(?:www\.)?(?:[\w-]+\.)+[a-z]{2,}(?:[/?#][^\s"]*)?)\s*$/iu.exec(v[1]);
+      if (u && /\/|^https?:|^www\./i.test(u[1])) ocr.push({ u: u[1], y: Number(v[2]) });
+    }
+    if (ocr.length) { const top = ocr.sort((p, q) => p.y - q.y)[0].u; if (!out.includes(top)) out.push(top); }
+  }
+  return [...out.filter(u => !SEARCH_PAGE_RE.test(u)), ...out.filter(u => SEARCH_PAGE_RE.test(u))];
+}
+function withSource(text, query, msgs) {
+  if (!SOURCE_RE.test(String(query || '')) || chatAppOf(query)) return text; // việc nhắn tin “kèm link” không phải hỏi nguồn
+  const seen = seenUrls(msgs).filter(u => !SEARCH_PAGE_RE.test(u)); const said = String(text || '').match(URL_IN_RE) || [];
+  const full = (u) => /^https?:\/\//i.test(u) ? u : 'https://' + u;
+  if (!said.length) return String(text || '').trim() + '\n\n' + (seen.length ? SOURCE_MSG.replace('{0}', full(seen[0])) : SOURCE_NONE_MSG);
+  if (seen.length && !said.some(u => seen.some(x => hostOf(x) === hostOf(u)))) return String(text || '').trim() + '\n\n' + SOURCE_FIX_MSG.replace('{0}', full(seen[0])); // URL mô hình ghi không phải trang đã mở
+  return text;
+}
+const isAppTask = (q) => { const t = String(q || ''); return (APP_TASK_RE.test(t) || APP_TASK_RE2.test(t)) && !HOWTO_RE.test(t); };
 // ensure_app: “nhắn Zalo cho Lan …”, “gửi Messenger …” — ứng dụng nhắn tin/thư nêu ở bất kỳ đâu trong câu gửi tin (không chỉ “trên X”)
 const CHAT_APP_RE = /(?:^|[\s,.(“"])(zalo|messenger|telegram|teams|slack|discord|whatsapp|viber|gmail|outlook)(?=[\s,.:;!?"“”)]|$)/iu;
 const SEND_VERB_RE = /(?:^|[\s,.])(nhắn|gửi tin|gửi cho|trả lời|soạn tin|send|message|reply|text)(?=[\s,.:]|$)/iu;
@@ -1029,6 +1068,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       const okSteps = steps.filter(x => x.status === 'ok');
       text = 'Đã làm:\n' + okSteps.slice(-12).map(x => `- ${x.label || x.name}: ${String(x.summary || '').slice(0, 120)}`).join('\n') + (okSteps.length > 12 ? `\n- … và ${okSteps.length - 12} bước khác` : '');
     }
+    if (!hardStop && finishReason !== 'abort' && String(text || '').trim() && steps.some(x => ['screen_look', 'screen_act'].includes(x.name) && x.status === 'ok')) text = withSource(text, query, msgs); // kịch bản A
     if (fakeSeen && !warning && finishReason !== 'abort' && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) warning = noActionWarn(steps, gateOk());
     // B30: không có chữ nào và không bước nào làm được → báo rõ “mô hình không trả lời”, không để câu trả lời rỗng
     if (!String(text || '').trim() && finishReason !== 'abort' && !steps.some(x => x.status === 'ok')) { text = EMPTY_ANSWER(Math.round((Date.now() - t0) / 1000)); if (warning === NO_ACTION_OK_WARN || warning === NO_ACTION_WARN) warning = null; deps.log && deps.log(`[aivn agent] câu trả lời trống sau ${Math.round((Date.now() - t0) / 1000)} giây, ${steps.length} bước — báo lỗi rõ cho người dùng`); }
@@ -1059,4 +1099,4 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
   return { refusedSendText, run, replyLang, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck, localizeText };
 }
 
-module.exports = { scrubToolNames, isAppTask, appOf, NO_APP_ACTION_WARN, noActionWarn, NO_ACTION_WARN, NO_ACTION_OK_WARN, EMPTY_ANSWER, editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };
+module.exports = { withSource, seenUrls, scrubToolNames, isAppTask, appOf, NO_APP_ACTION_WARN, noActionWarn, NO_ACTION_WARN, NO_ACTION_OK_WARN, EMPTY_ANSWER, editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };

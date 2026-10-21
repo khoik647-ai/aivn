@@ -60,6 +60,7 @@ test('một tin quá lớn (dán cả tệp) vẫn được cắt giữa cho v�
   assert.ok(r.fits, r.tokens + '/' + r.budget); assert.ok(r.messages[1].content.includes('(đã rút gọn)'));
 });
 
+let lookN = 0; const lookTag = () => { const k = lookN++; return 'abcdefghijklmnopqrstuvwxyz'[k % 26] + 'xyz'[Math.floor(k / 26) % 3]; };
 function mkAgent(ctx, { rounds = 30, out = 3000, strict = true, under = 1 } = {}) {
   const sent = []; let i = 0; let overflowErrors = 0;
   const engine = { status: () => ({ loaded: true, id: 'qwen3-vl-8b-instruct-q4_k_m', contextSize: ctx, vision: true }), countTokens: (x) => Math.ceil(tok(x) * under),
@@ -72,7 +73,7 @@ function mkAgent(ctx, { rounds = 30, out = 3000, strict = true, under = 1 } = {}
     } };
   const names = ['screen_look', 'screen_act'];
   const defs = Object.fromEntries(names.map(n => [n, CT.DEFS[n]]));
-  const computer = { names: () => names, defs, has: (n) => n in defs, CompError: CT.CompError, exec: async (n, a) => ({ forModel: `Màn hình (${a.question}): ` + 'cửa sổ Zalo, ô tìm kiếm, nút Gửi. '.repeat(Math.ceil(out / 35)), summary: 'đã nhìn' }) };
+  const computer = { names: () => names, defs, has: (n) => n in defs, CompError: CT.CompError, exec: async (n, a) => ({ forModel: `Màn hình (${a.question}): ` + 'cửa sổ Zalo, ô tìm kiếm, nút Gửi. '.repeat(Math.ceil(out / 35)), summary: 'đã nhìn ' + lookTag() }) }; // B66b: mỗi lần nhìn một màn hình KHÁC (không thì bộ chặn “không tiến triển” dừng sớm — đúng hành vi)
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'v16c-'));
   const logs = [];
   const agent = createAgent({ engine, computer, getSettings: () => ({ agentFolders: [], agentMemory: false, maxTokens: 512, agentTurnMaxTokens: 100000 }), memory: createMemoryStore(path.join(root, 'm.json')), scheduler: {}, trash: async () => {}, extractFile: async () => ({}), embedForMemory: async () => ({}), log: (x) => logs.push(x) });

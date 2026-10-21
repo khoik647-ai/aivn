@@ -25,6 +25,9 @@ const procNames = (app) => { const k = key(app); return [...new Set([...(PROC_AL
 const LOGIN_TITLE = /(?:^|[\s\-–|·:])(sign in|log ?in|đăng nhập|登录|登入|choose an account|chọn tài khoản)(?:$|[\s\-–|·:])|accounts\.google\.com|login\.(?:live|microsoftonline)\.com/iu;
 const LOGIN_STRONG = /(enter your password|nhập mật khẩu|forgot (?:your )?password|quên mật khẩu|use another account|sử dụng (?:một )?tài khoản khác|quét mã qr|scan (?:the )?qr ?code|email or phone|email hoặc số điện thoại|create account|tạo tài khoản|扫码登录|输入密码)/giu;
 const LOGIN_WEAK = /(sign in|đăng nhập|log ?in|password|mật khẩu|登录)/giu;
+// câu hỏi khi gặp màn hình đăng nhập (dùng chung cho ensure_app và screen_look giữa việc)
+const LOGIN_ASK_MSG = '{0} đang ở màn hình đăng nhập ({1}). Mình không tự đăng nhập — bạn đăng nhập giúp mình rồi bảo mình làm tiếp nhé.';
+const loginAsk = (name, why) => LOGIN_ASK_MSG.replace('{0}', name).replace('{1}', why);
 function loginWall(title, text) {
   if (LOGIN_TITLE.test(String(title || ''))) return 'tiêu đề cửa sổ';
   const t = String(text || ''); const strong = new Set((t.match(LOGIN_STRONG) || []).map(x => fold(x))); const weak = new Set((t.match(LOGIN_WEAK) || []).map(x => fold(x)));
@@ -136,7 +139,7 @@ async function ensureApp(app, d, opt = {}) {
       await sleep(opt.lookGapMs || 700);
     }
     note(`sẵn sàng sau ${looks} lần nhìn`);
-    if (!opt.noLoginCheck) { const why = loginWall(w0.title, last && last.text); if (why) { const ask = `${title || app} đang ở màn hình đăng nhập (${why}). Mình không tự đăng nhập — bạn đăng nhập ${title || app} giúp mình rồi bảo mình làm tiếp nhé.`; return { ...fail('login', ask, { window: w0 }), ask, stop: true }; } }
+    if (!opt.noLoginCheck) { const why = loginWall(w0.title, last && last.text); if (why) { const ask = loginAsk(title || app, why); return { ...fail('login', ask, { window: w0 }), ask, stop: true }; } }
     if (how0 === 'launched' && d.remember) { try { d.remember(app, w0); } catch {} }
     return { ok: true, app, how: how0, window: w0, warn, steps, ms: now() - t0 };
   }
@@ -276,4 +279,4 @@ function linuxDeps() {
   };
 }
 
-module.exports = { linuxDeps, ensureApp, loginWall, pickMain, procNames, PROC_ALIASES, BROWSER_PROCS, CS_SRC, CS_VER, PS_EA, PS_TRAY, winDeps, key };
+module.exports = { linuxDeps, ensureApp, loginWall, loginAsk, LOGIN_ASK_MSG, pickMain, procNames, PROC_ALIASES, BROWSER_PROCS, CS_SRC, CS_VER, PS_EA, PS_TRAY, winDeps, key };

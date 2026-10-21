@@ -411,13 +411,17 @@ function createDesktopAgent(deps) {
   // Ô đang chọn đọc được mà là ô nhập KHÁC (ô soạn tin) → không phải ô tìm kiếm, dù trước đó có bấm “Tìm kiếm”.
   function searchConfirmed(t, focusedEl, a) {
     const s = session; const SEARCHY = /tìm|tim kiem|search|find/iu;
-    const named = (el) => !!el && SEARCHY.test(`${el.name || ''} ${el.autoId || ''} ${el.placeholder || ''}`);
+    // kịch bản A: thanh địa chỉ của trình duyệt (“Address and search bar”, “Nhập địa chỉ”, omnibox) — gõ + Enter là TÌM/MỞ TRANG, không phải gửi tin
+    const ADDRY = /address|địa chỉ|dia chi|\burl\b|omnibox|地址|网址/iu;
+    const named = (el) => !!el && (SEARCHY.test(`${el.name || ''} ${el.autoId || ''} ${el.placeholder || ''}`) || ADDRY.test(`${el.name || ''} ${el.autoId || ''} ${el.placeholder || ''}`));
+    const W0 = s && s.obs && s.obs.win; const browserWin = !!W0 && (/^(chrome|msedge|firefox|brave|opera|browser|coccoc|vivaldi)(\.exe)?$/i.test(String(W0.proc || '')) || /(Google Chrome|Microsoft Edge|Mozilla Firefox|Cốc Cốc|Brave|Opera)(\s|$)/i.test(String(W0.title || '')));
     if (t && t.el) return named(t.el);
     if (t && t.x != null) return SEARCHY.test(String(a.element || a.target || '')) && !U.isIdRef(String(a.element || a.target || ''));
     if (focusedEl && (focusedEl.editable || focusedEl.focused) && !focusedEl.ocr) return named(focusedEl);
     // B64 (QA lượt 8): “vừa mở ô tìm kiếm” tính từ lúc thao tác XONG (sau khi kiểm tra lại màn hình — máy chậm mất 27–263 giây), không tính từ lúc bắt đầu bấm
     if (inSearchMode()) return true;
     const la = s && s.lastAction; const recent = la && Date.now() - (la.doneAt || la.at) < 60000;
+    if (recent && browserWin && /^(?:(?:ctrl|cmd|command|meta)\+l|alt\+d|f6)$/i.test(String(la.keys || '').replace(/\s/g, ''))) return true; // Ctrl+L/Alt+D/F6: con trỏ đang ở thanh địa chỉ
     if (recent && (/^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(la.keys || '').replace(/\s/g, '')) || (['click', 'double_click'].includes(la.action) && SEARCHY.test(`${la.query || ''} ${la.el ? la.el.name || '' : ''}`)))) return true;
     return !!(s && s.inSearch && Date.now() - s.inSearch < SEARCH_MS() && la && la.action === 'type_text');
   }
@@ -862,7 +866,9 @@ function createDesktopAgent(deps) {
     const targetName = `${t && t.el ? t.el.name || '' : ''} ${a.element || a.target || ''}`;
     if (action === 'type_text' && !a.submit && !s.inSearch) s.lastTyped = String(a.text || '');
     const sendA = action === 'type_text' && a.submit ? { ...a, text: a.text + '\n' } : a;
-    if (gate.send || (!(action === 'type_text' && a.submit && searchyDone) && SV.isSendAction(action, sendA, targetName, s.lastTyped))) {
+    // kịch bản A: chốt gửi đã xếp là TÌM (thanh địa chỉ / ô tìm kiếm, việc không phải nhắn tin) → không kiểm chứng “gửi tin” (trước: báo “GỬI NHẦM” khi tìm trên Chrome)
+    const searchNotSend = action === 'type_text' && !gate.send && !!gate.why;
+    if (gate.send || (!searchNotSend && !(action === 'type_text' && a.submit && searchyDone) && SV.isSendAction(action, sendA, targetName, s.lastTyped))) {
       const msg = action === 'type_text' ? String(a.text).replace(/\n\s*$/, '') : (gate.text || s.lastSent || s.lastTyped);
       const recipient = SV.recipientOf(ctx.userQuery);
       await sleep(800);
@@ -923,6 +929,15 @@ function createDesktopAgent(deps) {
       }
     }
     const o = await observe(ctx, { query: a && a.query, ocr: a && a.ocr ? 'force' : 'auto' });
+    // kịch bản B: gặp màn hình đăng nhập GIỮA việc (mở tài liệu Google Docs → trang accounts.google.com, phiên hết hạn…) → DỪNG và hỏi,
+    // không tự gõ tài khoản/mật khẩu. Trừ khi chính người dùng giao việc đăng nhập
+    const wantsLogin = /đăng nhập|sign ?in|log ?in|登录|登入/iu.test(String((ctx && ctx.userQuery) || ''));
+    const EAx = require('./agent/ensure-app'); const wall = !wantsLogin && o.obs && EAx.loginWall(o.obs.win && o.obs.win.title, o.text);
+    if (wall) {
+      const name = (o.obs.win && o.obs.win.title) || 'Ứng dụng';
+      const ask = EAx.loginAsk(`“${name}”`, wall);
+      return { error: 'màn hình đăng nhập', code: 'login', ask, stop: true, forModel: ask, summary: 'màn hình đăng nhập — hỏi bạn', thumb: o.thumb, detail: o.text };
+    }
     let extra = '';
     if (a && a.question && deps.engine.status().vision) { try { extra = '\nMô tả của mô hình nhìn ảnh: ' + await SC.describe(deps.engine, await withOverlayHidden(() => SC.capture({ maxW: 1280 })), a.question, { signal: ctx.signal }); } catch {} }
     let hint = '';
