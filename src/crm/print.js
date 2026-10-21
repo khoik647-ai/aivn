@@ -35,7 +35,8 @@ const amountWords = (n, lang) => lang === 'en' ? enWords(n) : lang === 'zh' ? zh
 
 function render(doc, { company: c, lang = 'vi', qr = null, generatedAt = new Date() } = {}) {
   lang = ['vi', 'en', 'zh'].includes(lang) ? lang : 'vi';
-  const ASCII = { en: { MST: 'Tax ID', STT: 'No.' }, zh: { MST: '税号', STT: '序号' } }; // từ viết tắt không dấu (bộ trích khoá chỉ lấy chữ có dấu)
+  // từ viết tắt không dấu (bộ trích khoá chỉ lấy chữ có dấu) + tên chứng từ in khác tên thẻ giao diện (“Receipts” → “Goods receipt”)
+  const ASCII = { en: { MST: 'Tax ID', STT: 'No.', 'Phiếu nhập kho': 'Goods receipt', 'Phiếu giao hàng': 'Delivery slip' }, zh: { MST: '税号', STT: '序号' } };
   const t = (s) => lang === 'vi' ? s : (ASCII[lang][s] || i18n().tr(s, lang));
   const loc = LOCALE[lang];
   const money = (n) => (Math.round(Number(n) || 0)).toLocaleString(loc) + ' ₫';
@@ -54,7 +55,7 @@ function render(doc, { company: c, lang = 'vi', qr = null, generatedAt = new Dat
   const partyLabel = doc.side === 'in' ? 'Nhà cung cấp' : K === 'quote' ? 'Kính gửi' : K === 'picking' ? 'Đơn vị nhận hàng' : 'Đơn vị mua hàng';
   const p = doc.partner || {};
   const party = `<section class="party"><div class="party-l">${row(partyLabel, p.name || '—')}${row('Địa chỉ', p.address)}${row('MST', p.tax_id)}${row('Điện thoại', p.phone)}${row('Email', p.email)}</div>
-    <div class="party-r">${doc.meta.map(([k, v]) => row(k, v)).join('')}</div></section>`;
+    <div class="party-r">${doc.meta.map(([k, v, tr]) => row(k, tr ? t(v) : v)).join('')}</div></section>`;
 
   // ---- bảng hàng
   let table, totals = '', words = '';
@@ -113,7 +114,7 @@ function describe(biz, crm, type, id) {
     const o = biz.getOrder(id); const sale = o.status === 'sale';
     return { type, title: sale ? 'Đơn bán hàng' : 'Báo giá', number: o.number, date: o.date, partner: o.contact, side: 'out', lines: o.lines, tax_rounding: o.tax_rounding,
       amount_untaxed: o.subtotal, amount_total: o.total, notes: o.notes, notesLabel: 'Điều khoản và ghi chú', stamp: o.status === 'cancel' ? 'Đã huỷ' : '',
-      meta: [['Ngày báo giá', o.date], ['Hiệu lực đến', o.valid_until], ['Điều khoản thanh toán', o.payment_days ? `${o.payment_days} ngày` : 'Thanh toán ngay'], ['Ngày giao cam kết', o.commitment_date], ['Người phụ trách', o.owner]].filter(x => x[1]).map(([k, v]) => [k, /^\d{4}-\d{2}-\d{2}$/.test(v) ? dmy(v) : v]),
+      meta: [['Ngày báo giá', o.date], ['Hiệu lực đến', o.valid_until], ['Điều khoản thanh toán', o.payment_days ? `${o.payment_days} ngày` : 'Thanh toán ngay', true], ['Ngày giao cam kết', o.commitment_date], ['Người phụ trách', o.owner]].filter(x => x[1]).map(([k, v, tr]) => [k, /^\d{4}-\d{2}-\d{2}$/.test(v) ? dmy(v) : v, tr]),
       signs: [[sale ? 'Khách hàng' : 'Khách hàng xác nhận', ''], [c.signer_title || 'Đại diện công ty', signer]], company: c };
   }
   if (type === 'invoice') {
@@ -131,21 +132,22 @@ function describe(biz, crm, type, id) {
   }
   if (type === 'picking') {
     const p = biz.getPicking(id); const products = Object.fromEntries((crm.listProducts({ all: true }) || []).map(x => [x.id, x]));
-    return { type, kind: p.kind, title: p.kind === 'in' ? 'Phiếu nhập kho' : p.kind === 'out' ? 'Phiếu giao hàng' : 'Phiếu điều chỉnh tồn kho', number: p.number, date: (p.done_at ? new Date(p.done_at).toISOString() : p.scheduled || '').slice(0, 10) || p.scheduled,
+    return { type, kind: p.kind, title: p.kind === 'in' ? 'Phiếu nhập kho' : p.kind === 'out' ? 'Phiếu giao hàng' : 'Phiếu điều chỉnh tồn kho', number: p.number, date: p.done_at ? localYmd(p.done_at) : p.scheduled,
       partner: p.partner_id ? (crm.getContact ? (crm.getContact(p.partner_id) || {}) : {}) : {}, side: p.kind === 'in' ? 'in' : 'out', state: p.state, stamp: p.state === 'cancel' ? 'Đã huỷ' : '',
       lines: p.moves.map(m => ({ name: m.product_name, sku: (products[m.product_id] || {}).sku, unit: m.unit, qty: m.qty, qty_done: m.qty_done, unit_cost: m.unit_cost })), notes: p.notes,
-      meta: [['Ngày dự kiến', dmy(p.scheduled)], ['Chứng từ gốc', p.origin], ['Trạng thái', p.state_vi]].filter(x => x[1]),
+      meta: [['Ngày dự kiến', dmy(p.scheduled)], ['Chứng từ gốc', p.origin], ['Trạng thái', p.state_vi, true]].filter(x => x[1]),
       signs: p.kind === 'in' ? [['Người lập phiếu', ''], ['Người giao hàng', ''], ['Thủ kho', ''], ['Kế toán trưởng', c.accountant]] : [['Người lập phiếu', ''], ['Thủ kho', ''], ['Người giao hàng', ''], ['Người nhận hàng', '']], company: c };
   }
   if (type === 'purchase') {
     const o = biz.getPurchase(id); const po = ['purchase', 'done'].includes(o.state);
     return { type, title: po ? 'Đơn mua hàng' : 'Yêu cầu báo giá', number: o.number, date: o.date_order, partner: o.partner, side: 'in', lines: o.lines, tax_rounding: o.tax_rounding,
       amount_untaxed: o.subtotal, amount_total: o.total, notes: o.notes, stamp: o.state === 'cancel' ? 'Đã huỷ' : '',
-      meta: [['Ngày đặt hàng', dmy(o.date_order)], ['Ngày nhận dự kiến', dmy(o.date_planned)], ['Điều khoản thanh toán', o.payment_days ? `${o.payment_days} ngày` : 'Thanh toán ngay'], ['Mã tham chiếu NCC', o.partner_ref], ['Người mua', o.owner]].filter(x => x[1]),
+      meta: [['Ngày đặt hàng', dmy(o.date_order)], ['Ngày nhận dự kiến', dmy(o.date_planned)], ['Điều khoản thanh toán', o.payment_days ? `${o.payment_days} ngày` : 'Thanh toán ngay', true], ['Mã tham chiếu NCC', o.partner_ref], ['Người mua', o.owner]].filter(x => x[1]),
       signs: [['Nhà cung cấp xác nhận', ''], [c.signer_title || 'Đại diện bên mua', signer]], company: c };
   }
   throw new Error('Loại chứng từ không hỗ trợ: ' + type);
 }
+const localYmd = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const dmy = (s) => /^\d{4}-\d{2}-\d{2}/.test(String(s || '')) ? String(s).slice(0, 10).split('-').reverse().join('/') : '';
 // tên tệp gợi ý: INV/2026/00001 → INV-2026-00001.pdf
 const fileName = (d) => `${String(d.number || d.title).replace(/[\\/:*?"<>|\s]+/g, '-')}.pdf`;

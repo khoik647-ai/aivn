@@ -156,6 +156,33 @@ test('Công ty: lưu MST, ngân hàng, logo; kiểm tra dữ liệu; mã VietQR 
   biz.registerPayment(inv.id, {}); assert.strictEqual(biz.invoiceQr(inv.id).ok, false, 'đã thu đủ thì không hiện QR');
 });
 
+test('Mẫu in A4: báo giá, hoá đơn (VietQR, thuế theo mức, bằng chữ), phiếu nhập, đơn mua — vi/en/zh; số tiền bằng chữ tiếng Anh và chữ Hán viết hoa', async () => {
+  const P = require('../src/crm/print');
+  assert.strictEqual(P.zhWords(20050000), '贰仟零伍万越南盾整'); assert.strictEqual(P.zhWords(1010), '壹仟零壹拾越南盾整'); assert.strictEqual(P.zhWords(1000000001), '壹拾亿零壹越南盾整');
+  assert.strictEqual(P.enWords(3603999), 'Three million six hundred and three thousand nine hundred and ninety-nine Vietnamese dong');
+  day = '2026-10-21'; const { crm, biz, ven, cus, ban, ship } = await setup();
+  biz.saveCompany({ name: 'Công ty TNHH Giải pháp AIVN', tax_id: '0312345678', bank_bin: '970436', bank_account: '0011001234567', bank_holder: 'CONG TY TNHH GIAI PHAP AIVN', signer: 'Đặng Văn Khôi' });
+  let inv = biz.saveInvoice({ partner_id: cus.id, lines: [{ name: 'Phần mềm <b>kế toán</b>', qty: 1, price: 12000000, vat_pct: 8 }, { product_id: ban.id, name: 'Bàn', qty: 2, price: 2500000, vat_pct: 10 }] });
+  inv = biz.postInvoice(inv.id); biz.registerPayment(inv.id, { amount: 5000000 });
+  const vi = P.renderDoc(biz, crm, 'invoice', inv.id, 'vi');
+  assert.strictEqual(vi.name, 'INV-2026-00001.pdf');
+  for (const s of ['HOÁ ĐƠN BÁN HÀNG', 'Hoá đơn bán hàng', 'Công ty TNHH Giải pháp AIVN', 'Thuế GTGT 8%', 'Thuế GTGT 10%', '960.000 ₫', '500.000 ₫', '18.460.000 ₫', 'Còn phải thu', '13.460.000 ₫', 'Mười tám triệu bốn trăm sáu mươi nghìn đồng', 'Người mua hàng', 'Người bán hàng', 'Đặng Văn Khôi', 'Nghị định 123/2020/NĐ-CP', '<svg', 'Đơn vị mua hàng'])
+    assert.ok(vi.html.includes(s) || vi.html.toUpperCase().includes(s.toUpperCase()), 'thiếu: ' + s);
+  assert.ok(!vi.html.includes('<b>kế toán</b>') && vi.html.includes('&lt;b&gt;kế toán&lt;/b&gt;'), 'tên dòng phải được thoát HTML');
+  const en = P.renderDoc(biz, crm, 'invoice', inv.id, 'en').html;
+  for (const s of ['Sales invoice', 'VAT 8%', '18,460,000 ₫', 'Eighteen million four hundred and sixty thousand Vietnamese dong', 'Tax ID', 'Amount due', 'Buyer']) assert.ok(en.includes(s), 'en thiếu: ' + s);
+  const zh = P.renderDoc(biz, crm, 'invoice', inv.id, 'zh').html;
+  for (const s of ['销售发票', '增值税 8%', '壹仟捌佰肆拾陆万越南盾整', '税号', '应收余额', '2026年10月21日']) assert.ok(zh.includes(s), 'zh thiếu: ' + s);
+  // đơn mua + phiếu nhập + báo giá
+  const po = biz.confirmPurchase(biz.savePurchase({ partner_id: ven.id, payment_days: 30, lines: [{ product_id: ban.id, qty: 10, price: 1000000 }, { product_id: ship.id, qty: 1, price: 500000 }] }).id);
+  const ph = P.renderDoc(biz, crm, 'purchase', po.id, 'en').html; for (const s of ['Purchase order', 'P00001', '30 days', 'Vendor acceptance', 'Eleven million five hundred and forty thousand Vietnamese dong']) assert.ok(ph.includes(s), 'đơn mua thiếu: ' + s);
+  const pk = P.renderDoc(biz, crm, 'picking', po.pickings[0].id, 'vi'); assert.strictEqual(pk.name, 'WH-IN-00001.pdf'); for (const s of ['Phiếu nhập kho', 'Thủ kho', 'Kế toán trưởng', 'BAN-01']) assert.ok(pk.html.includes(s), 'phiếu nhập thiếu: ' + s);
+  assert.ok(P.renderDoc(biz, crm, 'picking', po.pickings[0].id, 'en').html.includes('Goods receipt'));
+  const q = crm.saveQuote({ contact_id: cus.id, lines: [{ product_id: ban.id, name: 'Bàn', qty: 1, price: 2000000 }] });
+  const qh = P.renderDoc(biz, crm, 'quote', q.id, 'vi').html; for (const s of ['Báo giá', 'Kính gửi', 'Khách hàng xác nhận', 'Thanh toán ngay']) assert.ok(qh.includes(s), 'báo giá thiếu: ' + s);
+  assert.throws(() => P.describe(biz, crm, 'x', 'y'), /không hỗ trợ/);
+});
+
 // Giao diện thật (Electron + xvfb), vi/en/zh: Cài đặt › Công ty → RFQ → đơn mua → nhận 6/10 → hoá đơn NCC → trả một phần → báo cáo → hoá đơn 8% + 10% có VietQR → PDF
 const { spawnSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
