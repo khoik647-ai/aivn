@@ -34,14 +34,12 @@ test('B2: nhận ra người nhận trong câu yêu cầu', () => {
   assert.strictEqual(SV.recipientOf('nhắn cho Lan là mai họp'), 'Lan');
   assert.strictEqual(SV.recipientOf('mở zalo'), null);
 });
-test('B2: gõ vào ô đang chọn rồi Enter mà không thấy tên người nhận → CHƯA gửi', () => {
-  const v = SV.verifySend({ msg: 'Chúc buổi sáng, Trần Quỳnh Anh!', recipient: 'trần quỳnh anh', screenText: 'Zalo\n[e3] ô "Tìm kiếm"\nNhóm Lớp K27\nChúc buổi sáng, Trần Quỳnh Anh!' , seen: '' });
-  assert.strictEqual(v.sent, true, 'tên nằm trong chính tin nhắn vẫn được tính — kiểm tiếp ca dưới');
-  const v2 = SV.verifySend({ msg: 'Chúc buổi sáng nhé!', recipient: 'trần quỳnh anh', screenText: 'Zalo\nNhóm Lớp K27\nChúc buổi sáng nhé!' });
-  assert.strictEqual(v2.sent, false); assert.match(v2.why, /không thấy tên người nhận/);
-  const v3 = SV.verifySend({ msg: 'Chúc buổi sáng nhé!', recipient: 'trần quỳnh anh', screenText: 'Trần Quỳnh Anh\nVừa truy cập', seen: '' });
-  assert.strictEqual(v3.sent, false); assert.match(v3.why, /không thấy “Chúc buổi sáng nhé!”/);
-  const ok = SV.verifySend({ msg: 'Chúc buổi sáng nhé!', recipient: 'trần quỳnh anh', screenText: 'Tran Quynh Anh\nChúc buổi sáng nhé!\n08:01' });
+test('B2/B15: gõ vào ô đang chọn rồi Enter mà tiêu đề không phải người nhận → CHƯA gửi (kể cả khi tên nằm trong tin)', () => {
+  const v = SV.verifySend({ msg: 'Chúc buổi sáng, Trần Quỳnh Anh!', recipient: 'trần quỳnh anh', screenText: 'Zalo\n[e3] ô "Tìm kiếm"\nNhóm Lớp K27\nChúc buổi sáng, Trần Quỳnh Anh!', seen: 'TÊN: Nhóm Lớp K27\nÔ SOẠN: TRỐNG\nTIN: Chúc buổi sáng, Trần Quỳnh Anh!' });
+  assert.strictEqual(v.sent, false, 'tên nằm trong chính tin nhắn KHÔNG được tính (đây là lỗi trong video t128)'); assert.match(v.why, /tiêu đề cuộc trò chuyện/);
+  const v3 = SV.verifySend({ msg: 'Chúc buổi sáng nhé!', recipient: 'trần quỳnh anh', seen: 'TÊN: Trần Quỳnh Anh\nÔ SOẠN: TRỐNG\nTIN: Vừa truy cập' });
+  assert.strictEqual(v3.sent, false); assert.match(v3.why, /không thấy bong bóng tin/);
+  const ok = SV.verifySend({ msg: 'Chúc buổi sáng nhé!', recipient: 'trần quỳnh anh', seen: 'TÊN: Tran Quynh Anh\nÔ SOẠN: TRỐNG\nTIN: Chúc buổi sáng nhé!' });
   assert.strictEqual(ok.sent, true);
   assert.ok(SV.isSendAction('hotkey', { keys: 'enter' }, '', 'Chúc buổi sáng')); assert.ok(!SV.isSendAction('hotkey', { keys: 'enter' }, '', null));
   assert.ok(SV.isSendAction('click', {}, 'nút Gửi', null));

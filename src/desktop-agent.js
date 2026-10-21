@@ -292,6 +292,14 @@ function createDesktopAgent(deps) {
     if (action === 'type_text' && ((pwEl && pwEl.password) || (t && t.query && U.PASSWORD_NAME.test(t.query)))) {
       return { refused: true, forModel: 'AIVN AGENT KHÔNG BAO GIỜ gõ mật khẩu/mã PIN/OTP. Dừng lại và nhờ người dùng tự gõ vào ô này, rồi tiếp tục khi họ báo xong.', summary: 'không gõ mật khẩu' };
     }
+    // gửi tin trong ứng dụng chat: bắt buộc đã tìm và mở đúng người nhận trong lượt này (không gõ vào chat đang mở sẵn)
+    if (action === 'type_text' && ctx && ctx.userQuery) {
+      const tel = t && t.el ? t.el : focusedEl;
+      const searchField = !!((tel && /tìm|tim kiem|search|find/iu.test(`${tel.name || ''} ${tel.autoId || ''}`)) || /tìm|search|find/iu.test(String(a.element || a.target || '')) || (s.lastAction && Date.now() - s.lastAction.at < 60000 && (/^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(s.lastAction.keys || '').replace(/\s/g, '')) || /tìm|search|find/iu.test(`${s.lastAction.query || ''} ${s.lastAction.el ? s.lastAction.el.name || '' : ''}`))));
+      const R = SV.regionsOf(s.obs); const P = SV.parseSeen(s.lastSeen || '');
+      const g = SV.chatGate({ query: ctx.userQuery, text: a.text, searchField, proc: s.obs && s.obs.win ? s.obs.win.proc : (s.target && s.target.proc) || '', title: s.obs && s.obs.win ? s.obs.win.title : '', state: s, header: [...(R ? R.header : []), P.header].filter(Boolean) });
+      if (g) { deps.log && deps.log('desk', 'Chặn gõ tin: chưa mở đúng người nhận'); return { error: 'chưa mở đúng người nhận', forModel: g, summary: 'chưa mở đúng người nhận — tìm người nhận trước' }; }
+    }
     const desc = describeAct(action, a, t);
     const risk = riskOf(action, { el: t && t.el, query: t && t.query, text: action === 'type_text' && a.submit ? a.text + '\n' : a.text, keys: a.keys, lastAction: s.lastAction });
     const mode = S().agentScreenMode === 'important' ? 'important' : 'each';
@@ -327,6 +335,10 @@ function createDesktopAgent(deps) {
     }
     await performAt(action, t && t.x != null ? t.x : null, t && t.x != null ? t.y : null, a);
     const prevAction = s.lastAction;
+    // bấm vào kết quả tìm kiếm khớp người nhận → coi như đã mở cuộc trò chuyện (kiểm lại tiêu đề ngay bên dưới)
+    const rcp = ctx && ctx.userQuery ? SV.recipientOf(ctx.userQuery) : null;
+    const openPending = !!(rcp && ['click', 'double_click'].includes(action) && s.inSearch && s.foundHit && (SV.relates(s.foundHit.query, rcp) || SV.relates(s.foundHit.name, rcp) || SV.relates(`${t && t.el ? t.el.name || '' : ''}`, rcp)));
+    if (['click', 'double_click'].includes(action) && rcp && !openPending && s.chatOpen) s.chatOpen = null; // bấm chỗ khác: có thể đã đổi cuộc trò chuyện
     if (!['type_text', 'wait', 'scroll'].includes(action)) { s.inSearch = 0; s.foundHit = null; }
     s.lastAction = { action, el: t && t.el, keys: a.keys, at: Date.now(), query: t && t.query ? t.query : String(a.element || a.target || '') };
     deps.log && deps.log('desk', `Thao tác: ${desc}${t && t.via ? ' (định vị bằng ' + t.via + ')' : ''}`);
@@ -336,6 +348,13 @@ function createDesktopAgent(deps) {
     const o = await observe(ctx, { ocr: s.ocrUsed ? 'auto' : 'auto' });
     const checks = [];
     if (before && before.win && o.obs.win && before.win.title !== o.obs.win.title) checks.push(`Cửa sổ đổi thành "${o.obs.win.title}".`);
+    if (openPending) {
+      const R = SV.regionsOf(o.obs); const hdr = [o.obs.win ? o.obs.win.title : '', ...(R ? R.header : [])].filter(Boolean);
+      const v = SV.verifySend({ msg: 'x', recipient: rcp, regions: { header: R ? R.header : [], messages: ['x'], composer: [] }, winTitle: o.obs.win ? o.obs.win.title : '' });
+      const readable = R && R.header.length;
+      if (v.recipientSeen || !readable) { s.chatOpen = SV.nameKey(rcp); checks.push(v.recipientSeen ? `Đã mở cuộc trò chuyện với “${rcp}” (thấy tên ở tiêu đề).` : `Đã bấm kết quả “${rcp}”; chưa đọc được tiêu đề — kiểm tra lại bằng screen_look nếu cần.`); }
+      else checks.push(`Đã bấm kết quả nhưng tiêu đề cuộc trò chuyện là “${String(hdr.find(h => !/^(zalo|messenger)$/i.test(h)) || hdr[0] || '').slice(0, 40)}”, KHÔNG phải “${rcp}”. Bấm đúng kết quả tên “${rcp}”.`);
+    }
     let o2 = o;
     let searchyDone = false;
     if (action === 'type_text') {
@@ -385,10 +404,10 @@ function createDesktopAgent(deps) {
       const msg = action === 'type_text' ? String(a.text).replace(/\n\s*$/, '') : s.lastTyped;
       const recipient = SV.recipientOf(ctx.userQuery);
       await sleep(800);
-      o2 = await observe(ctx, { question: (o.poor || deps.engine.status().vision) ? `Cuộc trò chuyện đang mở là với ai (ghi đúng tên ở đầu khung chat)? Chép đúng chữ 3 tin nhắn cuối cùng trong khung chat.` : '' });
-      verify = SV.verifySend({ msg, recipient, screenText: o2.text, seen: o2.seen, winTitle: o2.obs.win ? o2.obs.win.title : '' });
+      o2 = await observe(ctx, { question: (o.poor || deps.engine.status().vision) ? SV.SEEN_QUESTION : '' });
+      verify = SV.verifySend({ msg, recipient, regions: SV.regionsOf(o2.obs), screenText: o2.text, seen: o2.seen, winTitle: o2.obs.win ? o2.obs.win.title : '' });
       verify.ocr = !!(o2.src && /OCR/.test(o2.src));
-      checks.push(verify.sent ? `ĐÃ KIỂM CHỨNG trên màn hình: thấy tin “${String(msg).slice(0, 40)}”${recipient ? ` trong cuộc trò chuyện với “${recipient}”` : ''}.` : `CHƯA kiểm chứng được là đã gửi: ${verify.why}. Không được báo “đã gửi”; hãy screen_look để kiểm tra rồi làm lại cho đúng.`);
+      checks.push(verify.sent ? `ĐÃ KIỂM CHỨNG trên màn hình: tiêu đề cuộc trò chuyện là “${recipient || '(không nêu tên)'}”, ô soạn đã trống, thấy bong bóng tin “${String(msg).slice(0, 40)}”.` : `CHƯA kiểm chứng được là đã gửi: ${verify.why}. Không được báo “đã gửi”; hãy screen_look để kiểm tra rồi làm lại cho đúng.`);
       s.lastTyped = null;
     }
     if (beforeDialog && s.dialog === beforeDialog) checks.push(`Hộp thoại “${beforeDialog}” VẪN đang mở — việc trong hộp thoại CHƯA xong. Xác nhận bằng nút của hộp thoại (Save/Lưu/OK/Mở) hoặc hotkey "enter"; đừng báo đã xong.`);

@@ -144,7 +144,8 @@ const noActionWarn = (steps) => steps.some(x => COMP.includes(x.name) && x.statu
 // thấy chữ vừa gửi trong cuộc trò chuyện và thấy tên người nhận (nếu người dùng nêu tên). Không có bằng chứng thì không được nói đã gửi.
 const SEND_CLAIM_RE = /(đã|vừa)\s+(được\s+)?(gửi|nhắn)(?!\p{L})|gửi[^.\n]{0,40}thành công|đã được gửi|(tin nhắn|lời chúc)[^.\n]{0,40}(đã|vừa)\s+(xuất hiện|tới|đến)/iu;
 const OCR_CLAIM_RE = /(xác nhận|kiểm tra|thấy)[^.\n]{0,24}(qua|bằng|nhờ)\s+OCR|OCR[^.\n]{0,24}(xác nhận|cho thấy)/iu;
-const sendVerified = (steps) => steps.some(x => x.status === 'ok' && x.verify && x.verify.sent === true);
+// lần gửi CUỐI CÙNG phải được kiểm chứng (B15: tiêu đề đúng tên đầy đủ, ô soạn trống, thấy bong bóng tin)
+const sendVerified = (steps) => { const v = steps.filter(x => x.status === 'ok' && x.verify); return v.length > 0 && v[v.length - 1].verify.sent === true; };
 const ocrDone = (steps) => steps.some(x => x.status === 'ok' && (x.name === 'read_screen_text' || (x.verify && x.verify.ocr)));
 function sendClaimCheck(text, steps) {
   const t = String(text || '');
@@ -536,7 +537,7 @@ function createAgent(deps) {
       '1) Mở ứng dụng bằng open_app (hoặc screen_act focus_window nếu đã mở). 2) screen_look để lấy danh sách phần tử [eN]. 3) screen_act MỘT thao tác với element = id [eN] trong danh sách MỚI NHẤT (không đoán id, không dùng id cũ). 4) Đọc phần "Kiểm tra" và danh sách mới trong kết quả rồi làm bước tiếp. Lặp lại tới khi xong.',
       'Gõ chữ: screen_act type_text (dán cả đoạn một lần; element = ô cần gõ, tự bấm vào ô trước; ô đã được chọn sẵn thì bỏ element; submit: true = gõ xong bấm Enter luôn — gộp bấm ô + gõ + Enter vào MỘT lần gọi). Phím tắt: hotkey ("ctrl+s", "enter", "ctrl+f"). Không thấy phần tử: screen_look với query, hoặc scroll, hoặc wait 1-2 giây cho ứng dụng tải xong.',
       'Ưu tiên phím tắt thay vì tìm biểu tượng: lưu = hotkey "ctrl+s" (Lưu thành… = "ctrl+shift+s"), mở tệp "ctrl+o", tạo mới "ctrl+n", hoàn tác "ctrl+z", chọn hết "ctrl+a", tìm "ctrl+f". Hộp thoại lưu tệp: ô Tên tệp thường đã được chọn sẵn → type_text tên tệp (có thể kèm đường dẫn đầy đủ, vd. "' + require('path').join(require('os').homedir(), 'Documents', 'ten-tep') + '") rồi hotkey "enter"; hỏi "giữ định dạng?" thì chọn nút giữ định dạng hiện tại. Không bấm "Close"/"Đóng" khi chưa xong việc.',
-      'Nhắn tin (Zalo, Messenger…): mở ứng dụng → bấm ô tìm kiếm → type_text tên người → chọn đúng người trong kết quả → type_text nội dung với element = ô soạn tin và submit: true (một lần gọi; AIVN hỏi người dùng trước khi gửi rồi tự kiểm chứng trên màn hình). Người dùng nói "hỏi trước khi gửi" thì dừng ở bước gửi để họ duyệt.',
+      'Nhắn tin (Zalo, Messenger…): LUÔN tìm người nhận trước, kể cả khi đang mở sẵn một cuộc trò chuyện (không bao giờ gõ vào chat đang mở): mở ứng dụng → bấm ô tìm kiếm → type_text tên người → chọn đúng người trong kết quả (tiêu đề phải là đúng tên đầy đủ) → type_text nội dung với element = ô soạn tin và submit: true (một lần gọi; AIVN hỏi người dùng trước khi gửi rồi tự kiểm chứng trên màn hình). Người dùng nói "hỏi trước khi gửi" thì dừng ở bước gửi để họ duyệt.',
       'Không bao giờ gõ mật khẩu, mã PIN, OTP. Nếu người dùng từ chối một bước (có thể kèm lý do), làm theo góp ý hoặc dừng và hỏi. Khi xong, báo ngắn gọn đã làm gì và đã kiểm tra thấy gì; không nói đã làm nếu kết quả kiểm tra chưa xác nhận.');
     if (names.includes('save_memory')) lines.push('Ghi nhớ: khi người dùng chia sẻ thông tin bền vững về họ (tên, sở thích, công việc, thói quen) hoặc bảo "hãy nhớ", gọi save_memory với một câu ngắn ở ngôi thứ ba.');
     const att = (runStore.getStore() || {}).attachments || [];

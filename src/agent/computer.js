@@ -315,7 +315,8 @@ const SYS = {
   empty_trash: { label: 'Dọn Thùng rác', confirm: true, danger: true, ask: /thung rac|trash|recycle/ },
 };
 // người dùng có yêu cầu đúng thao tác hệ thống này trong câu của lượt hiện tại không
-const sysAsked = (action, query) => { const d = SYS[action]; return !!(d && d.ask && d.ask.test(fold(query))); };
+// B16: nhận ý định theo cấu trúc từng mệnh đề (phủ định, câu hỏi, chuỗi lệnh, đối tượng hẹp) — xem sys-intent.js
+const sysAsked = (action, query) => !!SYS[action] && require('./sys-intent').sysAsked(action, query);
 async function systemAction(action, { platform = process.platform, keyTap = null, openExternal = null } = {}) {
   const win = platform === 'win32', mac = platform === 'darwin';
   const ps = (c) => run('powershell.exe', ['-NoProfile', '-Command', c]);
