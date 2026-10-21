@@ -696,6 +696,11 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         query = prevTask;
       }
     }
+    // B61 (máy thật): “nhắn giúp mình là mai 8h họp nhé” — không có người nhận → hỏi NGAY, trước mọi thao tác màn hình; mô hình không được tự chọn người nhận
+    if (compOn && require('./send-verify').missingRecipient(query)) {
+      deps.log && deps.log(`[aivn agent] việc gửi tin chưa có người nhận → hỏi “Gửi cho ai?” trước khi làm: "${query.slice(0, 60)}"`);
+      return { text: require('./send-verify').askWho(), steps: [], usage: {}, finishReason: 'stop', urls: [], memories: [], tools: names, warning: null, asked: 'recipient' };
+    }
     const actAsk = compOn && isActAsk(query);
     // B41: việc trên trang web/ứng dụng → ẩn “Chạy JavaScript” (chạy trong hộp cát Node, không chạm được trang: mô hình nhỏ tưởng nó điều khiển được trang → “document is not defined”)
     if (!headless && names.includes('run_javascript') && (isAppTask(query) || /(trang web|website|\bweb\b|trình duyệt|outlook|gmail|zalo|messenger|facebook|youtube|shopee)/iu.test(query))) { while (names.includes('run_javascript')) names.splice(names.indexOf('run_javascript'), 1); tools = mkTools(); deps.log && deps.log('[aivn agent] việc trên trang web/ứng dụng: ẩn công cụ Chạy JavaScript'); }

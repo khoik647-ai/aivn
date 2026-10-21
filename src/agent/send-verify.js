@@ -6,7 +6,7 @@
 //   3) thấy bong bóng tin vừa gửi trong khung tin nhắn (không tính ô soạn, tiêu đề, danh sách bên trái).
 const fold = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 const HONOR = /^(ban|anh|chi|em|co|chu|bac|ong|ba|me|bo|ma|thay|di|cau|mo|duong|thim|sep|giao su|ts|ths|pgs|mr|mrs|ms|mx|miss|dr|prof)$/;
-const STOP = String.raw`(?:trên|ở|qua|bằng|là|rằng|nội dung|với nội dung|tiêu đề|chủ đề|nói|bảo|hỏi|không cần|khỏi|đừng|và|rồi|nhé|nha|giúp|hộ|ngay|lúc|vào|on|via|in|saying|that|about|with|an email|an e-mail|a message|a text|a note)`;
+const STOP = String.raw`(?:trên|ở|qua|bằng|là|rằng|nội dung|với nội dung|tiêu đề|chủ đề|nói|bảo|hỏi|nhắc|chúc|mời|không cần|khỏi|đừng|và|rồi|nhé|nha|giúp|hộ|ngay|lúc|vào|on|via|in|saying|that|about|with|an email|an e-mail|a message|a text|a note)`;
 const NOT_NAME = /^(tôi|mình|em|tao|tớ|me|ai|mọi người|tin|tin nhắn|lời|câu|một|email|thư|mail|cho|tới|đến|với|họ|nó|anh ấy|chị ấy|bạn ấy)$/iu;
 
 // tên người nhận trong yêu cầu: “nhắn Trần Quỳnh Anh là…”, “gửi email cho thầy Lê Văn Hùng tiêu đề…”, “Messenger: nhắn Quỳnh Anh "…"”,
@@ -14,8 +14,12 @@ const NOT_NAME = /^(tôi|mình|em|tao|tớ|me|ai|mọi người|tin|tin nhắn|l
 // B58 (QA lượt 7): “Mr./Dr.” — dấu chấm của danh xưng không phải dấu hết câu; danh xưng tiếng Anh bỏ khỏi tên để tìm (“Mr. Le Van Hung” → “Le Van Hung”)
 const EN_HONOR_DOT = /\b(Mr|Mrs|Ms|Mx|Dr|Prof|Miss)\.(?=\s)/gi;
 const EN_HONOR_LEAD = /^(?:mr|mrs|ms|mx|dr|prof|miss)\.?\s+(?=\S)/iu;
+// B61 (máy thật, “nhắn giúp mình là mai 8h họp nhé”): “giúp/hộ/cho mình” là NGƯỜI DÙNG, không phải người nhận; cụm bắt đầu bằng từ mở đầu nội dung
+// (là/rằng/nội dung/saying/that…) hay “a message for me” không phải tên → không có người nhận → hỏi “Gửi cho ai?”
+const NOT_RECIPIENT = /^(?:(?:là|rằng|nội dung|với nội dung|tiêu đề|saying|that|about)(?:\s|$)|(?:a|an|the|my)\s+(?:message|email|e-mail|mail|text|note|dm)\b|(?:for|to)\s+(?:me|myself|us)\b|(?:giúp|hộ|giùm|dùm|cho)\s+(?:mình|tôi|em|tớ|tao)(?:\s|$)|(?:mình|tôi|tớ|tao|me|myself)(?:\s|$)|(?:nhắc|chúc|hỏi|báo|mời|xin|về|thông báo|lịch|nhờ)\s|(?:nhé|nha|nhá|đi|ngay|luôn|giúp|hộ|giùm|với|thầy|cô|anh|chị|em|bạn|sếp|mr|mrs|ms|dr)$)/iu;
 function recipientOf(query) {
   const r = recipientOf0(String(query || '').replace(EN_HONOR_DOT, '$1')); if (!r) return r;
+  if (NOT_RECIPIENT.test(String(r).trim())) return null;
   const x = stripHonorAfter(r) || r; const y = x.replace(EN_HONOR_LEAD, '').trim(); return y || x;
 }
 // B36/B47: “nói với X là…”, “bảo X là…”, “dặn/báo X là…”, “nhắn giúp/hộ/giùm X…”, “tell X (that) …”, “let X know …”, “inform/ask X to …”
@@ -245,6 +249,14 @@ const ASK_WHO = 'Gửi cho ai?';
 function askWho(current = '') {
   return current ? `Gửi cho ai? Cuộc trò chuyện đang mở là “${String(current).slice(0, 60)}” — trả lời “đúng” nếu gửi vào đó, hoặc cho mình tên đầy đủ của người nhận.` : 'Gửi cho ai? Cho mình tên đầy đủ của người nhận (đúng như trong ứng dụng).';
 }
+// B61: việc GỬI TIN/THƯ mà câu lệnh không nêu người nhận → hỏi “Gửi cho ai?” TRƯỚC mọi thao tác màn hình (không để mô hình tự chọn
+// người trong danh sách chat/bộ nhớ). Không áp dụng: đã nêu người nhận, “cuộc trò chuyện hiện tại”, việc không phải gửi tin (gửi tệp vào thư mục, trả lời câu hỏi…)
+const MSG_SEND = /(?:^|[^\p{L}])(?:nhắn(?:\s+tin)?|gửi\s+(?:tin(?:\s+nhắn)?|lời nhắn|email|e-mail|mail|thư)|soạn\s+(?:tin(?:\s+nhắn)?|email|mail|thư))(?![\p{L}])|(?:^|[^\p{L}])(?:send|write|draft)\s+(?:a\s+|an\s+)?(?:message|text|email|e-mail|mail|dm)\b|^\s*(?:please\s+)?(?:text|message|dm|email)\b|发(?:一[条條]|个|個)?\s*(?:消息|信息|短信|讯息|訊息|微信|邮件|郵件|私信)|傳(?:訊息|消息)|私信/iu;
+function missingRecipient(query) {
+  const q = String(query || ''); if (!MSG_SEND.test(q)) return false;
+  if (CURRENT_CHAT.test(q)) return false;
+  return !recipientOf(q);
+}
 const ASKED_WHO = /^(?:⚠\s*)?(?:Gửi cho ai\?|Who should I send it to\?|发给谁？)/u;
 // câu trả lời cho “Gửi cho ai?”: “đúng/yes/对/cuộc trò chuyện đang mở” = chat đang mở; còn lại là tên người nhận
 const YES_CURRENT = /^\s*(?:đúng|đúng rồi|ừ|ok|okay|vâng|dạ|phải|yes|yep|right|correct|对|是|是的|好)\s*[.!]*\s*$/iu;
@@ -293,4 +305,4 @@ function chatGate({ query, text, searchField = false, submit = false, proc = '',
   return `CHƯA gõ tin: AIVN AGENT phải TÌM và MỞ cuộc trò chuyện với “${recipient}” trước, không gõ vào cuộc trò chuyện đang mở sẵn${hdr.length ? ` (đang mở: “${String(hdr[0]).slice(0, 40)}”)` : ''}. Làm lần lượt: 1) screen_act click vào ô Tìm kiếm của ứng dụng; 2) type_text "${recipient}"; 3) click vào kết quả đúng tên “${recipient}”; 4) rồi mới gõ tin nhắn.`;
 }
 const SEEN_QUESTION = 'Trả lời đúng định dạng, chép đúng chữ trên màn hình:\nTÊN: <tên người/nhóm ở đầu khung trò chuyện đang mở>\nÔ SOẠN: <chữ còn trong ô soạn tin, hoặc TRỐNG>\nTIN: <tin nhắn cuối cùng trong khung trò chuyện>\nTIN: <tin nhắn trước đó>';
-module.exports = { CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };
+module.exports = { missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };
