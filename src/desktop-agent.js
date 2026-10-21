@@ -401,10 +401,22 @@ function createDesktopAgent(deps) {
     if (t && t.el) return named(t.el);
     if (t && t.x != null) return SEARCHY.test(String(a.element || a.target || '')) && !U.isIdRef(String(a.element || a.target || ''));
     if (focusedEl && (focusedEl.editable || focusedEl.focused) && !focusedEl.ocr) return named(focusedEl);
-    const la = s && s.lastAction; const recent = la && Date.now() - la.at < 60000;
+    // B64 (QA lượt 8): “vừa mở ô tìm kiếm” tính từ lúc thao tác XONG (sau khi kiểm tra lại màn hình — máy chậm mất 27–263 giây), không tính từ lúc bắt đầu bấm
+    if (inSearchMode()) return true;
+    const la = s && s.lastAction; const recent = la && Date.now() - (la.doneAt || la.at) < 60000;
     if (recent && (/^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(la.keys || '').replace(/\s/g, '')) || (['click', 'double_click'].includes(la.action) && SEARCHY.test(`${la.query || ''} ${la.el ? la.el.name || '' : ''}`)))) return true;
     return !!(s && s.inSearch && Date.now() - s.inSearch < SEARCH_MS() && la && la.action === 'type_text');
   }
+  // B64: chế độ tìm kiếm — bật khi bấm trúng phần tử tên Tìm kiếm/Search/查找 (kể cả chữ OCR) hoặc Ctrl/Cmd+F/K/E / phím tìm của ứng dụng;
+  // đồng hồ bắt đầu khi thao tác đó XONG; giữ qua type_text/wait/scroll; mọi thao tác khác tắt nó
+  const SEARCH_NAME = /tìm|tim kiem|search|find|查找|搜索|搜尋/iu;
+  function opensSearch(action, a, t) {
+    if (['click', 'double_click'].includes(action)) return SEARCH_NAME.test(`${t && t.el ? `${t.el.name || ''} ${t.el.placeholder || ''} ${t.el.autoId || ''}` : ''} ${t && t.query && !U.isIdRef(t.query) ? t.query : ''}`);
+    if (action === 'hotkey') { const k = String(a.keys || '').toLowerCase().replace(/\s/g, ''); if (/^(ctrl|control|cmd|command|meta)\+(f|k|e)$/.test(k)) return true;
+      const s = session; const ak = s && U.appKeys((s.obs && s.obs.win && s.obs.win.proc) || (s.target && s.target.proc) || '', s.obs && s.obs.win ? s.obs.win.title : ''); return !!(ak && ak.search && String(ak.search).toLowerCase().replace(/\s/g, '') === k); }
+    return false;
+  }
+  function inSearchMode() { const s = session; return !!(s && s.searchMode && s.searchMode.at && Date.now() - s.searchMode.at < SEARCH_MS()); }
   // B65: open_chat(app, người nhận) — mở ô tìm kiếm (phím tắt của ứng dụng hoặc bấm “Tìm kiếm”), xoá ô, gõ ĐÚNG tên người nhận lấy từ câu lệnh
   // của người dùng (không lấy tên mô hình đưa), chọn kết quả trùng tên, kiểm tra tiêu đề. Mô hình chỉ còn gõ nội dung tin.
   async function openChat(a, ctx) {
@@ -434,6 +446,10 @@ function createDesktopAgent(deps) {
     return { forModel: `Đã mở cuộc trò chuyện với “${rcp}” (đã kiểm tiêu đề). Các bước: ${steps.join('; ')}. Bước tiếp: type_text NỘI DUNG tin (không kèm element)${/đừng gửi|chỉ soạn|don't send|draft only/iu.test(q) ? ', KHÔNG submit' : ', submit: true'}.\n${String(r.forModel || '').split('\n').slice(2).join('\n')}`, summary: `đã mở “${rcp}”` };
   }
   async function act(a, ctx) {
+    try { return await actInner(a, ctx); }
+    finally { const s = session; if (s) { const now = Date.now(); if (s.lastAction && !s.lastAction.doneAt) s.lastAction.doneAt = now; if (s.searchMode && !s.searchMode.at) s.searchMode.at = now; } }
+  }
+  async function actInner(a, ctx) {
     let action = String(a.action || '').toLowerCase(); action = ALIASES[action] || action;
     if (!ACT_LABEL[action]) throw new Error('action không hợp lệ: ' + a.action + '. Dùng: ' + Object.keys(ACT_LABEL).join(', '));
     const s = await begin(ctx);
@@ -479,7 +495,7 @@ function createDesktopAgent(deps) {
       if (action === 'type_text' && t && t.el && U.isButtonish(t.el)) return { refused: true, error: 'không gõ vào nút', forModel: `KHÔNG gõ: ${t.el.id} là ${t.el.kind || 'nút'} “${String(t.el.name || '').slice(0, 40)}” — không gõ chữ vào nút/nhóm nút.${hint} Gọi lại type_text với element là id của ô nhập đúng.`, summary: `${t.el.id} là nút “${String(t.el.name || '').slice(0, 30)}” — không gõ vào nút` }; }
     // B34: vừa bấm ô Tìm kiếm (≤ 60 giây) mà type_text lại kèm id CŨ nay trỏ vào chữ/nút khác (không phải ô nhập, không phải “Tìm kiếm”) → bỏ id đó, gõ vào ô vừa chọn
     let staleEl = null;
-    { const la = s.lastAction; const justSearch = la && Date.now() - la.at < 60000 && ((['click', 'double_click'].includes(la.action) && /tìm|tim kiem|search|find/iu.test(`${la.query || ''} ${la.el ? la.el.name || '' : ''}`))
+    { const la = s.lastAction; const justSearch = inSearchMode() || la && Date.now() - (la.doneAt || la.at) < 60000 && ((['click', 'double_click'].includes(la.action) && /tìm|tim kiem|search|find/iu.test(`${la.query || ''} ${la.el ? la.el.name || '' : ''}`))
         || (la.action === 'hotkey' && /^(ctrl|cmd|command|meta)\+(f|k|e)$/i.test(String(la.keys || '').replace(/\s/g, '')))); // B64: vừa mở ô tìm kiếm bằng Ctrl+F/K (Zalo, Telegram, Teams…) → gõ vào ô đang chọn
       if (action === 'type_text' && justSearch && t && t.el && (t.el.ocr || (!t.el.editable && !U.inputLike(t.el))) && !/tìm|tim kiem|search|find/iu.test(`${t.el.name || ''} ${t.el.placeholder || ''}`)) { staleEl = t.el; t = null; needPoint = false; deps.log && deps.log('desk', `Vừa mở ô tìm kiếm (${la.action === 'hotkey' ? la.keys : 'bấm “Tìm kiếm”'}) — bỏ ${staleEl.id || 'phần tử'} “${String(staleEl.name || '').slice(0, 30)}”, gõ vào ô tìm kiếm đang chọn`); } }
     if (needPoint && (!t || t.x == null)) {
@@ -631,6 +647,8 @@ function createDesktopAgent(deps) {
     if (['click', 'double_click'].includes(action) && rcp && !openPending && s.chatOpen) s.chatOpen = null; // bấm chỗ khác: có thể đã đổi cuộc trò chuyện
     if (!['type_text', 'wait', 'scroll'].includes(action)) { s.inSearch = 0; s.foundHit = null; }
     s.lastAction = { action, el: t && t.el, keys: a.keys, at: Date.now(), query: t && t.query ? t.query : String(a.element || a.target || '') };
+    if (opensSearch(action, a, t)) { s.searchMode = { at: 0, how: action === 'hotkey' ? a.keys : `bấm “${String((t && t.el && t.el.name) || (t && t.query) || '').slice(0, 30)}”` }; deps.log && deps.log('desk', `Chế độ tìm kiếm: bật (${s.searchMode.how}) — tính giờ từ lúc thao tác xong`); }
+    else if (!['type_text', 'wait', 'scroll'].includes(action)) s.searchMode = null;
     if (action === 'type_text') s.lastTyped = String(a.text || '').replace(/\n+$/, '');
     deps.log && deps.log('desk', `Thao tác: ${desc}${t && t.via ? ' (định vị bằng ' + t.via + ')' : ''}`);
     ov('target', { box: null });
@@ -673,10 +691,10 @@ function createDesktopAgent(deps) {
       else checks.push('Đã gõ (dán một lần) rồi bấm Enter.');
       // ô tìm kiếm: chờ kết quả tải, nhìn lại, rồi mới kết luận; gợi ý tìm không dấu / một phần tên
       const el = t && t.el ? t.el : focusedEl;
-      const prevTxt = prevAction && Date.now() - prevAction.at < 60000 ? `${prevAction.query || ''} ${prevAction.el ? prevAction.el.name || '' : ''}` : '';
+      const prevTxt = prevAction && Date.now() - (prevAction.doneAt || prevAction.at) < 60000 ? `${prevAction.query || ''} ${prevAction.el ? prevAction.el.name || '' : ''}` : '';
       // còn đang ở ô tìm kiếm: lần gõ trước là tìm kiếm và từ đó chưa bấm vào đâu (máy chậm có thể mất vài phút giữa hai lần gõ)
       const stillSearching = s.inSearch && Date.now() - s.inSearch < SEARCH_MS();
-      const searchy = (stillSearching || /tìm|tim kiem|search|find|kiếm/i.test(`${el ? el.name + ' ' + (el.kind || '') : ''} ${a.element || a.target || ''} ${prevTxt}`) || (prevAction && Date.now() - prevAction.at < 60000 && /^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(prevAction.keys || '').replace(/\s/g, '')))) && !/\n/.test(String(a.text)) && String(a.text).length <= 80;
+      const searchy = (stillSearching || inSearchMode() || /tìm|tim kiem|search|find|kiếm/i.test(`${el ? el.name + ' ' + (el.kind || '') : ''} ${a.element || a.target || ''} ${prevTxt}`) || (prevAction && Date.now() - (prevAction.doneAt || prevAction.at) < 60000 && /^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(prevAction.keys || '').replace(/\s/g, '')))) && !/\n/.test(String(a.text)) && String(a.text).length <= 80;
       if (searchy && String(a.text).trim()) { searchyDone = true;
         const q = String(a.text).split('\n')[0].trim(); const fq = U.fold(q);
         const ask = `Ô tìm kiếm vừa được gõ "${q}". Danh sách kết quả tìm kiếm đang hiện những tên nào (ghi đúng chữ)? Dòng đầu tiên trả lời CÓ nếu có kết quả khớp hoặc gần khớp "${q}", KHÔNG nếu không có, ĐANG TẢI nếu chưa hiện xong.`;
@@ -766,7 +784,7 @@ function createDesktopAgent(deps) {
     if (isClickAct && pixChanged === false && ak && ak.search && clickSearchy && !(t && t.el && t.el.editable && !t.el.ocr)) {
       try {
         await refocus(); await performAt('hotkey', null, null, { keys: ak.search }); await sleep(500);
-        s.lastAction = { action: 'hotkey', keys: ak.search, at: Date.now(), query: 'Tìm kiếm' };
+        s.lastAction = { action: 'hotkey', keys: ak.search, at: Date.now(), query: 'Tìm kiếm' }; s.searchMode = { at: 0, how: ak.search };
         o = await observe(ctx, { ocr: 'auto' }); o2 = o;
         deps.log && deps.log('desk', `Bấm “Tìm kiếm” không đổi màn hình → dùng phím tắt ${ak.search} của ${ak.name}`);
         checks.push(`Bấm chữ “Tìm kiếm” không làm màn hình đổi nên AIVN đã bấm phím tắt ${ak.search} của ${ak.name} để mở ô tìm kiếm. Bước tiếp: type_text KHÔNG kèm element (gõ tên cần tìm).`);

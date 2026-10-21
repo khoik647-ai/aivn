@@ -2210,7 +2210,7 @@ document.getElementById('search').addEventListener('input', e => list(e.target.v
 document.getElementById('search').addEventListener('keydown', e => { if (e.key === 'Enter') { S.searches.push(e.target.value); list(e.target.value); } });
 list(''); open('Nhóm Lớp K27');
 </script>`;
-  const html = process.env.AIVN_QA_B21_MODE === 'k1' ? html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm trên Messenger</label><input id="search"') : !tg ? html0 : html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm</label><input id="search"').replace('<title>Nhóm Lớp K27 | Messenger</title>', '<title>Telegram - Trần Quỳnh Như</title>').replace(/Tìm kiếm trên Messenger/g, 'Tìm kiếm')
+  const html = ['k1', 'b64slow'].includes(process.env.AIVN_QA_B21_MODE) ? html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm trên Messenger</label><input id="search"') : !tg ? html0 : html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm</label><input id="search"').replace('<title>Nhóm Lớp K27 | Messenger</title>', '<title>Telegram - Trần Quỳnh Như</title>').replace(/Tìm kiếm trên Messenger/g, 'Tìm kiếm')
     .replace("const chats = ['Nhóm Lớp K27', 'Trần Quỳnh Anh', 'Lê Quỳnh Anh']", "const chats = ['Trần Quỳnh Như', 'Nhóm Lớp K27', 'Trần Quỳnh Anh']")
     .replace("document.title = c + ' | Messenger'", "document.title = 'Telegram - ' + c").replace("list(''); open('Nhóm Lớp K27');", "list(''); open('Trần Quỳnh Như');");
   const t = new BrowserWindow({ x: 40, y: 40, width: 1000, height: 600, show: true, title: APP, webPreferences: { contextIsolation: true } });
@@ -2240,6 +2240,33 @@ list(''); open('Nhóm Lớp K27');
       await step('b70-enter', { action: 'hotkey', keys: 'enter' });
       await step('b70-click-send', { action: 'click', element: 'Gửi' });
       out.final = await st(); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'b64slow') { // B64 (QA lượt 8, d10/zen): máy chậm — kiểm tra lại sau khi bấm mất > 60 giây; gõ tên KHÔNG kèm element ngay sau đó vẫn phải được coi là gõ vào ô tìm kiếm
+      const realNow = Date.now; let skew = 0; Date.now = () => realNow() + skew; out.skews = [];
+      const untap = LOG.tap((line, scope) => { if (scope === 'desk' && /Thao tác: bấm/.test(line) && out.skewNext) { out.skewNext = false; skew += 90000; out.skews.push(line.slice(0, 120)); } });
+      out.look0 = String((await d.look({ window: 'Messenger' }, ctx)).forModel || '').slice(0, 1500);
+      out.skewNext = true; await step('b64-click-search', { action: 'click', element: 'Tìm kiếm trên Messenger' });
+      await t.webContents.executeJavaScript('document.activeElement && document.activeElement.blur && 0'); // giữ nguyên tiêu điểm
+      await step('b64-type-name', { action: 'type_text', text: 'Trần Quỳnh Anh', submit: true });
+      out.skewNext = true; const hit = ((out.steps[out.steps.length - 1] || {}).forModel || '').match(/click element "(e\d+)"/);
+      await step('b64-click-result', { action: 'click', element: hit ? hit[1] : 'Trần Quỳnh Anh' });
+      await step('b64-send', { action: 'type_text', text: 'Mai 8h họp nhóm nhé', submit: true });
+      // đường Ctrl+F (dòng 625 cũ): ứng dụng mở ô tìm bằng phím tắt, máy chậm
+      await t.webContents.executeJavaScript(`document.addEventListener('keydown', e => { if (e.ctrlKey && e.key.toLowerCase() === 'f') { e.preventDefault(); document.getElementById('search').focus(); } }, true); 1`);
+      try { d.end('qa'); } catch {} const q2 = 'Nhắn tin cho Lê Quỳnh Anh trên Messenger: "Gửi mình file slide nhé". Không cần hỏi lại.';
+      const ctx2 = { ...ctx, userQuery: q2, auto: require('./agent/autonomy').forTurn({ setting: false, query: q2 }) };
+      const step2 = async (name, a) => { qaAsks.length = 0; let r; try { r = await d.act(a, ctx2); } catch (e) { r = { error: String(e.message || e) }; } await sleep(700);
+        const s = await st(); out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 2500), asks: qaAsks.slice(), state: s }); save(); return { r, s }; };
+      t.focus(); t.webContents.focus(); await sleep(400); await d.look({ window: 'Messenger' }, ctx2);
+      out.skewKeyNext = true; const untap2 = LOG.tap((line, scope) => { if (scope === 'desk' && /Thao tác: bấm phím/.test(line) && out.skewKeyNext) { out.skewKeyNext = false; skew += 90000; out.skews.push(line.slice(0, 120)); } });
+      await step2('b64k-hotkey', { action: 'hotkey', keys: 'ctrl+f' });
+      out.afterKey = await t.webContents.executeJavaScript(`({ active: document.activeElement && document.activeElement.id, hasFocus: document.hasFocus(), search: document.getElementById('search').value, comp: document.getElementById('comp').value })`);
+      await step2('b64k-type-name', { action: 'type_text', text: 'Lê Quỳnh Anh', submit: true });
+      out.afterType = await t.webContents.executeJavaScript(`({ active: document.activeElement && document.activeElement.id, search: document.getElementById('search').value, comp: document.getElementById('comp').value })`);
+      const hit2 = ((out.steps[out.steps.length - 1] || {}).forModel || '').match(/click element "(e\d+)"/);
+      await step2('b64k-click-result', { action: 'click', element: hit2 ? hit2[1] : 'Lê Quỳnh Anh' });
+      await step2('b64k-send', { action: 'type_text', text: 'Gửi mình file slide nhé', submit: true });
+      try { untap && untap(); untap2 && untap2(); } catch {} Date.now = realNow; out.final = await st(); throw null;
     }
     if (process.env.AIVN_QA_B21_MODE === 'openchat') { // B65: open_chat bằng mã — mô hình đưa tên sai/nội dung, AIVN vẫn tìm đúng “Trần Quỳnh Anh”, rồi chỉ gõ nội dung
       await step('oc-open', { action: 'open_chat', window: 'Telegram', recipient: 'Gửi mình file slide nhé' });
