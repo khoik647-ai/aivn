@@ -46,7 +46,10 @@
       let t = trCore(m[2], lang, 0);
       if (t == null) { const lo = m[2][0].toUpperCase() + m[2].slice(1); if (lo !== m[2]) { const x = trCore(lo, lang, 0); if (x != null) t = lang === 'zh' ? x : x[0].toLowerCase() + x.slice(1); } } // “(chạy bằng CPU, khá chậm)” viết thường
       if (t == null) { const x = trCore('· ' + m[2], lang, 0); if (x != null) t = x.replace(/^·\s*/, ''); } // khoá có “· ” đứng đầu
+      // B74: khoá viết thường (“bấm nút “{0}””) nhưng câu hiện viết HOA chữ đầu (“Bấm nút “Nộp bài”…” trên thanh AGENT) → thử chữ thường rồi viết hoa lại
+      if (t == null) { const lo = m[2][0].toLowerCase() + m[2].slice(1); if (lo !== m[2]) { const x = trCore(lo, lang, 0); if (x != null) t = lang === 'zh' ? x : x[0].toUpperCase() + x.slice(1); } }
       if (t == null && depth < 2) { const c = /^([\s\S]*?[^.。])([.。])$/.exec(m[2]); if (c) { const x = trPiece(c[1], lang, depth + 1); if (x != null) t = x.trim() + (lang === 'zh' ? '。' : '.'); } } // dấu chấm cuối
+      if (t == null && depth < 2) { const c = /^([\s\S]*?[^.…])(…|\.\.\.)$/.exec(m[2]); if (c) { const x = trPiece(c[1], lang, depth + 1); if (x != null) t = x.trim() + '…'; } } // B74: “…” cuối (đang làm)
       if (t == null && depth < 2) { const c = /^\(([\s\S]+)\)$/.exec(m[2]); if (c) { const x = trPiece(c[1], lang, depth + 1); if (x != null) t = lang === 'zh' ? '（' + x.trim() + '）' : '(' + x.trim() + ')'; } } // “(tự chọn)”
       if (t == null && depth < 2) { const c = /^([\s\S]*?\S)\s*[:：]$/.exec(m[2]); if (c) { const x = trCore(c[1], lang, 0); if (x != null) t = x + (lang === 'zh' ? '：' : ':'); } } // “Bộ xử lý:”
       if (t == null && depth < 2) { const e = /^([^\p{L}\p{N}]+)(\p{L}[\s\S]*)$/u.exec(m[2]); if (e) { const x = trPiece(e[2], lang, depth + 1); if (x != null) t = e[1] + x; } } // “🕒 Ngày giờ”
