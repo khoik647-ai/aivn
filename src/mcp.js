@@ -222,7 +222,7 @@ function claimCatalogId(def, { catalog = ADVANCED_CATALOG, taken = [] } = {}) {
   }
   return null;
 }
-function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null, resolveSecret = null, getExcelFolders = null }) {
+function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null, resolveSecret = null, getExcelFolders = null, scrub = null }) {
   const file = path.join(dir, 'mcp.json');
   const servers = new Map(); // tên → { state, client, transport, tools, error, logs[] }
   let lastRead = { mcpServers: {}, fileError: null, problems: {}, lan: {} };
@@ -245,14 +245,20 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
   }
   function config() { load(); return lastRaw; }
   function fileError() { load(); return lastRead.fileError; }
+  const clean = (s) => { const raw = s == null ? '' : String(s); try { return typeof scrub === 'function' ? String(scrub(raw)) : raw; } catch { return '••••'; } };
   const entry = (n) => { if (!servers.has(n)) servers.set(n, { state: 'off', tools: [], error: null, logs: [] }); return servers.get(n); };
-  const addLog = (n, line) => { const e = entry(n); for (const l of String(line).split(/\r?\n/)) if (l.trim()) e.logs.push(`${new Date().toLocaleTimeString('vi-VN')} ${l.slice(0, 400)}`); if (e.logs.length > 200) e.logs.splice(0, e.logs.length - 200); };
+  const addLog = (n, line) => { const e = entry(n); for (const l of clean(line).split(/\r?\n/)) if (l.trim()) e.logs.push(`${new Date().toLocaleTimeString('vi-VN')} ${l.slice(0, 400)}`); if (e.logs.length > 200) e.logs.splice(0, e.logs.length - 200); };
   function fail(name, message) {
-    const e = entry(name); e.state = 'error'; e.error = message; e.client = null; e.transport = null; e.tools = [];
-    addLog(name, 'LỖI: ' + message); log('mcp', `${name}: lỗi ${message}`); onChange(); return status(name);
+    const msg = clean(message);
+    const e = entry(name); e.state = 'error'; e.error = msg; e.client = null; e.transport = null; e.tools = [];
+    addLog(name, 'LỖI: ' + msg); log('mcp', clean(`${name}: lỗi ${msg}`)); onChange(); return status(name);
   }
 
-  async function start(name) {
+  async function start(name, opts = {}) {
+    const limit = Number(opts && opts.connectTimeout) > 0 ? Number(opts.connectTimeout) : 60000;
+    const timeoutMsg = limit === 60000 ? 'Quá 60 giây chưa kết nối được (lần đầu npx có thể phải tải gói).' : 'Quá thời gian chạy thử.';
+    const deadline = Date.now() + limit;
+    const failTimer = (rej) => setTimeout(() => rej(new Error(timeoutMsg)), Math.max(1, deadline - Date.now()));
     const loaded = load();
     const def = loaded.mcpServers[name];
     if (!def) throw new Error(`Không có máy chủ "${name}" trong mcp.json.`);
@@ -276,20 +282,20 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
         const u = new URL(def.url);
         const opts = headers ? { requestInit: { headers } } : undefined;
         transport = def.type === 'sse' || /\/sse\/?$/.test(u.pathname) ? new Sse(u, opts) : new Http(u, opts);
-        addLog(name, `Kết nối ${def.type === 'sse' ? 'SSE' : 'HTTP'} ${u.origin}${u.pathname}`);
+        addLog(name, clean(`Kết nối ${def.type === 'sse' ? 'SSE' : 'HTTP'} ${u.origin}${u.pathname}`));
       } else {
         const r = resolveCommand(def.command, def.args || []);
-        addLog(name, `Chạy: ${def.command} ${(def.args || []).join(' ')}${r.bundled ? ' (dùng Node đi kèm AIVN)' : ''}`);
+        addLog(name, clean(`Chạy: ${def.command} ${(def.args || []).join(' ')}${r.bundled ? ' (dùng Node đi kèm AIVN)' : ''}`));
         transport = new Stdio({ command: r.command, args: r.args, env: { ...process.env, ...r.env, ...env }, stderr: 'pipe', cwd: def.cwd || undefined });
-        transport.stderr && transport.stderr.on('data', (d) => addLog(name, String(d)));
+        transport.stderr && transport.stderr.on('data', (d) => addLog(name, clean(String(d))));
       }
       client = new Client({ name: 'AIVN', version: '0.15.0' }, { capabilities: {} });
       let earlyClose; const closed = new Promise((_, rej) => { earlyClose = () => rej(new Error('Máy chủ thoát ngay khi khởi động — xem nhật ký máy chủ bên dưới.')); });
       transport.onclose = () => { if (e.state === 'starting') earlyClose(); const x = servers.get(name); if (x && x.client === client && x.state === 'on') { x.state = 'error'; x.error = 'Máy chủ đã dừng.'; addLog(name, 'Máy chủ đã dừng'); onChange(); } };
       let tmo; closed.catch(() => {});
-      await Promise.race([client.connect(transport), closed, new Promise((_, rej) => { tmo = setTimeout(() => rej(new Error('Quá 60 giây chưa kết nối được (lần đầu npx có thể phải tải gói).')), 60000); })]).finally(() => clearTimeout(tmo));
-      const lt = await client.listTools();
-      const tools = (lt.tools || []).map(t => ({ name: t.name, full: toolName(name, t.name), description: t.description || '', inputSchema: t.inputSchema || { type: 'object', properties: {} } }));
+      await Promise.race([client.connect(transport), closed, new Promise((_, rej) => { tmo = failTimer(rej); })]).finally(() => clearTimeout(tmo));
+      let tmoList; const lt = await Promise.race([client.listTools(), new Promise((_, rej) => { tmoList = failTimer(rej); })]).finally(() => clearTimeout(tmoList));
+      const tools = (lt.tools || []).map(t => { const tool = clean(t.name); return { name: tool, full: toolName(name, tool), description: clean(t.description || ''), inputSchema: t.inputSchema || { type: 'object', properties: {} } }; });
       const seen = new Map();
       for (const t of tools) {
         if (seen.has(t.full)) {
@@ -300,12 +306,14 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
         seen.set(t.full, t.name);
       }
       Object.assign(e, { client, transport, state: 'on', tools });
-      addLog(name, `Đã kết nối · ${e.tools.length} công cụ: ${e.tools.map(t => t.name).join(', ')}`);
-      log('mcp', `${name}: đã kết nối, ${e.tools.length} công cụ`);
+      addLog(name, clean(`Đã kết nối · ${e.tools.length} công cụ: ${e.tools.map(t => t.name).join(', ')}`));
+      log('mcp', clean(`${name}: đã kết nối, ${e.tools.length} công cụ`));
     } catch (err) {
       if (client) { try { await client.close(); } catch { /* đã lỗi */ } }
-      e.state = 'error'; e.error = err.message; e.client = null; e.transport = null; e.tools = [];
-      addLog(name, 'LỖI: ' + err.message); log('mcp', `${name}: lỗi ${err.message}`);
+      const message = clean(err && err.message);
+      const stack = clean(err && err.stack);
+      e.state = 'error'; e.error = message; e.client = null; e.transport = null; e.tools = [];
+      addLog(name, 'LỖI: ' + message); log('mcp', clean(`${name}: lỗi ${message}\n${stack}`));
     }
     onChange(); return status(name);
   }
@@ -325,10 +333,10 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
       return {
         name: n, enabled: !cfg[n].disabled, lan: !!loaded.lan[n],
         kind: cfg[n].url ? (cfg[n].type === 'sse' ? 'sse' : 'http') : 'stdio',
-        command: cfg[n].url || [cfg[n].command, ...(cfg[n].args || [])].join(' '),
-        state: problem ? 'error' : e.state, error: problem || e.error,
-        tools: (problem ? [] : e.tools).map(t => ({ name: t.name, full: t.full, description: t.description.slice(0, 200) })),
-        logs: e.logs.slice(-60)
+        command: clean(cfg[n].url || [cfg[n].command, ...(cfg[n].args || [])].join(' ')),
+        state: problem ? 'error' : e.state, error: clean(problem || e.error || ''),
+        tools: (problem ? [] : e.tools).map(t => ({ name: t.name, full: t.full, description: clean(t.description).slice(0, 200) })),
+        logs: e.logs.slice(-60).map(clean)
       };
     });
     return only ? list.find(x => x.name === only) : list;
@@ -363,15 +371,23 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
       const folders = typeof getExcelFolders === 'function' ? getExcelFolders() : [];
       const denied = excelCallError(args, folders);
       if (denied) {
-        addLog(hit.n, `Từ chối ${hit.t.name}: ${denied}`);
-        return { error: denied, forModel: denied, summary: denied.slice(0, 160) };
+        const msg = clean(denied);
+        addLog(hit.n, `Từ chối ${hit.t.name}: ${msg}`);
+        return { error: msg, forModel: msg, summary: msg.slice(0, 160) };
       }
     }
-    addLog(hit.n, `Gọi ${hit.t.name} ${JSON.stringify(args).slice(0, 200)}`);
-    const r = await hit.e.client.callTool({ name: hit.t.name, arguments: args || {} }, undefined, { signal: ctx.signal, timeout: callTimeout(def) });
-    const text = resultText(r);
-    if (r.isError) { addLog(hit.n, `Lỗi: ${text.slice(0, 200)}`); return { error: text, forModel: `Lỗi từ máy chủ MCP ${hit.n}: ${text}`, summary: text.slice(0, 160) }; }
-    return { forModel: text, summary: `${hit.t.name} · ${text.split('\n')[0].slice(0, 120)}`, detail: text.slice(0, 3000) };
+    addLog(hit.n, clean(`Gọi ${hit.t.name} ${JSON.stringify(args).slice(0, 500)}`));
+    let r;
+    try { r = await hit.e.client.callTool({ name: hit.t.name, arguments: args || {} }, undefined, { signal: ctx.signal, timeout: callTimeout(def) }); }
+    catch (err) {
+      const message = clean(err && err.message);
+      const stack = clean(err && err.stack);
+      addLog(hit.n, `Lỗi: ${message}`); log('mcp', clean(`Gọi ${hit.t.name} lỗi ${message}\n${stack}`));
+      const e = new Error(message); e.stack = stack; throw e;
+    }
+    const text = clean(resultText(r));
+    if (r.isError) { addLog(hit.n, `Lỗi: ${text.slice(0, 200)}`); return { error: text, forModel: clean(`Lỗi từ máy chủ MCP ${hit.n}: ${text}`), summary: text.slice(0, 160) }; }
+    return { forModel: text, summary: clean(`${hit.t.name} · ${text.split('\n')[0].slice(0, 120)}`), detail: text.slice(0, 3000) };
   }
   async function stopAll() { for (const n of [...servers.keys()]) await stop(n, { quiet: true }); }
   return { file, readText, config, fileError, status, start, stop, startEnabled, saveText, setEnabled, names, defs: defsMap, has: (n) => /^mcp__/.test(n) && names().includes(n), exec, stopAll };

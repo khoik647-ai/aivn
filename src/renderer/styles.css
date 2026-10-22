@@ -450,6 +450,9 @@ details.adv[open]{display:flex;flex-direction:column;gap:10px}
 .ap-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .ap-actions kbd { font-size: 10px; opacity: .8; margin-left: 4px; border: 1px solid currentColor; border-radius: 4px; padding: 0 3px; }
 .ap-always { display: block; margin-top: 6px; }
+.ap-note { margin: 6px 0 0; }
+.approve-card details { margin: 6px 0; }
+.approve-card details > summary { cursor: pointer; }
 .always-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .always-list .chip { display: inline-flex; gap: 4px; align-items: center; border: 1px solid #f0c27a; background: #fff4e5; border-radius: 999px; padding: 2px 8px; font-size: 12px; }
 .always-list .chip button { border: none; background: none; cursor: pointer; color: #8a0c20; }

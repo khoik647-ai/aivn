@@ -1729,13 +1729,23 @@ function apShow() {
   const c = apOpen = apQueue.shift();
   const card = $('#approveCard'); card.classList.toggle('danger', !!c.danger);
   $('#apIcon').textContent = c.icon || '🔧'; $('#apTitle').textContent = c.title || 'AIVN AGENT xin phép';
-  $('#apSub').textContent = `Công cụ: ${c.label || c.tool}${c.path ? ' · ' + c.path : ''}`;
-  $('#apFields').innerHTML = (c.fields || []).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('');
+  $('#apSub').textContent = c.sub ? String(c.sub) : `Công cụ: ${c.label || c.tool}${c.path ? ' · ' + c.path : ''}`;
+  $('#apFields').innerHTML = (c.fields || []).map((row) => { const k = row[0], v = row[1], tip = row[2], raw = row[3] === 'raw' || row.length > 2; return `<tr><td>${esc(k)}</td><td${tip ? ` title="${esc(tip)}"` : ''}${raw ? ' data-noi18n' : ''}>${esc(v)}</td></tr>`; }).join('');
+  const note = $('#apNote'); if (note) { note.hidden = !c.note; note.textContent = c.note || ''; }
+  const det = $('#apDetails'); const detBody = $('#apDetailsBody');
+  if (det && detBody) {
+    det.open = false;
+    const rows = c.details || [];
+    det.hidden = !rows.length;
+    detBody.innerHTML = rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td data-noi18n>${esc(v)}</td></tr>`).join('');
+  }
   $('#apPreview').hidden = !c.preview; $('#apPreview').textContent = c.preview || '';
   $('#apDiff').hidden = !c.diff;
   $('#apDiff').innerHTML = c.diff ? c.diff.text.split('\n').map(l => { const k = l.startsWith('+ ') ? 'add' : l.startsWith('- ') ? 'del' : 'ctx'; return `<span class="${k}"><i class="g" aria-label="${k === 'add' ? 'thêm' : k === 'del' ? 'bỏ' : ''}">${k === 'add' ? '+' : k === 'del' ? '−' : ' '}</i>${esc(k === 'ctx' ? l.replace(/^ {2}/, '') : l.slice(2)) || ' '}</span>`; }).join('') : '';
   $('#apReasonBox').hidden = true; $('#apReason').value = '';
-  $('#apAlwaysRow').hidden = !c.allowAlways; $('#apAlways').checked = false; $('#apWarn').hidden = true; // không bao giờ bật sẵn
+  $('#apAlwaysRow').hidden = !c.allowAlways; $('#apAlways').checked = false; if ($('#apAlwaysText')) $('#apAlwaysText').textContent = c.alwaysLabel || 'Luôn cho phép công cụ này';
+  const connectCard = c.tool === 'connector_connect' || c.tool === 'mcp_connect' || c.tool === 'mcp_import' || c.tool === 'mcp_replace';
+  $('#apWarn').hidden = !(connectCard && c.warn); if (connectCard && c.warn) $('#apWarn').textContent = c.warn; // không bao giờ bật sẵn
   card.hidden = false; state.genPhase = 'ask'; if (state.genKind === 'agent') paintGenChrome(); else setPhase('ask');
   paintAgentWait();
   if (approveLive()) { $('#apDeny').focus({ preventScroll: true }); card.scrollTop = 0; card.scrollIntoView({ block: 'nearest' }); }
@@ -1764,7 +1774,7 @@ $('#apDenyReason').addEventListener('click', () => {
   if ($('#apReasonBox').hidden) { $('#apReasonBox').hidden = false; $('#apReason').focus(); $('#apDenyReason').textContent = 'Gửi lý do & từ chối'; return; }
   apAnswer(false, true); $('#apDenyReason').textContent = 'Từ chối kèm lý do';
 });
-$('#apAlways').addEventListener('change', (e) => { const c = apOpen; $('#apWarn').hidden = !e.target.checked; $('#apWarn').textContent = '⚠ ' + ((c && c.warn) || 'AIVN AGENT sẽ dùng công cụ này mà không hỏi lại.') + ' Bạn có thể bỏ trong Cài đặt AIVN AGENT.'; });
+$('#apAlways').addEventListener('change', (e) => { const c = apOpen; const connectCard = c && (c.tool === 'connector_connect' || c.tool === 'mcp_connect' || c.tool === 'mcp_import' || c.tool === 'mcp_replace'); if (connectCard) { $('#apWarn').hidden = !c.warn; $('#apWarn').textContent = c.warn || ''; return; } $('#apWarn').hidden = !e.target.checked; $('#apWarn').textContent = '⚠ ' + ((c && c.warn) || 'AIVN AGENT sẽ dùng công cụ này mà không hỏi lại.') + ' Bạn có thể bỏ trong Cài đặt AIVN AGENT.'; });
 document.addEventListener('keydown', (e) => {
   if (!apOpen) return;
   const operable = approveLive();

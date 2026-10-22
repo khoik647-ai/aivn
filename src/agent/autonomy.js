@@ -63,6 +63,8 @@ function skipAsk(auto, kind, info = {}) {
       if (info.tool === 'delete_file') return namedTarget(auto.query, info.path);
       if (info.tool === 'run_command' || info.tool === 'run_python' || info.tool === 'run_javascript') return false;
       if (/^mcp__/.test(info.tool || '')) return false;
+      if (/^biz_/.test(info.tool || '')) return false;
+      if (/^excel_(?:write_to_sheet|create_table|copy_sheet|format_range)$/.test(info.tool || '')) return false;
       return info.tool === 'write_file';
     case 'open-exec': case 'command': default: return false;
   }

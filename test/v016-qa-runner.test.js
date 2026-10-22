@@ -28,6 +28,9 @@ test('an toàn: bước cần xin phép LUÔN bị từ chối (kể cả câu �
   for (const req of [{ risk: true }, { title: 'Gửi tin nhắn' }, { desc: 'xoá tệp' }, { text: 'Purchase item' }, { label: 'khoá máy' }, { desc: 'tăng âm lượng' }, { title: '发送' }])
     for (const draft of [false, true]) assert.strictEqual(Q.answerFor(req, { draft }).ok, false, JSON.stringify(req));
   assert.match(Q.answerFor({ risk: true }, { draft: true }).reason, /Chỉ soạn sẵn/);
+  for (const tool of ['connector_connect', 'mcp_connect', 'mcp_import', 'mcp_replace', 'mcp__fs__echo', 'biz_deleteInvoice', 'biz_registerPayment'])
+    assert.strictEqual(Q.answerFor({ tool, title: 'bước thường' }, { draft: false }).ok, false, tool);
+  assert.strictEqual(Q.answerFor({ title: 'Bấm nút Lưu' }, { draft: false }).ok, true);
   assert.ok(Q.DRAFT_RE.test('soạn tin cho Lan nhưng đừng gửi') && Q.DRAFT_RE.test('draft only') && Q.DRAFT_RE.test('只起草'));
   const src = fs.readFileSync(path.join(root, 'src/qa-runner.js'), 'utf8');
   assert.ok(!/approve:\s*async[^}]*ok:\s*true/.test(src), 'approve không bao giờ trả ok:true');

@@ -809,6 +809,9 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
   }
   async function runInner({ messages, convoId = null, signal, onToken = () => {}, onStep = () => {}, onStatus = () => {}, headless = false, confirm, confirmScreen, approve = null, qa = false }) {
     const s = S_();
+    if (!headless && s.agentMcp !== false && deps.mcp && typeof deps.mcp.ensureLazy === 'function') {
+      try { await deps.mcp.ensureLazy(); } catch {}
+    }
     const names = activeTools({ headless });
     const att = (runStore.getStore() || {}).attachments || [];
     if (att.length && !names.includes('read_file') && !(s.agentToolsOff || []).includes('files')) names.push('read_file'); // đọc tệp đính kèm
@@ -1179,7 +1182,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
             let ctxRun = ctx; let refusedOut = null;
             const autoSkip = !headless && AP.needsApproval(call.name) && AU.skipAsk(auto, 'tool', { tool: call.name, path: args.path });
             if (autoSkip) { step.auto = auto.why; ctxRun = { ...ctx, confirm: async () => true, preApproved: true }; deps.log && deps.log(`[aivn agent] tự làm không hỏi (${auto.why}): ${call.name}`); }
-            else if (approve && !headless && AP.needsApproval(call.name) && !(AP.policy(call.name).allowAlways && (S_().agentAlwaysAllow || []).includes(call.name))) {
+            else if (approve && !headless && AP.shouldAsk(call.name, S_().agentAlwaysAllow || [])) {
               const card = AP.buildCard(call.name, args, { label: step.label, icon: step.icon, resolvePath: (p, o) => resolvePath(p, o) });
               step.status = 'asking'; onStep({ ...step }); onStatus({ stage: 'ask', round, tool: call.name });
               deps.log && deps.log(`[aivn agent] xin phép (đã hỏi): ${call.name} · ${String(card.title || '').slice(0, 80)}`);
@@ -1189,6 +1192,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
               else if (!ans || !ans.ok) refusedOut = { refused: true, forModel: AP.refusalText(card, ans && ans.reason), summary: 'Bạn từ chối' + (ans && ans.reason ? `: “${String(ans.reason).slice(0, 80)}”` : '') };
               else {
                 if (ans.always && card.allowAlways && deps.allowAlways) deps.allowAlways(call.name);
+                AP.noteApprovedWrite(call.name);
                 ctxRun = { ...ctx, confirm: async () => true, preApproved: true };
                 step.status = 'running'; onStep({ ...step }); onStatus({ stage: 'act', round, tool: call.name });
               }

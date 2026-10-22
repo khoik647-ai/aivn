@@ -108,8 +108,10 @@ function resolveModel(want, models = []) {
 }
 const isRiskyAsk = (req = {}) => !!req.risk || RISK_RE.test([req.title, req.desc, req.text, req.label, req.tool, req.message].filter(Boolean).join(' '));
 // thẻ xin phép bất kỳ trong chế độ QA → luôn từ chối bước quan trọng; bước thường (không rủi ro) của lớp phủ màn hình được làm như bài đo
+// beta.4: thẻ MCP, kết nối cửa hàng, và sáu công cụ Kinh doanh nguy hiểm bị từ chối dù chữ không khớp RISK_RE
 function answerFor(req, { draft }) {
-  if (isRiskyAsk(req)) return { ok: false, reason: draft ? 'Chỉ soạn sẵn, đừng gửi (chế độ QA: tự từ chối bước cần xin phép)' : 'Chế độ QA: tự từ chối bước cần xin phép' };
+  const deny = require('./plugins').qaDenies(req) || isRiskyAsk(req);
+  if (deny) return { ok: false, reason: draft ? 'Chỉ soạn sẵn, đừng gửi (chế độ QA: tự từ chối bước cần xin phép)' : 'Chế độ QA: tự từ chối bước cần xin phép' };
   return { ok: true, reason: '' };
 }
 // trạng thái trung thực từ kết quả AIVN AGENT
