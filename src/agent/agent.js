@@ -1081,7 +1081,8 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const wrong = steps.filter(x => x.verify && x.verify.wrongChat);
     if (wrong.length) { const w = wrong[wrong.length - 1].verify; const note = `⚠ Tin nhắn đã bị GỬI NHẦM: ${w.why}. Hãy mở cuộc trò chuyện “${w.wrongTo || 'đó'}” để thu hồi/xoá tin nếu cần.`; if (!String(text).includes('GỬI NHẦM')) text = `${note}\n\n${text}`.trim(); warning = note; }
     // B43: việc trên ứng dụng (nêu tên ứng dụng) mà cả lượt không có bước công cụ nào làm được → nói thẳng là chưa làm gì trong ứng dụng
-    if (finishReason !== 'abort' && compOn && isAppTask(query) && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) { warning = NO_APP_ACTION_WARN(appOf(query)); deps.log && deps.log(`[aivn agent] việc trên ứng dụng nhưng không có bước nào làm được → cảnh báo`); }
+    // B99: dừng vì bước GỬI bị từ chối (thẻ xin phép) ≠ mô hình yếu không làm gì — câu cuối đã nói rõ lý do, không cảnh báo “chọn mô hình mạnh hơn”
+    if (finishReason !== 'abort' && compOn && isAppTask(query) && !(hardStop && hardStop.sendRefused) && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) { warning = NO_APP_ACTION_WARN(appOf(query)); deps.log && deps.log(`[aivn agent] việc trên ứng dụng nhưng không có bước nào làm được → cảnh báo`); }
     // B39: không bao giờ kết thúc lượt bằng lời hứa ở thì tương lai (“tôi sẽ thử…”) — lượt đã hết, sẽ không có gì được làm tiếp
     if (finishReason !== 'abort' && RT.promiseEnding(text) && steps.some(x => COMP.includes(x.name))) {
       const verified = steps.some(x => x.verify && x.verify.sent) && !retry.lastBad();

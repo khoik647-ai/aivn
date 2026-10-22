@@ -761,7 +761,9 @@ function createDesktopAgent(deps) {
       deps.log && deps.log('desk', `Xin phép (đã hỏi)${gate.send ? ' — bước GỬI' : risk ? ' — bước quan trọng' : ''}: screen_act ${action} · ${desc}${logWho}`);
       // B93: thẻ GỬI mang đúng tên người nhận (theo lệnh) + tên cuộc trò chuyện đang hiện trên màn hình (tiêu đề khung giữa / chữ gợi ý ô soạn)
       const sendInfo = gate.send ? (() => { const sendText = action === 'type_text' ? String(a.text || '').replace(/\n+$/, '') : s.lastTyped || ''; let shown = null;
-        try { const R = SV.regionsOf(s.obs); shown = { header: R ? R.header.slice(0, 4) : [], composer: SV.composerTarget([...(R ? R.composer : []), ...((s.obs && s.obs.elements) || []).flatMap(e => [e.placeholder, e.name])].filter(Boolean)), title: s.obs && s.obs.win ? s.obs.win.title : '' }; } catch {}
+        try { const R = SV.regionsOf(s.obs); const P0 = SV.parseSeen(s.lastSeen || '');
+          // B97: cùng đầu vào + cùng cách làm sạch với cổng người nhận (B90); kèm kết quả cổng đã chốt trong lượt này (chatOpen + chữ gợi ý ô soạn đã khớp)
+          shown = { header: SV.cleanHeader([...(R ? R.header : []), P0.header].filter(Boolean)).slice(0, 4), headerRaw: R ? R.header.slice(0, 4) : [], gate: { chatOpen: s.chatOpen || null, placeholder: s.placeholderSeen && s.placeholderSeen.key === s.chatOpen ? s.placeholderSeen.name : null, openedBy: s.openedBy || null }, composer: SV.composerTarget([...(R ? R.composer : []), ...((s.obs && s.obs.elements) || []).flatMap(e => [e.placeholder, e.name])].filter(Boolean)), title: s.obs && s.obs.win ? s.obs.win.title : '' }; } catch {}
         return { send: true, recipient: gateRcp || null, sendText, shown }; })() : {};
       const r = await ask({ action, title: risk ? '⚠ Bước quan trọng — kiểm tra kỹ' : 'AIVN AGENT muốn làm bước này', desc: desc.charAt(0).toUpperCase() + desc.slice(1), risk, text: action === 'type_text' ? String(a.text) : null,
         window: s.obs && s.obs.win ? s.obs.win.title : '', image: s.shot ? s.shot.dataUrl : crop, box, via: t ? t.via : null, mode, ...sendInfo });
@@ -821,7 +823,7 @@ function createDesktopAgent(deps) {
       if (fm && SV.relates(fm[1], rcp)) { const src = (before && before.elements) || (s.obs && s.obs.elements) || [];
         const up = src.filter(e => e !== t.el && Array.isArray(e.b) && e.name && !SV.FORMER.test(e.name) && e.b[1] < E[1] && E[1] - e.b[1] <= E[3] * 3 + 14 && Math.abs(e.b[0] - E[0]) <= 48 && String(e.name).trim().length >= 2).sort((x, y) => y.b[1] - x.b[1])[0];
         if (up) { s.aliases = [...new Set([...(s.aliases || []), String(up.name).trim()])]; deps.log && deps.log('desk', `Người nhận “${rcp}” nay mang tên “${String(up.name).trim()}” (kết quả ghi “${String(t.el.name).trim()}”) — chấp nhận tên này ở tiêu đề`); } } }
-    if (['click', 'double_click'].includes(action) && rcp && !openPending && s.chatOpen) s.chatOpen = null; // bấm chỗ khác: có thể đã đổi cuộc trò chuyện
+    if (['click', 'double_click'].includes(action) && rcp && !openPending && s.chatOpen) { s.chatOpen = null; s.placeholderSeen = null; } // bấm chỗ khác: có thể đã đổi cuộc trò chuyện
     if (!['type_text', 'wait', 'scroll'].includes(action)) { s.inSearch = 0; s.foundHit = null; }
     s.lastAction = { action, el: t && t.el, keys: a.keys, at: Date.now(), query: t && t.query ? t.query : String(a.element || a.target || '') };
     if (['click', 'double_click'].includes(action)) s.focusProxy = 'c:' + U.fold(String((t && t.el && t.el.name) || (t && t.query) || '')).slice(0, 40); else if (action === 'hotkey') s.focusProxy = 'k:' + String(a.keys || '').toLowerCase(); // B95

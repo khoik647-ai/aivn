@@ -315,6 +315,29 @@ const COMPOSER_TO = [
 ];
 function composerTarget(texts = []) { for (const t of texts) { const x = String(t || '').trim(); if (!x || x.length > 120) continue; for (const re of COMPOSER_TO) { const m = re.exec(x); if (m && m[1] && m[1].length <= 60) return m[1].trim(); } } return null; }
 // tên khớp CHẶT (cả cụm, không chỉ chứa từ) — dùng khi lượt này CHƯA tìm người nhận
+// B97 (máy thật beta.2.3): dòng đầu khung chat đọc bằng OCR có rác — biểu tượng ảnh đại diện thành một ký tự lẻ (“Q My Documents”, “| Lan”),
+// dòng phụ dưới tên (“Lưu và đồng bộ dữ liệu…”, “Vừa truy cập”, “Active now”), giờ (“2158”, “21:58”). Cổng người nhận (B90) và
+// kiểm tra --approve-send-to dùng CHUNG cách làm sạch này.
+const HEADER_SUB = /^(?:lưu và đồng bộ|luu va dong bo|vừa truy cập|vua truy cap|truy cập|truy cap|đang hoạt động|dang hoat dong|hoạt động|hoat dong|đang nhập|dang nhap|ngoại tuyến|trực tuyến|active|online|offline|last seen|seen|typing|sync|saved messages|在线|离线|刚刚|最近|上次|正在输入)/iu;
+const HEADER_TIME = /^(?:\d{1,2}\s?[:h.]\s?\d{2}(?:\s?(?:am|pm|sa|ch))?|\d{3,4}|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|hôm (?:nay|qua)|today|yesterday|今天|昨天)$/iu;
+function cleanHeaderLine(x) {
+  let t = String(x == null ? '' : x).normalize('NFC').replace(/\s+/g, ' ').trim();
+  // ký tự lẻ đứng đầu (biểu tượng/ảnh đại diện OCR thành “Q”, “|”, “©”…) + phần sau còn ít nhất 2 chữ cái
+  const m = /^(\S)\s+(.+)$/u.exec(t); if (m && [...m[1]].length === 1 && !/\d/.test(m[1]) && /\p{L}.*\p{L}/u.test(m[2])) t = m[2].trim();
+  t = t.replace(/^[|•·©®@#*>»›\-–—:]+\s*/u, '').replace(/\s*[|•·]+$/u, '').trim();
+  // giờ dính ở cuối dòng tiêu đề (“My Documents 21:58”)
+  t = t.replace(/\s+\d{1,2}[:h.]\d{2}$/u, '').trim();
+  return t;
+}
+function cleanHeader(lines = []) {
+  const out = [];
+  for (const x of [].concat(lines || [])) {
+    const t = cleanHeaderLine(x); const f = fold(t);
+    if (!t || f.replace(/\s/g, '').length <= 1 || HEADER_TIME.test(t) || HEADER_SUB.test(t) || HEADER_SUB.test(f)) continue;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
 const exactName = (names, x) => { const kx = nameKey(x); return !!kx && names.some(n => nameKey(n) === kx); };
 function chatGate({ query, text, searchField = false, submit = false, proc = '', title = '', state = {}, header = [], ocrHeader = null, seenHeader = null, composer = [] }) {
   if (!isChatContext(query, proc, title)) return null;
@@ -343,10 +366,12 @@ function chatGate({ query, text, searchField = false, submit = false, proc = '',
   const nearName = !onlyName(text, recipient) && nameOnly; // gần giống tên (thêm vài ký tự): chỉ chặn khi CHƯA mở đúng cuộc trò chuyện
   if (onlyName(text, recipient)) return `KHÔNG gõ “${String(text).slice(0, 40)}”: ô đang nhận chữ CHƯA được xác nhận là ô Tìm kiếm (có thể là ô soạn tin của cuộc trò chuyện đang mở${header.filter(Boolean).length ? ` “${String(header.filter(Boolean)[0]).slice(0, 40)}”` : ''} — gõ tên + Enter ở đó sẽ GỬI tên thành tin nhắn). Làm lần lượt: 1) screen_act click vào ô/chữ “Tìm kiếm” của ứng dụng; 2) type_text "${recipient}" với element là CHÍNH ô tìm kiếm đó; 3) bấm vào kết quả đúng tên “${recipient}”. Nếu tên “${recipient}” đã hiện sẵn trong danh sách bên trái, bấm thẳng vào tên đó thay vì gõ.`;
   const k = nameKey(recipient);
-  const hdr = header.filter(Boolean).filter(h => !MENU_BAR(h));
+  const hdr = cleanHeader(header.filter(Boolean)).filter(h => !MENU_BAR(h)); // B97: cùng cách làm sạch với kiểm tra --approve-send-to
   // B27: màn hình (tiêu đề cửa sổ “Ứng dụng - Tên”, hoặc đầu khung chat đúng tên) cho thấy ĐÚNG người nhận → cho gõ, không dựa vào cờ nội bộ
   // tiêu đề cửa sổ (do hệ điều hành báo) là bằng chứng chắc; chữ OCR ở đầu khung chỉ được tin khi lượt này ĐÃ tìm người nhận (có thể là chữ khác lọt vào vùng đầu khung)
   const al = state.aliases || [];
+  // B97: ghi lại chữ gợi ý ô soạn (“Nhập @, tin nhắn tới X”) KHỚP CHẶT người nhận trong lượt này — sau khi gõ nội dung, chữ gợi ý biến mất
+  { const ct0 = composerTarget(composer); if (ct0 && exactName(namesFor(recipient, al), ct0)) state.placeholderSeen = { key: k, name: ct0 }; }
   if (chatShown(recipient, title, [], al) || (state.lastSearch && chatShown(recipient, title, hdr, al))) { state.chatOpen = k; return null; }
   // B90 (máy thật beta.2.1): đúng cuộc trò chuyện ĐÃ mở sẵn (không tìm trong lượt này) — tiêu đề khung giữa hoặc chữ gợi ý ô soạn
   // trùng KHỚP CHẶT với người nhận / tên khác (Cloud của tôi = My Documents = My Cloud…) → cho gõ
@@ -445,4 +470,4 @@ function fileAt(el, obs) {
 // việc có nhắc tới tệp/đính kèm (bỏ phần nội dung tin trong ngoặc kép)
 const WANTS_FILE = /tệp|tep|file|đính kèm|dinh kem|attach|tài liệu|ảnh|hình|photo|picture|video|mở\s+(?:tệp|file)|文件|附件|图片|照片/iu;
 function wantsFiles(query) { return WANTS_FILE.test(String(query || '').replace(/[“"«][^”"»]*[”"»]/g, ' ')); }
-module.exports = { searchClose, searchRowText, fileAt, searchLeftover, isComposerEl, findComposer, nameLikeText, isFileTarget, wantsFiles, FILE_NAME, composerTarget, COMPOSER_TO, namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };
+module.exports = { cleanHeader, cleanHeaderLine, searchClose, searchRowText, fileAt, searchLeftover, isComposerEl, findComposer, nameLikeText, isFileTarget, wantsFiles, FILE_NAME, composerTarget, COMPOSER_TO, namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };

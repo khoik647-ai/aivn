@@ -34,6 +34,27 @@ function parseArgs(argv = []) {
 // --approve-send-to: chỉ cuộc trò chuyện với CHÍNH MÌNH (nhóm tên khác của “Cloud của tôi”, khớp chặt cả cụm)
 const SELF_CHAT = () => require('./agent/send-verify').namesFor('Cloud của tôi');
 function isSelfChat(name) { const SV = require('./agent/send-verify'); const k = SV.nameKey(String(name || '')); return !!k && SELF_CHAT().some(n => SV.nameKey(n) === k); }
+// B97 (máy thật beta.2.3): kiểm tra màn hình cho --approve-send-to dùng CÙNG cách đọc + làm sạch tiêu đề với cổng người nhận (B90):
+// bỏ ký tự lẻ đầu dòng (“Q My Documents”), dòng phụ (“Lưu và đồng bộ…”), giờ (“2158”, “21:58”). Qua khi:
+//  (a) tiêu đề khung giữa (đã làm sạch) ĐÚNG là cuộc trò chuyện của chính mình, hoặc
+//  (b) trong CÙNG lượt, cổng người nhận đã chốt đúng người nhận này VÀ chữ gợi ý ô soạn (“Nhập @, tin nhắn tới My Documents”) đã khớp tên của chính mình,
+//      và màn hình lúc này không cho thấy cuộc trò chuyện nào khác (ô soạn ghi người khác / tiêu đề đọc được mà không phải mình).
+// Tiêu đề chỉ có giờ (["2158"]) KHÔNG BAO GIỜ tự nó cho qua.
+function selfChatShown(req = {}) {
+  const SV = require('./agent/send-verify');
+  const sh = req.shown || {}; const raw = (sh.headerRaw || sh.header || []).slice(0, 4);
+  const hdr = SV.cleanHeader([...(sh.header || []), ...(sh.headerRaw || [])]);
+  const own = SELF_CHAT(); const hit = hdr.find(isSelfChat);
+  if (hit) return { ok: true, via: `tiêu đề khung chat “${hit}”` };
+  if (sh.composer && !isSelfChat(sh.composer)) return { ok: false, why: `ô soạn đang ghi tin nhắn tới “${String(sh.composer).slice(0, 40)}” — không phải cuộc trò chuyện của chính bạn` };
+  const g = sh.gate || {}; const k = SV.nameKey(String(req.recipient || ''));
+  const gateOk = !!g.chatOpen && g.chatOpen === k; const phOk = !!(g.placeholder && isSelfChat(g.placeholder)) || !!(sh.composer && isSelfChat(sh.composer));
+  if (gateOk && phOk) {
+    if (hdr.length && !hdr.some(h => own.some(n => SV.headerMatches(n, h)))) return { ok: false, why: `tiêu đề khung chat đọc được là ${JSON.stringify(hdr.slice(0, 2))} — không phải cuộc trò chuyện của chính bạn` };
+    return { ok: true, via: `cổng người nhận đã chốt + chữ gợi ý ô soạn “${g.placeholder || sh.composer}” trong lượt này; tiêu đề đọc được ${JSON.stringify(raw)}` };
+  }
+  return { ok: false, why: `chưa chắc là cuộc trò chuyện của chính bạn — tiêu đề khung chat ${JSON.stringify(raw)}${hdr.length ? ` (làm sạch: ${JSON.stringify(hdr.slice(0, 2))})` : ' (không còn tên sau khi làm sạch)'}, ${gateOk ? 'cổng người nhận đã chốt' : 'cổng người nhận chưa chốt'}, ${phOk ? 'chữ gợi ý ô soạn đã khớp' : 'chưa thấy chữ gợi ý ô soạn khớp'}` };
+}
 // kiểm tra & chuẩn hoá; trả { ok, args, error }
 function validate(a, { cwd = process.cwd() } = {}) {
   if (!a) return { ok: false, error: 'không có cờ QA' };
@@ -99,6 +120,8 @@ function statusOf(r, { denied = 0, draft = false, error = null, timedOut = false
   if (timedOut) return { status: 'failed', reason: 'hết thời gian (--timeout)' };
   if (error) return { status: ['AGENT_GATE', 'NOT_ACTIVATED', 'NO_MODEL', 'SCREEN_OFF'].includes(error.code) ? 'blocked' : 'failed', reason: String(error.message || error) };
   if (!r) return { status: 'failed', reason: 'không có kết quả' };
+  // B98: người dùng (--answer “không/no/取消…”) huỷ việc → “cancelled”, mã thoát 4 (không phải thất bại)
+  if (r.cancelled) return { status: 'cancelled', reason: 'người dùng huỷ việc khi được hỏi lại (--answer) — không gửi/không làm gì' };
   if (r.outcome === 'asked_user' || r.asked) return { status: 'asked_user', question: String(r.text || ''), reason: r.asked ? String(r.asked) : 'hỏi lại người dùng' };
   if (r.finishReason === 'abort') return { status: 'failed', reason: 'bị dừng' };
   if (denied > 0 && !draft) return { status: 'blocked', reason: `${denied} bước cần xin phép đã bị tự từ chối (chế độ QA không bao giờ tự cho phép)` };
@@ -111,7 +134,7 @@ function statusOf(r, { denied = 0, draft = false, error = null, timedOut = false
   if (sendTask && !(r.steps || []).some(x => x && x.verify && x.verify.sent)) return { status: 'failed', reason: 'việc gửi tin nhưng không có bước nào kiểm chứng được là ĐÃ GỬI đúng người' };
   return { status: 'done' };
 }
-const exitCodeOf = (status) => status === 'done' ? 0 : status === 'asked_user' ? 3 : 2;
+const exitCodeOf = (status) => status === 'done' ? 0 : status === 'asked_user' ? 3 : status === 'cancelled' ? 4 : 2;
 function writeJson(file, obj) { fs.mkdirSync(path.dirname(file), { recursive: true }); const tmp = file + '.tmp-' + process.pid; fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8'); fs.renameSync(tmp, file); }
 // dòng nhật ký có toạ độ bấm / mã phím (B62/B66c) → gắn vào bước
 const DEBUG_LINE = /(toạ độ|tọa độ|\bVK\b|scan|flags|bấm tại|click|nhấn phím|phím|DPI|scale|→ \(\d+|\(\d+,\s*\d+\))/i;
@@ -126,15 +149,16 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
   const open = new Map(); let denied = 0, r = null, error = null, timedOut = false; let restoreLang = null;
   const ac = new AbortController(); const timer = setTimeout(() => { timedOut = true; ac.abort(); }, args.timeout * 1000);
   // ghi lại + trả lời một thẻ xin phép (đồng bộ). Thẻ ngoài lớp phủ màn hình (confirm/approve/screen) luôn coi là bước quan trọng → TỪ CHỐI
-  let sendApproved = 0;
+  let sendApproved = 0; let lastDeny = null;
   // --approve-send-to: CHỈ thẻ GỬI của lớp phủ màn hình, người nhận theo lệnh là cuộc trò chuyện của chính mình, tiêu đề khung giữa ĐÚNG là nó, chưa cho phép lần nào
   const selfSend = (kind, req) => {
     if (!args.approveSendTo || kind !== 'desk' || !req.send) return null;
-    const hdr = ((req.shown && req.shown.header) || []).find(isSelfChat);
+    const v = selfChatShown(req);
     const why = draft ? 'lệnh nói chỉ soạn, đừng gửi' : sendApproved ? 'đã cho phép một lần gửi rồi' : !isSelfChat(req.recipient) ? `người nhận “${req.recipient || '?'}” không phải cuộc trò chuyện của chính bạn`
-      : !hdr ? `tiêu đề khung chat trên màn hình (${JSON.stringify(((req.shown && req.shown.header) || []).slice(0, 2))}) không phải cuộc trò chuyện của chính bạn` : null;
-    deps.LOG && deps.LOG.log('qa', why ? `--approve-send-to: KHÔNG cho phép — ${why}` : `--approve-send-to: CHO PHÉP gửi tới “${req.recipient}” (tiêu đề khung chat “${hdr}”)`);
-    return why ? null : hdr;
+      : !v.ok ? v.why : null;
+    deps.LOG && deps.LOG.log('qa', why ? `--approve-send-to: KHÔNG cho phép — ${why}` : `--approve-send-to: CHO PHÉP gửi tới “${req.recipient}” (${v.via})`);
+    if (why) lastDeny = why;
+    return why ? null : v.via;
   };
   const ask = (kind, req = {}) => { const risk = kind !== 'desk' || isRiskyAsk(req); const self = risk ? selfSend(kind, req) : null;
     const a = self ? { ok: true, reason: '' } : risk ? { ...answerFor({ ...req, risk: true }, { draft }), final: true } : { ok: true, reason: '' }; if (!a.ok) denied++; if (self) sendApproved++;
@@ -184,7 +208,10 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
   } catch (e) { error = e; }
   finally { clearTimeout(timer); untap(); if (deps.desk && deps.desk.setBenchAnswer) deps.desk.setBenchAnswer(null); if (restoreLang) { try { restoreLang(); } catch {} } }
   const s = statusOf(r, { denied, draft, error: timedOut ? null : error, timedOut, task: args.task });
-  Object.assign(res, { status: s.status, reason: s.reason || null, question: s.question || null, finalAnswer: r ? r.text || '' : null, warning: r ? r.warning || null : null, draftOnly: draft, deniedApprovals: denied, approvedSends: sendApproved, approveSendTo: args.approveSendTo || null, exitCode: exitCodeOf(s.status) });
+  // B99: bị từ chối ở kiểm tra --approve-send-to → ghi ĐÚNG lý do (không phải cảnh báo mô hình yếu)
+  if (s.status === 'blocked' && denied > 0 && lastDeny) s.reason = `bước GỬI bị tự TỪ CHỐI: --approve-send-to không cho phép — ${lastDeny}`;
+  else if (s.status === 'blocked' && denied > 0 && args.approveSendTo == null && res.approvals.some(x => x.send && x.answer === 'denied')) s.reason = 'bước GỬI bị tự TỪ CHỐI (chế độ QA không có --approve-send-to nên mọi bước gửi đều bị từ chối) — tin CHƯA được gửi';
+  Object.assign(res, { status: s.status, reason: s.reason || null, question: s.question || null, finalAnswer: r ? r.text || '' : null, warning: r && r.warning && !(denied > 0 && /mô hình mạnh hơn/.test(r.warning)) ? r.warning : null, draftOnly: draft, deniedApprovals: denied, approvedSends: sendApproved, approveSendTo: args.approveSendTo || null, exitCode: exitCodeOf(s.status) });
   res.timings.totalMs = Date.now() - t0; res.timings.finishedAt = new Date().toISOString();
   res.log = lines.slice(-600);
   try { writeJson(args.out, res); } catch (e) { deps.LOG && deps.LOG.log('qa', 'Không ghi được result.json: ' + e.message); }
@@ -197,4 +224,4 @@ async function waitResult(out, runId, ms, sleep = (t) => new Promise(r => setTim
   while (Date.now() < end) { try { const j = JSON.parse(fs.readFileSync(out, 'utf8')); if (j && j.runId === runId) return j; } catch {} await sleep(500); }
   return null;
 }
-module.exports = { isSelfChat, SELF_CHAT, parseArgs, validate, validateKind, fromArgv, resolveModel, isRiskyAsk, answerFor, statusOf, exitCodeOf, run, waitResult, writeJson, DRAFT_RE };
+module.exports = { selfChatShown, isSelfChat, SELF_CHAT, parseArgs, validate, validateKind, fromArgv, resolveModel, isRiskyAsk, answerFor, statusOf, exitCodeOf, run, waitResult, writeJson, DRAFT_RE };

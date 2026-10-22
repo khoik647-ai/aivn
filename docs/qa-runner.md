@@ -15,7 +15,7 @@ Hai chế độ chạy không người để bot QA kiểm thử AIVN trên máy
 * **Không có cổng mạng nào**: không HTTP, không WebSocket, không cổng gỡ lỗi từ xa (CDP / `--remote-debugging-port`).
   Lý do: CDP không có xác thực, tiến trình nào trên máy cũng chiếm được AIVN và đọc được trò chuyện / giấy phép.
   `--qa-ui` điều khiển giao diện bằng `webContents.executeJavaScript` / `sendInputEvent` ngay trong tiến trình AIVN.
-* Mỗi lần chạy là **một phiên**. Mã thoát: `0` = done · `2` = failed/blocked · `3` = asked_user.
+* Mỗi lần chạy là **một phiên**. Mã thoát: `0` = done · `2` = failed/blocked · `3` = asked_user · `4` = cancelled (người dùng huỷ qua `--answer`).
 
 ## Hồ sơ riêng: `--profile <thư mục>`
 
@@ -41,7 +41,7 @@ Hai chế độ chạy không người để bot QA kiểm thử AIVN trên máy
 $env:AIVN_QA_MODE = "1"
 & "$env:LOCALAPPDATA\Programs\AIVN\AIVN.exe" --agent-task "mở Notepad và gõ: xin chào" `
     --model 4b --out C:\qa\r1\result.json --shots C:\qa\r1\shots --timeout 300 --lang vi --profile C:\qa\profile
-$LASTEXITCODE   # 0 done · 2 failed/blocked · 3 asked_user
+$LASTEXITCODE   # 0 done · 2 failed/blocked · 3 asked_user · 4 cancelled
 Get-Content -Encoding UTF8 C:\qa\r1\result.json | ConvertFrom-Json
 ```
 
@@ -58,8 +58,14 @@ Get-Content -Encoding UTF8 C:\qa\r1\result.json | ConvertFrom-Json
 * Chỉ dùng kèm `AIVN_QA_MODE=1` **và** `--agent-task` (kèm `--qa-ui` / `--qa-input-diag` → cờ sai, thoát 2).
 * **Chỉ** nhận tên của cuộc trò chuyện với chính mình: `Cloud của tôi` = `My Documents` = `My Cloud` = `我的文档`… (khớp cả cụm, không phân biệt hoa thường/dấu).
   Tên khác (người, nhóm, “Cloud”, “My Documents 2”…) → **từ chối chạy**: ghi lý do vào stderr, `aivn.log` và `result.json`, **thoát mã 2**.
-* Tự cho phép **đúng một** bước gửi, và chỉ khi: thẻ là bước GỬI của lớp phủ màn hình, người nhận trong lệnh là cuộc trò chuyện của chính mình, **tiêu đề khung chat giữa**
-  trên màn hình lúc đó đúng là cuộc trò chuyện đó, và lệnh không có “chỉ soạn / đừng gửi”. Mọi thẻ khác (gửi lần hai, xoá, thẻ ngoài lớp phủ…) vẫn bị từ chối.
+* Tự cho phép **đúng một** bước gửi, và chỉ khi: thẻ là bước GỬI của lớp phủ màn hình, người nhận trong lệnh là cuộc trò chuyện của chính mình, lệnh không có
+  “chỉ soạn / đừng gửi”, và màn hình cho thấy đúng cuộc trò chuyện đó (B97 — cùng cách đọc + làm sạch tiêu đề với cổng người nhận B90):
+  * **tiêu đề khung chat giữa** (đã bỏ ký tự lẻ đầu dòng do OCR biểu tượng như “Q My Documents”, dòng phụ “Lưu và đồng bộ…”, giờ “2158”/“21:58”) là cuộc trò chuyện của chính mình; **hoặc**
+  * trong **cùng lượt**, cổng người nhận đã chốt đúng người nhận này **và** chữ gợi ý ô soạn (“Nhập @, tin nhắn tới My Documents”) đã khớp tên của chính mình,
+    đồng thời màn hình lúc đó không cho thấy cuộc trò chuyện khác (ô soạn ghi người khác, hoặc tiêu đề đọc được mà không phải mình → từ chối).
+  * Tiêu đề chỉ đọc được giờ (`["2158"]`) **không bao giờ** tự nó cho qua.
+
+  Mọi thẻ khác (gửi lần hai, xoá, thẻ ngoài lớp phủ…) vẫn bị từ chối. Khi bị từ chối, `result.json` → `reason` ghi đúng lý do của kiểm tra này (B99).
   Mỗi quyết định có một dòng `--approve-send-to: CHO PHÉP …` / `KHÔNG cho phép — <lý do>` trong nhật ký. `result.json` có `approvedSends`, `approveSendTo`.
 
 ```powershell
@@ -74,6 +80,8 @@ $LASTEXITCODE   # 0 = đã gửi và kiểm chứng trên màn hình
 
 Khi lượt đầu kết thúc bằng một câu hỏi (`asked_user`, vd. “Gửi cho ai?”), bộ chạy trả lời **một lần** bằng câu này (cùng cuộc trò chuyện) rồi để AIVN AGENT làm tiếp
 với **cùng luật xin phép**. `result.json` có `firstTurn` (câu hỏi), `answer`, và kết quả của lượt sau. Lượt đầu không hỏi → cờ không được dùng.
+
+Trả lời huỷ (“không”, “thôi, huỷ đi”, “no”, “cancel”, “取消”, “đừng gửi”…) → AIVN AGENT không làm gì; `result.json` có `status: "cancelled"` và **mã thoát 4** (B98).
 
 ```powershell
 AIVN.exe --agent-task "nhắn giúp mình là mai 8h họp nhé" --answer "Cloud của tôi" --model 8b --out C:\qa\b75\result.json --profile C:\qa\profile --agent-settings-from main
@@ -97,7 +105,7 @@ AIVN.exe --agent-task "nhắn giúp mình là mai 8h họp nhé" --answer "Cloud
   "task": "…", "lang": "vi",
   "model": { "id": "…", "file": "….gguf", "mode": "gpu", "contextSize": 16384, "gpuLayers": 37, "totalLayers": 37 },
   "screen": { "platform": "win32", "displays": [{ "bounds": {…}, "scaleFactor": 1.25, "dpi": 120, "size": {…}, "primary": true }] },
-  "status": "done | failed | blocked | asked_user",
+  "status": "done | failed | blocked | asked_user | cancelled",
   "reason": "…", "question": "Gửi cho ai?",
   "finalAnswer": "…", "warning": null,
   "approvals": [{ "kind": "desk|approve|confirm|screen", "title": "…", "tool": "…", "send": true, "recipient": "Cloud của tôi", "shownChat": { "header": ["My Documents"], "composer": "My Documents" }, "text": "…", "answer": "denied | allowed (--approve-send-to “My Documents”)" }],

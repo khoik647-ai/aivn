@@ -356,6 +356,14 @@ const isInstalled = (x) => (x && typeof x === 'object' ? listModels().some(m => 
 // Runtime llama-server (runtimes.js): CUDA tải riêng cho máy NVIDIA; mặc định là bản Vulkan đi kèm. CUDA lỗi → tự quay về Vulkan.
 let RT = null;
 function runtimes() { if (!RT) RT = require('./runtimes').createRuntimes({ dir: () => path.join(app.getPath('userData'), 'runtimes'), log: (m) => LOG.log('runtime', m) }); return RT; }
+// phiên bản node-llama-cpp: gói chặn require('node-llama-cpp/package.json') bằng "exports" → đi ngược từ tệp chính tới package.json của gói
+let nodeLlamaVer;
+function nodeLlamaVersion() {
+  if (nodeLlamaVer !== undefined) return nodeLlamaVer; nodeLlamaVer = null;
+  try { let d = path.dirname(require.resolve('node-llama-cpp'));
+    for (let i = 0; i < 6; i++) { const f = path.join(d, 'package.json'); if (fs.existsSync(f)) { const j = JSON.parse(fs.readFileSync(f, 'utf8')); if (j.name === 'node-llama-cpp') { nodeLlamaVer = j.version || null; break; } } d = path.dirname(d); } } catch {}
+  return nodeLlamaVer;
+}
 async function serverExeFor() {
   try { const p = await runtimes().pick(settings.data.runtime || 'auto'); if (p.exe || p.why) LOG.log('runtime', `llama-server: ${p.runtime === 'cuda' ? 'CUDA' : 'bản đi kèm'}${p.why ? ' (' + p.why + ')' : ''}`); return p.exe; } catch { return null; }
 }
@@ -676,7 +684,7 @@ function getDesk() {
   const { createDesktopAgent } = require('./desktop-agent');
   desk = createDesktopAgent({ engine, launchApp: (q) => computerTools.launch(q), openExternal: (u) => shell.openExternal(u), stepScale: () => agentStepScale, getSettings: () => settings.data, setSettings: (p) => { Object.assign(settings.data, p); settings.save(); send('settings:changed', p); },
     log: (scope, m) => LOG.log(scope, m), getMainWindow: () => win, preload: path.join(__dirname, 'preload.js'), isTest: isTest && process.env.AIVN_DESK_KEEPWIN === '1', autoTest: !app.isPackaged && !!process.env.AIVN_DESK_AUTO,
-    autoAnswer: !app.isPackaged && process.env.AIVN_DESK_AUTO ? (req) => (qaAsks.push({ risk: req.risk || null, desc: req.desc || '', text: req.text || null }), { ok: process.env.AIVN_DESK_AUTO !== 'deny' && !(req.risk && process.env.AIVN_DESK_AUTO === 'safe'), reason: req.risk && process.env.AIVN_DESK_AUTO === 'safe' ? 'Đừng gửi, chỉ soạn sẵn' : '' }) : null,
+    autoAnswer: !app.isPackaged && process.env.AIVN_DESK_AUTO ? (req) => (qaAsks.push({ risk: req.risk || null, desc: req.desc || '', text: req.text || null, send: !!req.send, recipient: req.recipient || null, shown: req.shown || null }), { ok: process.env.AIVN_DESK_AUTO !== 'deny' && !(req.risk && process.env.AIVN_DESK_AUTO === 'safe'), reason: req.risk && process.env.AIVN_DESK_AUTO === 'safe' ? 'Đừng gửi, chỉ soạn sẵn' : '' }) : null,
     onStop: (reason) => stopComputer(reason), grounder: (process.env.AIVN_QA_DESK016 || process.env.AIVN_QA_B21 || process.env.AIVN_QA_ZALO_DPI) && !app.isPackaged ? async () => null : getGrounder }); // QA phím/gõ: không cần mắt nhìn (CPU chậm)
   return desk;
 }
@@ -1172,7 +1180,7 @@ function registerIpc() {
   const dirInfo = () => { const MD = require('./models-dir'); const files = MD.listFiles(paths.models); return { dir: paths.models, isDefault: path.resolve(paths.models) === path.resolve(defaultModelsDir()), default: defaultModelsDir(), free: MD.freeBytes(paths.models), drive: MD.driveOf(paths.models), bytes: files.reduce((s, f) => s + f.size, 0), files: files.length, extra: (settings.data.modelDirsExtra || []).filter(d => fs.existsSync(d)), problem: modelsDirProblem, moving: !!dirMove, qaProfile: !!QA_PROFILE }; };
   // Runtime CUDA/Vulkan (tab Runtime trong Cài đặt)
   const rtInfo = async () => { const st = engine.status() || {}; return { pref: settings.data.runtime || 'auto', cuda: await runtimes().status(),
-    versions: { llamaServer: require('./runtimes').BUILD, nodeLlamaCpp: (() => { try { return require('node-llama-cpp/package.json').version; } catch { return null; } })(), electron: process.versions.electron },
+    versions: { llamaServer: require('./runtimes').BUILD, nodeLlamaCpp: nodeLlamaVersion(), electron: process.versions.electron },
     platform: process.platform, arch: process.arch, active: st.loaded && st.vision ? { id: st.id, runtime: st.runtime || 'bundled', fallback: st.runtimeFallback || null } : null, chatGpu: st.gpu || null }; };
   ipcMain.handle('runtime:status', () => rtInfo());
   ipcMain.handle('runtime:set', (_e, pref) => { if (!require('./runtimes').PREFS.includes(pref)) return { ok: false }; settings.data.runtime = pref; settings.save(); LOG.log('runtime', 'Chọn runtime: ' + pref); return { ok: true, note: 'Áp dụng từ lần nạp mô hình nhìn ảnh / mắt nhìn tiếp theo.' }; });
@@ -2373,6 +2381,33 @@ list('');open('My Documents');leftover();</script>`;
       await d.look({ window: 'Zalo' }, c9);
       await step9('b96-file-task', { action: 'click', element: 'marketing cleaned data.xlsx' }, { ...ctx, userQuery: qf, auto: require('./agent/autonomy').forTurn({ setting: false, query: qf }) });
       out.final = await st4(); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'b97') { // B97 (máy thật beta.2.3): tiêu đề Zalo đọc thành ["Q My Documents","Lưu và đồng bộ…","2158"] hoặc chỉ ["2158"] — thẻ GỬI phải mang tiêu đề đã làm sạch + kết quả cổng người nhận
+      const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:300px 1fr 260px;height:100vh}
+#l{border-right:1px solid #ccc;padding:8px}#q{width:200px;font-size:20px;padding:5px}.it{padding:8px 4px}
+#c{display:flex;flex-direction:column;border-right:1px solid #ccc}#h{padding:8px 16px;border-bottom:1px solid #ccc;display:flex;justify-content:space-between;height:70px}#hn{font-weight:bold}#hs{font-size:16px}#m{flex:1;padding:16px}#comp{font-size:20px;margin:10px;padding:8px}#comp::placeholder{color:#222}
+#r{padding:10px}#r b{display:block;text-align:center}</style>
+<div id=l><input id=q placeholder="Tìm kiếm"><div class=it>Nhóm Lớp K27</div><div class=it>My Documents</div><div class=it>Trần Văn Bình</div></div>
+<div id=c><div id=h><div><div id=hn>Q My Documents</div><div id=hs>Lưu và đồng bộ dữ liệu giữa các thiết bị</div></div><div id=ht>21:58</div></div><div id=m></div><input id=comp placeholder="Nhập @, tin nhắn tới My Documents"></div>
+<div id=r><b>Thông tin hội thoại</b></div>
+<script>window.S={sent:[]};comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sent.push({to:'My Documents',text:comp.value});const b=document.createElement('div');b.textContent=comp.value;m.appendChild(b);comp.value='';}});comp.focus();</script>`;
+      await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(zh)); t.setTitle('Zalo'); t.focus(); t.webContents.focus(); await sleep(700);
+      const st7 = () => t.webContents.executeJavaScript("({ sent: S.sent.slice(), comp: comp.value, focus: document.activeElement ? document.activeElement.id : '' })");
+      const step7 = async (name, a, c) => { qaAsks.length = 0; let r; try { r = await d.act(a, c); } catch (e) { r = { error: String(e.message || e) }; } await sleep(600);
+        out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 1500), asks: qaAsks.slice(), state: await st7() }); save(); return r; };
+      const mk = (q) => ({ ...ctx, userQuery: q, auto: require('./agent/autonomy').forTurn({ setting: false, query: q }) }); // như chế độ QA: bước GỬI luôn qua thẻ
+      // (1) như lượt QA “e”: tiêu đề có “Q ” + dòng phụ + giờ, gõ nội dung kèm Enter trong MỘT bước → thẻ GỬI
+      const qa1 = 'gửi tin "AIVN b97 một" cho Cloud của tôi trên Zalo'; const c1 = mk(qa1);
+      await d.look({ window: 'Zalo' }, c1);
+      await step7('b97-noisy-header', { action: 'type_text', text: 'AIVN b97 một', submit: true }, c1);
+      // (2) như lượt QA “e retry”/“b”: tiêu đề chỉ còn giờ “21:58”; gõ nội dung (chữ gợi ý ô soạn biến mất) rồi Enter riêng → thẻ GỬI không còn chữ gợi ý
+      await t.webContents.executeJavaScript("hn.textContent='';hs.textContent='';comp.value='';comp.focus()"); await sleep(300);
+      const qa2 = 'gửi tin "AIVN b97 hai" cho Cloud của tôi trên Zalo'; const c2 = mk(qa2);
+      await d.look({ window: 'Zalo' }, c2);
+      await step7('b97-time-only-type', { action: 'type_text', text: 'AIVN b97 hai' }, c2);
+      await d.look({ window: 'Zalo' }, c2);
+      await step7('b97-time-only-enter', { action: 'hotkey', keys: 'enter' }, c2);
+      out.final = await st7(); throw null;
     }
     if (process.env.AIVN_QA_B21_MODE === 'ensure') { // ensure_app: Zalo giả bị cửa sổ khác che → đưa lên + chờ sẵn sàng; open_chat dùng lại; cửa sổ ẩn → lỗi rõ, không treo
       const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:240px 1fr;height:100vh}#l{border-right:1px solid #ccc;padding:8px}#q{width:200px;font-size:20px;padding:5px}.it{padding:10px 4px;cursor:pointer}#c{display:flex;flex-direction:column}#h{font-weight:bold;padding:12px 16px;border-bottom:1px solid #ccc}#m{flex:1;padding:16px}#comp{font-size:20px;margin:10px;padding:8px}</style>
