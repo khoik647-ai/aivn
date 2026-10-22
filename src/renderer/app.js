@@ -2,7 +2,7 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const A = window.aivn;
-const state = { settings: null, models: [], status: { loaded: false }, convos: [], current: null, generating: null, generatingConv: null, catalog: [], mode: 'chat', lastByMode: {}, agent: null };
+const state = { settings: null, models: [], status: { loaded: false }, convos: [], current: null, generating: null, generatingConv: null, genKind: null, genPhase: null, genNote: '', agentFoot: '', _genStatsShown: '', catalog: [], mode: 'chat', lastByMode: {}, agent: null };
 const isAgent = () => state.mode === 'agent';
 
 // 0.16 i18n: định dạng số/ngày theo ngôn ngữ giao diện (vi: 1.234,5 · en: 1,234.5 · zh: 1,234.5)
@@ -91,6 +91,7 @@ function setMode(mode) {
   if (typeof state.streamFlush === 'function') state.streamFlush(); // B173: vẽ ngay phần đã stream lên nút mới, không chờ token kế
   if (state.models) $('#modelSelect').innerHTML = modelOptionsHtml(state.models, state.status.loaded ? state.status.id : '', mode === 'agent');
   if (mode === 'agent') refreshAgent();
+  paintGenChrome();
 }
 const convoMode = (c) => c.mode === 'agent' ? 'agent' : 'chat';
 
@@ -843,15 +844,15 @@ $('#composer').addEventListener('submit', async (e) => {
   let text = input.value.trim(); $('#slashPop').hidden = true;
   // lệnh / chạy ngay cả khi đang tạo câu trả lời (chỉ đổi cài đặt cục bộ), trừ /moi
   if (!isAgent() && text.startsWith('/') && runSlash(text)) return;
-  if (state.generating) return;
+  if (state.generating) { if ($('#stopBtn').hidden) toast('Đang trả lời — bấm Dừng trước đã', true); return; }
   if (isAgent()) { if (pending.some(a => a.loading)) { toast('Đang đọc tệp, vui lòng đợi một chút…'); return; } if (text || pending.some(a => a.ok)) sendAgent(text); return; }
   if (pending.some(a => a.loading)) { toast('Đang đọc tệp, vui lòng đợi một chút…'); return; }
   const vision = !!state.status.vision;
   // ảnh thêm lúc đang dùng mô hình nhìn ảnh nhưng giờ mô hình không nhìn được: đọc chữ (OCR) ngay lúc gửi
   if (!vision) for (const a of pending.filter(x => x.ok && x.direct)) {
-    $('#genStats').textContent = 'Đang đọc chữ trong ảnh…';
+    if (!isAgent()) { state._genStatsShown = 'Đang đọc chữ trong ảnh…'; $('#genStats').textContent = state._genStatsShown; }
     try { const r = await A.ocrImage(a.png); if (r && r.chars >= 3) Object.assign(a, { direct: false, text: r.text, ocrChars: r.chars, ocrConf: r.confidence }); else a.ok = false; } catch { a.ok = false; }
-    $('#genStats').textContent = '';
+    if (!isAgent() && state._genStatsShown === 'Đang đọc chữ trong ảnh…') { state._genStatsShown = ''; $('#genStats').textContent = ''; }
     if (!a.ok) toast(`Không đọc được chữ trong ảnh "${a.name}", ảnh này sẽ không được gửi.`, true);
   }
   const docsToSend = pending.filter(a => a.ok);
@@ -880,8 +881,8 @@ async function runTurn(conv, userMsg, reply, { docsToSend = [], directImgs = [] 
   renderMessages();
   const ri = conv.messages.indexOf(reply);
   const liveBody = () => ChatStream.streamBody({ query: (i) => document.querySelector('#messages .msg[data-i="' + i + '"]'), conv, visible: state.current, visibleMode: state.mode, index: ri });
-  const reqId = uid(); state.generating = reqId; genStartedAt = Date.now(); setPhase('think');
-  $('#sendBtn').hidden = true; $('#stopBtn').hidden = false; $('#genStats').textContent = 'Đang suy nghĩ…';
+  const reqId = uid(); state.generating = reqId; state.genKind = 'chat'; state.genPhase = null; genStartedAt = Date.now();
+  setGenNote('Đang suy nghĩ…');
   const s = state.settings; const cp = chatParams();
   // Lịch sử gửi cho mô hình: chỉ tin nhắn có tài liệu gần nhất giữ toàn bộ nội dung đã đóng gói, tin cũ hơn chỉ ghi tên tệp
   const ui = conv.messages.indexOf(userMsg);
@@ -899,11 +900,11 @@ async function runTurn(conv, userMsg, reply, { docsToSend = [], directImgs = [] 
     { role: 'user', content: lastText }];
   const offRag = A.onRagProgress((p) => {
     if (p.reqId !== reqId) return;
-    $('#genStats').textContent = p.stage === 'search' ? 'Đang tìm đoạn liên quan trong tài liệu…' : p.total ? `Đang lập chỉ mục “${p.name}”: ${p.done}/${p.total} đoạn…` : 'Đang chuẩn bị tìm kiếm tài liệu…';
+    setGenNote(p.stage === 'search' ? 'Đang tìm đoạn liên quan trong tài liệu…' : p.total ? `Đang lập chỉ mục “${p.name}”: ${p.done}/${p.total} đoạn…` : 'Đang chuẩn bị tìm kiếm tài liệu…');
   });
   const offInfo = A.onDocInfo((info) => {
     if (info.reqId !== reqId) return;
-    if (info.mode === 'rag') { reply.sources = info.sources; $('#genStats').textContent = 'Đang suy nghĩ…'; return; }
+    if (info.mode === 'rag') { reply.sources = info.sources; setGenNote('Đang suy nghĩ…'); return; }
     userMsg.context = info.context;
     if (info.ragAvailable) offerRag();
     if (info.truncated) {
@@ -927,9 +928,9 @@ async function runTurn(conv, userMsg, reply, { docsToSend = [], directImgs = [] 
   };
   const queue = () => { if (!rafPending) { rafPending = true; requestAnimationFrame(paint); } };
   state.streamFlush = paint;
-  const off = A.onToken(({ reqId: r, t }) => { if (r !== reqId) return; if (thinkStart && !thinkEnd) thinkEnd = Date.now(); reply.content += t; if (I18N.is($('#genStats').textContent, 'Đang suy nghĩ…')) $('#genStats').textContent = 'Đang trả lời…'; queue(); });
+  const off = A.onToken(({ reqId: r, t }) => { if (r !== reqId) return; if (thinkStart && !thinkEnd) thinkEnd = Date.now(); reply.content += t; if (I18N.is($('#genStats').textContent, 'Đang suy nghĩ…') || state.genNote === 'Đang suy nghĩ…') setGenNote('Đang trả lời…'); queue(); });
   const offThink = A.onThink(({ reqId: r, t }) => { if (r !== reqId) return; if (!thinkStart) thinkStart = Date.now(); reply.thought = (reply.thought || '') + t; queue(); });
-  const offRec = A.onChatRecover((x) => { if (x.reqId !== reqId) return; reply.content = ''; reply.thought = ''; const body = liveBody(); if (body) body.innerHTML = ''; $('#genStats').textContent = x.grow ? `Ngữ cảnh chưa đủ — đang nạp lại mô hình với ngữ cảnh ${Number(x.ctx).toLocaleString(LOC())}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${x.ctx}) và thử lại…`; });
+  const offRec = A.onChatRecover((x) => { if (x.reqId !== reqId) return; reply.content = ''; reply.thought = ''; const body = liveBody(); if (body) body.innerHTML = ''; setGenNote(x.grow ? `Ngữ cảnh chưa đủ — đang nạp lại mô hình với ngữ cảnh ${Number(x.ctx).toLocaleString(LOC())}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${x.ctx}) và thử lại…`); });
   try {
     const r = await A.generate({ reqId, convoId: conv.id, messages: history, temperature: cp.temperature, maxTokens: cp.maxTokens, params: cp,
       docs: docsToSend.filter(a => !(vision && a.kind === 'image' && a.vis)).map(a => ({ name: a.name, text: a.text, kind: a.kind, pages: a.pages })),
@@ -941,15 +942,17 @@ async function runTurn(conv, userMsg, reply, { docsToSend = [], directImgs = [] 
     reply.model = state.status.id || reply.model; delete reply.error;
     if (reply.alts) { reply.alts.push(snapAlt(reply)); reply.alt = reply.alts.length - 1; }
     paintSbSpeed(r.usage); paintCtxBar(reply.stats);
-    $('#genStats').textContent = '';
+    setGenNote('');
     if (r.dropped) toast(`Cuộc trò chuyện dài hơn ngữ cảnh: AIVN đã tạm bỏ ${r.dropped} tin cũ khi gửi (chính sách “${OVERFLOW_LABEL[cp.overflow] || cp.overflow}”).`);
   } catch (err) {
     reply.error = true; reply.content = (reply.content ? reply.content + '\n\n' : '') + '⚠ ' + cleanErr(err.message);
     if (reply.alts) { reply.alts.push(snapAlt(reply)); reply.alt = reply.alts.length - 1; }
-    $('#genStats').textContent = '';
+    setGenNote('');
   } finally {
-    off(); offThink(); offInfo(); offRag(); offRec(); state.generating = null; state.generatingConv = null; state.streamFlush = null; delete reply.streaming;
-    $('#sendBtn').hidden = false; $('#stopBtn').hidden = true;
+    off(); offThink(); offInfo(); offRag(); offRec();
+    state.generating = null; state.generatingConv = null; state.streamFlush = null; delete reply.streaming;
+    state.genKind = null; state.genNote = ''; state.genPhase = null;
+    paintGenChrome();
     conv.updatedAt = Date.now(); await A.saveConvo(conv); await loadConvos(); renderMessages();
   }
 }
@@ -1483,8 +1486,8 @@ async function sendAgent(text) {
   const box = $('#messages');
   const stick = () => { box.scrollTop = box.scrollHeight; };
   msgEl().querySelector('.body').classList.add('cursor');
-  const reqId = uid(); state.generating = reqId; genStartedAt = Date.now();
-  $('#sendBtn').hidden = true; $('#stopBtn').hidden = false; $('#genStats').textContent = 'Đang chuẩn bị (công cụ, ghi nhớ)…';
+  const reqId = uid(); state.generating = reqId; state.genKind = 'agent'; state.genPhase = null; genStartedAt = Date.now();
+  setGenNote('Đang chuẩn bị (công cụ, ghi nhớ)…');
   const paintSteps = () => { const el = msgEl(); if (!el) return; const w = el.querySelector('.steps-wrap'); const open = new Set($$('details.step[open]', w).map(d => d.dataset.step)); w.innerHTML = stepsHtml(reply, open); stick(); };
   let raf = false;
   const paintBody = () => { if (raf) return; raf = true; requestAnimationFrame(() => { raf = false; const el = msgEl(); if (el) el.querySelector('.body').innerHTML = md(reply.content); stick(); }); };
@@ -1494,30 +1497,36 @@ async function sendAgent(text) {
     const i = reply.steps.findIndex(x => x.id === step.id);
     if (i < 0) { reply.steps.push(step); reply.content = ''; paintBody(); } else reply.steps[i] = step; // chữ trước khi gọi công cụ đã nằm trong thẻ bước
     paintSteps();
-    $('#genStats').textContent = step.status === 'running' ? `Đang chạy công cụ: ${UIL() === 'vi' ? step.label : I18N.tr(step.label, UIL())}…` : 'Đang suy nghĩ tiếp…';
+    setGenNote(step.status === 'running' ? `Đang chạy công cụ: ${UIL() === 'vi' ? step.label : I18N.tr(step.label, UIL())}…` : 'Đang suy nghĩ tiếp…');
   });
   const offSt = A.onAgentStatus((st) => {
     if (st.reqId !== reqId) return;
-    if (st.stage === 'think') setPhase('think');
-    if (st.stage === 'ask') setPhase('ask');
-    if (st.stage === 'act' || st.stage === 'tools') setPhase('act');
-    if (st.stage === 'think') $('#genStats').textContent = st.round ? `Đang suy nghĩ… (bước ${st.round + 1})` : 'Đang suy nghĩ…';
-    if (st.stage === 'recover') { reply.content = ''; reply.steps = []; paintBody(); paintSteps(); $('#genStats').textContent = st.grow ? `Ngữ cảnh chưa đủ cho yêu cầu này — đang nạp lại mô hình với ngữ cảnh ${Number(st.ctx).toLocaleString(LOC())}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${st.ctx}) và thử lại…`; return; }
-    if (st.stage === 'verify') { reply.content = ''; paintBody(); $('#genStats').textContent = 'Đang kiểm tra lại: câu trả lời chưa khớp với các bước đã làm…'; }
+    if (st.stage === 'think') state.genPhase = 'think';
+    if (st.stage === 'ask') state.genPhase = 'ask';
+    if (st.stage === 'act' || st.stage === 'tools') state.genPhase = 'act';
+    if (st.stage === 'think') setGenNote(st.round ? `Đang suy nghĩ… (bước ${st.round + 1})` : 'Đang suy nghĩ…');
+    else if (st.stage === 'ask' || st.stage === 'act' || st.stage === 'tools') paintGenChrome();
+    if (st.stage === 'recover') { reply.content = ''; reply.steps = []; paintBody(); paintSteps(); setGenNote(st.grow ? `Ngữ cảnh chưa đủ cho yêu cầu này — đang nạp lại mô hình với ngữ cảnh ${Number(st.ctx).toLocaleString(LOC())}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${st.ctx}) và thử lại…`); return; }
+    if (st.stage === 'verify') { reply.content = ''; paintBody(); setGenNote('Đang kiểm tra lại: câu trả lời chưa khớp với các bước đã làm…'); }
   });
+  let summary = '';
   try {
     const r = await A.agentRun({ reqId, convoId: conv.id, messages: [...agentHistory(conv), { role: 'user', content: pack.content }], attachments: pack.files });
     if (r.blocked) { reply.content = `⛔ ${r.gate.modelName || 'Mô hình này'} chưa dùng được cho AIVN AGENT: ${r.gate.reason}. Hãy chuyển sang mô hình phù hợp ở thanh phía trên.`; reply.warning = 'blocked'; r.text = reply.content; r.usage = { completion_tokens: 0, seconds: 0 }; refreshAgent(); }
     Object.assign(reply, { content: r.text || (r.finishReason === 'abort' ? '' : r.warning ? '' : '(AIVN AGENT không trả lời)'), warning: r.warning || null, steps: r.steps, urls: r.urls, memories: r.memories, model: r.model || reply.model });
     const tools = r.steps.length;
-    $('#genStats').textContent = [tools ? `${tools} bước dùng công cụ` : null, `${r.usage.completion_tokens} token${UIL() === 'en' && r.usage.completion_tokens !== 1 ? 's' : ''}`, `${r.usage.seconds.toFixed(1).replace(".", DEC())} giây`, r.finishReason === 'abort' ? 'đã dừng' : r.finishReason === 'length' ? 'chạm giới hạn token' : null].filter(Boolean).map(x => UIL() === 'vi' ? x : (I18N.tr(x, UIL()) || x)).join(' · '); // B33b: dịch từng phần
+    summary = [tools ? `${tools} bước dùng công cụ` : null, `${r.usage.completion_tokens} token${UIL() === 'en' && r.usage.completion_tokens !== 1 ? 's' : ''}`, `${r.usage.seconds.toFixed(1).replace(".", DEC())} giây`, r.finishReason === 'abort' ? 'đã dừng' : r.finishReason === 'length' ? 'chạm giới hạn token' : null].filter(Boolean).map(x => UIL() === 'vi' ? x : (I18N.tr(x, UIL()) || x)).join(' · '); // B33b: dịch từng phần
     if (r.finishReason === 'abort') reply.content = (reply.content ? reply.content + '\n\n' : '') + `_Đã dừng${r.stoppedBy ? ' (' + r.stoppedBy + ')' : ''}._`;
   } catch (err) {
     reply.error = true; reply.content = (reply.content ? reply.content + '\n\n' : '') + '⚠ ' + cleanErr(err.message);
-    $('#genStats').textContent = '';
+    summary = '';
   } finally {
-    setPhase('done'); setTimeout(() => { if (!state.generating) setPhase(null); }, 4000);
-    offTok(); offStep(); offSt(); state.generating = null; $('#sendBtn').hidden = false; $('#stopBtn').hidden = true;
+    const onAgent = isAgent();
+    offTok(); offStep(); offSt();
+    state.generating = null; state.genKind = null; state.genNote = ''; state.genPhase = null; state.agentFoot = summary;
+    paintGenChrome();
+    if (onAgent) { setPhase('done'); setTimeout(() => { if (!state.generating) setPhase(null); }, 4000); }
+    else setPhase(null);
     conv.updatedAt = Date.now(); await A.saveConvo(conv); await loadConvos(); renderMessages();
     if (reply.steps.some(x => x.name === 'save_memory' && x.status === 'ok')) refreshMemCount();
     if (reply.steps.some(x => x.name === 'create_reminder' && x.status === 'ok')) refreshSchedCount();
@@ -1554,6 +1563,18 @@ function setPhase(ph) {
   el.hidden = false; const order = ['think', 'ask', 'act', 'done']; const k = order.indexOf(ph);
   el.querySelectorAll('span').forEach(sp => { const i = order.indexOf(sp.dataset.ph); sp.classList.toggle('on', i === k); sp.classList.toggle('done', ph === 'done' ? i < k : false); });
 }
+// B169: Dừng, dòng “đang…”, và thanh bước theo trang đang xem — không để lượt AIVN AGENT còn hiện trên Trò chuyện.
+function paintGenChrome() {
+  const gs = $('#genStats');
+  const plan = planGenChrome({ mode: state.mode, genKind: state.genKind || null, genPhase: state.genPhase || null, genNote: state.genNote || '', agentFoot: state.agentFoot || '' });
+  const send = $('#sendBtn'); const stop = $('#stopBtn');
+  if (send) send.hidden = plan.sendHidden;
+  if (stop) stop.hidden = plan.stopHidden;
+  if (gs && state._genStatsShown !== plan.genStats) { state._genStatsShown = plan.genStats; gs.textContent = plan.genStats; }
+  // Trang AIVN AGENT đang nghỉ giữ thanh “Kết quả” thêm vài giây. Mọi trường hợp khác vẽ đúng kế hoạch.
+  if (state.genKind || !isAgent()) setPhase(plan.phase);
+}
+function setGenNote(text) { state.genNote = text; paintGenChrome(); }
 function apShow() {
   if (apOpen || !apQueue.length) return;
   const c = apOpen = apQueue.shift();
@@ -1566,7 +1587,7 @@ function apShow() {
   $('#apDiff').innerHTML = c.diff ? c.diff.text.split('\n').map(l => { const k = l.startsWith('+ ') ? 'add' : l.startsWith('- ') ? 'del' : 'ctx'; return `<span class="${k}"><i class="g" aria-label="${k === 'add' ? 'thêm' : k === 'del' ? 'bỏ' : ''}">${k === 'add' ? '+' : k === 'del' ? '−' : ' '}</i>${esc(k === 'ctx' ? l.replace(/^ {2}/, '') : l.slice(2)) || ' '}</span>`; }).join('') : '';
   $('#apReasonBox').hidden = true; $('#apReason').value = '';
   $('#apAlwaysRow').hidden = !c.allowAlways; $('#apAlways').checked = false; $('#apWarn').hidden = true; // không bao giờ bật sẵn
-  card.hidden = false; setPhase('ask');
+  card.hidden = false; state.genPhase = 'ask'; if (state.genKind === 'agent') paintGenChrome(); else setPhase('ask');
   $('#apDeny').focus({ preventScroll: true }); card.scrollTop = 0;
   card.scrollIntoView({ block: 'nearest' });
 }
@@ -1574,7 +1595,7 @@ function apAnswer(ok, withReason = false) {
   const c = apOpen; if (!c) return;
   const reason = withReason ? $('#apReason').value.trim() : '';
   const always = ok && c.allowAlways && $('#apAlways').checked;
-  apOpen = null; $('#approveCard').hidden = true; setPhase(ok ? 'act' : 'think');
+  apOpen = null; $('#approveCard').hidden = true; state.genPhase = ok ? 'act' : 'think'; if (state.genKind === 'agent') paintGenChrome(); else setPhase(state.genPhase);
   A.agentApproveReply({ id: c.id, ok, reason, always });
   if (always) toast(`Đã chọn “Luôn cho phép” cho ${c.label || c.tool}. Bỏ trong Cài đặt AIVN AGENT.`);
   apShow();
