@@ -50,7 +50,8 @@ test('B118: giao diện chỉ tạo link khi chữ === href; agent đọc thanh 
 // ---------- B119: số liệu bám trang ----------
 const PAGE = 'BIỂU ĐỒ GIÁ VÀNG\nLOẠI (NGHÌN ĐỒNG/LƯỢNG)\tMUA\tBÁN\nHồ Chí Minh\t139,300\t142,300\nHà Nội\t139,300\t142,300\nHuế\t139,300\t142,300\nCà Mau\t139,300\t142,300\nCập nhật lúc 08:30 22/10/2026';
 test('B119: nhận ra số sai, ký hiệu tiền lạ, nhận định không có trên trang (đúng câu trả lời QA)', () => {
-  assert.deepStrictEqual(G.ungroundedNumbers(SJC_ANS, PAGE, { now: new Date('2026-10-22T10:00:00+07:00') }), ['141.000']);
+  // B159: “Mua 139.300 ₫” trên trang đơn vị nghìn đồng là sai 1000 lần (139.300 ₫ ≠ 139,3 triệu) → nay cũng bị đánh dấu
+  assert.deepStrictEqual(G.ungroundedNumbers(SJC_ANS, PAGE, { now: new Date('2026-10-22T10:00:00+07:00') }), ['139.300', '141.000']);
   assert.deepStrictEqual(G.stripStrayCurrency(SJC_ANS, PAGE).removed.sort(), ['₫', '₫', '₽'].sort());
   assert.strictEqual(G.unsupportedClaims(SJC_ANS, PAGE).length, 1); assert.strictEqual(G.unitOf(PAGE), 'nghìn đồng/lượng');
   // định dạng số Việt/Anh, đơn vị

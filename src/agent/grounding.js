@@ -12,7 +12,11 @@ const SEARCH_PAGE_RE = /^(?:https?:\/\/)?(?:www\.)?(?:google\.[a-z.]+\/search|bi
 function splitUrl(u) {
   const s = String(u || '').trim().replace(TRAIL, '');
   const m = /^(?:(https?):\/\/)?([^/?#\s]+)(.*)$/i.exec(s); if (!m) return null;
-  return { scheme: (m[1] || '').toLowerCase(), host: m[2].toLowerCase().replace(/^www\./, ''), rest: m[3] || '' };
+  let host = m[2].toLowerCase().replace(/^www\./, ''), rest = m[3] || '';
+  // B160: youtu.be/ID ≡ youtube.com/watch?v=ID (cả m.youtube.com) — cùng một trang
+  if (host === 'm.youtube.com') host = 'youtube.com';
+  if (host === 'youtu.be') { const y = /^\/([\w-]{6,})\/?(?:\?([^#]*))?(#.*)?$/.exec(rest); if (y) { host = 'youtube.com'; rest = '/watch?v=' + y[1] + (y[2] ? '&' + y[2] : '') + (y[3] || ''); } }
+  return { scheme: (m[1] || '').toLowerCase(), host, rest };
 }
 // khoá so sánh “chính xác”: bỏ http(s)://, www., dấu / cuối; tên miền không phân biệt hoa thường; ĐƯỜNG DẪN giữ nguyên (hoa thường, dấu “-” đều tính)
 function urlKey(u) { const p = splitUrl(u); if (!p) return ''; return p.host + p.rest.replace(/\/+$/, ''); }
@@ -31,6 +35,8 @@ function nearestSource(u, sources) {
     const ks = urlKey(s.url); const ps = splitUrl(s.url); if (!ks || !ps) continue;
     if (ks === k) return { src: s, exact: true, d: 0 };
     const hd = lev(p.host, ps.host); if (hd > 2) continue;
+    // video YouTube khác mã là trang khác, không phải gõ sai
+    const vid = (x) => (/^youtube\.com\/watch\?v=([\w-]+)/.exec(x) || [])[1]; if ((vid(k) || vid(ks)) && vid(k) !== vid(ks)) continue;
     const d = lev(k.toLowerCase(), ks.toLowerCase()) + (k === ks ? 0 : (k.toLowerCase() === ks.toLowerCase() ? 1 : 0));
     if (d <= Math.max(3, Math.round(ks.length * 0.25)) && (!best || d < best.d)) best = { src: s, exact: false, d };
   }
@@ -89,7 +95,10 @@ function fixUrls(text, sources) {
   const LEAD_RE = new RegExp('(?:' + LEADIN + ')[ \\t]*[:：]?[ \\t]*<?\\u0001>?[ \\t]*[.,;。]?', 'giu');
   t = t.split('\n').map(line => {
     if (!line.includes('\u0001')) return line;
-    const x = line.replace(LEAD_RE, '').replace(/<?\u0001>?/g, '');
+    // B160: mọi lời dẫn ngắn “…:” ngay trước URL bị bỏ (“More info:”, “Bạn xem chi tiết tại đây:”, “Video:”), tính từ đầu dòng/đầu câu, ≤ 7 từ, không chứa số;
+    // dài hơn hoặc có số (dữ kiện) thì giữ chữ, chỉ bỏ dấu “:”
+    const x = line.replace(LEAD_RE, '').replace(/(^|[.!?。！？]\s*)([^.!?。！？:：\n]*?)[ \t]*[:：][ \t]*<?\u0001>?[ \t]*[.,;。]?/gu,
+      (all, pre, lead) => (!/\d/.test(lead) && lead.trim().split(/\s+/).filter(Boolean).length <= 7) ? pre : pre + lead).replace(/<?\u0001>?/g, '');
     return /^[\s\-*•:：]*$/u.test(x) ? null : x;
   }).filter(l => l !== null).join('\n');
   t = t.replace(/[ \t]+(\n|$)/g, '$1').replace(/\(\s*\)/g, '').replace(/<\s*>/g, '').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').replace(/^\s*\n/, '');
@@ -126,20 +135,42 @@ function pageScale(text) {
   if (!m) return 1; const w = m[1].toLowerCase(); return { 'nghìn': 1e3, 'ngàn': 1e3, 'thousand': 1e3, '千': 1e3, 'triệu': 1e6, 'million': 1e6, '百万': 1e6, 'tỷ': 1e9, 'tỉ': 1e9, 'billion': 1e9, '万': 1e4, '亿': 1e8 }[w] || 1;
 }
 const vkey = (v) => Math.round(v * 1e3) / 1e3;
-function valueSet(text) {
-  const set = new Set(); const ps = pageScale(text);
-  for (const { tok, scale } of numbersWithScale(text)) for (const v of numValues(tok)) { set.add(vkey(v)); if (scale !== 1) set.add(vkey(v * scale)); else if (ps !== 1) set.add(vkey(v * ps)); }
-  return set;
+// B159 (QA box beta.2.8): “139.300 triệu” và “139.300 đồng” từng “khớp” trang “139,300 nghìn đồng” vì 139.300 được hiểu cả là 139,3 (thập phân kiểu Anh).
+// Số viết theo nhóm 3 chữ số (139.300 · 1,200 · 139.300.000) đi kèm hệ số hoặc đơn vị tiền → chỉ hiểu là số nguyên có dấu phân cách nghìn
+// (không ai viết “139.300 triệu” để nói 139,3 triệu); 139,3 triệu · 1.2B · 3,5 tỷ (không đủ nhóm 3) vẫn là thập phân.
+const GROUPED = /^\d{1,3}(?:([.,])\d{3})(?:\1\d{3})*$/;
+// chỉ áp cho chữ hệ số TIẾNG VIỆT và đơn vị tiền Việt (ở đó “.” là dấu nghìn); 1.393亿 · 139.3 million vẫn đọc thập phân như cũ
+const VI_SCALE = /^\s*(?:nghìn|ngàn|nghin|ngan|triệu|trieu|tr\.?|tỷ|tỉ|ty)(?![\p{L}\d])/u;
+const VI_CUR = /^\s*(?:đồng|dong|vnđ|vnd|đ|₫)(?![\p{L}\d])/iu;
+const scaledValues = (tok, vi = true) => vi && GROUPED.test(tok) ? [Number(tok.replace(/[.,]/g, ''))] : numValues(tok);
+// đơn vị tiền ngay sau số (không có chữ hệ số): câu trả lời “139.300 đồng” phải khớp GIÁ TRỊ THẬT trên trang, không chỉ dãy chữ số
+const CUR_AFTER = /^\s*(?:đồng|dong|vnđ|vnd|đ|₫|元|yuan)(?![\p{L}\d])/iu;
+function numbersWithUnit(text) { const t = String(text || '').replace(URL_RE, ' '); const out = []; for (const m of t.matchAll(NUM_RE)) { const rest = t.slice(m.index + m[0].length, m.index + m[0].length + 12); out.push({ tok: m[0].trim(), scale: scaleAfter(rest), cur: CUR_AFTER.test(rest), vi: VI_SCALE.test(rest) || VI_CUR.test(rest) }); } return out; }
+// raw: mọi cách đọc dãy chữ số (B119: số trần trong câu trả lời khớp chữ trên trang); real: giá trị thật sau hệ số của chính số đó hoặc đơn vị cả bảng
+function valueSets(text) {
+  const raw = new Set(), real = new Set(); const ps = pageScale(text);
+  const vps = /(?:nghìn|ngàn|triệu|tỷ|tỉ)\s*(?:đồng|vnd|vnđ|đ|dong)/iu.test(String(text || '')); // đơn vị cả bảng là tiếng Việt
+  for (const { tok, scale, cur, vi } of numbersWithUnit(text)) {
+    for (const v of numValues(tok)) raw.add(vkey(v));
+    if (scale !== 1) for (const v of scaledValues(tok, vi)) real.add(vkey(v * scale));
+    else if (ps !== 1 && !cur) { for (const v of scaledValues(tok, vps)) real.add(vkey(v * ps)); }
+    else for (const v of (cur ? scaledValues(tok, vi) : numValues(tok))) real.add(vkey(v));
+  }
+  return { raw, real };
 }
+function valueSet(text) { const { raw, real } = valueSets(text); return new Set([...raw, ...real]); }
 // số trong câu trả lời không thấy trong chữ trang/yêu cầu (bỏ qua số ngày/tháng/năm trong ngày hiện tại)
 function ungroundedNumbers(answer, pageText, { query = '', now = new Date() } = {}) {
-  const pool = valueSet(`${pageText || ''}\n${query || ''}`);
+  const { raw, real } = valueSets(`${pageText || ''}\n${query || ''}`);
   const today = new Set([now.getDate(), now.getMonth() + 1, now.getFullYear()]);
   const bad = [];
-  for (const { tok, scale } of numbersWithScale(answer)) {
+  for (const { tok, scale, cur, vi } of numbersWithUnit(answer)) {
     const vs = numValues(tok); if (!vs.length) continue;
-    // số có chữ hệ số (“139,3 triệu”) so theo GIÁ TRỊ THẬT; số trần so cả giá trị chữ lẫn giá trị thật
-    if (scale !== 1 ? vs.some(v => pool.has(vkey(v * scale))) : vs.some(v => pool.has(vkey(v)))) continue;
+    // có chữ hệ số (“139,3 triệu”) → so GIÁ TRỊ THẬT; có đơn vị tiền (“139.300 đồng”) → so giá trị thật; số trần → so cả dãy chữ số (B119)
+    const ok = scale !== 1 ? scaledValues(tok, vi).some(v => real.has(vkey(v * scale)))
+      : cur ? scaledValues(tok, vi).some(v => real.has(vkey(v)))
+      : vs.some(v => raw.has(vkey(v)) || real.has(vkey(v)));
+    if (ok) continue;
     if (vs.every(v => today.has(v))) continue;
     if (!bad.includes(tok)) bad.push(tok);
   }
@@ -165,4 +196,4 @@ function unsupportedClaims(answer, pageText) {
 // đơn vị của bảng (“LOẠI (NGHÌN ĐỒNG/LƯỢNG)”) để nhắc trong câu trả lời
 function unitOf(pageText) { const m = /\(\s*((?:nghìn|ngàn|triệu)\s+đồng\s*\/\s*(?:lượng|chỉ|kg|gram|g))\s*\)/iu.exec(String(pageText || '')) || /((?:nghìn|ngàn|triệu)\s+đồng\s*\/\s*(?:lượng|chỉ))/iu.exec(String(pageText || '')); return m ? m[1].toLowerCase().replace(/\s*\/\s*/, '/') : null; }
 
-module.exports = { pageScale, numbersWithScale, URL_RE, splitUrl, urlKey, nearestSource, sourcesFromMsgs, fixUrls, lev, numValues, numbersIn, ungroundedNumbers, stripStrayCurrency, unsupportedClaims, unitOf, SEARCH_PAGE_RE };
+module.exports = { pageScale, numbersWithScale, numbersWithUnit, valueSet, valueSets, scaledValues, URL_RE, splitUrl, urlKey, nearestSource, sourcesFromMsgs, fixUrls, lev, numValues, numbersIn, ungroundedNumbers, stripStrayCurrency, unsupportedClaims, unitOf, SEARCH_PAGE_RE };

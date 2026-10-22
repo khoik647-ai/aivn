@@ -96,12 +96,31 @@ function directSys(query) {
 }
 // B157 (máy thật beta.2.7: việc “tìm giá vàng trên Chrome” lại mở Cài đặt hệ thống): thao tác hệ thống chỉ được XÉT khi việc có liên quan
 // tới nó (chủ đề). Không liên quan → từ chối ngay, không hiện thẻ xin phép (thẻ có thể bị “Tự làm không hỏi” tự đồng ý).
+// B161 (QA box beta.2.8): B157 so chủ đề bằng CHUỖI CON nên câu lạc đề vẫn “liên quan” (loại→loa, nhắc→nhac, khoá học, block/clock,
+// gửi thông báo, ngôn ngữ lập trình, hình nền desktop, giá loa). Nay: so theo TỪ trên chuỗi đã fold (bỏ dấu câu); từ chủ đề “mạnh” tính một mình,
+// từ “yếu” (tiếng, nhạc, thông báo, ngôn ngữ, desktop, loa, tên thiết bị…) chỉ tính khi có ĐỘNG TỪ HỆ THỐNG ngay trước (≤ 2 từ) hoặc từ chỉ mức ngay sau.
+const SYS_VERB = 'tang|giam|bat|tat|mo|chinh|doi|dat|cai|vao|hien|ve|ra|ket noi|ngat|turn(?: on| off| up| down)?|switch(?: on| off| to)?|change|set|adjust|increase|decrease|raise|lower|open|enable|disable|show|go to|mute|unmute|connect|disconnect';
+const SYS_LEVEL = 'to|nho|lon|be|hon|qua|louder|quieter|lower|higher|up|down';
+const topicWords = (s) => fold(s).replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+function topic({ strong, weak, cjk }) {
+  const res = [];
+  if (strong) res.push(new RegExp(W(strong), 'u'));
+  if (weak) res.push(new RegExp(String.raw`(?:^|\s)(?:${SYS_VERB})(?:\s+\S+){0,2}\s+(?:${weak})(?=\s|$)|(?:^|\s)(?:${weak})(?:\s+\S+){0,1}\s+(?:${SYS_LEVEL})(?=\s|$)`, 'u'));
+  return { test: (q) => { const t = topicWords(q); return res.some(r => r.test(t)) || (!!cjk && cjk.test(String(q || ''))); } };
+}
+// “tiếng” + tên ngôn ngữ (tiếng Anh, tiếng Việt…) là ngôn ngữ, không phải âm thanh
+const TIENG = String.raw`tieng(?!\s+(?:anh|viet|trung|hoa|nhat|han|phap|duc|nga|y|tay ban nha|bo dao nha|thai|lao|campuchia|khmer|an do|a rap))`;
+const VOLUME = topic({ strong: 'am luong|volume|mute|unmute|tat tieng|bat tieng|im lang', weak: `${TIENG}|loa|am thanh|sound|nhac|music|speaker|speakers`, cjk: /音量|静音/ });
 const SYS_TOPIC = {
-  volume_up: /am luong|volume|loa|tieng|am thanh|sound|mute|nhac|music|音量|声音/, volume_down: null, volume_set: null, volume_change: null, mute: null,
-  open_settings: /cai dat|settings|thiet lap|wi-?fi|bluetooth|do sang|brightness|display|ket noi mang|network|windows update|cap nhat windows|ngon ngu|language|chuot|mouse|ban phim|keyboard|may in|printer|am thanh|sound|thong bao|notification|che do toi|dark mode|hinh nen|wallpaper|ngay gio|mui gio|time zone|pin|battery|设置/,
-  lock: /khoa|lock|锁/, sleep: /\bngu\b|sleep|睡眠/, shutdown: /tat may|shut ?down|关机/, restart: /khoi dong lai|restart|reboot|重启/,
-  show_desktop: /man hinh chinh|desktop|thu nho (het|tat ca|moi)|桌面/, empty_trash: /thung rac|trash|recycle|回收站/,
+  volume_up: VOLUME, volume_down: VOLUME, volume_set: VOLUME, volume_change: VOLUME, mute: VOLUME,
+  open_settings: topic({ strong: 'cai dat|settings|setting|thiet lap|control panel|do sang|brightness|windows update|cap nhat windows|che do toi|dark mode|mui gio|time zone|ngay gio he thong',
+    weak: 'wi-?fi|bluetooth|ket noi mang|mang|network|display|ngon ngu|language|chuot|mouse|ban phim|keyboard|may in|printer|am thanh|sound|thong bao|notification|notifications|hinh nen|wallpaper|ngay gio|pin|battery|man hinh', cjk: /设置/ }),
+  lock: topic({ strong: String.raw`khoa(?!\s+(?:hoc|luan|bieu|tai khoan|cua|xe|so|kinh|zip))|lock|lock screen|khoa man hinh`, cjk: /锁屏|锁定/ }),
+  sleep: topic({ strong: String.raw`(?<!ngon\s)ngu(?!\s+(?:phap|van|canh|ngon|am))|sleep|hibernate`, cjk: /睡眠/ }),
+  shutdown: topic({ strong: 'tat may|shut ?down|power off', cjk: /关机/ }),
+  restart: topic({ strong: 'khoi dong lai|restart|reboot', cjk: /重启/ }),
+  show_desktop: topic({ strong: String.raw`man hinh chinh|show desktop|thu nho (?:het|tat ca|moi)`, weak: 'desktop|man hinh desktop', cjk: /桌面/ }),
+  empty_trash: topic({ strong: 'thung rac|trash|recycle bin|recycle', cjk: /回收站/ }),
 };
-for (const k of ['volume_down', 'volume_set', 'volume_change', 'mute']) SYS_TOPIC[k] = SYS_TOPIC.volume_up;
-function sysRelated(action, query) { if (sysAsked(action, query)) return true; const re = SYS_TOPIC[action]; return !!re && re.test(fold(query)); }
+function sysRelated(action, query) { if (sysAsked(action, query)) return true; const t = SYS_TOPIC[action]; return !!t && t.test(query); }
 module.exports = { sysRelated, SYS_TOPIC, sysAsked, clauses, clauseAsks, RULES, volumeLevel, volumeDelta, volumeParse, directSys };

@@ -1,4 +1,4 @@
-"""Kiểm bố cục trang web AIVN (B143–B150) ở 320/375/1280 px × vi/en/zh bằng Playwright + Chrome. Thoát 1 nếu có lỗi.
+"""Kiểm bố cục trang web AIVN (B143–B150, B162) ở 280/320/375/1280 px × vi/en/zh bằng Playwright + Chrome. Thoát 1 nếu có lỗi.
 Dùng: python tools/site_check.py URL out.json [thư-mục-ảnh]"""
 import sys, json
 from playwright.sync_api import sync_playwright
@@ -6,7 +6,8 @@ URL = sys.argv[1]; OUT = sys.argv[2]; SHOTS = sys.argv[3] if len(sys.argv) > 3 e
 CREDIT = 'NGUYỄN NGỌC KHÔI SINH VIÊN VLU'
 IPH = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1'
 AND = 'Mozilla/5.0 (Linux; Android 14; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36'
-CONF = [('iphoneSE-320', dict(viewport={'width': 320, 'height': 568}, user_agent=IPH, is_mobile=True, has_touch=True, device_scale_factor=2)),
+CONF = [('fold-280', dict(viewport={'width': 280, 'height': 653}, user_agent=AND, is_mobile=True, has_touch=True, device_scale_factor=2)),  # B162
+        ('iphoneSE-320', dict(viewport={'width': 320, 'height': 568}, user_agent=IPH, is_mobile=True, has_touch=True, device_scale_factor=2)),
         ('iphone-375', dict(viewport={'width': 375, 'height': 667}, user_agent=IPH, is_mobile=True, has_touch=True, device_scale_factor=2)),
         ('android-320', dict(viewport={'width': 320, 'height': 640}, user_agent=AND, is_mobile=True, has_touch=True)),
         ('desktop-1280', dict(viewport={'width': 1280, 'height': 800}))]
@@ -62,6 +63,7 @@ for r in res:
     if (r['linkH'] or 0) < 44: bad.append(f'{k}: link beta cao {r["linkH"]} px < 44')
     if any(n != 1 for n in r['nwLines']): bad.append(f'{k}: “SHA-256”/số phiên bản bị ngắt dòng')
     if r['heroH'] is not None and (r['heroH'] < 44 or not r.get('heroScroll')): bad.append(f'{k}: link beta ở đầu trang cao {r["heroH"]} px / cuộn tới khối: {r.get("heroScroll")}')
+    if r.get('heroText') and r['heroText'].lower().count('beta') > 1: bad.append(f'{k}: link đầu trang lặp “beta”: {r["heroText"]}')  # B145
     if r['creditCount'] < 3: bad.append(f'{k}: dòng ghi công chỉ còn {r["creditCount"]}')
     if not r['footPhone'].startswith(LABEL.get(r['lang'], '?')): bad.append(f'{k}: nhãn điện thoại “{r["footPhone"]}”')
     if (r['lang'] != 'vi') != bool(r['footSub']): bad.append(f'{k}: phụ đề ghi công “{r["footSub"]}” (en/zh phải có, vi để trống)')

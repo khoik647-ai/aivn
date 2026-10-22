@@ -17,7 +17,7 @@ a = ap.parse_args()
 page = open(a.html, encoding='utf-8').read()
 START, END = '<!--AIVN-BETA-->', '<!--/AIVN-BETA-->'
 page = re.sub(r'\n?' + re.escape(START) + r'.*?' + re.escape(END), '', page, flags=re.S)
-# B152: link “Hoặc thử bản beta …” ngay dưới hàng nút tải + câu nhắc trong huy hiệu phiên bản (hero.1) — cập nhật/gỡ cùng khối beta
+# B152: link “Hoặc thử bản thử nghiệm …” ngay dưới hàng nút tải + câu nhắc trong huy hiệu phiên bản (hero.1) — cập nhật/gỡ cùng khối beta
 HSTART, HEND, BSTART, BEND = '<!--AIVN-BETA-HERO-->', '<!--/AIVN-BETA-HERO-->', '<!--AIVN-BETA-BADGE-->', '<!--/AIVN-BETA-BADGE-->'
 unbadge = lambda t: re.sub(re.escape(BSTART) + r'.*?' + re.escape(BEND), '', t, flags=re.S)
 page = re.sub(r'\n?' + re.escape(HSTART) + r'.*?' + re.escape(HEND), '', page, flags=re.S)
@@ -57,8 +57,9 @@ if not a.clear:
     css = css.replace('</style>', '#tai-beta{scroll-margin-top:calc(var(--hdr,68px) + 16px)}'
                       '.beta-hero{margin:.5rem 0 .2rem}.beta-hero .nw{white-space:nowrap}.badge{display:inline-block;line-height:1.5}.badge .dot{display:inline-block;vertical-align:middle;margin-right:8px}.badge .nw{white-space:nowrap}.beta-hero a{display:inline-block;min-height:44px;padding:.6rem 0;line-height:1.5;box-sizing:border-box;font-weight:600;color:var(--accent);text-decoration:underline;text-underline-offset:3px}</style>')
     block = (f'\n{START}{css}<p class="hero-note beta-dl" id="tai-beta" data-i18n="beta.1" data-beta-version="{v}">{T["vi"]}</p>{js}{END}')
-    H2 = {'vi': f'<a href="#tai-beta">🧪 Hoặc thử bản beta {nv} →</a>', 'en': f'<a href="#tai-beta">🧪 Or try the {nv} beta →</a>',
-          'zh': f'<a href="#tai-beta">🧪 或者试试 {nv} 测试版 →</a>'}
+    # B145 (QA web beta.2.8): không lặp “beta” — số phiên bản đã có chữ beta
+    H2 = {'vi': f'<a href="#tai-beta">🧪 Hoặc thử bản thử nghiệm {nv} →</a>', 'en': f'<a href="#tai-beta">🧪 Or try the test version {nv} →</a>',
+          'zh': f'<a href="#tai-beta">🧪 或者试试测试版 {nv} →</a>'}
     BADGE = {'vi': f' · Có bản thử nghiệm {nv}', 'en': f' · {nv} beta available', 'zh': f' · 已推出 {nv} 测试版'}
     BADGE = {l: BSTART + t + BEND for l, t in BADGE.items()}
     m = re.search(r'<p class="hero-note"[^>]*data-i18n="hero\.9"[^>]*>.*?</p>', page, flags=re.S)

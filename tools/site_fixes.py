@@ -5,6 +5,7 @@
         Trang mẫu: giữ chỗ __MB_WIN__/__MB_ARM__/__MB_X64__ để release.sh điền; trang đang chạy: --sizes WIN,ARM,X64 (byte).
 - B149: chân trang en/zh: nhãn “Phone:”/“电话：”; dòng ghi công “NGUYỄN NGỌC KHÔI SINH VIÊN VLU” giữ NGUYÊN, chỉ thêm phụ đề dịch bên dưới/bên cạnh.
 - B150: không tràn ngang ở màn 320 px (vi/en/zh).
+- B162: không tràn ngang ở màn 280 px (vi/en/zh).
 Dùng: python3 tools/site_fixes.py --html F [--i18n-dir site/i18n] [--sizes 240075606,259835253,272736118]"""
 import argparse, json, os, re, sys
 
@@ -68,6 +69,11 @@ CSS = ('/*AIVN-FIX-320*/@media (max-width:380px){header .wrap{padding-left:14px;
        'h1,h2,h3,.lead,.checks li{overflow-wrap:anywhere}}.dev-grid>*,.privacy>*{min-width:0}.credit-sub{display:block;font-size:.85em;opacity:.8;margin-top:2px}.credit-sub:empty{display:none}/*END-FIX-320*/')
 page = re.sub(r'/\*AIVN-FIX-320\*/.*?/\*END-FIX-320\*/', '', page, flags=re.S)
 i = page.index('</style>'); page = page[:i] + CSS + page[i:]
+# --- B162: không tràn ngang ở 280 px (Galaxy Fold gập, S9+ thu hẹp): đầu trang (logo + VI/EN/中文 + nút menu) cần ~285 px → thu gọn thêm; đặt SAU khối 320
+CSS280 = ('/*AIVN-FIX-280*/@media (max-width:300px){header .wrap{padding-left:10px;padding-right:10px}.nav{gap:4px}.nav-cta{gap:4px}.logo{gap:4px;font-size:1rem}'
+          '.logo small{padding:1px 4px;font-size:.62rem}.lang{padding:1px;gap:1px}.lang button{padding:6px 4px;min-width:24px;font-size:.7rem}.burger{width:36px;height:36px}}/*END-FIX-280*/')
+page = re.sub(r'/\*AIVN-FIX-280\*/.*?/\*END-FIX-280\*/', '', page, flags=re.S)
+i = page.index('</style>'); page = page[:i] + CSS280 + page[i:]
 
 KEYS = {
     'en': {'hero.arm': '<b>Apple Silicon</b><small>M1, M2, M3, M4… chips · ~__MB_ARM__ MB</small>', 'cta.arm': '<b>Apple Silicon</b><small>M1, M2, M3, M4… chips · ~__MB_ARM__ MB</small>',

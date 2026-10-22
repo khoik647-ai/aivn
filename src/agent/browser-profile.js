@@ -32,7 +32,7 @@ function browserOfApp(app) { const k = fold(app).replace(/[^a-z]/g, ''); return 
 
 // Local State (JSON) → hồ sơ đang dùng { dir, name }
 function lastProfile(localState) {
-  let j = localState; if (typeof j === 'string') { try { j = JSON.parse(j); } catch { j = null; } }
+  let j = localState; if (typeof j === 'string') { try { j = JSON.parse(j.replace(/^\uFEFF/, "")); } catch { j = null; } }
   const p = (j && j.profile) || {}; const cache = p.info_cache || {};
   let dir = typeof p.last_used === 'string' && p.last_used.trim() ? p.last_used.trim() : '';
   if (!dir || (Object.keys(cache).length && !cache[dir])) { const act = Array.isArray(p.last_active_profiles) ? p.last_active_profiles.find(x => cache[x]) : null; dir = act || (cache.Default ? 'Default' : Object.keys(cache)[0] || 'Default'); }
