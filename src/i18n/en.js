@@ -2699,6 +2699,12 @@
     "Tệp “{0}” nằm ngoài thư mục được phép.": "The file “{0}” is outside the allowed folders.",
     "mcp.json không phải JSON hợp lệ.": "mcp.json is not valid JSON.",
     "mcp.json phải là một đối tượng JSON.": "mcp.json must be a JSON object.",
+    "Chưa có thư mục được phép. Hãy thêm thư mục trong Cài đặt AIVN AGENT.": "There is no allowed folder yet. Add a folder in AIVN AGENT settings.",
+    "Hãy ghi đường dẫn hoặc tên tệp, không ghi nội dung tệp.": "Enter a path or a file name, not the file contents.",
+    "Không tìm thấy tệp “{0}” trong thư mục được phép. Có tệp tên gần giống: “{1}”.": "Could not find the file “{0}” in an allowed folder. A file with a similar name exists: “{1}”.",
+    "Không tìm thấy tệp “{0}”.": "Could not find the file “{0}”.",
+    "Kiểm tra lại đường dẫn, tên tệp, và xem thư mục đó có nằm trong thư mục được phép không.": "Check the path, the file name, and whether that folder is in the allowed folders.",
+    "“{0}” là thư mục, không phải tệp.": "“{0}” is a folder, not a file."
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.en = D;
   if (typeof module === 'object' && module.exports) module.exports = D;
