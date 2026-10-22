@@ -1348,12 +1348,12 @@ function registerIpc() {
     const body = String(text);
     const peek = plugins.peekSecrets(body);
     if (peek.count > 0) {
-      const ans = await dialog.showMessageBox(win, {
+      const ans = await dialog.showMessageBox(win, TO({
         type: 'warning', buttons: ['Để sau', 'Đưa vào kho bảo mật'], defaultId: 1, cancelId: 0, title: 'Khoá bí mật',
         message: `Phát hiện ${peek.count} khoá bí mật trong tệp. Đưa vào kho bảo mật? Giá trị sẽ không ghi dạng chữ trong mcp.json.`,
         detail: pluginSecrets.secure() ? require('./plugins').KEYCHAIN_OK : require('./plugins').KEYCHAIN_NO,
-      });
-      if (ans.response !== 1) return { ok: false, canceled: true, offer: true, secretCount: peek.count, notice: pluginSecrets.secure() ? null : require('./plugins').KEYCHAIN_NO };
+      }));
+      if (ans.response !== 1) return { ok: false, canceled: true, offer: true, secretCount: peek.count, saved: false, moved: false, notice: require('./plugins').NOT_MOVED };
     }
     const r = await plugins.saveJson(body);
     if (r.ok) LOG.log('mcp', 'Đã lưu mcp.json');
@@ -1363,6 +1363,7 @@ function registerIpc() {
   ipcMain.handle('mcp:toggle', async (_e, { name, on }) => { if (on && masterOff()) return pausedReply(); return plugins.toggle(name, !!on); });
   ipcMain.handle('mcp:restart', async (_e, name) => { if (masterOff()) return pausedReply(); return plugins.startServer(name); });
   ipcMain.handle('mcp:preset', async (_e, kind) => {
+    if (masterOff()) return pausedReply();
     let folder = null;
     if (kind === 'filesystem') { const r = await dialog.showOpenDialog(win, { buttonLabel: 'Chọn thư mục', title: 'Chọn thư mục cho máy chủ MCP filesystem', properties: ['openDirectory'] }); if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }; folder = r.filePaths[0]; }
     return plugins.addPreset(kind, folder);

@@ -2768,6 +2768,14 @@
     "Quá 60 giây chưa kết nối được (lần đầu npx có thể phải tải gói).": "Still not connected after 60 seconds (the first npx run may have to download a package).",
     "Máy chủ thoát ngay khi khởi động — xem nhật ký máy chủ bên dưới.": "The server exited as soon as it started — see the server log below.",
     "Máy chủ đã dừng.": "The server stopped.",
+    "Lệnh này không ghim phiên bản. npx có thể tải mã mới từ internet.": "This command does not pin a version. npx can download new code from the internet.",
+    "Lệnh này không ghim phiên bản. uvx có thể tải mã mới từ internet.": "This command does not pin a version. uvx can download new code from the internet.",
+    "Lệnh này không ghim phiên bản. docker pull có thể tải mã mới từ internet.": "This command does not pin a version. docker pull can download new code from the internet.",
+    "Chưa chuyển khoá vào kho bảo mật. Chưa lưu mcp.json.": "The key was not moved into the secure store. mcp.json was not saved.",
+    "Chạy: {0}": "Run: {0}",
+    "LỖI: {0}": "ERROR: {0}",
+    "(dùng Node đi kèm AIVN)": "(uses the Node bundled with AIVN)",
+    "Đã tắt": "Off",
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.en = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

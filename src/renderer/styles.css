@@ -460,6 +460,7 @@ details.adv[open]{display:flex;flex-direction:column;gap:10px}
 .mcp-json { width: 100%; font: 12px/1.4 ui-monospace, Consolas, monospace; border-radius: 8px; border: 1px solid var(--line, #ccc); padding: 6px 8px; }
 .mcp-srv { border: 1px solid var(--line, #ddd); border-radius: 8px; padding: 6px 8px; margin: 6px 0; font-size: 13px; }
 .mcp-srv .hd { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.mcp-srv .mcp-cmd { flex: 1 0 100%; overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
 .mcp-srv .st { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: #eee; }
 .mcp-srv .st.on { background: #e8f6ec; color: #17603a; } .mcp-srv .st.error { background: #ffebe9; color: #82071e; } .mcp-srv .st.starting { background: #fff4e5; color: #8a4b00; }
 .mcp-srv pre { max-height: 140px; overflow: auto; font-size: 11px; background: var(--code-bg, #f6f6f6); padding: 6px; border-radius: 6px; white-space: pre-wrap; }

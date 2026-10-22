@@ -33,7 +33,10 @@ const ALWAYS_IMPORT = ALWAYS_READY;
 const AUTOSTART_LINE = 'Cho phép máy chủ này tự chạy mỗi khi mở AIVN.';
 const LEAVES = 'Dữ liệu gửi tới máy chủ này rời khỏi máy bạn.';
 const LAN_HTTP = 'Địa chỉ http này nằm trong mạng nội bộ của bạn.';
-const UNPINNED = 'Lệnh này không ghim phiên bản. npx có thể tải mã mới.';
+const UNPINNED_NPX = 'Lệnh này không ghim phiên bản. npx có thể tải mã mới từ internet.';
+const UNPINNED_UVX = 'Lệnh này không ghim phiên bản. uvx có thể tải mã mới từ internet.';
+const UNPINNED_DOCKER = 'Lệnh này không ghim phiên bản. docker pull có thể tải mã mới từ internet.';
+const NOT_MOVED = 'Chưa chuyển khoá vào kho bảo mật. Chưa lưu mcp.json.';
 const NO_SECRET = 'không có';
 const REPLACE_WARN = 'Tiến trình cũ sẽ bị dừng.';
 const DATA_HERE = 'Dữ liệu nằm trên máy này (crm.db).';
@@ -56,7 +59,10 @@ const CARD_STRINGS = [
   'Đã tách {0} khoá bí mật ra khỏi tệp. Chúng được mã hoá bằng kho khoá hệ điều hành và không ghi dạng chữ vào mcp.json.',
   LEAVES,
   LAN_HTTP,
-  UNPINNED,
+  UNPINNED_NPX,
+  UNPINNED_UVX,
+  UNPINNED_DOCKER,
+  NOT_MOVED,
   BIZ_WARN,
   EXCEL_WARN,
   KEPT,
@@ -120,13 +126,38 @@ function isSecret(name, value) {
   if (typeof value !== 'string' || value === '') return false;
   return isSecretName(name) || likelySecretValue(value);
 }
-function pullsCode(def) {
-  if (!def || def.url) return false;
+function flagSecretValue(a) {
+  if (typeof a !== 'string' || secretIdOf(a) || !a.startsWith('-')) return null;
+  const eq = a.indexOf('=');
+  if (eq < 2) return null;
+  const value = a.slice(eq + 1);
+  if (!value || secretIdOf(value)) return null;
+  if (looksLikeSecretValue(value) || likelySecretValue(value)) return value;
+  return null;
+}
+function argCountsAsSecret(a, store) {
+  if (typeof a !== 'string' || secretIdOf(a)) return false;
+  if (likelySecretValue(a)) return true;
+  if (flagSecretValue(a)) return true;
+  return !!(store && store.mask(a) !== a);
+}
+function pullTool(def) {
+  if (!def || def.url) return '';
   const base = String(def.command || '').toLowerCase().replace(/\.(cmd|exe)$/, '');
   const args = (Array.isArray(def.args) ? def.args : []).map(a => String(a).toLowerCase());
-  if (base === 'npx' || base === 'uvx' || args.includes('npx') || args.includes('uvx')) return true;
+  if (base === 'npx' || args.includes('npx')) return 'npx';
+  if (base === 'uvx' || args.includes('uvx')) return 'uvx';
   const docker = base === 'docker' || args[0] === 'docker';
-  return docker && args.includes('pull');
+  if (docker && args.includes('pull')) return 'docker pull';
+  return '';
+}
+function pullsCode(def) { return pullTool(def) !== ''; }
+function unpinnedLine(def) {
+  const tool = pullTool(def);
+  if (tool === 'npx') return UNPINNED_NPX;
+  if (tool === 'uvx') return UNPINNED_UVX;
+  if (tool === 'docker pull') return UNPINNED_DOCKER;
+  return '';
 }
 function catalogTitle(name, def) {
   if (name === 'memory' || claimCatalogId(def) === 'memory') return MEMORY_TITLE;
@@ -296,6 +327,17 @@ function secretKeyNames(def) {
       if (secretRef(v) || (typeof v === 'string' && isSecret(k, v))) names.push(k);
     }
   }
+  const args = def && Array.isArray(def.args) ? def.args : [];
+  args.forEach((a, i) => {
+    if (typeof a !== 'string') return;
+    const id = secretIdOf(a);
+    if (id) {
+      const slot = String(id).split(':').pop();
+      names.push(/^arg\d+$/.test(slot) ? slot : 'arg' + i);
+      return;
+    }
+    if (argCountsAsSecret(a, null)) names.push('arg' + i);
+  });
   return names;
 }
 function fingerprint(def) {
@@ -334,7 +376,8 @@ function cardMcpConnect(name, def, secrets, { displayName = '' } = {}) {
   const fields = [['Khoá bí mật', names.length ? names.join(', ') : NO_SECRET]];
   if (def && def.url && !isLoopback(def.url)) fields.push(['Dữ liệu', LEAVES]);
   if (def && def.url && classifyUrl(def.url).lan) fields.push(['Mạng', LAN_HTTP]);
-  if (pullsCode(def)) fields.push(['Phiên bản', UNPINNED]);
+  const pull = unpinnedLine(def);
+  if (pull) fields.push(['Phiên bản', pull]);
   if (names.length && secrets && !secrets.secure()) fields.push(['Khoá', secrets.sentence()]);
   const shown = secrets ? secrets.mask(commandRaw(def)) : commandRaw(def);
   const auto = catalogTitle(name, def);
@@ -426,8 +469,7 @@ function extractSecrets(cfg, store) {
     if (Array.isArray(def.args)) {
       def.args = def.args.map((a, i) => {
         if (typeof a !== 'string' || secretIdOf(a)) return a;
-        const known = !!(store && store.mask(a) !== a);
-        if (!likelySecretValue(a) && !known) return a;
+        if (!argCountsAsSecret(a, store)) return a;
         const id = `mcp:${safeName(name)}:arg${i}`;
         if (store) store.put(id, a);
         count++;
@@ -456,7 +498,7 @@ function observeSecrets(cfg, store) {
     for (const bag of ['env', 'headers']) {
       for (const [k, v] of Object.entries(def[bag] || {})) if (typeof v === 'string' && isSecret(k, v)) store.note(v);
     }
-    for (const a of Array.isArray(def.args) ? def.args : []) if (typeof a === 'string' && likelySecretValue(a)) store.note(a);
+    for (const a of Array.isArray(def.args) ? def.args : []) if (typeof a === 'string' && (likelySecretValue(a) || flagSecretValue(a))) store.note(a);
   }
 }
 
@@ -691,6 +733,7 @@ function createPluginGate({ dir, mcp, secrets, meta = null, approve = async () =
     return openServer(name);
   }
   async function addPreset(kind, folder) {
+    if (!agentEnabled()) return { ok: false, paused: true, error: MASTER_OFF };
     const P = presets({ folder });
     if (!P[kind]) return { ok: false, error: 'Không có mẫu này.' };
     const cfg = JSON.parse(JSON.stringify(mcp.config() || { mcpServers: {} }));
@@ -874,6 +917,6 @@ module.exports = {
   cardMcpConnect, cardAutostart, cardConnector, cardImport, cardReplace, cardExcelFolders, cardVisibleText, checkboxLabel,
   connectDanger, unpinned, kindOf, fingerprint, isSecret, isSecretName, looksLikeSecretValue, secretKeyNames,
   qaDenies, commandInDetails, CARD_STRINGS, KEYCHAIN_OK, KEYCHAIN_NO, MASTER_OFF, SAVED_PAUSED, MCP_WARN,
-  explainProbeError, likelySecretValue, pullsCode, catalogTitle,
+  explainProbeError, likelySecretValue, pullsCode, catalogTitle, NOT_MOVED, unpinnedLine,
   BIZ_READ, BIZ_WRITE, BIZ_DANGER, EXCEL_WRITE, SOON, storageSecure,
 };

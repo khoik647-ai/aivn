@@ -582,16 +582,36 @@ test('danh sách dùng câu chạy thử đã dịch; lỗi thô chỉ ở Chi t
   }
 });
 
-test('cảnh báo npx chỉ cho npx, uvx hoặc docker pull', () => {
+test('cảnh báo tải mã gọi đúng lệnh npx, uvx hoặc docker pull', () => {
   const secrets = PG.createSecretStore({ dir: tmp(), safeStorage: fakeSecure() });
-  const warn = (def) => JSON.stringify(PG.cardMcpConnect('s', def, secrets).fields).includes('npx có thể tải');
-  assert.equal(warn({ command: 'node', args: ['a.js'] }), false);
-  assert.equal(warn({ command: 'node.exe', args: ['a.js'] }), false);
-  assert.equal(warn({ command: 'npx', args: ['-y', 'mcp-fetch-server'] }), true);
-  assert.equal(warn({ command: 'uvx', args: ['some-tool'] }), true);
-  assert.equal(warn({ command: 'docker', args: ['pull', 'ghcr.io/example/app'] }), true);
-  assert.equal(warn({ command: 'docker', args: ['run', '-i', '--rm', 'ghcr.io/example/app'] }), false);
+  const line = (def) => {
+    const row = PG.cardMcpConnect('s', def, secrets).fields.find(r => r[0] === 'Phiên bản');
+    return row ? String(row[1]) : '';
+  };
+  assert.equal(line({ command: 'node', args: ['a.js'] }), '');
+  assert.equal(line({ command: 'node.exe', args: ['a.js'] }), '');
+  const npx = line({ command: 'npx', args: ['-y', 'mcp-fetch-server'] });
+  const uvx = line({ command: 'uvx', args: ['some-tool'] });
+  const pull = line({ command: 'docker', args: ['pull', 'ghcr.io/example/app'] });
+  assert.equal(npx, 'Lệnh này không ghim phiên bản. npx có thể tải mã mới từ internet.');
+  assert.equal(uvx, 'Lệnh này không ghim phiên bản. uvx có thể tải mã mới từ internet.');
+  assert.equal(uvx.includes('npx'), false);
+  assert.equal(pull, 'Lệnh này không ghim phiên bản. docker pull có thể tải mã mới từ internet.');
+  assert.equal(pull.includes('npx'), false);
+  assert.equal(line({ command: 'docker', args: ['run', '-i', '--rm', 'ghcr.io/example/app'] }), '');
   assert.equal(PG.cardMcpConnect('s', { command: 'node', args: ['a.js'] }, secrets).danger, true);
+  for (const s of [npx, uvx, pull]) {
+    for (const lang of ['en', 'zh']) {
+      const t = T.tr(s, lang);
+      assert.notEqual(t, s, lang + ' thiếu ' + s);
+      assert.equal(CORE.VI.test(t), false, lang + ' còn tiếng Việt: ' + t);
+    }
+  }
+  assert.equal(T.tr(uvx, 'en').includes('npx'), false);
+  assert.match(T.tr(uvx, 'en'), /uvx/);
+  assert.equal(T.tr(pull, 'zh').includes('npx'), false);
+  assert.match(T.tr(pull, 'zh'), /docker pull/);
+  assert.match(T.tr(npx, 'en'), /npx can download new code from the internet/);
 });
 
 test('Sổ tay agent là tên hiển thị của mẫu memory', async () => {
@@ -676,4 +696,155 @@ test('không mã hoá được thì không ghi đĩa và nói khoá không giữ
   assert.equal(fs.existsSync(path.join(dir, 'mcp-secrets.json')), false);
   assert.equal(fs.readFileSync(mcp.file, 'utf8').includes('sk-khongluu-plaintext-99'), false);
   for (const lang of ['en', 'zh']) assert.equal(CORE.VI.test(T.tr(PG.KEYCHAIN_NO, lang)), false);
+});
+
+function noVi(s) {
+  for (const lang of ['en', 'zh']) {
+    const t = T.tr(s, lang);
+    assert.notEqual(t, s, lang + ' thiếu ' + s);
+    assert.equal(CORE.VI.test(t), false, lang + ' còn tiếng Việt: ' + t);
+  }
+}
+
+test('hộp chuyển khoá dùng câu en/zh đã có, không còn tiếng Việt', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'src/main.js'), 'utf8');
+  const save = main.slice(main.indexOf("ipcMain.handle('mcp:save'"), main.indexOf("ipcMain.handle('mcp:toggle'"));
+  assert.match(save, /dialog\.showMessageBox\(win, TO\(\{/);
+  assert.match(save, /Phát hiện \$\{peek\.count\} khoá bí mật trong tệp\. Đưa vào kho bảo mật\? Giá trị sẽ không ghi dạng chữ trong mcp\.json\./);
+  const msg = 'Phát hiện 4 khoá bí mật trong tệp. Đưa vào kho bảo mật? Giá trị sẽ không ghi dạng chữ trong mcp.json.';
+  for (const lang of ['en', 'zh']) {
+    const o = T.trOpts({ title: 'Khoá bí mật', buttons: ['Để sau', 'Đưa vào kho bảo mật'], message: msg, detail: PG.KEYCHAIN_OK }, lang);
+    const blob = [o.title, ...o.buttons, o.message, o.detail].join('\n');
+    assert.equal(CORE.VI.test(blob), false, blob);
+  }
+  assert.equal(T.tr(msg, 'en'), 'Found 4 secrets in the file. Move them into the secure store? The values will not be written as plain text in mcp.json.');
+  assert.equal(T.tr(msg, 'zh'), '在文件里发现 4 个密钥。你要把它们放进安全库吗？这些值不会以明文写入 mcp.json。');
+});
+
+test('Sổ tay agent giữ tên đã chốt và agent nằm trong danh sách duyệt chính tả', () => {
+  const allow = fs.readFileSync(path.join(__dirname, '..', 'docs/spelling-allow.txt'), 'utf8');
+  assert.match(allow, /^agent$/m);
+  const html = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/index.html'), 'utf8');
+  assert.match(html, /data-mcp-preset="memory"[^>]*>🧠 Sổ tay agent</);
+});
+
+test('đếm khoá và chuyển khoá dùng cùng một danh sách, kể cả --token=ghp_', async () => {
+  const { mcp, gate, secrets } = world();
+  const ghp = 'ghp_Abcd1234Efgh5678';
+  const sk = 'sk-Abcdefghijklmnop12';
+  const text = JSON.stringify({ mcpServers: { 'qa-sec': {
+    command: 'node',
+    args: ['--port', '9', 'keep', '--token=' + ghp, sk],
+    env: { TOKEN: 'hf_tokentokentoken12', API_KEY: 'github_pat_' + 'x'.repeat(24) },
+    headers: { Authorization: 'Bearer ' + 'q'.repeat(24) },
+  } } });
+  const peeked = gate.peekSecrets(text).count;
+  const bare = PG.extractSecrets(JSON.parse(text), null);
+  const moved = PG.extractSecrets(JSON.parse(text), secrets);
+  assert.equal(peeked, 5);
+  assert.equal(bare.count, peeked);
+  assert.equal(moved.count, peeked);
+  assert.equal(bare.cfg.mcpServers['qa-sec'].args[3], '${secret:mcp:qa-sec:arg3}');
+  assert.equal(moved.cfg.mcpServers['qa-sec'].args[3], '${secret:mcp:qa-sec:arg3}');
+  assert.equal(moved.cfg.mcpServers['qa-sec'].args[4], '${secret:mcp:qa-sec:arg4}');
+  assert.equal(JSON.stringify(moved.cfg).includes(ghp), false);
+  const saved = await gate.saveJson(text);
+  assert.equal(saved.ok, true);
+  assert.equal(saved.secretCount, peeked);
+  const disk = fs.readFileSync(mcp.file, 'utf8');
+  assert.equal(disk.includes(ghp), false);
+  assert.match(disk, /\$\{secret:mcp:qa-sec:arg3\}/);
+  const names = PG.secretKeyNames(moved.cfg.mcpServers['qa-sec']);
+  assert.ok(names.includes('TOKEN') && names.includes('arg3') && names.includes('arg4'), names.join(','));
+  const card = PG.cardMcpConnect('qa-sec', moved.cfg.mcpServers['qa-sec'], secrets);
+  const line = card.fields.find(r => r[0] === 'Khoá bí mật')[1];
+  assert.match(line, /TOKEN/);
+  assert.match(line, /arg3/);
+  assert.match(line, /arg4/);
+});
+
+test('thẻ Khoá bí mật kể tên arg3 và arg4', () => {
+  const secrets = PG.createSecretStore({ dir: tmp(), safeStorage: fakeSecure() });
+  const def = {
+    command: 'node',
+    args: ['a', 'b', 'c', '${secret:mcp:qa-sec:arg3}', '${secret:mcp:qa-sec:arg4}'],
+    env: { TOKEN: '${secret:mcp:qa-sec:TOKEN}' },
+  };
+  assert.deepEqual(PG.secretKeyNames(def), ['TOKEN', 'arg3', 'arg4']);
+  const line = PG.cardMcpConnect('qa-sec', def, secrets).fields.find(r => r[0] === 'Khoá bí mật')[1];
+  assert.equal(line, 'TOKEN, arg3, arg4');
+});
+
+test('danh sách máy chủ giữ nguyên placeholder, không cắt giữa arg', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/app.js'), 'utf8');
+  const paint = app.slice(app.indexOf('function paintMcp'), app.indexOf('async function refreshMcp'));
+  assert.equal(paint.includes('.slice(0, 90)'), false);
+  assert.match(paint, /mcp-cmd/);
+  assert.match(paint, /esc\(x\.command\)/);
+  assert.doesNotMatch(paint, /esc\(x\.command\)\.slice/);
+  const css = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/styles.css'), 'utf8');
+  assert.match(css, /\.mcp-srv \.mcp-cmd \{[^}]*overflow-wrap: anywhere/);
+  const cmd = 'npx -y @example/server-with-a-long-pinned-name-for-qa-secret-keys ${secret:mcp:qa-sec:arg3} ${secret:mcp:qa-sec:arg4}';
+  assert.ok(cmd.length > 90);
+  const cut = cmd.slice(0, 90);
+  assert.equal(cut.includes('}'), false);
+  assert.equal(cut.includes('arg4'), false);
+  assert.match(cmd, /\$\{secret:mcp:qa-sec:arg3\}/);
+  assert.match(cmd, /\$\{secret:mcp:qa-sec:arg4\}/);
+});
+
+test('Để sau nói chưa chuyển khoá và chưa lưu mcp.json', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'src/main.js'), 'utf8');
+  const save = main.slice(main.indexOf("ipcMain.handle('mcp:save'"), main.indexOf("ipcMain.handle('mcp:toggle'"));
+  assert.match(save, /notice: require\('\.\/plugins'\)\.NOT_MOVED/);
+  assert.ok(save.indexOf('NOT_MOVED') < save.indexOf('plugins.saveJson'), 'từ chối phải về trước khi ghi tệp');
+  assert.match(save, /saved: false/);
+  assert.match(save, /moved: false/);
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/app.js'), 'utf8');
+  assert.match(app, /r\.notice \|\| 'Chưa chuyển khoá vào kho bảo mật\. Chưa lưu mcp\.json\.'/);
+  assert.equal(PG.NOT_MOVED, 'Chưa chuyển khoá vào kho bảo mật. Chưa lưu mcp.json.');
+  noVi(PG.NOT_MOVED);
+  assert.match(T.tr(PG.NOT_MOVED, 'en'), /not moved into the secure store/);
+  assert.match(T.tr(PG.NOT_MOVED, 'en'), /mcp\.json was not saved/);
+  assert.match(T.tr(PG.NOT_MOVED, 'zh'), /没有放进安全库/);
+  assert.match(T.tr(PG.NOT_MOVED, 'zh'), /没有保存 mcp\.json/);
+});
+
+test('công tắc chủ tắt thì Sổ tay agent không hiện thẻ; nhật ký và trạng thái tắt dịch en/zh', async () => {
+  const w = world({ agentEnabled: () => false });
+  const r = await w.gate.addPreset('memory');
+  assert.equal(r.paused, true);
+  assert.equal(r.error, PG.MASTER_OFF);
+  assert.equal(w.cards.length, 0);
+  assert.equal(JSON.stringify(w.mcp.config()).includes('server-memory'), false);
+  const main = fs.readFileSync(path.join(__dirname, '..', 'src/main.js'), 'utf8');
+  const preset = main.slice(main.indexOf("ipcMain.handle('mcp:preset'"), main.indexOf("ipcMain.handle('mcp:master'"));
+  const offAt = preset.indexOf('if (masterOff()) return pausedReply()');
+  assert.ok(offAt >= 0 && offAt < preset.indexOf('showOpenDialog') && offAt < preset.indexOf('addPreset'));
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/app.js'), 'utf8');
+  const paint = app.slice(app.indexOf('function paintMcp'), app.indexOf('async function refreshMcp'));
+  assert.match(paint, /off: 'Đã tắt'/);
+  assert.match(paint, /mcpLogText\(x\.logs\)/);
+  assert.equal(T.tr('Đã tắt', 'zh'), '已关闭');
+  assert.equal(T.tr('Đã tắt', 'en'), 'Off');
+  assert.notEqual(T.tr('Đã tắt', 'zh'), '已禁用');
+  const labels = ['Chạy: npx -y pkg', 'LỖI: spawn x ENOENT', '(trống)', '(dùng Node đi kèm AIVN)', 'Đã tắt'];
+  for (const s of labels) noVi(s);
+  assert.equal(T.tr('Chạy: npx -y pkg', 'en'), 'Run: npx -y pkg');
+  assert.equal(T.tr('LỖI: spawn x ENOENT', 'zh'), '错误：spawn x ENOENT');
+  assert.equal(T.tr('(trống)', 'en'), '(empty)');
+  assert.equal(T.tr('(trống)', 'zh'), '（空）');
+  function trLog(line, lang) {
+    const tr = (s) => T.tr(s, lang);
+    const cut = line.indexOf(' ');
+    const bundled = '(dùng Node đi kèm AIVN)';
+    let rest = tr(cut > 0 ? line.slice(cut + 1) : line);
+    if (rest.includes(bundled)) rest = rest.split(bundled).join(tr(bundled));
+    return (cut > 0 ? line.slice(0, cut) + ' ' : '') + rest;
+  }
+  for (const lang of ['en', 'zh']) {
+    assert.equal(CORE.VI.test(trLog('14:32:01 Chạy: npx -y pkg (dùng Node đi kèm AIVN)', lang)), false);
+    assert.equal(CORE.VI.test(trLog('14:32:01 LỖI: spawn x ENOENT', lang)), false);
+    assert.equal(CORE.VI.test(trLog('(trống)', lang)), false);
+  }
 });

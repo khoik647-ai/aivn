@@ -2768,6 +2768,14 @@
     "Quá 60 giây chưa kết nối được (lần đầu npx có thể phải tải gói).": "超过 60 秒仍未连上（第一次用 npx 时可能要下载包）。",
     "Máy chủ thoát ngay khi khởi động — xem nhật ký máy chủ bên dưới.": "服务器一启动就退出了 — 请看下面的服务器日志。",
     "Máy chủ đã dừng.": "服务器已停止。",
+    "Lệnh này không ghim phiên bản. npx có thể tải mã mới từ internet.": "此命令没有固定版本。npx 可能会从互联网下载新代码。",
+    "Lệnh này không ghim phiên bản. uvx có thể tải mã mới từ internet.": "此命令没有固定版本。uvx 可能会从互联网下载新代码。",
+    "Lệnh này không ghim phiên bản. docker pull có thể tải mã mới từ internet.": "此命令没有固定版本。docker pull 可能会从互联网下载新代码。",
+    "Chưa chuyển khoá vào kho bảo mật. Chưa lưu mcp.json.": "密钥没有放进安全库。没有保存 mcp.json。",
+    "Chạy: {0}": "运行：{0}",
+    "LỖI: {0}": "错误：{0}",
+    "(dùng Node đi kèm AIVN)": "（使用 AIVN 自带的 Node）",
+    "Đã tắt": "已关闭",
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;
