@@ -3,6 +3,7 @@
 // Đoạn = chữ nằm giữa các thẻ HTML; ${...} trong chuỗi mẫu thành {0},{1}…; thuộc tính title/placeholder/aria-label/data-tip/alt cũng là đoạn.
 const fs = require('fs'); const path = require('path');
 const ROOT = path.join(__dirname, '..');
+const VD = require('../src/i18n/vi-detect');
 const VI = /[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i;
 const ATTR = /\b(?:title|placeholder|aria-label|data-tip|alt|label|data-empty)\s*=\s*"([^"]*)"/g;
 // chữ Việt không dấu (regex VI không bắt được) mà giao diện có hiện
@@ -17,8 +18,9 @@ function fromHtml(html, out) {
   const text = html.replace(/<!--[\s\S]*?-->/g, '').replace(/<(script|style)[\s\S]*?<\/\1>/g, '').split(/<[^>]*>/);
   for (const t of text) add(t, out);
 }
+let HTML_LOOSE = false;
 function add(t, out) {
-  t = norm(ent(t)); if (!t || (!VI.test(t) && !ASCII_VI.has(t))) return;
+  t = norm(ent(t)); if (!t || (!VI.test(t) && !ASCII_VI.has(t) && !(HTML_LOOSE && VD.looksUnaccentedVi(t)))) return; // B105: chữ Việt không dấu trong HTML (“CUDA 12.4 cho GPU NVIDIA”); tệp dữ liệu/JS chỉ xét chữ có dấu (bí danh cột “nhan vien”… không phải chữ giao diện)
   // đánh số lại {n} cho đoạn
   let i = 0; const k = t.replace(/\{\d+\}/g, () => `{${i++}}`);
   if (k.replace(/\{\d+\}/g, '').trim().length === 0) return;
@@ -58,7 +60,7 @@ function extract(files) {
   const out = new Set();
   for (const f of files) {
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
-    if (f.endsWith('.html')) { fromHtml(src.replace(/<script[\s\S]*?<\/script>/g, ''), out); const m = src.match(/<title>([^<]*)<\/title>/); if (m) add(m[1], out); }
+    if (f.endsWith('.html')) { HTML_LOOSE = true; fromHtml(src.replace(/<script[\s\S]*?<\/script>/g, ''), out); const m = src.match(/<title>([^<]*)<\/title>/); if (m) add(m[1], out); HTML_LOOSE = false; }
     else jsStrings(src, out);
   }
   return [...out].sort();
