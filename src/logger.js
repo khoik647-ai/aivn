@@ -8,8 +8,14 @@ const SECRET_KEY = /(token|password|passwd|pw|secret|api[-_]?key|authorization|c
 function redact(v, depth = 0) {
   if (v == null) return v;
   if (typeof v === 'string') {
-    const s = v.replace(/\bhf_[A-Za-z0-9]{8,}\b/g, 'hf_***').replace(/\b(gh[pousr]_)[A-Za-z0-9]{10,}\b/g, '$1***').replace(/(Bearer\s+)[A-Za-z0-9._-]{8,}/gi, '$1***');
-    try { return require('./plugins').maskUrlSecrets(s); } catch { return s; }
+    let s = v.replace(/\bhf_[A-Za-z0-9]{8,}\b/g, 'hf_***').replace(/\b(gh[pousr]_)[A-Za-z0-9]{10,}\b/g, '$1***').replace(/(Bearer\s+)[A-Za-z0-9._-]{8,}/gi, '$1***');
+    s = s.replace(/\b(?:sk-|sk_|github_pat_|xox[baprs]-)[A-Za-z0-9._~+/-]{8,}/g, '••••');
+    try {
+      const PG = require('./plugins');
+      s = PG.maskAwsAdjacent(s);
+      s = s.replace(/\bAKIA[0-9A-Z]{16}\b/g, '••••');
+      return PG.maskUrlSecrets(s);
+    } catch { return s.replace(/\bAKIA[0-9A-Z]{16}\b/g, '••••'); }
   }
   if (typeof v !== 'object' || depth > 4) return v;
   if (Array.isArray(v)) return v.slice(0, 50).map(x => redact(x, depth + 1));

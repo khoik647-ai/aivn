@@ -8,11 +8,11 @@ const mcpMod = require('./mcp');
 
 const { safeName, classifyUrl, claimCatalogId, isExcelServer, validate, presets, secretIdOf, secretPlaceholder } = mcpMod;
 
-// KEY/TOKEN/… vẫn khớp trong tên (X_APP_KEY). APPID, SIG, SID, PASS, CRED chỉ khớp cả cụm,
-// để không nuốt APPLICATION, SIGNAL, SIDE, COMPASS.
-const SECRET_NAME = /TOKEN|API[-_]?KEY|APP[-_]?ID|KEY|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL|AUTH|SIGNATURE|(?:^|[^A-Za-z0-9])(?:SIG|SID|PASS|CRED)(?:[^A-Za-z0-9]|$)/i;
-const SECRET_VALUE = /^(?:sk-|ghp_|github_pat_|hf_|Bearer )/;
-const SECRET_QUERY = new Set(['apikey', 'key', 'token', 'accesstoken', 'auth', 'password', 'passwd', 'pwd', 'pass', 'secret', 'sig', 'signature', 'appid', 'appkey', 'sid', 'credential', 'credentials', 'apisecret', 'clientsecret', 'refreshtoken', 'idtoken', 'privatekey', 'accesskey', 'secretkey', 'authkey']);
+// TOKEN/KEY/SECRET/AUTH khớp cả cụm (X_APP_KEY, AUTHORIZATION) chứ không nuốt MAX_TOKENS, KEYBOARD_LAYOUT, AUTHOR.
+// APPID, AWS_ID, SIG, SID, PASS, CRED cũng chỉ khớp cả cụm, để không nuốt APPLICATION, SIGNAL, SIDE, COMPASS, CLIENT_ID.
+const SECRET_NAME = /API[-_]?KEY|APP[-_]?ID|AWS[-_]?ID|PASSWORD|PASSWD|PWD|CREDENTIAL|SIGNATURE|(?:^|[^A-Za-z0-9])(?:TOKEN|KEY|SECRET|AUTH(?:ORIZATION|ENTICATION)?|SIG|SID|PASS|CRED)(?:[^A-Za-z0-9]|$)/i;
+const SECRET_VALUE = /^(?:sk-|sk_|ghp_|github_pat_|hf_|Bearer |AKIA[0-9A-Z]{16}|xox[baprs]-)/;
+const SECRET_QUERY = new Set(['apikey', 'key', 'token', 'accesstoken', 'auth', 'password', 'passwd', 'pwd', 'pass', 'secret', 'sig', 'signature', 'appid', 'appkey', 'sid', 'credential', 'credentials', 'apisecret', 'clientsecret', 'refreshtoken', 'idtoken', 'privatekey', 'accesskey', 'accesskeyid', 'awsaccesskeyid', 'secretaccesskey', 'secretkey', 'authkey']);
 const SOON = ['zalo', 'gmail', 'drive', 'calendar', 'notion'];
 const BIZ_READ = ['listStock', 'getPicking', 'listPickings', 'getOrder', 'listOrders', 'getInvoice', 'listInvoices', 'salesReport', 'invoiceReport', 'stockReport', 'overview'];
 const BIZ_WRITE = ['createReceipt', 'setDone', 'validatePicking', 'adjustStock', 'sendQuote', 'confirmOrder', 'resetToQuote', 'saveInvoice', 'invoiceOrder', 'postInvoice', 'resetInvoice'];
@@ -114,16 +114,27 @@ const CARD_STRINGS = [
 
 function isSecretName(name) { return SECRET_NAME.test(String(name || '')); }
 function looksLikeSecretValue(v) { return typeof v === 'string' && v !== '' && SECRET_VALUE.test(v); }
+// Khoá AWS thường dài 40 ký tự. Mẫu QA dài 39. Chỉ tính khi cùng máy chủ có AKIA. Đường dẫn bắt đầu bằng / không phải.
+function looksLikeAwsSecret(v) {
+  return typeof v === 'string' && /^[A-Za-z0-9/+]{39,40}$/.test(v) && /[/+]/.test(v) && !v.startsWith('/');
+}
 function likelySecretValue(v) {
   if (looksLikeSecretValue(v)) return true;
   if (typeof v !== 'string' || secretIdOf(v)) return false;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) return false;
   if (v.length < 20 || v.length > 500) return false;
-  if (/[\s"'\\]/.test(v) || v.includes('/') || v.startsWith('-') || v.startsWith('.')) return false;
+  if (/[\s"'\\]/.test(v) || v.startsWith('-') || v.startsWith('.')) return false;
+  if (v.startsWith('/') || /^[A-Za-z]:[\\/]/.test(v)) return false;
   if (/@\d+\.\d+\.\d+/.test(v)) return false;
+  if (v.includes('/')) return false;
   const core = v.replace(/[-_.=+]/g, '');
   if (core.length < 20 || new Set(core).size < 8) return false;
-  if (/^[0-9a-f]+$/i.test(core) && core.length >= 32) return true;
+  // Hex 32 ký tự là khoá. Hex 40 là git sha, hex 64 là sha256: không tự chuyển, kể cả khi có chữ hoa.
+  if (/^[0-9a-f]+$/i.test(core)) return core.length >= 32 && core.length !== 40 && core.length !== 64;
   return /[a-z]/.test(core) && /[A-Z]/.test(core) && /\d/.test(core);
+}
+function isBenignLiteral(v) {
+  return typeof v === 'string' && /^(none|null|false|true|off|no|yes|default)$/i.test(v);
 }
 function isSecret(name, value) {
   if (typeof value !== 'string' || value === '') return false;
@@ -153,8 +164,16 @@ function slotFromPlaceholder(v, fallback) {
 function urlSecretSpans(text) {
   const s = String(text || '');
   const spans = [];
-  const userRe = /([a-z][a-z0-9+.-]*:\/\/)([^/?#@]*?):([^/?#@]*)@/gi;
   let m;
+  const teleRe = /\/bot(\d{6,}):([A-Za-z0-9_-]{20,})/g;
+  while ((m = teleRe.exec(s))) {
+    const value = m[2];
+    const start = m.index + m[0].length - value.length;
+    const end = start + value.length;
+    if (isRedactedValue(value)) spans.push({ start, end, already: true, slotHint: slotFromPlaceholder(value, 'telegram') });
+    else spans.push({ start, end, already: false, slotHint: 'telegram', value, note: [value] });
+  }
+  const userRe = /([a-z][a-z0-9+.-]*:\/\/)([^/?#@]*?):([^/?#@]*)@/gi;
   while ((m = userRe.exec(s))) {
     const value = m[3];
     const start = m.index + m[1].length + m[2].length + 1;
@@ -207,6 +226,7 @@ function splitFlag(a) {
 }
 function isSecretFlagName(name) {
   const n = String(name || '');
+  if (/(?:file|path|dir|url)$/i.test(n)) return false;
   if (/^k$/i.test(n)) return true;
   return isSecretQueryName(n) || isSecretName(n);
 }
@@ -214,10 +234,28 @@ function isBareSecretFlag(a) {
   const f = splitFlag(a);
   return !!(f && !f.hasEq && f.name && isSecretFlagName(f.name));
 }
+function isHeaderFlag(a) {
+  const f = splitFlag(a);
+  return !!(f && !f.hasEq && /^(h|header)$/i.test(f.name));
+}
+function splitHeaderValue(a) {
+  const m = /^([A-Za-z0-9-]+)(\s*:\s*)(\S[\s\S]*)$/.exec(String(a || ''));
+  if (!m) return null;
+  const start = m[1].length + m[2].length;
+  return { name: m[1], value: m[3], valueStart: start, valueEnd: start + m[3].length };
+}
+function headerValueIsSecret(name, value) {
+  if (!value || isBenignLiteral(value) || isRedactedValue(value)) return false;
+  return isSecretName(name) || isSecretQueryName(name) || looksLikeSecretValue(value) || likelySecretValue(value);
+}
+function serverHasAkia(def) {
+  return /AKIA[0-9A-Z]{16}/.test(JSON.stringify(def || {}));
+}
 // Một danh sách cho hộp thoại, lần chuyển, và dòng Khoá bí mật trên thẻ.
 function secretFindings(def) {
   const out = [];
   const used = new Set();
+  const akia = serverHasAkia(def);
   function claim(base) {
     let s = sanitizeSlot(base);
     if (!used.has(s)) { used.add(s); return s; }
@@ -238,6 +276,21 @@ function secretFindings(def) {
       else addNew(sp.slotHint, sp.value, loc, { start: sp.start, end: sp.end }, sp.note);
     }
   }
+  function valueIsSecret(name, value) {
+    if (typeof value !== 'string' || value === '' || isBenignLiteral(value)) return false;
+    if (isSecret(name, value)) return true;
+    return !!(akia && looksLikeAwsSecret(value));
+  }
+  function considerString(text, loc, keyName) {
+    if (typeof text !== 'string' || text === '') return;
+    const whole = secretIdOf(text);
+    if (whole && !loc.index && loc.type !== 'arg') {
+      addAlready(keyName || String(whole).split(':').pop() || 'secret', loc);
+      return;
+    }
+    if (valueIsSecret(keyName, text)) { addNew(keyName || 'secret', text, loc, null, [text]); return; }
+    addSpans(text, loc);
+  }
   for (const bag of ['env', 'headers']) {
     const obj = def && def[bag];
     if (!obj || typeof obj !== 'object' || Array.isArray(obj)) continue;
@@ -245,7 +298,7 @@ function secretFindings(def) {
       const loc = { type: bag === 'headers' ? 'header' : 'env', key: k };
       if (secretIdOf(v)) { addAlready(k, loc); continue; }
       if (typeof v !== 'string' || v === '') continue;
-      if (isSecret(k, v)) addNew(k, v, loc, null, [v]);
+      if (valueIsSecret(k, v)) addNew(k, v, loc, null, [v]);
       else addSpans(v, loc);
     }
   }
@@ -260,28 +313,66 @@ function secretFindings(def) {
       return;
     }
     const flag = splitFlag(a);
+    if (flag && flag.hasEq && /^(h|header)$/i.test(flag.name)) {
+      const h = splitHeaderValue(flag.value);
+      if (h && isRedactedValue(h.value)) { addAlready(slotFromPlaceholder(h.value, sanitizeSlot(h.name)), loc); return; }
+      if (h && headerValueIsSecret(h.name, h.value)) {
+        const start = a.length - flag.value.length + h.valueStart;
+        addNew(sanitizeSlot(h.name), h.value, loc, { start, end: start + h.value.length }, [h.value]);
+        return;
+      }
+    }
     if (flag && flag.hasEq) {
       if (flag.value && String(flag.value).includes('${secret:')) {
         addAlready(slotFromPlaceholder(flag.value, 'arg' + i), loc);
         return;
       }
-      if (flag.value && !isRedactedValue(flag.value) && (isSecretFlagName(flag.name) || looksLikeSecretValue(flag.value) || likelySecretValue(flag.value))) {
+      if (flag.value && !isRedactedValue(flag.value) && !isBenignLiteral(flag.value) && (isSecretFlagName(flag.name) || looksLikeSecretValue(flag.value) || likelySecretValue(flag.value) || (akia && looksLikeAwsSecret(flag.value)))) {
         addNew('arg' + i, a, loc, null, flag.value === a ? [a] : [a, flag.value]);
         return;
       }
     }
-    if (i > 0 && isBareSecretFlag(args[i - 1]) && !a.startsWith('-') && a !== '') {
+    if (i > 0 && isHeaderFlag(args[i - 1]) && !a.startsWith('-')) {
+      const h = splitHeaderValue(a);
+      if (h && isRedactedValue(h.value)) { addAlready(slotFromPlaceholder(h.value, sanitizeSlot(h.name)), loc); return; }
+      if (h && headerValueIsSecret(h.name, h.value)) {
+        addNew(sanitizeSlot(h.name), h.value, loc, { start: h.valueStart, end: h.valueEnd }, [h.value]);
+        return;
+      }
+    }
+    if (i > 0 && isBareSecretFlag(args[i - 1]) && !a.startsWith('-') && a !== '' && !isBenignLiteral(a)) {
       addNew('arg' + i, a, loc, null, [a]);
       return;
     }
-    if (likelySecretValue(a)) { addNew('arg' + i, a, loc, null, [a]); return; }
+    if (valueIsSecret('', a) || (akia && looksLikeAwsSecret(a))) { addNew('arg' + i, a, loc, null, [a]); return; }
     addSpans(a, loc);
   });
   if (def && typeof def.url === 'string' && def.url) {
     const loc = { type: 'url' };
     const whole = secretIdOf(def.url);
     if (whole) addAlready(String(whole).split(':').pop() || 'url', loc);
+    else if (valueIsSecret('url', def.url)) addNew('url', def.url, loc, null, [def.url]);
     else addSpans(def.url, loc);
+  }
+  if (def && typeof def === 'object') {
+    for (const [k, v] of Object.entries(def)) {
+      if (k === 'env' || k === 'headers' || k === 'args' || k === 'url') continue;
+      walkNested(v, [k]);
+    }
+  }
+  function walkNested(value, path) {
+    if (typeof value === 'string') {
+      considerString(value, { type: 'path', path: path.slice() }, String(path[path.length - 1]));
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item, i) => walkNested(item, path.concat(i)));
+      return;
+    }
+    if (value && typeof value === 'object') {
+      if (secretIdOf(value)) { addAlready(String(path[path.length - 1] || 'secret'), { type: 'path', path: path.slice() }); return; }
+      for (const [k, v] of Object.entries(value)) walkNested(v, path.concat(k));
+    }
   }
   return out;
 }
@@ -329,6 +420,24 @@ function storageSecure(safeStorage) {
   } catch { return false; }
 }
 
+function maskAwsAdjacent(text) {
+  const s = text == null ? '' : String(text);
+  if (!/AKIA[0-9A-Z]{16}/.test(s)) return s;
+  return s.replace(/[A-Za-z0-9/+]{39,40}/g, (m, offset, str) => {
+    const prev = offset > 0 ? str[offset - 1] : '';
+    const next = str[offset + m.length] || '';
+    if (/[A-Za-z0-9/+]/.test(prev) || /[A-Za-z0-9/+]/.test(next)) return m;
+    if (!looksLikeAwsSecret(m)) return m;
+    return '••••';
+  });
+}
+function maskKnownSecrets(text) {
+  let s = text == null ? '' : String(text);
+  s = maskAwsAdjacent(s);
+  s = s.replace(/(?:sk-|sk_|ghp_|github_pat_|hf_|xox[baprs]-|Bearer )[A-Za-z0-9._~+/-]{8,}/g, '••••');
+  s = s.replace(/AKIA[0-9A-Z]{16}/g, '••••');
+  return maskUrlSecrets(s);
+}
 function createSecretStore({ dir, safeStorage = null } = {}) {
   const file = path.join(dir, 'mcp-secrets.json');
   const mem = new Map();
@@ -343,8 +452,7 @@ function createSecretStore({ dir, safeStorage = null } = {}) {
     let s = text == null ? '' : String(text);
     const list = [...noted].sort((a, b) => b.length - a.length);
     for (const v of list) if (v && s.includes(v)) s = s.split(v).join('••••');
-    s = s.replace(/(?:sk-|ghp_|github_pat_|hf_|Bearer )[A-Za-z0-9._~+/-]{8,}/g, '••••');
-    return maskUrlSecrets(s);
+    return maskKnownSecrets(s);
   }
   function maskDeep(value, seen = new WeakSet()) {
     if (typeof value === 'string') return mask(value);
@@ -584,24 +692,68 @@ function cardReplace(name, oldDef, newDef, secrets) {
   };
 }
 
+function dig(root, parts) {
+  let cur = root;
+  for (const p of parts || []) {
+    if (cur == null) return undefined;
+    cur = cur[p];
+  }
+  return cur;
+}
+function locKey(loc) {
+  if (!loc) return '';
+  if (loc.type === 'path') return 'path:' + JSON.stringify(loc.path || []);
+  if (loc.key != null) return loc.type + ':' + loc.key;
+  if (loc.index != null) return loc.type + ':' + loc.index;
+  return loc.type || '';
+}
 function locText(def, loc) {
   if (!loc) return '';
   if (loc.type === 'env') return def.env ? def.env[loc.key] : '';
   if (loc.type === 'header') return def.headers ? def.headers[loc.key] : '';
   if (loc.type === 'arg') return Array.isArray(def.args) ? def.args[loc.index] : '';
   if (loc.type === 'url') return def.url;
+  if (loc.type === 'path') {
+    const v = dig(def, loc.path);
+    return typeof v === 'string' ? v : '';
+  }
   return '';
 }
 function locWrite(def, loc, text) {
+  if (!loc) return;
   if (loc.type === 'env') def.env[loc.key] = text;
   else if (loc.type === 'header') def.headers[loc.key] = text;
   else if (loc.type === 'arg') def.args[loc.index] = text;
   else if (loc.type === 'url') def.url = text;
+  else if (loc.type === 'path' && Array.isArray(loc.path) && loc.path.length) {
+    let cur = def;
+    for (let i = 0; i < loc.path.length - 1; i++) {
+      cur = cur[loc.path[i]];
+      if (cur == null) return;
+    }
+    cur[loc.path[loc.path.length - 1]] = text;
+  }
+}
+function topLevelIsSecret(key, value) {
+  if (typeof value !== 'string' || value === '' || secretIdOf(value) || isBenignLiteral(value)) return false;
+  if (isSecret(key, value) || looksLikeSecretValue(value)) return true;
+  return urlSecretSpans(value).some(sp => !sp.already);
 }
 function extractSecrets(cfg, store) {
   const next = JSON.parse(JSON.stringify(cfg || {}));
   let count = 0;
   let rewritten = 0;
+  for (const [k, v] of Object.entries(next)) {
+    if (k === 'mcpServers') continue;
+    if (!topLevelIsSecret(k, v)) continue;
+    const id = `mcp:global:${sanitizeSlot(k)}`;
+    if (store) {
+      store.put(id, v);
+      for (const sp of urlSecretSpans(v)) if (!sp.already && sp.value && sp.value !== v) store.note(sp.value);
+    }
+    delete next[k];
+    count++;
+  }
   const servers = next.mcpServers && typeof next.mcpServers === 'object' ? next.mcpServers : {};
   for (const [name, def] of Object.entries(servers)) {
     if (!def || typeof def !== 'object') continue;
@@ -623,7 +775,7 @@ function extractSecrets(cfg, store) {
       }
       count++;
       if (f.span) {
-        const key = f.loc.type + ':' + (f.loc.key != null ? f.loc.key : f.loc.index != null ? f.loc.index : '');
+        const key = locKey(f.loc);
         if (!spans.has(key)) spans.set(key, []);
         spans.get(key).push(f);
       } else locWrite(def, f.loc, secretPlaceholder(id));
@@ -804,11 +956,24 @@ function createPluginGate({ dir, mcp, secrets, meta = null, approve = async () =
     let parsed;
     try { parsed = JSON.parse(String(text)); } catch { return { ok: false, error: 'mcp.json không phải JSON hợp lệ.' }; }
     try { validate(parsed); } catch (e) { return { ok: false, error: secrets.mask(e && e.message) }; }
+    const before = JSON.parse(JSON.stringify((mcp.config() && mcp.config().mcpServers) || {}));
+    const rawServers = parsed.mcpServers && typeof parsed.mcpServers === 'object' && !Array.isArray(parsed.mcpServers) ? parsed.mcpServers : {};
     const extracted = extractSecrets(parsed, secrets);
     try {
       await mcp.saveText(JSON.stringify(extracted.cfg));
       reconcile(extracted.cfg.mcpServers || {});
-      return { ok: true, servers: publicServers(), secretCount: extracted.count, secretsSecure: secrets.secure(), notice: extracted.count && !secrets.secure() ? KEYCHAIN_NO : null };
+      const importItems = Object.entries(rawServers).filter(([, def]) => def && typeof def === 'object').map(([name, def]) => ({
+        name, kind: kindOf(def), commandRedacted: scrubShown(def, secrets), danger: connectDanger(def), def,
+      }));
+      const importCard = secrets.maskDeep(cardImport(importItems, { secretCount: extracted.count, secretsSecure: secrets.secure() }));
+      const replaceCards = [];
+      const savedServers = extracted.cfg.mcpServers || {};
+      for (const [name, raw] of Object.entries(rawServers)) {
+        if (!raw || typeof raw !== 'object' || !before[name] || !savedServers[name]) continue;
+        if (commandRaw(before[name]) === commandRaw(savedServers[name])) continue;
+        replaceCards.push(secrets.maskDeep(cardReplace(name, before[name], raw, secrets)));
+      }
+      return { ok: true, servers: publicServers(), secretCount: extracted.count, secretsSecure: secrets.secure(), notice: extracted.count && !secrets.secure() ? KEYCHAIN_NO : null, importCard, replaceCards };
     } catch (e) {
       say(`Lưu mcp.json lỗi\n${e && e.stack || e}`);
       return { ok: false, error: secrets.mask(e && e.message) };
@@ -1090,6 +1255,6 @@ module.exports = {
   connectDanger, unpinned, kindOf, fingerprint, isSecret, isSecretName, looksLikeSecretValue, secretKeyNames,
   qaDenies, commandInDetails, CARD_STRINGS, KEYCHAIN_OK, KEYCHAIN_NO, MASTER_OFF, SAVED_PAUSED, MCP_WARN,
   explainProbeError, likelySecretValue, pullsCode, catalogTitle, NOT_MOVED, unpinnedLine,
-  secretFindings, maskUrlSecrets,
+  secretFindings, maskUrlSecrets, maskAwsAdjacent, maskKnownSecrets,
   BIZ_READ, BIZ_WRITE, BIZ_DANGER, EXCEL_WRITE, SOON, storageSecure,
 };
