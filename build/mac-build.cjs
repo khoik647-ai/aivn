@@ -5,6 +5,8 @@ const { publish: _publish, ...base } = require('../package.json').build;
 const fs = require('fs');
 const path = require('path');
 const target = process.env.MAC_TARGET || 'zip';
+// Bản beta: release.sh đặt AIVN_VERSION (vd. 0.16.0-beta.3) → ghi vào gói như bản Windows (-c.extraMetadata.version), package.json trong git không đổi
+const VERSION = process.env.AIVN_VERSION || null;
 // Với target "dir" electron-builder không ghi app-update.yml → tự ghi để electron-updater biết repo GitHub (phải làm trước khi ký)
 function writeUpdateYml(arch) {
   const pub = [].concat(_publish || [])[0];
@@ -21,7 +23,7 @@ function writeUpdateYml(arch) {
     const node = [{ from: `build/node/darwin-${arch}`, to: 'node', filter: ['node', 'LICENSE'] }, { from: `build/llama/darwin-${arch}`, to: 'llama', filter: ['**/*', '!.build'] }];
     if (!fs.existsSync(path.join(__dirname, 'llama', `darwin-${arch}`, 'llama-server'))) throw new Error(`thiếu build/llama/darwin-${arch}/llama-server — chạy: node build/fetch-llama.cjs`);
     if (!fs.existsSync(path.join(__dirname, 'node', `darwin-${arch}`, 'node'))) throw new Error(`thiếu build/node/darwin-${arch}/node — chạy: node build/fetch-node.cjs`);
-    const config = { ...base, mac: { ...base.mac, extraResources: node, files: [...base.mac.files, `!node_modules/@node-llama-cpp/${other}/**`] } };
+    const config = { ...base, ...(VERSION ? { extraMetadata: { ...(base.extraMetadata || {}), version: VERSION } } : {}), mac: { ...base.mac, extraResources: node, files: [...base.mac.files, `!node_modules/@node-llama-cpp/${other}/**`] } };
     await builder.build({ targets: builder.Platform.MAC.createTarget([target], builder.Arch[arch]), config, publish: 'never' });
     if (target === 'dir') writeUpdateYml(arch);
   }

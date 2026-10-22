@@ -17,7 +17,7 @@ function tmpl() {
 }
 test('B144/B145/B146/B148/B143: lời khối beta vi/en/zh, SHA-256 không ngắt, vùng bấm ≥ 44 px, dòng “chỉ cho Windows” trên điện thoại', () => {
   const f = live(); fixes(f, ['--sizes', '240075606,259835253,272736118']); beta(f); const h = fs.readFileSync(f, 'utf8'); const D = dict(h);
-  const vi = h.match(/data-i18n="beta\.1"[^>]*>([\s\S]*?)<\/p>/)[1]; const T = { vi, en: D.en['beta.1'], zh: D.zh['beta.1'] };
+  const vi = h.match(/data-i18n="beta\.1"[^>]*>([\s\S]*?)<\/div><script>/)[1]; const T = { vi, en: D.en['beta.1'], zh: D.zh['beta.1'] };
   assert.match(T.vi, /Tải bản thử nghiệm <span class="nw">0\.16\.0-beta\.2\.7<\/span> cho Windows/); assert.match(T.vi, /Nếu dùng hằng ngày/);
   assert.match(T.en, /Download the <span class="nw">0\.16\.0-beta\.2\.7<\/span> beta for Windows/);
   assert.match(T.zh, /下载 <span class="nw">0\.16\.0-beta\.2\.7<\/span> 测试版（Windows）/); assert.ok(!/试用版/.test(T.zh)); assert.match(T.zh, /测试版可能仍有错误，也不会自动更新/);
@@ -76,9 +76,10 @@ test('B152/B145: link “Hoặc thử bản thử nghiệm …” (không lặp 
   const f = live(); fixes(f, ['--sizes', '240075606,259835253,272736118']); beta(f); const h = fs.readFileSync(f, 'utf8'); const D = dict(h);
   const iRow = h.indexOf('id="tai-ve"'), iHero = h.indexOf('data-i18n="beta.2"'), iNote = h.indexOf('data-i18n="hero.9"'), iBlock = h.indexOf('id="tai-beta"');
   assert.ok(iRow < iHero && iHero < iNote && iNote < iBlock, 'thứ tự: hàng nút → link beta → ghi chú → khối beta');
-  assert.match(h, /<p class="beta-hero" data-i18n="beta\.2"><a href="#tai-beta">🧪 Hoặc thử bản thử nghiệm <span class="nw">0\.16\.0-beta\.2\.7<\/span> →<\/a><\/p>/);
-  assert.match(D.en['beta.2'], /^<a href="#tai-beta">🧪 Or try the test version <span class="nw">0\.16\.0-beta\.2\.7<\/span> →<\/a>$/);
-  assert.match(D.zh['beta.2'], /^<a href="#tai-beta">🧪 或者试试测试版 <span class="nw">0\.16\.0-beta\.2\.7<\/span> →<\/a>$/);
+  // B174: hai câu theo hệ điều hành — Windows/chưa rõ máy thấy “Hoặc thử …”, máy chưa có tệp của bản beta thấy “… chỉ có cho Windows”
+  assert.match(h, /<p class="beta-hero" data-i18n="beta\.2"><a href="#tai-beta"><span class="bh-any">🧪 Hoặc thử bản thử nghiệm <span class="nw">0\.16\.0-beta\.2\.7<\/span> →<\/span><span class="bh-nowin">🧪 Bản thử nghiệm <span class="nw">0\.16\.0-beta\.2\.7<\/span> hiện chỉ có cho Windows →<\/span><\/a><\/p>/);
+  assert.match(D.en['beta.2'], /^<a href="#tai-beta"><span class="bh-any">🧪 Or try the test version <span class="nw">0\.16\.0-beta\.2\.7<\/span> →<\/span><span class="bh-nowin">🧪 Test version <span class="nw">0\.16\.0-beta\.2\.7<\/span> is for Windows only →<\/span><\/a>$/);
+  assert.match(D.zh['beta.2'], /^<a href="#tai-beta"><span class="bh-any">🧪 或者试试测试版 <span class="nw">0\.16\.0-beta\.2\.7<\/span> →<\/span><span class="bh-nowin">🧪 测试版 <span class="nw">0\.16\.0-beta\.2\.7<\/span> 目前仅支持 Windows →<\/span><\/a>$/);
   assert.match(h, /data-i18n="hero\.1">[^\n]*Phiên bản 0\.15\.3[^\n]*<!--AIVN-BETA-BADGE--> · Có bản thử nghiệm <span class="nw">0\.16\.0-beta\.2\.7<\/span><!--\/AIVN-BETA-BADGE--><\/span>/);
   assert.match(D.en['hero.1'], /Version 0\.15\.3 .*<!--AIVN-BETA-BADGE--> · <span class="nw">0\.16\.0-beta\.2\.7<\/span> beta available<!--\/AIVN-BETA-BADGE-->$/);
   assert.match(D.zh['hero.1'], /0\.15\.3 版 .*<!--AIVN-BETA-BADGE--> · 已推出 <span class="nw">0\.16\.0-beta\.2\.7<\/span> 测试版<!--\/AIVN-BETA-BADGE-->$/);

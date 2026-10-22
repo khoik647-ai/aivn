@@ -100,3 +100,9 @@ Quynh
 Holo
 Xeon
 checkboxes
+app
+apple
+dr
+quarantine
+xattr
+zip

@@ -77,7 +77,9 @@ test('B145: link “Hoặc thử bản thử nghiệm …” không lặp “bet
   const f = tmpCopy();
   execFileSync('python3', [path.join(root, 'tools/site_beta.py'), '--html', f, '--version', '0.16.0-beta.2.8', '--url', 'https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.2.8/AIVN-Setup-0.16.0-beta.2.8.exe', '--sha256', 'f'.repeat(64), '--size', '245012768']);
   const h = fs.readFileSync(f, 'utf8'); const D = dict(h);
-  const vi = (h.match(/data-i18n="beta\.2">([\s\S]*?)<\/p>/) || [])[1]; const strip = (s) => s.replace(/<[^>]+>/g, '');
+  const vi = (h.match(/data-i18n="beta\.2">([\s\S]*?)<\/p>/) || [])[1];
+  // B174: link đầu trang có hai câu, CSS chọn theo hệ điều hành (bh-any: Windows/chưa rõ; bh-nowin: máy chưa có tệp của bản beta) — mỗi câu kiểm riêng
+  const strip = (s) => { const m = s.match(/<span class="bh-any">([\s\S]*?)<\/span><span class="bh-nowin">/); return (m ? m[1] : s).replace(/<[^>]+>/g, ''); };
   assert.strictEqual(strip(vi), '🧪 Hoặc thử bản thử nghiệm 0.16.0-beta.2.8 →');
   assert.strictEqual(strip(D.en['beta.2']), '🧪 Or try the test version 0.16.0-beta.2.8 →'); assert.strictEqual(strip(D.zh['beta.2']), '🧪 或者试试测试版 0.16.0-beta.2.8 →');
   for (const t of [vi, D.en['beta.2'], D.zh['beta.2']]) assert.strictEqual((strip(t).match(/beta/gi) || []).length, 1, t);
