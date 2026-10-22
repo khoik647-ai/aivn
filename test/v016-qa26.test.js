@@ -111,3 +111,27 @@ test('B121: phát hiện ABM_GETSTATE → StuckRects3; toạ độ vật lý; b�
   assert.match(s, /trong dải đáy \$\{band\} px của màn hình \$\{b\.width\}×\$\{b\.height\} nhưng thanh tác vụ không tự ẩn/);
   assert.ok(!/displayBoundsAt\(x, y\); const ny = TB\.safeY/.test(s), 'không còn dùng khung DIP cho điểm bấm vật lý');
 });
+
+// ---------- B122: open_chat xong phải xoá ô tìm kiếm và kiểm đã trống ----------
+test('B122 (mã): open_chat gọi clearChatSearch sau khi đã mở đúng chat; kiểm lại ô tìm kiếm + tiêu đề; ghi log B122', () => {
+  const s = src('src/desktop-agent.js');
+  assert.match(s, /async function clearChatSearch\(rcp, note, ctx\)/);
+  assert.match(s, /const sc = await clearChatSearch\(rcp, note, ctx\);/);
+  assert.match(s, /SV\.searchLeftover\(s\.obs\) \|\| SV\.searchClose\(s\.obs\)/);
+  assert.match(s, /B122: sau open_chat/);
+});
+const { spawnSync } = require('child_process'); const os = require('os');
+const hasX = spawnSync('which', ['xvfb-run']).status === 0 && fs.existsSync(path.join(__dirname, '..', 'node_modules/.bin/electron'));
+test('B122 (Electron, chat giả giữ chữ tìm như Zalo): sau open_chat ô tìm kiếm TRỐNG, nút Đóng ẩn, vẫn đúng chat, màn hình trả về là màn hình mới', { skip: !hasX && 'cần xvfb-run + electron', timeout: 300000 }, () => {
+  const root = path.join(__dirname, '..'); const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b122-')); const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b122-ud-'));
+  const env = Object.assign({}, process.env, { AIVN_USER_DATA: ud, AIVN_SKIP_ACTIVATION: '1', AIVN_QA_B21: dir, AIVN_DESK_AUTO: '1', AIVN_QA_B21_MODE: 'b122' });
+  const r = spawnSync('timeout', ['280', 'xvfb-run', '-a', '-s', '-screen 0 1280x800x24', path.join(root, 'node_modules/.bin/electron'), '.', '--no-sandbox', '--user-data-dir=' + ud], { cwd: root, encoding: 'utf8', env });
+  const f = path.join(dir, 'qab21.json'); assert.ok(fs.existsSync(f), 'không chạy xong: ' + (r.stderr || '').slice(-800));
+  const d = JSON.parse(fs.readFileSync(f, 'utf8')); assert.ok(!d.error, d.error);
+  const st = d.steps[0]; assert.match(st.forModel, /Đã mở cuộc trò chuyện với “Trần Quỳnh Anh”/);
+  assert.strictEqual(d.domQ, '', 'ô tìm kiếm phải trống'); assert.strictEqual(d.closeHidden, true); assert.strictEqual(d.searchCleared, true);
+  assert.strictEqual(d.final.cur, 'Trần Quỳnh Anh'); assert.deepStrictEqual(d.final.sent, []);
+  assert.match(st.forModel, /đã kiểm: ô tìm kiếm trống/);
+  assert.doesNotMatch(st.forModel.split('Màn hình bây giờ')[1] || '', /Đóng/, 'màn hình trả cho mô hình phải là màn hình SAU khi xoá');
+  assert.match(fs.readFileSync(path.join(ud, 'logs', 'aivn.log'), 'utf8'), /B122: sau open_chat “Trần Quỳnh Anh”: ô tìm kiếm đã trống/);
+});

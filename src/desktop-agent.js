@@ -574,6 +574,26 @@ function createDesktopAgent(deps) {
   const ocNext = (q) => !SV.msgSend(q) && !SV.quotedIn(q).length ? 'Việc chỉ là MỞ cuộc trò chuyện: ĐÃ XONG. KHÔNG gõ gì, KHÔNG gửi gì — trả lời người dùng là đã mở.' : `Bước tiếp: type_text ĐÚNG nội dung tin người dùng đã nêu (không kèm element, không tự thêm lời chào)${DRAFT_SEND.test(q) ? ', KHÔNG submit' : ', submit: true'}.`;
   // B108: việc gửi tin mà mô hình định gõ/gửi chữ KHÔNG có trong yêu cầu → hỏi người dùng nội dung chính xác (không tự bịa, không đoán)
   const askText = (q) => { const r = SV.recipientOf(q); return `Bạn muốn gửi chính xác nội dung gì${r ? ` cho “${r}”` : ''}? Mình chỉ gửi đúng chữ bạn đưa (ví dụ: gửi tin "…"${r ? ` cho ${r}` : ''}), không tự viết thêm.`; };
+  // B122: xoá chữ còn trong ô tìm kiếm sau khi đã mở đúng cuộc trò chuyện; kiểm lại: không còn nút “Đóng”/chữ sót; tiêu đề vẫn đúng
+  async function clearChatSearch(rcp, note, ctx) {
+    const s = session; if (!s) return { cleared: false };
+    const dirty = () => SV.searchLeftover(s.obs) || SV.searchClose(s.obs); let screen = null;
+    try {
+      if (!dirty()) { note('ô tìm kiếm đã trống'); return { cleared: true, already: true }; }
+      for (let i = 0; i < 2 && dirty(); i++) {
+        const close = SV.searchClose(s.obs); const left = SV.searchLeftover(s.obs);
+        await refocus();
+        if (close && i === 0) { await performAt('click', close.x, close.y, { __el: null, __q: 'Đóng', __notSend: true }); note('bấm “Đóng” cạnh ô tìm kiếm để xoá chữ tìm'); }
+        else { if (left && Array.isArray(left.b)) await performAt('click', left.b[0] + Math.min(left.b[2] / 2, 30), left.b[1] + left.b[3] / 2, { __el: left, __q: left.name, __notSend: true }); await clearFocused(); SC.libnut().keyTap('escape'); note('xoá chữ trong ô tìm kiếm (chọn hết + xoá + Esc)'); }
+        await sleep(350); const o = await observe(ctx || s.ctx, { ocr: 'auto', thumb: false }); screen = o && o.text ? o.text : screen;
+      }
+      const left = dirty(); const R = SV.regionsOf(s.obs); const still = SV.chatShown(rcp, s.obs && s.obs.win ? s.obs.win.title : '', R ? R.header : [], s.aliases);
+      s.searchMode = null; s.inSearch = null;
+      note(left ? `ô tìm kiếm vẫn còn chữ “${String(left.name || left.value || '').slice(0, 30)}”` : `đã kiểm: ô tìm kiếm trống${still ? ', khung chat vẫn là “' + rcp + '”' : ''}`);
+      deps.log && deps.log('desk', `B122: sau open_chat “${rcp}”: ô tìm kiếm ${left ? 'VẪN còn chữ' : 'đã trống'}; tiêu đề ${still ? 'vẫn đúng' : 'chưa đọc lại được'}`);
+      return { cleared: !left, chatStill: !!still, screen };
+    } catch (e) { note('chưa xoá được ô tìm kiếm: ' + String(e.message || e).split('\n')[0]); return { cleared: false }; }
+  }
   async function openChat(a, ctx) {
     const s = await begin(ctx); const q = ctx && ctx.userQuery ? String(ctx.userQuery) : '';
     const rcp = q ? SV.recipientOf(q) || (SV.CURRENT_CHAT.test(q) ? null : null) : null;
@@ -608,7 +628,9 @@ function createDesktopAgent(deps) {
     const hit = { ...s.foundHit }; r = await act({ action: 'click', element: hit.id || rcp }, ctx); note(`bấm kết quả “${hit.name || rcp}”`);
     const ok = /Đã mở cuộc trò chuyện với/.test(String(r && r.forModel || ''));
     if (!ok) return { forModel: `${r && r.forModel ? r.forModel : ''}\nopen_chat: đã bấm kết quả nhưng CHƯA xác nhận được tiêu đề là “${rcp}”. KHÔNG gõ nội dung; quan sát lại (screen_look) hoặc báo người dùng.`, summary: `chưa xác nhận mở “${rcp}”` };
-    return { forModel: `Đã mở cuộc trò chuyện với “${rcp}” (đã kiểm tiêu đề). Các bước: ${steps.join('; ')}. ${ocNext(q)}\n${String(r.forModel || '').split('\n').slice(2).join('\n')}`, summary: `đã mở “${rcp}”` };
+    // B122 (máy thật beta.2.6): mở chat xong, ô tìm kiếm vẫn còn “Cloud của tôi” + bảng kết quả → xoá ô tìm kiếm (nút Đóng/X, hoặc chọn hết + xoá + Esc) và KIỂM ô đã trống
+    const sc = await clearChatSearch(rcp, note, ctx);
+    return { searchCleared: sc.cleared, forModel: `Đã mở cuộc trò chuyện với “${rcp}” (đã kiểm tiêu đề). Các bước: ${steps.join('; ')}. ${ocNext(q)}\n${sc.screen ? 'Màn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n' + sc.screen : String(r.forModel || '').split('\n').slice(2).join('\n')}`, summary: `đã mở “${rcp}”${sc.cleared ? '' : ' (ô tìm kiếm chưa xoá được)'}` };
   }
   // B86 (máy thật): chữ ký bước cho bộ chặn chu kỳ — phần tử THẬT đã nhắm (loại + tên, không phải id), chữ THẬT đã gõ (sau khi thay), và dấu vân tay màn hình sau thao tác
   const screenHash = (obs) => { try { const names = (obs && obs.elements || []).map(e => U.fold(String(e.name || e.value || '')).replace(/\d+/g, '#').trim()).filter(Boolean).sort();

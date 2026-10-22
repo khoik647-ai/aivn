@@ -174,6 +174,8 @@ test('ensure_app thật (Electron + Xvfb + xfwm4, Zalo giả): bị che → đư
   assert.ok(st['ensure-minimized'].ok && st['ensure-minimized'].how === 'restored', JSON.stringify(st['ensure-minimized']));
   assert.match(st['ensure-openchat'].forModel, /Zalo: đã đưa lên trước|Zalo: đã ở trước/, 'open_chat phải chạy ensure_app trước');
   assert.deepStrictEqual(d.final.sent, [], 'không gửi gì khi chưa xác nhận người nhận');
+  // B122: fake Zalo giữ chữ tìm sau khi mở chat (như máy thật) → open_chat phải xoá ô tìm kiếm và kiểm đã trống
+  const oc = st['ensure-openchat']; if (oc.ok && /đã mở/.test(oc.summary)) { assert.strictEqual(oc.state.q || '', '', 'B122: ô tìm kiếm phải trống sau open_chat: ' + JSON.stringify(oc)); assert.ok(oc.steps == null || true); assert.match(fs.readFileSync(path.join(ud, 'logs', 'aivn.log'), 'utf8'), /B122: sau open_chat “My Documents”: ô tìm kiếm đã trống/); }
   assert.ok(!st['ensure-hidden'].ok && st['ensure-hidden'].code && st['ensure-hidden'].ms < 10000, JSON.stringify(st['ensure-hidden']));
   const log = fs.readFileSync(path.join(ud, 'logs', 'aivn.log'), 'utf8'); assert.match(log, /ensure_app Zalo: SẴN SÀNG sau/);
 });

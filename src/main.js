@@ -2256,7 +2256,7 @@ async function qaB21() {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const out = { steps: [] }; const save = () => fs.writeFileSync(path.join(dir, 'qab21.json'), JSON.stringify(out, null, 2));
   // B27 (QA lượt 4): AIVN_QA_B21_MODE=telegram — Telegram giả, “Trần Quỳnh Như” (bẫy) mở sẵn; tiêu đề cửa sổ “Telegram - <tên>”
-  const tg = ['telegram', 'openchat', 'b69'].includes(process.env.AIVN_QA_B21_MODE); const APP = tg ? 'Telegram' : 'Messenger';
+  const tg = ['telegram', 'openchat', 'b69', 'b122'].includes(process.env.AIVN_QA_B21_MODE); const APP = tg ? 'Telegram' : 'Messenger';
   const html0 = `<!doctype html><meta charset="utf-8"><title>Nhóm Lớp K27 | Messenger</title>
 <style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:340px 1fr;height:100vh}#left{border-right:1px solid #ccc;padding:10px}#search{width:300px;font-size:22px;padding:6px}
 .it{padding:14px 8px;cursor:pointer}#right{display:flex;flex-direction:column}#hdr{font-weight:bold;padding:16px;border-bottom:1px solid #ccc}#msgs{flex:1;padding:16px}#comp{font-size:22px;margin:12px;padding:8px}</style>
@@ -2272,9 +2272,13 @@ document.getElementById('search').addEventListener('input', e => list(e.target.v
 document.getElementById('search').addEventListener('keydown', e => { if (e.key === 'Enter') { S.searches.push(e.target.value); list(e.target.value); } });
 list(''); open('Nhóm Lớp K27');
 </script>`;
-  const html = ['k1', 'b64slow'].includes(process.env.AIVN_QA_B21_MODE) ? html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm trên Messenger</label><input id="search"') : !tg ? html0 : html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm</label><input id="search"').replace('<title>Nhóm Lớp K27 | Messenger</title>', '<title>Telegram - Trần Quỳnh Như</title>').replace(/Tìm kiếm trên Messenger/g, 'Tìm kiếm')
+  let html = ['k1', 'b64slow'].includes(process.env.AIVN_QA_B21_MODE) ? html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm trên Messenger</label><input id="search"') : !tg ? html0 : html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm</label><input id="search"').replace('<title>Nhóm Lớp K27 | Messenger</title>', '<title>Telegram - Trần Quỳnh Như</title>').replace(/Tìm kiếm trên Messenger/g, 'Tìm kiếm')
     .replace("const chats = ['Nhóm Lớp K27', 'Trần Quỳnh Anh', 'Lê Quỳnh Anh']", "const chats = ['Trần Quỳnh Như', 'Nhóm Lớp K27', 'Trần Quỳnh Anh']")
     .replace("document.title = c + ' | Messenger'", "document.title = 'Telegram - ' + c").replace("list(''); open('Nhóm Lớp K27');", "list(''); open('Trần Quỳnh Như');");
+  // B122: như Zalo thật — mở chat xong ô tìm kiếm VẪN còn chữ; nút “Đóng” hiện khi ô có chữ, bấm (hoặc Esc) mới xoá
+  if (process.env.AIVN_QA_B21_MODE === 'b122') html = html.replace("document.getElementById('search').value = ''; list(''); document.getElementById('comp').focus(); }", "document.getElementById('comp').focus(); }\nfunction clr() { const q = document.getElementById('search'); q.value = ''; S.q = ''; list(''); document.getElementById('cl').hidden = true; S.cleared = (S.cleared || 0) + 1; }")
+    .replace('<div id="list"></div>', '<button id="cl" hidden onclick="clr()" style="font-size:20px;border:0;background:none">Đóng</button><div id="list"></div>').replace('#search{width:300px;', '#search{width:220px;')
+    .replace("document.getElementById('search').addEventListener('input', e => list(e.target.value));", "document.getElementById('search').addEventListener('input', e => { list(e.target.value); S.q = e.target.value; document.getElementById('cl').hidden = !e.target.value; }); document.getElementById('search').addEventListener('keydown', e => { if (e.key === 'Escape') clr(); });");
   const t = new BrowserWindow({ x: 40, y: 40, width: 1000, height: 600, show: true, title: APP, webPreferences: { contextIsolation: true } });
   await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)); t.focus(); t.webContents.focus(); await sleep(700);
   const st = () => t.webContents.executeJavaScript('JSON.parse(JSON.stringify(S))');
@@ -2293,6 +2297,11 @@ list(''); open('Nhóm Lớp K27');
       await step('k1-type-stale', { action: 'type_text', element: idK27 || 'Nhóm Lớp K27', text: 'Trần Quỳnh Anh', submit: true });
       await step('k1-click-result', { action: 'click', element: 'Trần Quỳnh Anh' });
       await step('k1-send', { action: 'type_text', text: 'Mai 8h họp nhóm nhé', submit: true });
+      out.final = await st(); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'b122') { // B122 (máy thật beta.2.6): open_chat bấm kết quả xong phải xoá ô tìm kiếm và kiểm đã trống
+      const t0 = Date.now(); const r = await step('b122-open', { action: 'open_chat', window: 'Telegram' }); out.openMs = Date.now() - t0; out.searchCleared = r.r && r.r.searchCleared;
+      out.domQ = await t.webContents.executeJavaScript("document.getElementById('search').value"); out.closeHidden = await t.webContents.executeJavaScript("document.getElementById('cl').hidden");
       out.final = await st(); throw null;
     }
     if (process.env.AIVN_QA_B21_MODE === 'b69') { // B69/B70: KHÔNG có câu “không cần hỏi lại” → bước gửi phải hỏi; gửi xong không bao giờ gửi lại
@@ -2516,11 +2525,12 @@ comp.addEventListener('focus',()=>{if(TRAP)setTimeout(()=>q.focus(),0)});q.addEv
     }
     if (process.env.AIVN_QA_B21_MODE === 'ensure') { // ensure_app: Zalo giả bị cửa sổ khác che → đưa lên + chờ sẵn sàng; open_chat dùng lại; cửa sổ ẩn → lỗi rõ, không treo
       const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:240px 1fr;height:100vh}#l{border-right:1px solid #ccc;padding:8px}#q{width:200px;font-size:20px;padding:5px}.it{padding:10px 4px;cursor:pointer}#c{display:flex;flex-direction:column}#h{font-weight:bold;padding:12px 16px;border-bottom:1px solid #ccc}#m{flex:1;padding:16px}#comp{font-size:20px;margin:10px;padding:8px}</style>
-<div id=l><input id=q placeholder="Tìm kiếm"><div id=list></div></div><div id=c><div id=h></div><div id=m></div><input id=comp placeholder="Nhập tin nhắn"></div>
+<div id=l><input id=q placeholder="Tìm kiếm"><button id=cl hidden>Đóng</button><div id=list></div></div><div id=c><div id=h></div><div id=m></div><input id=comp placeholder="Nhập tin nhắn"></div>
 <script>const chats=['Nhóm Lớp K27','My Documents','Trần Văn Bình'];window.S={cur:'',sent:[]};const fold=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').toLowerCase();
 function list(f){const el=document.getElementById('list');el.innerHTML='';for(const c of chats.filter(c=>!f||fold(c).includes(fold(f)))){const d=document.createElement('div');d.className='it';d.textContent=c;d.onclick=()=>open(c);el.appendChild(d);}}
-function open(n){S.cur=n;h.textContent=n;document.title='Zalo';m.innerHTML='';q.value='';list('');comp.focus();}
-comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sent.push({to:S.cur,text:comp.value});comp.value='';}});q.addEventListener('input',()=>list(q.value));document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.key.toLowerCase()==='f'){e.preventDefault();q.focus();}});list('');open('Nhóm Lớp K27');</script>`;
+function open(n){S.cur=n;h.textContent=n;document.title='Zalo';m.innerHTML='';comp.focus();} /* B122: như Zalo thật — mở chat xong ô tìm kiếm VẪN còn chữ + nút Đóng */
+function clr(){q.value='';S.q='';list('');cl.hidden=true;}cl.onclick=clr;q.addEventListener('keydown',e=>{if(e.key==='Escape')clr();});
+comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sent.push({to:S.cur,text:comp.value});comp.value='';}});q.addEventListener('input',()=>{list(q.value);S.q=q.value;cl.hidden=!q.value;});document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.key.toLowerCase()==='f'){e.preventDefault();q.focus();}});list('');open('Nhóm Lớp K27');</script>`;
       await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(zh)); t.setTitle('Zalo'); await sleep(500);
       const cover = new BrowserWindow({ x: 20, y: 20, width: 1100, height: 700, show: true, title: 'Ghi chú - che Zalo', webPreferences: { contextIsolation: true } });
       await cover.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<title>Ghi chú - che Zalo</title><body style="font:30px sans-serif">Cửa sổ khác đang che Zalo</body>')); cover.focus(); await sleep(600);
