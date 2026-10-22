@@ -400,12 +400,13 @@
             </div>
             <div class="set-card">
               <label>Runtime cho mô hình nhìn ảnh / mắt nhìn
-                <select id="rtPref" data-testid="runtime-pref"><option value="auto">Tự động (CUDA nếu đã tải và có GPU NVIDIA)</option><option value="cuda">Luôn thử CUDA</option><option value="bundled">Bản đi kèm (Vulkan / Metal / CPU)</option></select>
+                <select id="rtPref" data-testid="runtime-pref"><option value="auto">Mặc định: bản đi kèm (Vulkan / Metal / CPU) — khuyên dùng</option><option value="cuda">CUDA (tuỳ chọn, cần tải runtime CUDA và GPU NVIDIA)</option><option value="bundled">Bản đi kèm (Vulkan / Metal / CPU)</option></select>
               </label>
               <p class="small muted">Chỉ dùng CPU: tắt “Tăng tốc bằng GPU” ở thẻ Phần cứng &amp; bộ máy. Trò chuyện chữ (không ảnh) luôn dùng bộ máy node-llama-cpp đi kèm.</p>
             </div>
             <div class="set-card">
               <h4>CUDA 12.4 cho GPU NVIDIA</h4>
+              <p class="small muted" data-testid="runtime-cuda-note">Tuỳ chọn. Đo trên RTX 4070 SUPER với Qwen3-VL 8B: CUDA sinh chữ nhanh ngang Vulkan (86,0 so với 86,4 token/giây), đọc câu hỏi ngắn nhanh hơn một chút, ảnh lớn lúc nhanh lúc chậm hơn. Vì vậy AIVN mặc định dùng Vulkan đi kèm; chỉ tải CUDA nếu bạn muốn tự thử.</p>
               <div class="small" id="rtCuda" data-testid="runtime-cuda">Đang kiểm tra…</div>
               <progress id="rtProg" max="1" value="0" hidden data-testid="runtime-progress"></progress>
               <div class="row">

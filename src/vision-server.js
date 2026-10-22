@@ -52,16 +52,43 @@ const LIVE = new Set(); const HOOKS = { spawn: null, exit: null }; // HOOKS: ch�
 function killAllSync() { for (const p of LIVE) { try { p.kill('SIGKILL'); } catch {} } LIVE.clear(); }
 class VisionError extends Error { constructor(msg, code) { super(msg); this.code = code; } }
 
+// B107: thiết bị của llama-server: `llama-server --list-devices` in “CUDA0: NVIDIA GeForce RTX 4070 SUPER (12281 MiB, 11071 MiB free)”
+function parseDevices(text) {
+  const out = [];
+  for (const l of String(text || '').split(/\r?\n/)) { const m = /^\s*((?:CUDA|Vulkan|Metal|ROCm|SYCL|CPU)\d*)\s*:\s*(.+?)\s*(?:\((\d+)\s*MiB(?:,\s*(\d+)\s*MiB free)?\))?\s*$/i.exec(l); if (m) out.push({ id: m[1], name: m[2].trim(), totalMiB: m[3] ? +m[3] : null, freeMiB: m[4] ? +m[4] : null }); }
+  return out;
+}
+const devCache = new Map();
+function listDevices(exe, { timeoutMs = 20000 } = {}) {
+  let st = null; try { st = fs.statSync(exe); } catch { return Promise.resolve({ ok: false, cuda: [], all: [], error: 'không thấy ' + exe }); }
+  const key = `${exe}|${st.mtimeMs}|${st.size}`; if (devCache.has(key)) return devCache.get(key);
+  const p = new Promise((resolve) => {
+    require('child_process').execFile(exe, ['--list-devices'], { cwd: path.dirname(exe), timeout: timeoutMs, windowsHide: true, maxBuffer: 1 << 20 }, (e, out, err) => {
+      const all = parseDevices(`${out || ''}\n${err || ''}`);
+      if (e && !all.length) return resolve({ ok: false, cuda: [], all, error: String(e.message || e).split('\n')[0] });
+      resolve({ ok: true, cuda: all.filter(d => /^CUDA\d+$/i.test(d.id)), all });
+    });
+  });
+  devCache.set(key, p); p.then(r => { if (!r.ok) devCache.delete(key); }); return p;
+}
+
 function createVisionServer({ log = () => {} } = {}) {
   let proc = null, port = 0, key = '', info = null, tail = [];
 
   // Runtime CUDA tải riêng (runtimes.js): thử trước; lỗi khởi động hoặc không thấy GPU NVIDIA → tự quay về bản đi kèm (Vulkan) và ghi lý do
+  // B107 (máy thật beta.2.5): llama.cpp b11751 ở mức log mặc định KHÔNG in “ggml_cuda_init/using device CUDA0” → trước đây luôn coi là
+  // “không thấy GPU NVIDIA”, nạp lại bằng Vulkan (thời gian nạp gấp đôi). Nay chọn CUDA theo `llama-server --list-devices` (không phụ thuộc mức log);
+  // không thấy thiết bị CUDA nào → dùng ngay bản đi kèm, không nạp hai lần. Dòng log chỉ còn là tín hiệu phụ khi không dò được.
   async function start(o) {
     let fallback = null;
     if (o.serverExe && o.gpu !== false && fs.existsSync(o.serverExe)) {
-      try {
+      const dev = await (o.listDevices || listDevices)(o.serverExe);
+      if (dev.ok && !dev.cuda.length) { fallback = 'runtime CUDA: --list-devices không thấy GPU NVIDIA nào'; log(`[vision] ${fallback} → dùng bản đi kèm (Vulkan)`); }
+      else try {
+        if (dev.ok) log(`[vision] --list-devices: ${dev.cuda.map(d => d.name).join(', ')}`);
         await startOn(o.serverExe, o, 'cuda');
-        if (!cudaSeen) throw new VisionError('runtime CUDA không thấy GPU NVIDIA nào', 'CUDA_NO_DEVICE');
+        if (!dev.ok && !cudaSeen) throw new VisionError('runtime CUDA không thấy GPU NVIDIA nào', 'CUDA_NO_DEVICE');
+        if (info) info.cudaDevices = dev.ok ? dev.cuda : null;
         return { runtime: 'cuda', runtimeFallback: null };
       } catch (e) {
         if (e.code === 'TIMEOUT') throw e;
@@ -82,6 +109,7 @@ function createVisionServer({ log = () => {} } = {}) {
     port = await freePort(); key = crypto.randomBytes(18).toString('hex'); tail = []; cudaSeen = false;
     const args = ['-m', modelPath, ...(mmprojPath ? ['--mmproj', mmprojPath] : []), ...(process.env.AIVN_TEST_CHAT_TEMPLATE ? ['--chat-template-file', process.env.AIVN_TEST_CHAT_TEMPLATE] : []), '--host', '127.0.0.1', '--port', String(port), '--api-key', key,
       '-c', String(contextSize), '-np', '1', '--no-webui', '--offline', '--jinja'];
+    args.push('-lv', '4'); // B107: in “offloaded N/M layers to GPU” + thiết bị dùng (b11751 chỉ in ở mức 4) → gpuLayers/totalLayers có giá trị
     if (!gpu) args.push('-ngl', '0', ...(mmprojPath ? ['--no-mmproj-offload'] : []));
     if (Number(threads) > 0) args.push('-t', String(Math.round(threads)), '-tb', String(Math.round(threads)));
     if (Number(batchSize) > 0) args.push('-b', String(Math.min(Math.round(batchSize), contextSize)));
@@ -245,4 +273,4 @@ function createVisionServer({ log = () => {} } = {}) {
   return { start, stop, generate, chatStep, countTokens, status: () => info, available: () => !!findServer() };
 }
 
-module.exports = { sseParser, createVisionServer, findServer, VisionError, killAllSync, LIVE, HOOKS };
+module.exports = { sseParser, createVisionServer, findServer, VisionError, killAllSync, LIVE, HOOKS, parseDevices, listDevices };

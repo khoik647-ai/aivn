@@ -59,9 +59,10 @@ function createRuntimes({ dir, platform = process.platform, arch = process.arch,
   async function pick(pref = 'auto') {
     const p = PREFS.includes(pref) ? pref : 'auto';
     if (p === 'bundled') return { exe: null, runtime: 'bundled', why: 'đã chọn bản đi kèm' };
-    if (!installed()) return { exe: null, runtime: 'bundled', why: p === 'cuda' ? 'chưa tải runtime CUDA' : '' };
-    if (failed && p === 'auto') return { exe: null, runtime: 'bundled', why: `CUDA lỗi lần trước: ${failed}` };
-    const g = await nvidia(); if (!g && p === 'auto') return { exe: null, runtime: 'bundled', why: 'không thấy GPU NVIDIA' };
+    // B107: QA đo trên RTX 4070 SUPER (Qwen3-VL 8B, b11751): CUDA ≈ Vulkan khi sinh chữ (86,0 / 86,4 tok/s) → MẶC ĐỊNH là bản đi kèm (Vulkan);
+    // CUDA chỉ dùng khi người dùng chọn “CUDA” (tuỳ chọn) trong thẻ Runtime
+    if (p === 'auto') return { exe: null, runtime: 'bundled', why: '' };
+    if (!installed()) return { exe: null, runtime: 'bundled', why: 'chưa tải runtime CUDA' };
     return { exe: exe(), runtime: 'cuda', why: '' };
   }
   function markFailed(reason) { failed = String(reason || 'lỗi').slice(0, 200); log(`[runtime] CUDA lỗi → dùng bản đi kèm cho tới khi mở lại AIVN: ${failed}`); }

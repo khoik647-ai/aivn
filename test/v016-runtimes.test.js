@@ -20,16 +20,16 @@ test('driver threshold + status: no NVIDIA / old driver / non-Windows', async ()
   assert.equal(s.size, 271945179 + 391443627);
 });
 
-test('pick: bundled until installed; failure in auto mode falls back for the session', async () => {
+test('pick: B107 — auto = bundled Vulkan (default, even with CUDA installed); CUDA only when chosen', async () => {
   const dir = tmp();
   const r = R.createRuntimes({ dir, platform: 'win32', arch: 'x64', nvidiaSmi: smi('RTX, 581.57, 8192') });
   assert.deepEqual((await r.pick('auto')).runtime, 'bundled');
   assert.match((await r.pick('cuda')).why, /chưa tải/);
   const bin = path.join(dir, 'cuda12', 'bin'); fs.mkdirSync(bin, { recursive: true }); fs.writeFileSync(path.join(bin, 'llama-server.exe'), 'x');
   fs.writeFileSync(path.join(dir, 'cuda12', 'runtime.json'), JSON.stringify({ build: R.BUILD }));
-  assert.equal((await r.pick('auto')).runtime, 'cuda'); assert.equal((await r.pick('bundled')).runtime, 'bundled');
+  assert.equal((await r.pick('auto')).runtime, 'bundled', 'B107: Vulkan is the default'); assert.equal((await r.pick('cuda')).runtime, 'cuda'); assert.equal((await r.pick('bundled')).runtime, 'bundled');
   r.markFailed('no CUDA device');
-  assert.equal((await r.pick('auto')).runtime, 'bundled'); assert.match((await r.pick('auto')).why, /CUDA lỗi/);
+  assert.equal((await r.pick('auto')).runtime, 'bundled');
   assert.equal((await r.pick('cuda')).runtime, 'cuda', 'explicit CUDA choice still tries (user asked for it)');
   fs.writeFileSync(path.join(dir, 'cuda12', 'runtime.json'), JSON.stringify({ build: 'b1' }));
   assert.equal(r.installed(), null, 'stale build stamp = not installed');
@@ -64,6 +64,6 @@ test('install from the real b11751 CUDA 12.4 packages (local fetch)', { skip: !R
   assert.equal(fs.statSync(path.join(dir, 'cuda12', 'bin', 'ggml-cuda.dll')).size, 577119744);
   assert.ok(!fs.existsSync(path.join(dir, 'cuda12', '.dl')), 'zips removed after install');
   assert.ok(r.installed()); assert.ok(ticks > 10);
-  assert.equal((await r.pick('auto')).exe, path.join(dir, 'cuda12', 'bin', 'llama-server.exe'));
+  assert.equal((await r.pick('cuda')).exe, path.join(dir, 'cuda12', 'bin', 'llama-server.exe')); assert.equal((await r.pick('auto')).exe, null);
   fs.rmSync(dir, { recursive: true, force: true });
 });
