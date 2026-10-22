@@ -691,7 +691,8 @@ function progLabel(p) {
   if (p.stage === 'wait-asr') return 'chờ tải bộ nghe…';
   return '';
 }
-A.onFilesProgress((p) => { const it = pending.find(a => a.loading && a.path === p.path); if (!it) return; it.prog = p.stage === 'done' ? null : p; renderChips(); });
+// sự kiện tiến độ đến muộn (stage 'done' sau khi đã trả kết quả) không được xoá nhãn “chờ tải bộ nghe…”
+A.onFilesProgress((p) => { const it = pending.find(a => a.loading && a.path === p.path); if (!it || (it.prog && it.prog.stage === 'wait-asr')) return; it.prog = p.stage === 'done' ? null : p; renderChips(); });
 const IMG_EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
 const OCR_NOTE = 'Mô hình hiện tại không nhìn được ảnh, AIVN đã đọc chữ trong ảnh';
 const VISION_NOTE = 'Mô hình nhìn ảnh trực tiếp';

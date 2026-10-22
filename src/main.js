@@ -1873,7 +1873,8 @@ async function qaMedia() {
     await js(`localStorage.setItem('aivn.onboarded', '1'); document.querySelector('#onboard') && (document.querySelector('#onboard').hidden = true)`);
     const files = String(process.env.AIVN_QA_MEDIA_FILES || '').split(path.delimiter).filter(Boolean);
     if (process.env.AIVN_QA_MEDIA_NOASR === '1') {
-      await js(`addFiles(${JSON.stringify(files.slice(0, 1))})`);
+      // không chờ promise: addFiles chờ người dùng trả lời hộp hỏi tải → executeJavaScript sẽ treo tới khi bấm (treo test 900 s)
+      await js(`void addFiles(${JSON.stringify(files.slice(0, 1))}).catch(e => console.warn('addFiles', e && e.message)); 0`);
       out.modalShown = await until(`!document.querySelector('#confirmModal').hidden`, 20000);
       out.modal = await js(`({ title: document.querySelector('#cfTitle').textContent, msg: document.querySelector('#cfMsg').textContent, ok: document.querySelector('#cfYes').textContent, no: document.querySelector('#cfNo').textContent, chip: (document.querySelector('#chips .chip .sz') || {}).textContent || '' })`);
       fs.writeFileSync(path.join(dir, 'noasr-modal.png'), (await wc.capturePage()).toPNG());

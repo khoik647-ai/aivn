@@ -42,17 +42,17 @@ test('đóng gói: bộ nghe tạo bằng build/media-bundle.cjs (không đưa .
 
 const hasX = spawnSync('which', ['xvfb-run']).status === 0 && fs.existsSync(path.join(ROOT, 'node_modules/.bin/electron'));
 const vendor = fs.existsSync(path.join(ROOT, 'src/media/vendor/asr-bundle.mjs'));
-const run = (env) => {
+const run = (env, secs = 900) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-qamedia-'));
-  const r = spawnSync('timeout', ['900', 'xvfb-run', '-a', '-s', '-screen 0 1366x860x24', path.join(ROOT, 'node_modules/.bin/electron'), '.', '--no-sandbox'], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, AIVN_SKIP_ACTIVATION: '1', AIVN_QA_MEDIA: dir, ...env } });
+  const r = spawnSync('timeout', [String(secs), 'xvfb-run', '-a', '-s', '-screen 0 1366x860x24', path.join(ROOT, 'node_modules/.bin/electron'), '.', '--no-sandbox'], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, AIVN_SKIP_ACTIVATION: '1', AIVN_QA_MEDIA: dir, ...env } });
   const f = path.join(dir, 'qamedia.json'); assert.ok(fs.existsSync(f), 'QA âm thanh/video không chạy xong: ' + (r.stderr || '').slice(-800));
   const d = JSON.parse(fs.readFileSync(f, 'utf8')); assert.ok(!d.error, d.error); return d;
 };
 test('giao diện thật: chưa có bộ nghe → hỏi tải (dung lượng, chạy trên máy), "Để sau" bỏ tệp', { skip: (!hasX && 'cần xvfb-run + electron') || (!vendor && 'chưa chạy build/media-bundle.cjs') }, () => {
   const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-qamedia-ud-'));
-  const d = run({ AIVN_USER_DATA: ud, AIVN_QA_MEDIA_NOASR: '1', AIVN_QA_MEDIA_FILES: path.join(__dirname, 'fixtures/media/im-lang.webm') });
+  const d = run({ AIVN_USER_DATA: ud, AIVN_QA_MEDIA_NOASR: '1', AIVN_QA_MEDIA_FILES: path.join(__dirname, 'fixtures/media/im-lang.webm') }, 120); // không cần mô hình: treo = lỗi, không chờ 900 s
   assert.strictEqual(d.installed, false); assert.ok(d.modalShown);
-  assert.strictEqual(d.modal.title, 'Tải bộ nghe để chép lời âm thanh/video?'); assert.match(d.modal.msg, /"im-lang\.webm".*Whisper \(72\d\.\d MB, chỉ tải một lần\).*không gửi tệp đi đâu/);
+  assert.strictEqual(d.modal.title, 'Tải bộ nghe để chép lời âm thanh/video?'); assert.match(d.modal.msg, /"im-lang\.webm".*Whisper \(72\d MB, chỉ tải một lần\).*không gửi tệp đi đâu/);
   assert.strictEqual(d.modal.ok, 'Tải bộ nghe'); assert.strictEqual(d.modal.no, 'Để sau'); assert.match(d.modal.chip, /chờ tải bộ nghe/);
   assert.strictEqual(d.chipsAfterNo, 0);
 });
