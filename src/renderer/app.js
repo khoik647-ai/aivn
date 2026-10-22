@@ -360,12 +360,13 @@ async function selectLd(id) {
   pane.innerHTML = `<div class="ld-skel"><div></div><div></div><div></div></div>`;
   const g = await ldMeta(id); if (ld.sel !== id) return;
   ld.form = defaultForm(g); renderLdPane(m, g); ldFoot(); ldEstimate();
+  fillGpuPickers().then(r => { const row = $('#ldGpuDevRow'); if (row) row.hidden = !(r && r.devices && r.devices.length > 1); }).catch(() => {}); // B168
 }
 function renderLdPane(m, g) {
   const f = ld.form; const bad = !g || g.error;
   const max = Math.max(4096, (g && g.trainCtx) || 32768); const steps = ctxSteps(max); const L = g && g.layers ? g.layers + 1 : null;
   const si = steps.reduce((bi, v, i) => Math.abs(v - f.contextSize) < Math.abs(steps[bi] - f.contextSize) ? i : bi, 0);
-  const st = state.status; const cur = m.loaded && st.loaded ? `<div class="ld-cur small">Đang chạy với ngữ cảnh <b>${fmtTok(st.contextSize)}</b> · ${st.gpu ? `GPU <b>${st.gpuLayers ?? '?'}/${st.totalLayers ?? '?'}</b> lớp` : '<b>chỉ CPU</b>'}${st.perf && st.perf.kv ? ` · bộ đệm K/V ${esc(st.perf.kv)}` : ''}</div>` : '';
+  const st = state.status; const cur = m.loaded && st.loaded ? `<div class="ld-cur small">Đang chạy với ngữ cảnh <b>${fmtTok(st.contextSize)}</b> · ${st.gpu ? `GPU <b>${st.gpuLayers ?? '?'}/${st.totalLayers ?? '?'}</b> lớp${st.device ? `<span class="ld-dev"> · ${esc(st.device)}</span>` : ''}` : '<b>chỉ CPU</b>'}${st.perf && st.perf.kv ? ` · bộ đệm K/V ${esc(st.perf.kv)}` : ''}</div>` : '';
   $('#ldPane').innerHTML = `
     <div class="ld-title"><h4 title="${esc(m.file)}">${esc(mName(m))}</h4>
       <div class="ld-chips">${[g && g.arch, g && g.sizeLabel && `${g.sizeLabel} tham số`, g && g.quant, fmtBytes(m.size), g && g.trainCtx && 'tối đa ' + fmtTok(g.trainCtx) + ' token', m.vision && '👁 nhìn ảnh', g && g.templateTools && 'gọi công cụ'].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('')}</div>
@@ -375,7 +376,7 @@ function renderLdPane(m, g) {
       <input type="range" id="ldCtx" min="0" max="${steps.length - 1}" step="1" value="${si}" aria-label="Độ dài ngữ cảnh" aria-valuetext="${fmtTok(f.contextSize)} token">
       <div class="ld-ticks small muted"><span>${fmtTok(steps[0])}</span><span>${fmtTok(max)}</span></div>
       <p class="hint">Số token mô hình nhớ được trong một cuộc trò chuyện. Trò chuyện cần ít nhất 4.096; AIVN AGENT cần ít nhất 8.192. Ngữ cảnh lớn tốn thêm bộ nhớ.</p></section>
-    <section class="ld-sec" id="ldGpuSec"${L ? '' : ' hidden'}><div class="ld-row"><label for="ldGpu">Tăng tốc GPU</label><span class="ld-val"><label class="ld-auto"><input type="checkbox" id="ldGpuAuto" ${f.gpuLayers === 'auto' ? 'checked' : ''}> Tự động</label><input type="number" id="ldGpuN" min="0" max="${L || 999}" value="${f.gpuLayers === 'auto' ? '' : f.gpuLayers}" ${f.gpuLayers === 'auto' ? 'disabled' : ''} aria-label="Số lớp đưa lên GPU"> ${L ? '/ ' + L + ' lớp' : 'lớp'}</span></div>
+    <section class="ld-sec" id="ldGpuSec"${L ? '' : ' hidden'}><div class="ld-row"><label for="ldGpu">Tăng tốc GPU</label><span class="ld-val"><label class="ld-auto"><input type="checkbox" id="ldGpuAuto" ${f.gpuLayers === 'auto' ? 'checked' : ''}> Tự động</label><input type="number" id="ldGpuN" min="0" max="${L || 999}" value="${f.gpuLayers === 'auto' ? '' : f.gpuLayers}" ${f.gpuLayers === 'auto' ? 'disabled' : ''} aria-label="Số lớp đưa lên GPU"> ${L ? '/ ' + L + ' lớp' : 'lớp'}</span></div><div class="ld-row" id="ldGpuDevRow" hidden><label for="ldGpuDev">GPU</label><span class="ld-val"><select id="ldGpuDev" class="gpu-pick" data-testid="ld-gpu-dev"></select></span></div>
       <input type="range" id="ldGpu" min="0" max="${L || 99}" step="1" value="${f.gpuLayers === 'auto' ? (L || 0) : f.gpuLayers}" ${f.gpuLayers === 'auto' ? 'disabled' : ''} aria-label="Số lớp đưa lên GPU">
       <p class="hint" id="ldGpuHint">Đưa càng nhiều lớp lên GPU càng nhanh. Nếu không đủ VRAM, giảm số lớp — phần còn lại chạy bằng CPU và RAM.</p></section>
     <section class="ld-sec ld-mem" id="ldMem" aria-live="polite"${bad ? ' hidden' : ''}><div class="ld-row"><span class="lbl">Ước lượng bộ nhớ</span><span class="ld-verdict" id="ldVerdict">…</span></div><div id="ldBars"></div></section>
@@ -411,14 +412,16 @@ async function ldEstimate() {
   const bar = (label, used, total, note) => { const p = total ? used / total : 0; return `<div class="ld-bar ${lvl(p)}"><div class="ld-bar-h small"><span>${label}</span><span><b>${gb(used)}</b>${total ? ' / ' + gb(total) : ''}${note ? ' · ' + note : ''}</span></div><div class="ld-track"><div style="width:${Math.min(100, p * 100).toFixed(1)}%"></div></div></div>`; };
   const vt = h.vram && h.vram.total || 0; let html = '', worst = 0;
   if (h.unified) { const tot = h.ram || 0; const used = e.vram + e.ram; worst = tot ? used / tot / 0.75 : 0; html = bar('Bộ nhớ hợp nhất (GPU + RAM)', used, tot, 'Apple Metal'); }
-  else { if (h.gpu && vt) { const p = e.vram / vt * 0.9; worst = Math.max(worst, p); html += bar('VRAM' + (h.devices && h.devices[0] ? ' · ' + esc(h.devices[0]) : ''), e.vram, vt, e.gpuLayers + '/' + e.totalLayers + ' lớp'); }
+  else { if (h.gpu && vt) { const p = e.vram / vt * 0.9; worst = Math.max(worst, p); const gname = h.gpuName || (h.devices && h.devices[0]) || ''; html += bar('VRAM' + (gname ? ' · ' + esc(gname) : ''), e.vram, vt, e.gpuLayers + '/' + e.totalLayers + ' lớp'); }
     const rt = h.ram || 0; if (rt) { const p = e.ram / (rt * 0.8); worst = Math.max(worst, p); html += bar('RAM', e.ram, rt, ''); } }
   html += `<div class="small muted ld-kvline">Bộ đệm K/V cho ${fmtTok(f.contextSize)} token: ${gb(e.kv)}${f.kvCache === 'q8_0' ? ' (đã nén Q8_0)' : ''}</div>`;
   $('#ldBars').innerHTML = html;
   const v = $('#ldVerdict'); const l = lvl(worst);
   v.className = 'ld-verdict ' + l; v.textContent = l === 'ok' ? '✓ Vừa với máy của bạn' : l === 'warn' ? '⚠ Sát giới hạn — có thể chậm' : '✕ Có thể không đủ bộ nhớ';
   if (f.gpuLayers === 'auto') { $('#ldGpu').value = e.gpuLayers; $('#ldGpuN').placeholder = String(e.gpuLayers); }
-  const hint = $('#ldGpuHint'); if (hint) hint.textContent = !h.gpu ? 'Không thấy GPU dùng được — mô hình sẽ chạy bằng CPU và RAM.' : f.gpuLayers === 'auto' ? `Tự động: AIVN ước lượng đưa ${e.gpuLayers}/${e.totalLayers} lớp lên GPU (${esc(String(h.gpu).toUpperCase())}) và vẫn giữ đủ ngữ cảnh.` : 'Đưa càng nhiều lớp lên GPU càng nhanh. Nếu không đủ VRAM, giảm số lớp — phần còn lại chạy bằng CPU và RAM.';
+  const gpuLbl = String(h.gpu).toUpperCase() + (h.gpuName ? ' · ' + h.gpuName : ''); // B168: tên GPU thật đang dùng
+  const hint = $('#ldGpuHint'); if (hint) hint.textContent = !h.gpu ? 'Không thấy GPU dùng được — mô hình sẽ chạy bằng CPU và RAM.' : f.gpuLayers === 'auto' ? (e.measured ? `Tự động: lần nạp trước với cùng cài đặt có ${e.gpuLayers}/${e.totalLayers} lớp nằm trên GPU (${esc(gpuLbl)}).` : `Tự động: AIVN ước lượng đưa ${e.gpuLayers}/${e.totalLayers} lớp lên GPU (${esc(gpuLbl)}) và vẫn giữ đủ ngữ cảnh.`)
+      + (e.totalLayers && e.gpuLayers < e.totalLayers / 2 ? ' ' + 'Chưa tới một nửa số lớp nằm trên GPU nên mô hình sẽ chạy chậm. Hãy giảm độ dài ngữ cảnh (8192 là đủ cho Trò chuyện và AIVN AGENT) hoặc chọn mô hình nhỏ hơn.' : '') : 'Đưa càng nhiều lớp lên GPU càng nhanh. Nếu không đủ VRAM, giảm số lớp — phần còn lại chạy bằng CPU và RAM.';
   if (!h.gpu) { for (const x of ['#ldGpu', '#ldGpuN', '#ldGpuAuto']) $(x).disabled = true; $('#ldGpuSec').classList.add('off'); }
 }
 function ldFoot() {
@@ -595,12 +598,21 @@ A.onDlDone(async (j) => { toast(`Tải xong ${j.name} ✓`); jobs.set(j.id, j); 
 A.onDlRemoved(({ id }) => { jobs.delete(id); renderDlPanel(); renderCatalog(); if (disc.repo) openRepo(disc.repo.id, true); });
 
 // --- Tìm kiếm Hugging Face ---
+const foldQ = (x) => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/[^a-z0-9]+/g, '');
+function catalogMatches(q) {
+  const k = foldQ(q); if (k.length < 2) return [];
+  return (state.catalog || []).filter(c => [c.name, c.id, c.family, c.repo, c.file].some(v => foldQ(v).includes(k)));
+}
 async function doSearch() {
   const q = $('#searchQ').value.trim(), sort = $('#searchSort').value;
   disc.lastQuery = { q, sort };
   $('#hfArea').hidden = false; $('#repoArea').hidden = true; $('#sugArea').hidden = true;
   $('#hfTitle').textContent = q ? `Kết quả cho “${q}”` : 'Mô hình GGUF phổ biến trên Hugging Face';
   $('#hfResults').innerHTML = '<div class="muted pad">Đang tìm trên Hugging Face…</div>';
+  { // B163: mô hình trong danh mục AIVN khớp từ khoá hiện NGAY đầu kết quả (không phụ thuộc mạng/kết quả Hugging Face) — “qwen3-vl” → Qwen3-VL 2B/4B/8B
+    const cat = catalogMatches(q); const el = $('#hfCat');
+    if (el) { el.hidden = !cat.length; el.innerHTML = cat.length ? `<h4 class="muted small" style="grid-column:1/-1">Trong danh mục AIVN (${cat.length})</h4>` + cat.map(c => catCard(c, !!c.mmproj)).join('') : ''; }
+  }
   try {
     const res = await A.hfSearch({ q, sort });
     if (disc.lastQuery.q !== q || disc.lastQuery.sort !== sort) return;
@@ -616,7 +628,7 @@ let searchTimer;
 $('#searchForm').addEventListener('submit', (e) => { e.preventDefault(); clearTimeout(searchTimer); doSearch(); });
 $('#searchQ').addEventListener('input', () => { clearTimeout(searchTimer); if ($('#searchQ').value.trim().length >= 2) searchTimer = setTimeout(doSearch, 450); });
 $('#searchSort').addEventListener('change', () => { if (!$('#hfArea').hidden || $('#searchQ').value.trim()) doSearch(); });
-$('#hfClose').addEventListener('click', () => { $('#hfArea').hidden = true; $('#repoArea').hidden = true; $('#sugArea').hidden = false; disc.repo = null; $('#searchQ').value = ''; renderCatalog(); });
+$('#hfClose').addEventListener('click', () => { $('#hfArea').hidden = true; { const el = $('#hfCat'); if (el) { el.hidden = true; el.innerHTML = ''; } } $('#repoArea').hidden = true; $('#sugArea').hidden = false; disc.repo = null; $('#searchQ').value = ''; renderCatalog(); });
 
 async function openRepo(repo, quiet) {
   const area = $('#repoArea');
@@ -1513,7 +1525,7 @@ $('#sysNotice').addEventListener('click', (e) => { const b = e.target.closest('[
 
 // ---------- AIVN AGENT ----------
 const AGENT_EXAMPLES = ['Bây giờ là mấy giờ, hôm nay thứ mấy? Còn bao nhiêu ngày nữa đến Tết Dương lịch?', 'Xem thư mục được phép có những tệp nào rồi tóm tắt tệp mới nhất.', 'Tính lãi kép: gửi 50 triệu, lãi 6,5%/năm trong 5 năm thì được bao nhiêu?', 'Hãy nhớ: tôi tên Khôi, đang học ở VLU.'];
-const STATUS_VI = { running: 'đang chạy', ok: 'xong', error: 'lỗi', refused: 'bị từ chối' };
+const STATUS_VI = { running: 'đang chạy', ok: 'xong', error: 'lỗi', refused: 'bị từ chối', noeffect: 'không có tác dụng' }; // B166
 const fmtMs = (ms) => ms == null ? '' : ms < 1000 ? ms + ' ms' : (ms / 1000).toFixed(1).replace('.', DEC()) + ' giây';
 function argPreview(st) { const a = st.args || {}; const v = a.path || a.expression || a.query || a.url || a.fact || a.title || a.code || ''; return String(v).split('\n')[0].slice(0, 90); }
 function stepBodyHtml(st) {
@@ -1521,7 +1533,8 @@ function stepBodyHtml(st) {
   return `${st.thumb && st.thumb.src ? `<img class="s-thumb" src="${esc(st.thumb.src)}" alt="Màn hình sau bước này" loading="lazy">` : ''}<div class="s-body"><h5>Công cụ</h5><div><code>${esc(st.name)}</code></div><h5>Đầu vào</h5><pre>${esc(args)}</pre>${st.status !== 'running' ? `<h5>Kết quả</h5><pre>${esc(st.detail ?? st.summary ?? '')}</pre>` : ''}</div>`;
 }
 function stepHtml(st, open) {
-  return `<details class="step st-${esc(st.status)}" data-step="${esc(st.id)}"${open ? ' open' : ''}><summary><span aria-hidden="true">${esc(st.icon || '🔧')}</span><span class="s-name">${esc(st.label)}</span>${st.auto ? `<span class="s-auto" title="${st.auto === 'phrase' ? 'Tự làm không hỏi (theo câu trong yêu cầu của bạn)' : 'Tự làm không hỏi (đang bật)'}">⚡ tự làm</span>` : ''}<span class="s-sum">${esc(st.summary || argPreview(st))}</span>${st.ms != null ? `<span class="s-ms">${fmtMs(st.ms)}</span>` : ''}<span class="s-st">${STATUS_VI[st.status] || esc(st.status)}</span></summary>
+  const stt = st.status === 'ok' && st.check ? 'noeffect' : st.status; // B166: bước chạy xong nhưng màn hình không đổi → không hiện “xong” xanh
+  return `<details class="step st-${esc(stt)}" data-step="${esc(st.id)}"${open ? ' open' : ''}><summary><span aria-hidden="true">${esc(st.icon || '🔧')}</span><span class="s-name">${esc(st.label)}</span>${st.auto ? `<span class="s-auto" title="${st.auto === 'phrase' ? 'Tự làm không hỏi (theo câu trong yêu cầu của bạn)' : 'Tự làm không hỏi (đang bật)'}">⚡ tự làm</span>` : ''}<span class="s-sum">${esc(st.summary || argPreview(st))}</span>${st.ms != null ? `<span class="s-ms">${fmtMs(st.ms)}</span>` : ''}<span class="s-st">${STATUS_VI[stt] || esc(stt)}</span></summary>
     ${stepBodyHtml(st)}</details>`;
 }
 // B171: lỗi hiện bước + lỗi + cách xử lý; thẻ lỗi giống nhau liên tiếp gộp một, kèm số lần
@@ -1626,6 +1639,8 @@ async function sendAgent(text) {
     if (st.stage === 'act' || st.stage === 'tools') state.genPhase = 'act';
     if (st.stage === 'think') setGenNote(st.round ? `Đang suy nghĩ… (bước ${st.round + 1})` : 'Đang suy nghĩ…');
     else if (st.stage === 'ask' || st.stage === 'act' || st.stage === 'tools') paintGenChrome();
+    if (st.elapsedMs != null && state.mode === 'agent') { const e = $('#genStats'); const sec = Math.round(st.elapsedMs / 1000); if (e && sec >= 5) { let sp = e.querySelector('.ag-prog'); if (!sp) { sp = document.createElement('span'); sp.className = 'ag-prog'; e.appendChild(sp); } sp.textContent = st.capMs ? ` · ${sec} giây / tối đa ${Math.round(st.capMs / 1000)} giây` : ` · ${sec} giây`; } } // B165: tiến độ + trần thời gian (phần riêng, không đụng câu trạng thái)
+    if (st.stage === 'slow' && st.text) setGenNote(st.text); // B165: cảnh báo trước khi chạy (ít hơn nửa số lớp trên GPU)
     if (st.stage === 'recover') { reply.content = ''; reply.steps = []; paintBody(); paintSteps(); setGenNote(st.grow ? `Ngữ cảnh chưa đủ cho yêu cầu này — đang nạp lại mô hình với ngữ cảnh ${Number(st.ctx).toLocaleString(LOC())}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${st.ctx}) và thử lại…`); return; }
     if (st.stage === 'verify') { reply.content = ''; paintBody(); setGenNote('Đang kiểm tra lại: câu trả lời chưa khớp với các bước đã làm…'); }
   });
@@ -2455,7 +2470,7 @@ $('#lkSleep').addEventListener('change', async (e) => { await A.lockOptions({ lo
 const GBf = (b) => (b / 1024 ** 3).toFixed(1) + ' GB';
 async function paintAdvanced() {
   const s = state.settings || {};
-  $('#gpuDevice').value = Number.isInteger(s.gpuDevice) ? String(s.gpuDevice) : '';
+  $('#gpuDevice').value = Number.isInteger(s.gpuDevice) ? String(s.gpuDevice) : ''; fillGpuPickers().catch(() => {});
   const gl = Number.isInteger(s.gpuLayers) ? s.gpuLayers : -1;
   $('#gpuLayers').value = String(gl); $('#gpuLayersVal').textContent = gl < 0 ? 'Tự động' : gl === 0 ? '0 (chỉ CPU)' : String(gl);
   $('#vramLimit').value = Number(s.vramLimitGB) > 0 ? String(s.vramLimitGB) : '';
@@ -2477,7 +2492,18 @@ async function paintAdvanced() {
 }
 $('#gpuLayers').addEventListener('input', e => { const n = Number(e.target.value); $('#gpuLayersVal').textContent = n < 0 ? 'Tự động' : n === 0 ? '0 (chỉ CPU)' : String(n); });
 $('#gpuLayers').addEventListener('change', async e => { const n = Number(e.target.value); state.settings = await A.setSettings({ gpuLayers: n < 0 ? null : n }); toast('Số lớp GPU mới áp dụng khi nạp lại mô hình'); });
-$('#gpuDevice').addEventListener('change', async e => { const v = e.target.value; state.settings = await A.setSettings({ gpuDevice: v === '' ? null : Number(v) }); toast('Đã đổi thiết bị GPU. Hãy nạp lại mô hình.'); setTimeout(paintAdvanced, 1500); });
+// B168: bộ chọn GPU dùng chung (Cài đặt › Nâng cao, tab Runtime, hộp nạp Ctrl+L): tên thật của từng GPU, Tự động = GPU rời
+async function fillGpuPickers() {
+  const r = await (A.gpuDevices ? A.gpuDevices() : Promise.resolve(null)).catch(() => null); state.gpuDevs = r;
+  const cur = r && Number.isInteger(r.current) ? String(r.current) : (Number.isInteger((state.settings || {}).gpuDevice) ? String(state.settings.gpuDevice) : '');
+  const devs = (r && r.devices) || [];
+  const opts = `<option value="">${esc(r && r.auto ? `Tự động: ${r.auto.name}` : 'Tự động (ưu tiên GPU rời)')}</option>` + (devs.length ? devs : [0, 1, 2, 3].map(i => ({ index: i, name: `Thiết bị Vulkan #${i}` })))
+    .map(d => `<option value="${d.index}">${esc(d.name)}${d.integrated ? ' — GPU tích hợp' : ''}${d.totalMiB ? ` (${(d.totalMiB / 1024).toFixed(1).replace('.', DEC())} GB)` : ''}</option>`).join('');
+  for (const sel of document.querySelectorAll('select.gpu-pick')) { sel.innerHTML = opts; sel.value = cur; }
+  return r;
+}
+async function setGpuPick(v) { state.settings = await A.setSettings({ gpuDevice: v === '' ? null : Number(v) }); for (const sel of document.querySelectorAll('select.gpu-pick')) sel.value = v; toast('Đã đổi GPU. Hãy nạp lại mô hình.'); setTimeout(paintAdvanced, 1500); }
+document.addEventListener('change', e => { if (e.target && e.target.matches && e.target.matches('select.gpu-pick')) setGpuPick(e.target.value); });
 $('#vramLimit').addEventListener('change', async e => { const v = Number(e.target.value); state.settings = await A.setSettings({ vramLimitGB: v > 0 ? v : null }); toast('Đã đổi giới hạn VRAM. Hãy nạp lại mô hình.'); setTimeout(paintAdvanced, 1500); });
 $('#advReset').addEventListener('click', async () => { state.settings = await A.setSettings({ gpu: true, gpuDevice: null, gpuLayers: null, vramLimitGB: null }); $('#gpuOn').checked = true; toast('Đã về chế độ tự động. Hãy nạp lại mô hình.'); setTimeout(paintAdvanced, 1500); });
 
@@ -2604,6 +2630,7 @@ async function paintRuntime() {
   $('#rtVersions').innerHTML = `llama.cpp (llama-server) <b>${esc(r.versions.llamaServer)}</b> — bản đi kèm: ${esc(bundled)}${c.installed ? ' · CUDA 12.4' : ''}<br>node-llama-cpp ${esc(r.versions.nodeLlamaCpp || '?')} (trò chuyện chữ${r.chatGpu ? ', GPU: ' + esc(String(r.chatGpu)) : ''}) · Electron ${esc(r.versions.electron)}`;
   const actRt = r.active ? (r.active.runtime === 'cuda' ? 'CUDA' : `bản đi kèm (${bundled})`) : '';
   const prefRt = r.pref === 'cuda' ? 'CUDA' : `bản đi kèm (${bundled})`;
+  fillGpuPickers().catch(() => {});
   // B123: luôn có chữ (QA đọc data-testid="runtime-active"): chưa nạp mô hình nhìn ảnh → nói runtime sẽ dùng
   $('#rtActive').textContent = !r.active ? `Chưa nạp mô hình nhìn ảnh — lần nạp tới sẽ dùng: ${prefRt}` : r.active.fallback ? `Đang chạy: ${r.active.id} — ${actRt}. CUDA lỗi nên đã quay về bản đi kèm: ${r.active.fallback}` : `Đang chạy: ${r.active.id} — ${actRt}`;
   const gpu = c.gpu ? `${c.gpu.name} · driver ${c.gpu.driver}${c.gpu.vramMiB ? ' · ' + (c.gpu.vramMiB / 1024).toFixed(1) + ' GB VRAM' : ''}` : '';

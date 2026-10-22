@@ -139,7 +139,9 @@ async function withCtxGrow(fn, { minCtx = MIN_CTX_CHAT, maxCtx = 0, onGrow } = {
     const train = (st.meta && st.meta.trainCtx) || 32768;
     const need = Number(e.need) || 0;
     // B17: máy yếu dùng ngữ cảnh AIVN AGENT 12K để mô hình nằm trọn VRAM — không tự nới quá mức đó (lịch sử được thu gọn thay vào)
-    const want = Math.min(train, maxCtx > 0 ? Math.max(maxCtx, have) : Infinity, Math.max(minCtx, Math.ceil(Math.max(need * 1.3, have * 2) / 4096) * 4096));
+    // B165: không bao giờ tự nới quá mức VRAM của máy chịu được (GPU rời 4 GB: 16384) — beta.2.8 nới tới 32K–64K làm 4B chỉ còn 6/37 lớp trên GPU
+    const vcap = await ctxCapByVram().catch(() => Infinity);
+    const want = Math.min(train, vcap, maxCtx > 0 ? Math.max(maxCtx, have) : Infinity, Math.max(minCtx, Math.ceil(Math.max(need * 1.3, have * 2) / 4096) * 4096));
     if (!settings.data.lastModel || !st.loaded || want <= have) { engineLog('Ngữ cảnh không đủ, không tăng được', e, { have, need, train }); throw ctxSmallError(have, null); }
     engineLog(`Ngữ cảnh ${have} không đủ (cần ~${need || '?'} token): tự nạp lại mô hình với ngữ cảnh ${want}`, e, { have, need, want });
     onGrow && onGrow(want);
@@ -150,6 +152,10 @@ async function withCtxGrow(fn, { minCtx = MIN_CTX_CHAT, maxCtx = 0, onGrow } = {
     catch (e3) { if (isCtxErr(e3)) throw ctxSmallError(now, null); throw e3; }
   }
 }
+// B165: trần ngữ cảnh theo VRAM của GPU rời (bộ đệm K/V f16 của mô hình 4B ≈ 144 KB/token: 16K ≈ 2,3 GB, 64K ≈ 9 GB).
+// Áp cho MỌI nguồn ngữ cảnh không do người dùng vừa chọn trong hộp nạp: giá trị lưu riêng của mô hình, tự tăng ngữ cảnh, tự phục hồi.
+const ctxCapFor = (h) => require('./gpu-pick').ctxCapFor(h);
+const ctxCapByVram = async () => ctxCapFor(await hw());
 // Bộ máy AI dừng giữa lượt (sập/thiếu bộ nhớ): nạp lại mô hình với ngữ cảnh nhỏ hơn rồi thử lại MỘT lần
 async function withEngineRecovery(fn, { onRetry, minCtx = MIN_CTX_CHAT } = {}) {
   try { return await fn(); }
@@ -174,7 +180,15 @@ function engineEnv() {
   const lim = Number(d.vramLimitGB) > 0 ? String(Math.round(Number(d.vramLimitGB) * 1024 ** 3)) : '';
   return { AIVN_GPU: d.gpu === false ? 'off' : '', GGML_VK_VISIBLE_DEVICES: dev, AIVN_VRAM_LIMIT: lim };
 }
-const hw = async () => (hwCache ||= await engine.hardwareInfo().catch(() => ({ ram: require('os').totalmem() })).then(h => (process.env.AIVN_QA_FAKEHW && !app.isPackaged ? { ...h, ...JSON.parse(process.env.AIVN_QA_FAKEHW) } : h)));
+const hw = async () => (hwCache ||= await engine.hardwareInfo().catch(() => ({ ram: require('os').totalmem() })).then(h => (process.env.AIVN_QA_FAKEHW && !app.isPackaged ? { ...h, ...JSON.parse(process.env.AIVN_QA_FAKEHW) } : h)).then(withGpuName));
+// B168: tên GPU dùng thật (GPU rời trước GPU tích hợp) — cũng áp cho phần cứng giả của QA
+function withGpuName(h) { if (!h || !Array.isArray(h.devices) || !h.devices.length) return h; const GP = require('./gpu-pick'); const raw = h.devicesRaw || h.devices; const pk = GP.pick(raw, Number.isInteger(settings.data.gpuDevice) ? settings.data.gpuDevice : null); return { ...h, devicesRaw: raw, devices: GP.order(raw), gpuName: (pk && pk.name) || h.gpuName || null, gpuMixed: GP.mixed(raw) }; }
+// B168: thiết bị llama-server sẽ dùng (cùng cách chọn với vision-server: GPU rời lớn nhất hoặc thiết bị người dùng chọn) — VRAM trống của ĐÚNG thiết bị đó
+async function serverDevice() {
+  try { const exe = await serverExeFor() || require('./vision-server').findServer(); if (!exe) return null;
+    const d = await require('./vision-server').listDevices(exe, { timeoutMs: 10000 }); const gpus = d && d.ok ? d.all.filter(x => !/^cpu/i.test(x.id)) : [];
+    const pk = require('./gpu-pick').pick(gpus); return pk && pk.totalMiB ? { ...pk, all: gpus } : null; } catch { return null; }
+}
 const generations = new Map(); // reqId -> AbortController
 const stopReasons = new Map(); // reqId -> lý do dừng (ghi nhật ký + hiện cho người dùng)
 function abortGen(reqId, ac, reason) { if (!ac || ac.signal.aborted) return; stopReasons.set(reqId, reason); LOG.log('app', `Dừng lượt ${reqId}: ${reason}`); try { ac.abort(); } catch {} }
@@ -204,7 +218,7 @@ function initStores() {
   computerTools = createComputerTools({ launchCacheFile: path.join(app.getPath('userData'), 'app-launch-cache.json'), sandbox: () => benchSandbox, getSettings: () => settings.data, listWindows: () => require('./agent/uitree').windows(), openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => LOG.block('apps', 'Quét ứng dụng đã cài (AIVN AGENT)', [`nguồn: ${JSON.stringify(d.sources)}`, `lỗi: ${d.errors.length ? d.errors.join('; ') : 'không'}`, `thư mục Desktop: ${d.dirs ? d.dirs.desktop.join(' | ') : '—'}`, `thư mục Start Menu: ${d.dirs ? d.dirs.start.join(' | ') : '—'}`, `thời gian tìm sâu: ${d.ms ?? '?'} ms`]),
     keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: (a, ctx) => deskWrap(getDesk().look, a, ctx), act: (a, ctx) => deskWrap(getDesk().act, a, ctx), ensureApp: (a, ctx) => deskWrap(getDesk().ensureApp, a, ctx), readText: (a, ctx) => deskWrap(getDesk().readText, a, ctx), pending: () => (desk && desk.active() ? desk.pending() : null), searchTodo: () => (desk && desk.active() ? desk.searchTodo() : null), searchFound: () => (desk && desk.active() ? desk.searchFound() : null), likely: (q) => (desk && desk.active() ? desk.likely(q) : null), cleanupDraft: (o) => (desk && desk.active() ? desk.cleanupDraft(o) : null), readBrowserPage: (o) => (desk && desk.active() ? desk.readBrowserPage(o) : null), openInBrowser: (b, u) => getDesk().openInBrowser(b, u), browserRead: (a, ctx) => deskWrap(getDesk().browserRead, a, ctx) } });
   mcp = require('./mcp').createMcpManager({ dir: app.getPath('userData'), log: (sc, m) => LOG.log(sc, m), onChange: () => send('mcp:changed', mcp.status()), getExcelFolders: () => { try { const meta = JSON.parse(fs.readFileSync(path.join(ud, 'plugins-meta.json'), 'utf8')); const list = meta && meta.connectors && meta.connectors.excel && meta.connectors.excel.folders; return Array.isArray(list) ? list.filter(x => typeof x === 'string') : []; } catch { return []; } } });
-  agent = createAgent({ engine: agentEngine, mcp, getSettings: () => settings.data, gateOk: () => lastGateOk, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: extractAny, embedForMemory, log, computer: computerTools,
+  agent = createAgent({ engine: agentEngine, mcp, recipes: require('./agent/recipes').createRecipeStore(path.join(app.getPath('userData'), 'agent-recipes.json')), getSettings: () => settings.data, gateOk: () => lastGateOk, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: extractAny, embedForMemory, log, computer: computerTools,
     logTool: (x) => LOG.log('tool', `${x.auto ? '(tự động) ' : ''}${x.name} → ${x.status} sau ${x.ms ?? '?'} ms`, { args: Object.fromEntries(Object.entries(x.args || {}).map(([k, v]) => [k, typeof v === 'string' && v.length > 200 ? v.slice(0, 200) + '…' : v])), ketQua: String(x.summary || '').slice(0, 300) }),
     trash: async (p) => { try { await shell.trashItem(p); } catch (e) { throw new Error('Không chuyển được tệp vào Thùng rác (' + e.message + '). Tệp vẫn còn nguyên.'); } } });
   lic = createLicenseState({ file: path.join(ud, 'license.json'), isPackaged: app.isPackaged, log: (m) => { log(m); if (isTest) console.log(m); }, fetchJson });
@@ -442,6 +456,12 @@ async function measureVram(id, st) {
   e.vram = { bytes: Math.round(used), ctx: st.contextSize || null, at: Date.now() }; settings.save();
   LOG.log('load', `Đo VRAM thật: ${id} dùng ${(used / 1024 ** 3).toFixed(2)} GB ở ngữ cảnh ${st.contextSize}`);
 }
+// B170: số lớp GPU THẬT của lần nạp gần nhất (theo ngữ cảnh + thiết bị) — hộp nạp hiện số này thay cho ước lượng khi cùng điều kiện
+function noteLayers(id, st) {
+  if (!st || !Number.isInteger(st.gpuLayers) || !st.totalLayers) return;
+  const u = settings.data.modelUsage || (settings.data.modelUsage = {}); const e = u[id] || (u[id] = { uses: 0 });
+  e.layers = { ctx: st.contextSize || null, gpu: st.gpuLayers, total: st.totalLayers, device: st.device || null, kv: (st.loadParams && st.loadParams.kvCache) || null, at: Date.now() }; settings.save();
+}
 async function loadById(id, { force = false, ctx = null, reason = null, minCtx = null, load = null } = {}) {
   const m = listModels().find(x => x.id === id);
   if (!m) throw new Error(`Không tìm thấy mô hình "${id}"`);
@@ -473,7 +493,13 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       const h = await hw(); const vt = h.gpu && h.gpu !== 'metal' && h.vram && !h.vram.integratedOnly ? h.vram.total : 0;
       if (vt > 0 && vt < 6 * 1024 ** 3) { ctxNote = `Đã giới hạn độ dài ngữ cảnh ở 8192 (bạn chọn ${ctxWant}) vì GPU chỉ có ${(vt / 1024 ** 3).toFixed(1)} GB VRAM.`; ctxWant = 8192; }
     }
-    const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj, serverArgs: require('./model-launch').launchArgs({ id: m.id, family: SC.groundingFamily(NAMES.isGeneric(m.file) ? m.id : (m.file || m.id)), catalog: m.catalog, load: ml }) } : {}), ...(ml.mmap === false ? { useMmap: false } : {}), ...(ml.mlock ? { useMlock: true } : {}), ...(load ? { reload: true } : {}) };
+    { // B165: ngữ cảnh lưu riêng / tự tăng vượt trần VRAM → hạ về trần (chỉ giữ nguyên khi người dùng VỪA chọn trong hộp nạp)
+      const picked = load && cleanLoad(load).contextSize; const cap = ctxCapFor(await hw());
+      if (!picked && ctxWant > cap) { ctxNote = [ctxNote, `Đã giới hạn độ dài ngữ cảnh ở ${cap} (giá trị cũ ${ctxWant}) để mô hình nằm trên GPU nhiều nhất có thể. Muốn dùng ngữ cảnh lớn hơn, hãy chọn trong hộp nạp (Ctrl+L).`].filter(Boolean).join(' '); ctxWant = cap; }
+    }
+    const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj, serverArgs: require('./model-launch').launchArgs({ id: m.id, family: SC.groundingFamily(NAMES.isGeneric(m.file) ? m.id : (m.file || m.id)), catalog: m.catalog, load: ml }) } : {}), ...(ml.mmap === false ? { useMmap: false } : {}), ...(ml.mlock ? { useMlock: true } : {}), ...(load ? { reload: true } : {}),
+      // B170: llama-server (mô hình nhìn ảnh) nay cũng theo Bộ đệm K/V / Flash attention của hộp nạp (trước đây bị bỏ qua)
+      ...(ml.kvCache ? { kvCache: ml.kvCache } : {}), ...(ml.flashAttention != null ? { flashAttention: ml.flashAttention } : {}) };
     if (opts.mmproj) opts.serverExe = await serverExeFor();
     LOG.log('load', `Bắt đầu nạp ${m.file}`, { size: m.size, ctx: opts.contextSize, gpuLayers: opts.gpuLayers ?? 'tự động', vision: !!opts.mmproj, ...(opts.serverArgs && opts.serverArgs.length ? { args: opts.serverArgs.join(' ') } : {}) });
     const tLoad = Date.now();
@@ -516,6 +542,7 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
     if (ctxNote) { st = { ...st, notice: [st.notice, ctxNote].filter(Boolean).join(' ') }; LOG.log('load', ctxNote); }
     if (reason) LOG.log('load', 'Lý do nạp lại: ' + reason);
     measureVram(m.id, st).catch(() => {});
+    noteLayers(m.id, st);
     LOG.log('load', `Đã nạp ${m.file} sau ${Date.now() - tLoad} ms`, { mode: st.mode, ctx: st.contextSize, gpu: st.backend || st.gpu, runtime: st.vision ? (st.runtime || 'bundled') : 'node-llama-cpp', ...(st.vision && st.gpu && st.backend !== st.gpu ? { chatGpu: st.gpu } : {}), gpuLayers: st.gpuLayers, totalLayers: st.totalLayers, toolMode: st.toolMode, fallbackFrom: st.fallbackFrom });
     noteUsage(null, m.id);
     settings.data.lastModel = m.id; settings.save(); lastUse = Date.now();
@@ -664,6 +691,9 @@ async function runAgentTurn({ reqId, convoId, messages, headless = false, signal
       e.code = 'AGENT_GATE'; e.gate = g; throw e;
     }
   }
+  // B165: chưa tới một nửa số lớp của mô hình nằm trên GPU → mỗi bước AIVN AGENT rất chậm (laptop 4 GB, beta.2.8: 6/37 lớp, 40–83 s mỗi bước).
+  // Báo TRƯỚC khi chạy (một lần cho mỗi lần nạp), kèm cách sửa: giảm ngữ cảnh / mô hình nhỏ hơn đã có trên máy.
+  if (!headless && reqId && !cloudBrainOn()) { try { const w = await slowAgentWarning(); if (w) { send('agent:status', { reqId, stage: 'slow', text: w }); send('app:notice', { text: w, kind: 'warn' }); } } catch {} }
   const comp = !headless && agent.activeTools({ headless }).some(n => n === 'screen_act' || n === 'screen_look'); // phím dừng khẩn cấp toàn cục chỉ khi điều khiển màn hình (Ctrl+Alt+Q trùng AltGr+Q trên một số bàn phím)
   if (comp) computerSessionStart();
   const files = (Array.isArray(attachments) ? attachments : []).filter(f => f && typeof f.path === 'string' && path.isAbsolute(f.path) && fs.existsSync(f.path) && fs.statSync(f.path).isFile()).slice(0, 10);
@@ -678,6 +708,20 @@ async function runAgentTurn({ reqId, convoId, messages, headless = false, signal
     if (desk && desk.active() && desk.hasDraft && desk.hasDraft()) { try { await desk.cleanupDraft({ clear: !(signal && signal.aborted && signal.reason !== 'timeout') }); } catch {} }
     if (comp) computerSessionEnd(); if (desk && desk.active()) desk.end(signal && signal.aborted ? 'đã dừng' : 'xong lượt');
   }
+}
+let slowWarnKey = null;
+async function slowAgentWarning() {
+  const st = engine.status(); if (!st || !st.loaded || !Number.isInteger(st.gpuLayers) || !(st.totalLayers > 0) || !st.gpu) return null;
+  if (st.gpuLayers >= st.totalLayers / 2) return null;
+  const key = `${st.id}|${st.gpuLayers}|${st.contextSize}`; if (slowWarnKey === key) return null; slowWarnKey = key;
+  const cur = listModels().find(x => x.id === st.id); const h = await hw();
+  const smaller = listModels().filter(x => x.mmproj && cur && x.size < cur.size * 0.8 && x.id !== st.id).sort((a, b) => b.size - a.size)[0];
+  const lowV = h && h.vram && h.vram.total > 0 && h.vram.total < 6 * 1024 ** 3;
+  const tips = [];
+  if ((st.contextSize || 0) > 8192) tips.push(`giảm độ dài ngữ cảnh xuống 8192 trong hộp nạp (Ctrl+L)`);
+  if (smaller) tips.push(`chuyển sang ${smaller.catalog ? smaller.catalog.name : smaller.file} (đã có trên máy)`);
+  else if (lowV) tips.push('tải Qwen3-VL 2B trong Khám phá (gợi ý ⭐ cho GPU dưới 6 GB)');
+  return `Chỉ ${st.gpuLayers}/${st.totalLayers} lớp của mô hình nằm trên GPU${st.device ? ` (${st.device})` : ''}, nên mỗi bước của AIVN AGENT sẽ chậm.${tips.length ? ' Để nhanh hơn: ' + tips.join(', hoặc ') + '.' : ''}`;
 }
 // ---------- Điều khiển máy tính kiểu desktop agent (quan sát → thao tác → kiểm tra) ----------
 let desk = null;
@@ -1162,8 +1206,28 @@ function registerIpc() {
     try { const st = fs.statSync(r.filePaths[0]); if (st.size > 1e6) throw new Error('Tệp quá lớn'); return { ok: true, preset: require('./presets').parseImport(fs.readFileSync(r.filePaths[0], 'utf8')) }; }
     catch (e) { return { ok: false, error: e.message }; }
   });
+  // B168: bộ chọn GPU (Cài đặt › Nâng cao, hộp nạp, tab Runtime): tên thật của MỌI GPU Vulkan, GPU rời được AIVN chọn khi để Tự động
+  ipcMain.handle('gpu:devices', async () => {
+    const exe = require('./vision-server').findServer(); const GP = require('./gpu-pick');
+    let gpus = [];
+    if (process.env.AIVN_QA_FAKEDEVICES && !app.isPackaged) gpus = JSON.parse(process.env.AIVN_QA_FAKEDEVICES);
+    else if (exe) { const d = await require('./vision-server').listDevices(exe, { timeoutMs: 10000, allDevices: true }).catch(() => null); gpus = d && d.ok ? d.all.filter(x => /^vulkan\d+$/i.test(x.id)) : []; }
+    const list = gpus.map((d, i) => ({ index: Number((/(\d+)$/.exec(d.id) || [])[1] ?? i), id: d.id, name: d.name, totalMiB: d.totalMiB || null, integrated: GP.isIntegrated(d.name) }));
+    const auto = GP.pick(gpus);
+    return { devices: list, auto: auto ? { id: auto.id, name: auto.name } : null, current: Number.isInteger(settings.data.gpuDevice) ? settings.data.gpuDevice : null };
+  });
   ipcMain.handle('models:meta', async (_e, id) => { const m = listModels().find(x => x.id === id); if (!m) return null; const g = require('./gguf').cachedSummary(m.path); return g ? { ...g, fileSize: m.size, file: m.file, id: m.id, vision: !!m.vision, saved: modelLoadFor(id), global: { contextSize: settings.data.contextSize || null, gpuLayers: Number.isInteger(settings.data.gpuLayers) ? settings.data.gpuLayers : null } } : null; });
-  ipcMain.handle('models:estimate', async (_e, id, o = {}) => { const m = listModels().find(x => x.id === id); if (!m) return null; const g = require('./gguf').cachedSummary(m.path); if (!g || g.error) return null; let h = await hw().catch(() => ({})); if (process.env.AIVN_QA_FAKEHW && !app.isPackaged) h = { ...h, ...JSON.parse(process.env.AIVN_QA_FAKEHW) }; const gpu = !!(h.gpu); const est = require('./gguf').estimate({ ...g, fileSize: m.size }, { ...o, gpu, vram: gpu && h.gpu !== 'metal' ? h.vram : null }); return { ...est, hw: { gpu: h.gpu || false, vram: h.vram || null, ram: h.ram || 0, freeRam: h.freeRam || 0, devices: h.devices || [], unified: h.gpu === 'metal' } }; });
+  ipcMain.handle('models:estimate', async (_e, id, o = {}) => { const m = listModels().find(x => x.id === id); if (!m) return null; const g = require('./gguf').cachedSummary(m.path); if (!g || g.error) return null; let h = await hw().catch(() => ({})); if (process.env.AIVN_QA_FAKEHW && !app.isPackaged) h = { ...h, ...JSON.parse(process.env.AIVN_QA_FAKEHW) }; const gpu = !!(h.gpu);
+    // B170: mô hình nhìn ảnh → ước lượng theo đúng cách llama-server --fit chọn số lớp, trên đúng thiết bị (B168)
+    const server = m.mmproj && settings.data.vision !== false ? { mmprojBytes: (() => { try { return fs.statSync(m.mmproj).size; } catch { return 0; } })() } : null;
+    let vram = gpu && h.gpu !== 'metal' ? h.vram : null; let device = h.gpuName || null;
+    if (server && gpu && h.gpu !== 'metal' && !(process.env.AIVN_QA_FAKEHW && !app.isPackaged)) { const d = await serverDevice(); if (d) { vram = { ...(vram || {}), total: d.totalMiB * 1024 ** 2, free: (d.freeMiB || d.totalMiB) * 1024 ** 2 }; device = d.name; } }
+    const est = require('./gguf').estimate({ ...g, fileSize: m.size }, { ...o, gpu, vram, server });
+    // lần nạp thật gần nhất cùng ngữ cảnh + cùng chế độ tự động → hiện số THẬT (không để ước lượng lệch số thật)
+    const real = ((settings.data.modelUsage || {})[m.id] || {}).layers;
+    const same = real && est.auto && real.ctx === o.ctx && (real.kv || 'f16') === (o.kvType === 'q8_0' ? 'q8_0' : 'f16') && real.total === est.totalLayers;
+    const fin = same ? { ...require('./gguf').estimate({ ...g, fileSize: m.size }, { ...o, gpu, vram, server, gpuLayers: real.gpu }), auto: true, measured: true } : est;
+    return { ...fin, server: !!server, hw: { gpu: h.gpu || false, vram: vram || null, ram: h.ram || 0, freeRam: h.freeRam || 0, devices: h.devices || [], gpuName: device, unified: h.gpu === 'metal' } }; });
   ipcMain.handle('models:saveLoad', async (_e, id, o) => { settings.data.modelLoad = { ...(settings.data.modelLoad || {}) }; const c = cleanLoad(o); if (o === null || !Object.keys(c).length) delete settings.data.modelLoad[id]; else settings.data.modelLoad[id] = c; settings.save(); return modelLoadFor(id); });
   ipcMain.handle('models:load', async (_e, id, o = {}) => { try { if (o && o.remember && o.load) { settings.data.modelLoad = { ...(settings.data.modelLoad || {}), [id]: cleanLoad(o.load) }; settings.save(); } return { ok: true, status: await loadById(id, { force: !!(o && o.force), load: o && o.load || null }) }; } catch (e) { return { ok: false, error: e.message, code: e.code || null, modelId: e.modelId || id, catalogId: e.catalogId || null }; } });
   ipcMain.handle('models:unload', async () => { await engine.unloadModel(); const st = engine.status(); send('model:status', st); return st; });

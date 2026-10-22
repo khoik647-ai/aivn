@@ -37,11 +37,14 @@ function alternatives(a = {}) {
   if (act === 'hotkey') return ['bấm nút tương ứng trên giao diện thay cho phím tắt', 'focus_window đúng ứng dụng rồi bấm lại phím'];
   return ['screen_look để xem lại màn hình rồi chọn cách khác'];
 }
+// B166 (máy thật beta.2.8): phím tắt đã biết là không có tác dụng (màn hình không đổi) thì bấm lại y hệt trên cùng màn hình cũng vô ích
+// (agent bấm ctrl+t hai lần) → chặn ngay lần thứ 2. Bấm/gõ vẫn được thử lại một lần (phần tử có thể vừa hiện ra).
+const limitOf = (a = {}) => /^(?:hotkey|key|press)$/i.test(String(a.action || '')) ? 1 : 2;
 function createRetryTracker() {
   const tries = new Map(); const log = []; const blocked = new Map(); let blockedTotal = 0, badStreak = 0;
   return {
     // trước khi làm: cách này đã hỏng 2 lần → trả kết quả thay thế (không làm lại)
-    before(a, c = '') { const k = key(a) + '@' + c; const t = tries.get(k); if (t && t.fails >= 2) { blocked.set(k, (blocked.get(k) || 0) + 1); blockedTotal++; } if (t && t.fails >= 2) return { error: 'cách này đã thử 2 lần không có tác dụng', forModel: `(Kiểm tra tự động của AIVN) KHÔNG làm lại: ${describe(a)} đã thử ${t.fails} lần và đều chưa có tác dụng (${t.why}). Hãy đổi cách: ${alternatives(a).join('; ')}. Nếu đã thử hết mà vẫn không được thì dừng và báo người dùng rõ là CHƯA làm được bước này.`, summary: 'bỏ qua — cách này đã hỏng 2 lần, cần đổi cách' }; return null; },
+    before(a, c = '') { const k = key(a) + '@' + c; const t = tries.get(k); const lim = limitOf(a); if (t && t.fails >= lim) { blocked.set(k, (blocked.get(k) || 0) + 1); blockedTotal++; } if (t && t.fails >= lim) return { error: t.fails < 2 ? 'phím này vừa bấm không có tác dụng' : 'cách này đã thử 2 lần không có tác dụng', forModel: `(Kiểm tra tự động của AIVN) KHÔNG làm lại: ${describe(a)} đã thử ${t.fails} lần và đều chưa có tác dụng (${t.why}). Hãy đổi cách: ${alternatives(a).join('; ')}. Nếu đã thử hết mà vẫn không được thì dừng và báo người dùng rõ là CHƯA làm được bước này.`, summary: t.fails < 2 ? 'bỏ qua — phím này vừa bấm không có tác dụng, cần đổi cách' : 'bỏ qua — cách này đã hỏng 2 lần, cần đổi cách' }; return null; },
     // sau khi làm: ghi nhận; hỏng lần đầu → thêm gợi ý đổi cách vào kết quả
     after(a, out, c = '') {
       const why = outcome(out); const k = key(a) + '@' + c; const t = tries.get(k) || { fails: 0, why: '' };

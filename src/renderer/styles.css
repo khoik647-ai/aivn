@@ -286,14 +286,14 @@ input:focus-visible,textarea:focus-visible,select:focus-visible{outline:none}
 .steps{display:flex;flex-direction:column;gap:6px;margin:2px 0 8px}
 .step-pre{font-size:12.5px;color:var(--muted);font-style:italic}
 .step{border:1px solid var(--line);border-left:3px solid var(--line2);border-radius:9px;background:var(--bg2);font-size:12.5px}
-.step.st-ok{border-left-color:var(--ok)}.step.st-error{border-left-color:var(--danger)}.step.st-refused{border-left-color:var(--warm)}.step.st-running{border-left-color:var(--accent)}
+.step.st-ok{border-left-color:var(--ok)}.step.st-error{border-left-color:var(--danger)}.step.st-refused{border-left-color:var(--warm)}.step.st-running{border-left-color:var(--accent)}.step.st-noeffect{border-left-color:#b26a00}
 .step summary{display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;list-style:none;min-width:0}
 .step summary::-webkit-details-marker{display:none}
 .step summary::after{content:"▸";margin-left:auto;color:var(--faint);transition:transform .15s}.step[open] summary::after{transform:rotate(90deg)}
 .step .s-name{font-weight:700;color:var(--text);white-space:nowrap}
 .step .s-sum{flex:1;min-width:0;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .step .s-st{font-size:11px;font-weight:700;border-radius:999px;padding:1px 8px;white-space:nowrap}
-.st-ok .s-st{color:var(--ok);background:var(--ok-soft)}.st-error .s-st{color:var(--danger);background:var(--danger-soft)}.st-refused .s-st{color:var(--warm);background:var(--warm-soft)}.st-running .s-st{color:var(--accent-ink);background:var(--accent-soft)}
+.st-ok .s-st{color:var(--ok);background:var(--ok-soft)}.st-error .s-st{color:var(--danger);background:var(--danger-soft)}.st-refused .s-st{color:var(--warm);background:var(--warm-soft)}.st-running .s-st{color:var(--accent-ink);background:var(--accent-soft)}.st-noeffect .s-st{color:#8a5200;background:rgba(178,106,0,.12)}:root[data-theme=dark] .st-noeffect .s-st{color:#f0b14a}
 .st-running .s-st::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:5px;animation:pulse 1s infinite}
 .step .s-ms{font-size:11px;color:var(--faint);white-space:nowrap}
 .step .s-body{padding:0 10px 10px;display:flex;flex-direction:column;gap:6px}

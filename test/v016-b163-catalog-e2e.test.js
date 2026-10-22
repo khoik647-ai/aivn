@@ -43,6 +43,8 @@ for (const [name, hw] of Object.entries(LAPTOP)) {
     assert.match(card4, /Có trên máy/, '4B đã tải phải hiện “Có trên máy”'); assert.match(card4, /⭐ Gợi ý: điều khiển máy/, 'máy 4 GB: ⭐ AIVN AGENT là Qwen3-VL 4B');
     assert.ok(!/Llama 3\.1 8B Instruct[^⭐]{0,400}⭐ Gợi ý: điều khiển máy/.test(all), 'mô hình chỉ đọc chữ không bao giờ được ⭐ AIVN AGENT');
     assert.match(R.loader || '', /Qwen3-VL 4B Instruct/, 'bộ chọn mô hình (Ctrl+L) phải liệt kê 4B đã tải');
+    // B163: tìm “qwen3-vl” luôn ra thẻ danh mục AIVN (2B + 4B) ngay đầu kết quả, kể cả khi không có mạng tới Hugging Face
+    assert.match(R.hfcat || '', /Trong danh mục AIVN/i); assert.ok((R.hfcat || '').includes(vl4.name) && (R.hfcat || '').includes(vl2.name), 'tìm qwen3-vl phải ra 2B + 4B: ' + String(R.hfcat || '').slice(0, 200));
     const hf = R.hf || '';
     if (/Qwen3-VL-\w/.test(hf)) { assert.match(hf, /Qwen3-VL-4B-Instruct-GGUF/); assert.match(hf, /Qwen3-VL-2B-Instruct-GGUF/); }
     else t.diagnostic('không có mạng tới huggingface.co: bỏ qua kiểm tra kết quả tìm “qwen3-vl” — ' + hf.slice(0, 160));

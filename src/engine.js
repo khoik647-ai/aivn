@@ -46,7 +46,9 @@ async function hardwareInfo() {
   const vram = await vramInfo(l).catch(() => null);
   let devices = []; try { devices = await l.getGpuDeviceNames(); } catch {}
   const cpu = (os.cpus()[0] || {}).model || '';
-  return { gpu: l.gpu || false, vram, devices, ram: os.totalmem(), freeRam: os.freemem(), cpus: os.cpus().length, mathCores: l.cpuMathCores || null, cpu, platform: process.platform, arch: process.arch, cpuOnly: process.env.AIVN_GPU === 'off' };
+  // B168: GPU tích hợp thường đứng trước trong danh sách Vulkan → nhãn dùng gpuName (GPU rời được ưu tiên), danh sách xếp GPU rời trước
+  const GP = require('./gpu-pick'); const pk = GP.pick(devices); const gpuName = pk ? pk.name : null;
+  return { gpu: l.gpu || false, vram, devices: GP.order(devices), devicesRaw: devices, gpuName, gpuMixed: GP.mixed(devices), ram: os.totalmem(), freeRam: os.freemem(), cpus: os.cpus().length, mathCores: l.cpuMathCores || null, cpu, platform: process.platform, arch: process.arch, cpuOnly: process.env.AIVN_GPU === 'off' };
 }
 
 // Đọc số lớp + kích thước KV từ GGUF để tự chọn số lớp đưa lên GPU (có chừa khoảng trống)
@@ -68,6 +70,7 @@ async function modelGeometry(modelPath) {
   } catch { return { arch: null, layers: null, kvPerToken: null }; }
 }
 const MB = 1024 * 1024;
+const mmprojBytes = (p) => { try { return p ? require('fs').statSync(p).size : 0; } catch { return 0; } };
 // Kế hoạch nạp: thử lần lượt từ nhanh nhất tới an toàn nhất
 // 0.15.2: KHÔNG BAO GIỜ thu nhỏ ngữ cảnh dưới minCtx (mặc định 8192 — lời nhắc hệ thống + công cụ của AIVN AGENT cần chỗ).
 // Thiếu VRAM thì đưa ít lớp lên GPU hơn; ngữ cảnh chỉ giảm (tới minCtx) ở các phương án cuối cùng.
@@ -110,7 +113,11 @@ async function loadModel(id, modelPath, opts = {}) {
     loading = (async () => {
       await unloadModel();
       const l = await getLlama().catch(() => null);
-      const vpf = opts.perf || {}; const vx = { ...(vpf.threads ? { threads: vpf.threads } : {}), ...(vpf.batchSize ? { batchSize: vpf.batchSize } : {}), extraArgs: opts.serverArgs, serverExe: opts.serverExe || null }; // B26: số luồng/lô của từng mô hình áp dụng cả cho llama-server
+      const vpf = opts.perf || {}; const vx = { ...(vpf.threads ? { threads: vpf.threads } : {}), ...(vpf.batchSize ? { batchSize: vpf.batchSize } : {}), extraArgs: opts.serverArgs, serverExe: opts.serverExe || null,
+        // B168/B170: chọn GPU rời trên máy nhiều GPU, lề VRAM rõ ràng cho --fit (cùng công thức với ước lượng ở hộp nạp), số lớp/KV/flash attention người dùng đặt
+        multiGpu: await (l && l.gpu ? Promise.resolve().then(() => l.getGpuDeviceNames()) : Promise.resolve([])).then(n => (n || []).length > 1).catch(() => false), devicePref: opts.devicePref ?? null,
+        fitTargetMiB: require('./gguf').serverMarginMiB(mmprojBytes(opts.mmproj)), ...(Number.isInteger(opts.gpuLayers) ? { gpuLayers: opts.gpuLayers } : {}),
+        ...(opts.kvCache ? { kvCache: opts.kvCache } : {}), ...(opts.flashAttention != null ? { flashAttention: opts.flashAttention } : {}) }; // B26: số luồng/lô của từng mô hình áp dụng cả cho llama-server
       try { await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: !!(l && l.gpu), ...vx }); }
       catch (e) {
         if (!(l && l.gpu) || ['VCREDIST', 'NO_SERVER'].includes(e.code)) throw e;
@@ -176,7 +183,7 @@ async function unloadModel() {
 
 function status() {
   // B123: bộ máy THẬT đang chạy mô hình nhìn ảnh (llama-server), không phải GPU của node-llama-cpp
-  if (visionOn) { const v = getVision().status(); if (v) return { loaded: true, id: v.id, path: v.path, contextSize: v.contextSize, vision: true, gpu: llama && llama.gpu, backend: serverBackend(v), gpuLayers: v.gpuLayers ?? null, totalLayers: v.totalLayers ?? null, toolMode: v.textTools ? 'text' : 'native', runtime: v.runtime || 'bundled', runtimeFallback: v.runtimeFallback || null, meta: v.template ? { toolTemplate: !!v.template.nativeTools } : null }; }
+  if (visionOn) { const v = getVision().status(); if (v) return { loaded: true, id: v.id, path: v.path, contextSize: v.contextSize, vision: true, gpu: llama && llama.gpu, backend: serverBackend(v), gpuLayers: v.gpuLayers ?? null, totalLayers: v.totalLayers ?? null, device: v.device || null, toolMode: v.textTools ? 'text' : 'native', runtime: v.runtime || 'bundled', runtimeFallback: v.runtimeFallback || null, meta: v.template ? { toolTemplate: !!v.template.nativeTools } : null }; }
   return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, meta: current.meta || null, perf: current.perf || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: !!loading };
 }
 

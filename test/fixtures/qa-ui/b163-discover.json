@@ -80,6 +80,11 @@
    "as": "hf"
   },
   {
+   "do": "readText",
+   "testid": "hf-catalog",
+   "as": "hfcat"
+  },
+  {
    "do": "screenshot",
    "name": "search"
   }

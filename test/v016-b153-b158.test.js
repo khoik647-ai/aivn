@@ -156,7 +156,8 @@ test('B155: mô hình kiểu 4B nói “không có fetch_url” → AIVN tự đ
   const { agent, seen } = agentWith(replies);
   const r = await agent.run({ messages: [{ role: 'user', content: Q }], approve: async () => ({ ok: false }) });
   const auto = r.steps.find(s => s.autoRead); assert.ok(auto, r.steps.map(s => s.name).join()); assert.strictEqual(auto.status, 'ok'); assert.strictEqual(auto.args.url, SJC);
-  const second = seen[1].msgs.map(m => String(m.content || '')).join('\n');
+  // 0.16 (B167): AIVN đọc trang TRƯỚC lượt đầu của mô hình → lượt có nội dung trang có thể là lượt đầu tiên
+  const second = (seen.find(x => x.msgs.some(m => /AIVN đã TỰ đọc trang/.test(String(m.content || '')))) || { msgs: [] }).msgs.map(m => String(m.content || '')).join('\n');
   assert.match(second, /142\.300\.000/); assert.match(second, /AIVN đã TỰ đọc trang/); assert.match(second, /ĐỪNG nói là không có công cụ/);
   assert.match(r.text, /139\.300\.000/); assert.match(r.text, /142\.300\.000/); assert.match(r.text, /sjc\.com\.vn/); assert.ok(!/google\.com\/search/.test(r.text), r.text);
   assert.ok(!/không có công cụ/.test(r.text));

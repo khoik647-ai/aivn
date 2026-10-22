@@ -1346,11 +1346,12 @@ function createDesktopAgent(deps) {
     const st = (deps.getSettings && deps.getSettings()) || {}; const net = st.agentWeb === true;
     const b = (a && a.browser && BP.byId(a.browser)) || BP.browserOf(a && a.query) || BP.byId('chrome');
     const lg = (m) => deps.log && deps.log('desk', m);
+    if (a && a.settleMs > 0 && !deps.isTest) await sleep(Math.min(5000, a.settleMs)); // B164: trang vừa Enter còn đang tải
     const r = await W.autoRead({ query: a.query, browser: b }, {
       log: lg, waitMs: deps.isTest ? 300 : 3500,
       ensure: async (br) => { const e = await ensureApp({ app: br.name }, ctx); return e && !e.error ? { ok: true } : { ok: false, error: e && e.error }; },
       read: async () => { const s = session; if (s && s.target) { try { await observe(ctx, { thumb: false, vision: 'off' }); } catch {} } return readBrowserPage({ page: true }); },
-      navigate: net ? (u) => navigateBrowser(u) : null,
+      navigate: (u) => navigateBrowser(u), // B164: lái trình duyệt (Ctrl+L + địa chỉ) là thao tác màn hình, không phải AIVN tự truy cập mạng → luôn dùng được
       fetch: net ? (u) => web.fetchPage(u, { maxChars: 12000, signal: ctx && ctx.signal }) : null,
       search: net ? async (t) => { const x = await web.search(t, { signal: ctx && ctx.signal }); return (x && x.results) || []; } : null,
       ocr: async () => { const o = await observe(ctx, { thumb: false, vision: 'off' }); return ((session && session.obs && session.obs.elements) || []).map(e => e.name || e.value || '').filter(Boolean).join('\n') || (o && o.text) || ''; },

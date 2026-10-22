@@ -66,7 +66,7 @@ test('agent: giao diện en/zh → lời nhắc hệ thống yêu cầu trả l�
     let sys = null; const ct = createComputerTools({ getSettings: () => ({ agentComputer: true }), openPath: async () => '', openExternal: async () => {}, visionReady: () => false, screen: {} });
     const engine = { status: () => ({ loaded: true, contextSize: 4096 }), chatStep: async (msgs) => { sys = msgs[0].content; return { text: 'ok', toolCalls: [], finishReason: 'stop', usage: {} }; } };
     const ag = createAgent({ engine, getSettings: () => ({ agentComputer: true, uiLang: lang }), memory: { count: () => 0 }, scheduler: {}, extractFile: async () => ({}), embedForMemory: async () => ({}), computer: ct });
-    await ag.run({ messages: [{ role: 'user', content: 'hi' }], confirm: async () => false }); assert.match(sys, re, lang);
+    await ag.run({ messages: [{ role: 'user', content: lang === 'vi' ? 'thư mục được phép có những tệp gì?' : 'what is in my allowed folder?' }], confirm: async () => false }); assert.match(sys, re, lang); // 'hi' = lời chào → đường nhanh B165, không lời nhắc đầy đủ
   }
 });
 

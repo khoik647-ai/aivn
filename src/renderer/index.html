@@ -218,6 +218,7 @@
         <div class="dl-panel" id="dlPanel" hidden data-testid="dl-panel"><h4>Đang tải</h4><div id="dlList" data-testid="dl-list"></div></div>
         <div id="hfArea" hidden data-testid="hf-area">
           <div class="row between"><h3 id="hfTitle">Kết quả</h3><button class="btn sm" id="hfClose" data-testid="hf-close">✕ Đóng tìm kiếm</button></div>
+          <div class="cards" id="hfCat" data-testid="hf-catalog" hidden></div>
           <div class="hf-results" id="hfResults" data-testid="hf-results"></div>
         </div>
         <div id="repoArea" hidden data-testid="repo-area"></div>
@@ -378,7 +379,7 @@
         <label class="check"><input type="checkbox" id="gpuOn" data-testid="gpu-on"> Tăng tốc bằng GPU (Vulkan/CUDA/Metal)<small>Tắt nếu nạp mô hình bị lỗi. AIVN tự chuyển sang CPU khi GPU nạp lỗi. Đổi cài đặt này sẽ gỡ mô hình đang nạp.</small></label>
           <p class="small muted">Mặc định AIVN tự chọn: GPU rời (CUDA/Vulkan), Metal trên Mac, hoặc CPU; tự tính số lớp đưa lên GPU theo VRAM riêng còn trống và tự giảm dần nếu nạp lỗi. Chỉ đổi khi bạn biết mình cần gì.</p>
           <label>Thiết bị GPU (Vulkan)
-            <select id="gpuDevice" data-testid="gpu-device"><option value="">Tự động (ưu tiên GPU rời)</option><option value="0">Thiết bị Vulkan #0</option><option value="1">Thiết bị Vulkan #1</option><option value="2">Thiết bị Vulkan #2</option><option value="3">Thiết bị Vulkan #3</option></select>
+            <select id="gpuDevice" class="gpu-pick" data-testid="gpu-device"><option value="">Tự động (ưu tiên GPU rời)</option><option value="0">Thiết bị Vulkan #0</option><option value="1">Thiết bị Vulkan #1</option><option value="2">Thiết bị Vulkan #2</option><option value="3">Thiết bị Vulkan #3</option></select>
           </label>
           <label>Số lớp đưa lên GPU <b id="gpuLayersVal">Tự động</b>
             <input type="range" id="gpuLayers" min="-1" max="100" step="1" value="-1" data-testid="gpu-layers">
@@ -402,6 +403,9 @@
             <div class="set-card">
               <label>Runtime cho mô hình nhìn ảnh / mắt nhìn
                 <select id="rtPref" data-testid="runtime-pref"><option value="auto">Mặc định: bản đi kèm (Vulkan / Metal / CPU) — khuyên dùng</option><option value="cuda">CUDA (tuỳ chọn, cần tải runtime CUDA và GPU NVIDIA)</option><option value="bundled">Bản đi kèm (Vulkan / Metal / CPU)</option></select>
+              </label>
+              <label>GPU dùng để chạy mô hình
+                <select id="rtGpu" class="gpu-pick" data-testid="runtime-gpu"><option value="">Tự động (ưu tiên GPU rời)</option></select>
               </label>
               <p class="small muted">Chỉ dùng CPU: tắt “Tăng tốc bằng GPU” ở thẻ Phần cứng &amp; bộ máy. Trò chuyện chữ (không ảnh) luôn dùng bộ máy node-llama-cpp đi kèm.</p>
             </div>

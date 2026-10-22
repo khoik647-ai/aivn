@@ -86,6 +86,7 @@
       "src/agent/textproto.js",
       "src/agent/sampling.js",
       "src/gguf.js",
+      "src/gpu-pick.js",
       "src/schema.js",
       "src/ocr.js",
       "src/llama-archs.json",

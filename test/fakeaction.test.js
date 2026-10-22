@@ -54,7 +54,10 @@ test('bước giả → buộc chọn công cụ → mô hình gọi open_app th
 test('trả lời bình thường không bị chặn', async () => {
   const { agent, calls } = mkAgent([say('Xin chào! Mình là AIVN AGENT.')]);
   const r = await agent.run({ messages: [{ role: 'user', content: 'chào bạn' }], confirm: async () => true });
-  assert.strictEqual(calls.length, 1); assert.strictEqual(r.warning, null);
+  // B165 (0.16): lời chào trả lời thẳng, không vòng công cụ (0 hoặc 1 lượt mô hình), không cảnh báo
+  assert.ok(calls.length <= 1, String(calls.length)); assert.strictEqual(r.warning, null); assert.ok(String(r.text || '').trim());
+  const r2 = await mkAgent([say('Mình là AIVN AGENT, mình có thể giúp bạn mở ứng dụng, tìm trên mạng, nhắc việc.')]).agent.run({ messages: [{ role: 'user', content: 'bạn làm được những việc gì cho mình?' }], confirm: async () => true });
+  assert.strictEqual(r2.warning, null);
 });
 
 test('bước quan trọng (gửi/thanh toán/xoá, Enter sau khi gõ) luôn hỏi; bước thường thì không', () => {

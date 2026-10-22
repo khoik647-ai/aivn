@@ -74,12 +74,12 @@ async function autoRead({ query, browser }, io) {
   let searchPage = null;
   if (!p || !p.url || isBlankUrl(p.url)) {
     const g = googleUrl(terms); trail.push(`chưa có trang → tìm “${terms}”`); log(`B155: chưa có trang → tìm “${terms}” trong ${b.name}`);
-    await io.navigate(g, b); await sleep(io.waitMs || 3500); p = await io.read(); if (!p || !p.url) p = { url: g, text: (p && p.text) || '', title: '' };
+    if (io.navigate) { await io.navigate(g, b); await sleep(io.waitMs || 3500); p = await io.read(); } if (!p || !p.url) p = { url: g, text: (p && p.text) || '', title: '' };
   }
   if (isSearchUrl(p.url)) {
     searchPage = p; let results = []; try { results = io.search ? (await io.search(terms)) || [] : []; } catch {}
     const src = pickSource({ pageText: p.text, query: terms, results });
-    if (src) {
+    if (src && io.navigate) {
       trail.push(`trang kết quả tìm kiếm → đi tới trang nguồn ${src.host}`); log(`B155: trang kết quả tìm kiếm → trang nguồn ${src.url}`);
       await io.navigate(src.url, b); await sleep(io.waitMs || 3500); const p2 = await io.read();
       p = p2 && p2.url && !isSearchUrl(p2.url) ? p2 : { url: src.url, text: '', title: '' };
