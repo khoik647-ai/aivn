@@ -749,7 +749,7 @@ function renderMessages() {
     const ag = m.role === 'assistant' && (m.steps || m.agent);
     const extra = m.role === 'assistant' ? webSrcHtml(m) + (m.memories && m.memories.length ? `<div class="mem-used" title="${esc(m.memories.join('\n'))}">🧠 Đã dùng ${m.memories.length} ghi nhớ liên quan</div>` : '') : '';
     const sched = m.scheduled ? `<div class="sched-tag">⏰ Lịch tự động · ${new Date(m.scheduled.at).toLocaleString(LOC())}${m.scheduled.late ? ' · chạy bù (trễ)' : ''}${m.scheduled.manual ? ' · chạy thủ công' : ''}</div>` : '';
-    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN AGENT' : 'AIVN'}${m.model ? ' · ' + esc(modelLabel(m.model)) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}${think}<div class="body${m.streaming ? ' cursor' : ''}">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions">${/cần nhiều ngữ cảnh hơn|ngữ cảnh[^.]*quá nhỏ/i.test(m.content || '') ? '<button type="button" class="btn sm primary" data-ctx-grow="1">Tăng ngữ cảnh</button>' : ''}<button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning && m.warning !== 'blocked' ? warnBox(m.warning) : ''}${srcs}${extra}${sched}${stats}${copyBtn}</div>${warn}`;
+    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN AGENT' : 'AIVN'}${m.model ? ' · ' + esc(modelLabel(m.model)) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div><div class="err-note">${errNoteHtml(m)}</div>` : ''}${think}<div class="body${m.streaming ? ' cursor' : ''}">${m.role === 'assistant' ? md(ag ? agentBody(m) : m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions">${/cần nhiều ngữ cảnh hơn|ngữ cảnh[^.]*quá nhỏ/i.test(m.content || '') ? '<button type="button" class="btn sm primary" data-ctx-grow="1">Tăng ngữ cảnh</button>' : ''}<button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning && m.warning !== 'blocked' ? warnBox(m.warning) : ''}${srcs}${extra}${sched}${stats}${copyBtn}</div>${warn}`;
   }).join('');
   box.scrollTop = box.scrollHeight;
   paintCtxBar(lastStats(state.current));
@@ -1488,15 +1488,35 @@ const AGENT_EXAMPLES = ['Bây giờ là mấy giờ, hôm nay thứ mấy? Còn 
 const STATUS_VI = { running: 'đang chạy', ok: 'xong', error: 'lỗi', refused: 'bị từ chối' };
 const fmtMs = (ms) => ms == null ? '' : ms < 1000 ? ms + ' ms' : (ms / 1000).toFixed(1).replace('.', DEC()) + ' giây';
 function argPreview(st) { const a = st.args || {}; const v = a.path || a.expression || a.query || a.url || a.fact || a.title || a.code || ''; return String(v).split('\n')[0].slice(0, 90); }
-function stepHtml(st, open) {
+function stepBodyHtml(st) {
   const args = Object.keys(st.args || {}).length ? JSON.stringify(st.args, null, 2) : '(không có)';
+  return `${st.thumb && st.thumb.src ? `<img class="s-thumb" src="${esc(st.thumb.src)}" alt="Màn hình sau bước này" loading="lazy">` : ''}<div class="s-body"><h5>Công cụ</h5><div><code>${esc(st.name)}</code></div><h5>Đầu vào</h5><pre>${esc(args)}</pre>${st.status !== 'running' ? `<h5>Kết quả</h5><pre>${esc(st.detail ?? st.summary ?? '')}</pre>` : ''}</div>`;
+}
+function stepHtml(st, open) {
   return `<details class="step st-${esc(st.status)}" data-step="${esc(st.id)}"${open ? ' open' : ''}><summary><span aria-hidden="true">${esc(st.icon || '🔧')}</span><span class="s-name">${esc(st.label)}</span>${st.auto ? `<span class="s-auto" title="${st.auto === 'phrase' ? 'Tự làm không hỏi (theo câu trong yêu cầu của bạn)' : 'Tự làm không hỏi (đang bật)'}">⚡ tự làm</span>` : ''}<span class="s-sum">${esc(st.summary || argPreview(st))}</span>${st.ms != null ? `<span class="s-ms">${fmtMs(st.ms)}</span>` : ''}<span class="s-st">${STATUS_VI[st.status] || esc(st.status)}</span></summary>
-    ${st.thumb && st.thumb.src ? `<img class="s-thumb" src="${esc(st.thumb.src)}" alt="Màn hình sau bước này" loading="lazy">` : ''}<div class="s-body"><h5>Công cụ</h5><div><code>${esc(st.name)}</code></div><h5>Đầu vào</h5><pre>${esc(args)}</pre>${st.status !== 'running' ? `<h5>Kết quả</h5><pre>${esc(st.detail ?? st.summary ?? '')}</pre>` : ''}</div></details>`;
+    ${stepBodyHtml(st)}</details>`;
+}
+// B171: lỗi hiện bước + lỗi + cách xử lý; thẻ lỗi giống nhau liên tiếp gộp một, kèm số lần
+function errNoteHtml(m) {
+  const EV = window.AIVN_ERROR_VIEW; if (!EV) return '';
+  const g = EV.orphanGroup(m && m.content, m && m.steps);
+  return g ? EV.errorCardHtml(g, { fmtMs }) : '';
+}
+function agentBody(m) {
+  const EV = window.AIVN_ERROR_VIEW;
+  return EV ? EV.presentBody(m && m.content, m && m.steps) : ((m && m.content) || '');
 }
 function stepsHtml(m, openIds = new Set()) {
   if (!m.steps || !m.steps.length) return '';
+  const EV = window.AIVN_ERROR_VIEW;
+  const groups = EV ? EV.groupSteps(m.steps) : m.steps.map(st => ({ kind: 'step', st }));
   let html = '', lastPre = null;
-  for (const st of m.steps) { if (st.pre && st.pre !== lastPre) { html += `<div class="step-pre">💭 ${esc(st.pre)}</div>`; lastPre = st.pre; } html += stepHtml(st, openIds.has(st.id)); }
+  for (const g of groups) {
+    const st = g.st;
+    if (st && st.pre && st.pre !== lastPre) { html += `<div class="step-pre">💭 ${esc(st.pre)}</div>`; lastPre = st.pre; }
+    if (g.kind === 'err' && EV) { const shown = (g.steps && g.steps.length) ? g.steps[g.steps.length - 1] : g.st; html += EV.errorCardHtml({ ...g, st: shown }, { fmtMs, open: (g.steps || []).some(s => openIds.has(s.id)), detailHtml: stepBodyHtml(shown) }); }
+    else if (st) html += stepHtml(st, openIds.has(st.id));
+  }
   return `<div class="steps" aria-label="Các bước AIVN AGENT đã làm">${html}</div>`;
 }
 function webSrcHtml(m) {
@@ -1552,15 +1572,17 @@ async function sendAgent(text) {
   input.value = ''; input.style.height = 'auto';
   drafts.note('agent', 'input', ''); drafts.stash('agent', { input: '' }, pending);
   renderMessages();
-  const msgEl = () => $(`#messages .msg[data-i="${idx}"]`);
+  // B173: #messages được dựng lại khi đổi trang. Chỉ vẽ khi vẫn đang xem đúng cuộc AGENT, không ghi vào tin Trò chuyện cùng chỉ số.
+  const msgEl = () => { const body = window.ChatStream && ChatStream.streamBody({ query: (i) => document.querySelector('#messages .msg[data-i="' + i + '"]'), conv, visible: state.current, visibleMode: state.mode, index: idx }); return body ? body.closest('.msg') : null; };
   const box = $('#messages');
   const stick = () => { box.scrollTop = box.scrollHeight; };
-  msgEl().querySelector('.body').classList.add('cursor');
+  const startEl = msgEl(); if (startEl) startEl.querySelector('.body').classList.add('cursor');
   const reqId = uid(); state.generating = reqId; state.genKind = 'agent'; state.genPhase = null; genStartedAt = Date.now();
   setGenNote('Đang chuẩn bị (công cụ, ghi nhớ)…');
-  const paintSteps = () => { const el = msgEl(); if (!el) return; const w = el.querySelector('.steps-wrap'); const open = new Set($$('details.step[open]', w).map(d => d.dataset.step)); w.innerHTML = stepsHtml(reply, open); stick(); };
+  const paintNote = (el) => { const n = el.querySelector('.err-note'); if (n) n.innerHTML = errNoteHtml(reply); };
+  const paintSteps = () => { const el = msgEl(); if (!el) return; const w = el.querySelector('.steps-wrap'); const open = new Set($$('details.step[open], details.step-more[open]', w).map(d => d.dataset.step)); w.innerHTML = stepsHtml(reply, open); paintNote(el); stick(); };
   let raf = false;
-  const paintBody = () => { if (raf) return; raf = true; requestAnimationFrame(() => { raf = false; const el = msgEl(); if (el) el.querySelector('.body').innerHTML = md(reply.content); stick(); }); };
+  const paintBody = () => { if (raf) return; raf = true; requestAnimationFrame(() => { raf = false; const el = msgEl(); if (!el) return; el.querySelector('.body').innerHTML = md(agentBody(reply)); paintNote(el); stick(); }); };
   const offTok = A.onToken(({ reqId: r, t }) => { if (r !== reqId) return; reply.content += t; paintBody(); });
   const offStep = A.onAgentStep(({ reqId: r, step }) => {
     if (r !== reqId) return;

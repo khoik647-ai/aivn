@@ -650,7 +650,7 @@ function askApproval(card) {
     if (!app.isPackaged && process.env.AIVN_APPROVE_AUTO) setTimeout(async () => { if (process.env.AIVN_QACU && confirmSeq <= 3) { await sleep(500); try { fs.writeFileSync(path.join(process.env.AIVN_QACU, `approve-card-${confirmSeq}.png`), (await win.webContents.capturePage()).toPNG()); } catch {} } const f = confirms.get(id); if (f) f(process.env.AIVN_APPROVE_AUTO === 'allow' ? { ok: true } : { ok: false, reason: process.env.AIVN_APPROVE_AUTO.replace(/^deny:?/, '') }); }, 200);
   });
 }
-const slimStep = (x) => ({ id: x.id, name: x.name, label: x.label, icon: x.icon, args: x.args, status: x.status, summary: x.summary, detail: typeof x.detail === 'string' ? x.detail.slice(0, 4000) : x.detail, urls: x.urls, ms: x.ms, pre: x.pre, thumb: x.thumb && typeof x.thumb.src === 'string' && x.thumb.src.length < 120000 ? x.thumb : undefined });
+const slimStep = (x) => ({ id: x.id, name: x.name, label: x.label, icon: x.icon, args: x.args, status: x.status, summary: x.summary, detail: typeof x.detail === 'string' ? x.detail.slice(0, 4000) : x.detail, urls: x.urls, ms: x.ms, pre: x.pre, thumb: x.thumb && typeof x.thumb.src === 'string' && x.thumb.src.length < 120000 ? x.thumb : undefined, check: x.check || undefined, error: x.error ? String(x.error).slice(0, 400) : undefined }); // B171: chuyển tiếp lỗi sẵn có (check/error) để thẻ bước hiện đủ, không đổi vòng lặp
 async function runAgentTurn({ reqId, convoId, messages, headless = false, signal, attachments = [], gate = true, qa = null }) {
   if (!engine.status().loaded && !cloudBrainOn()) {
     if (headless && settings.data.lastModel) await loadById(settings.data.lastModel);
