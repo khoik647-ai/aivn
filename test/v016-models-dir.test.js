@@ -38,13 +38,16 @@ test('trình tải: thư mục đích theo thư mục mô hình HIỆN TẠI, ki
   assert.match(m, /if \(QA_PROFILE\) return \{ ok: false, error: 'Hồ sơ QA/);
 });
 const hasX = spawnSync('which', ['xvfb-run']).status === 0 && fs.existsSync(path.join(root, 'node_modules/.bin/electron'));
-const runUi = (ud, script, out) => spawnSync('timeout', ['200', 'nice', 'xvfb-run', '-a', '-s', '-screen 0 1280x800x24', path.join(root, 'node_modules/.bin/electron'), '.', '--no-sandbox', '--qa-ui', script, '--out', out], { cwd: root, encoding: 'utf8', env: { ...process.env, AIVN_QA_MODE: '1', AIVN_SKIP_ACTIVATION: '1', AIVN_USER_DATA: ud } });
-for (const mode of ['move', 'point']) test(`giao diện thật (Xvfb): Cài đặt → Chung → Đổi thư mục… (${mode === 'move' ? 'chuyển mô hình' : 'chỉ trỏ sang thư mục mới'})`, { skip: !hasX && 'cần xvfb', timeout: 240e3 }, () => {
+// B187: máy tải nặng làm bước chuyển mô hình (test 7, mode move) kéo ~29s thay vì ~9s và hết hạn 20s của expectHidden.
+// Chờ đúng trạng thái trên DOM (thanh tiến độ biến mất, rồi đường dẫn mới hiện), hạn mức rộng; không ngủ cố định.
+const UI_WAIT = 120000;
+const runUi = (ud, script, out) => spawnSync('timeout', ['420', 'nice', 'xvfb-run', '-a', '-s', '-screen 0 1280x800x24', path.join(root, 'node_modules/.bin/electron'), '.', '--no-sandbox', '--qa-ui', script, '--out', out], { cwd: root, encoding: 'utf8', env: { ...process.env, AIVN_QA_MODE: '1', AIVN_SKIP_ACTIVATION: '1', AIVN_USER_DATA: ud } });
+for (const mode of ['move', 'point']) test(`giao diện thật (Xvfb): Cài đặt → Chung → Đổi thư mục… (${mode === 'move' ? 'chuyển mô hình' : 'chỉ trỏ sang thư mục mới'})`, { skip: !hasX && 'cần xvfb', timeout: 480e3 }, () => {
   const d = tmp(); const ud = path.join(d, 'ud'), nd = path.join(d, 'D-models'); fill(path.join(ud, 'models')); fs.mkdirSync(nd);
-  const s = { name: 'mdir-' + mode, steps: [{ goto: 'chat' }, { waitFor: ['ob-skip', 4000], optional: true }, { click: 'ob-skip', optional: true },
-    { goto: 'settings/general' }, { expectText: ['mdir-info', path.join(ud, 'models')] }, { setFiles: ['mdir-change', nd] },
-    { expectText: ['confirm-modal', 'Chuyển 3 tệp'] }, mode === 'move' ? { click: 'cf-yes' } : { click: 'cf-no' }, ...(mode === 'point' ? [{ expectText: ['confirm-modal', 'Chỉ dùng thư mục mới'] }, { click: 'cf-yes' }] : []),
-    { expectHidden: 'mdir-prog', timeout: 20000 }, { expectText: ['mdir-info', nd] }, { goto: 'models' }, { expectText: ['models-dir', nd] }] };
+  const s = { name: 'mdir-' + mode, steps: [{ goto: 'chat' }, { waitFor: ['ob-skip', 20000], optional: true }, { click: 'ob-skip', optional: true },
+    { goto: 'settings/general' }, { expectText: ['mdir-info', path.join(ud, 'models')], timeout: 30000 }, { setFiles: ['mdir-change', nd], timeout: 30000 },
+    { expectText: ['confirm-modal', 'Chuyển 3 tệp'], timeout: 30000 }, mode === 'move' ? { click: 'cf-yes', timeout: 30000 } : { click: 'cf-no', timeout: 30000 }, ...(mode === 'point' ? [{ expectText: ['confirm-modal', 'Chỉ dùng thư mục mới'], timeout: 30000 }, { click: 'cf-yes', timeout: 30000 }] : []),
+    { expectHidden: 'mdir-prog', timeout: UI_WAIT }, { expectText: ['mdir-info', nd], timeout: UI_WAIT }, { goto: 'models' }, { expectText: ['models-dir', nd], timeout: UI_WAIT }] };
   fs.writeFileSync(path.join(d, 's.json'), JSON.stringify(s)); const r = runUi(ud, path.join(d, 's.json'), path.join(d, 'r.json'));
   const j = JSON.parse(fs.readFileSync(path.join(d, 'r.json'), 'utf8'));
   assert.deepStrictEqual(j.steps.filter(x => !x.ok).map(x => `${x.n} ${x.action}: ${x.error}`), []); assert.strictEqual(r.status, 0);
