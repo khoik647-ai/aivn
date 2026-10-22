@@ -1102,7 +1102,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     }
     if (finishReason !== 'abort') { const fc = RT.finalCheck(text, retry); if (fc) warning = warning || fc; }
     // B104: việc gửi tin chưa xong mà ô soạn còn chữ AIVN gõ → xoá (hoặc báo rõ còn đó); người dùng bấm Dừng → không thao tác thêm
-    if (!sentDone && deps.computer && deps.computer.cleanupDraft && require('./send-verify').MSG_SEND.test(String(query || '')) && !require('./send-verify').DRAFT_ONLY.test(String(query || ''))) {
+    if (!sentDone && deps.computer && deps.computer.cleanupDraft && require('./send-verify').msgSend(String(query || '')) && !require('./send-verify').DRAFT_ONLY.test(String(query || ''))) {
       try {
         const cd = await deps.computer.cleanupDraft({ clear: !(signal?.aborted && signal.reason !== 'timeout') });
         if (cd) { const note = draftNoteOf(cd); text = `${String(text || '').trim()}${String(text || '').trim() ? '\n\n' : ''}${note}`; }

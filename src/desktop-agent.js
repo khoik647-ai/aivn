@@ -679,7 +679,7 @@ function createDesktopAgent(deps) {
     let bodyTyping = false;
     if (action === 'type_text' && ctx && ctx.userQuery && !a.__clear) {
       const rcpB = SV.recipientOf(ctx.userQuery) || s.chatOpen || null;
-      const msgTask = !!(SV.MSG_SEND.test(ctx.userQuery) && (rcpB || s.chatOpen)) && SV.isChatContext(ctx.userQuery, s.obs && s.obs.win ? s.obs.win.proc : '', s.obs && s.obs.win ? s.obs.win.title : ''); // chỉ ứng dụng chat (thư điện tử có ô Tiêu đề/thân thư riêng)
+      const msgTask = !!(SV.msgSend(ctx.userQuery) && (rcpB || s.chatOpen)) && SV.isChatContext(ctx.userQuery, s.obs && s.obs.win ? s.obs.win.proc : '', s.obs && s.obs.win ? s.obs.win.title : ''); // chỉ ứng dụng chat (thư điện tử có ô Tiêu đề/thân thư riêng)
       if (msgTask && !SV.nameLikeText(a.text, rcpB) && !(s.inSearch && Date.now() - s.inSearch < SEARCH_MS() && !s.chatOpen)) {
         bodyTyping = true;
         const win = s.obs && s.obs.win;
@@ -746,7 +746,7 @@ function createDesktopAgent(deps) {
       const tName = `${t && t.el ? t.el.name || '' : ''} ${t && t.query ? t.query : String(a.element || a.target || '')}`;
       const W = s.obs && s.obs.win && Array.isArray(s.obs.win.b) && s.obs.win.b[3] > 50 ? s.obs.win.b : null;
       const inComposerRow = !!(t && t.el && Array.isArray(t.el.b) && W && (t.el.b[1] + t.el.b[3] / 2 - W[1]) / W[3] > 0.8);
-      return { chatOpen: !!s.chatOpen, recipient: qG ? SV.recipientOf(qG) : null, messaging: !!(qG && SV.MSG_SEND.test(qG)), searchTarget: searchConfirmed(t, focusedEl, a), lastTyped: s.lastTyped || '', targetName: tName, inComposerRow };
+      return { chatOpen: !!s.chatOpen, recipient: qG ? SV.recipientOf(qG) : null, messaging: !!(qG && SV.msgSend(qG)), searchTarget: searchConfirmed(t, focusedEl, a), lastTyped: s.lastTyped || '', targetName: tName, inComposerRow };
     };
     const gate = SG.classify(action, a, gateState());
     const gateRcp = (ctx && ctx.userQuery ? SV.recipientOf(ctx.userQuery) : null) || s.chatOpen || s.currentChat || '';
@@ -789,7 +789,7 @@ function createDesktopAgent(deps) {
     let forceAsk = null;
     if (['click', 'double_click'].includes(action) && ctx && ctx.userQuery && !s.dialog) {
       const nmF = String((t && t.el && t.el.name) || (t && t.query && !U.isIdRef(String(t.query)) ? t.query : '') || '').trim();
-      const msgTaskF = SV.MSG_SEND.test(ctx.userQuery) || !!SV.recipientOf(ctx.userQuery);
+      const msgTaskF = SV.msgSend(ctx.userQuery) || !!SV.recipientOf(ctx.userQuery);
       if (msgTaskF && nmF && (SV.isFileTarget(nmF, t && t.el) || SV.fileAt(t && t.el, s.obs))) {
         if (!SV.wantsFiles(ctx.userQuery)) {
           deps.log && deps.log('desk', `Chặn bấm tệp (B96): “${nmF.slice(0, 60)}” — việc gửi tin không mở tệp`);
