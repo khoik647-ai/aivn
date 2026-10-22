@@ -20,14 +20,14 @@ Mục 14 vẫn là quyết định đã duyệt, trừ các xung đột ghi ngay
 
 ## 1. Quyết định đã chốt
 
-1. Hộp thoại là lớp trên `createMcpManager` (`src/mcp.js`) cho phần Nâng cao. Không viết máy khách MCP mới. AIVN Kinh doanh và Excel không phải máy chủ MCP và không ghi vào `mcp.json` (mục 5.4, 9.2).
+1. Hộp thoại là lớp trên `createMcpManager` (`src/mcp.js`) cho phần Nâng cao và cho Excel. Không viết máy khách MCP mới. AIVN Kinh doanh không phải máy chủ MCP và không ghi vào `mcp.json`. Excel là gói `@negokaz/excel-mcp-server@0.12.0`: cửa hàng ghi một mục khoá `excel` để lõi gọi gói (mục 5.4, 9.1). Ô cửa hàng không hiện lệnh.
 2. Mọi lần **bắt đầu** một máy chủ MCP (bấm Kết nối trong Nâng cao, nhập tệp rồi chạy, thay thế lệnh, bật lại “tự kết nối khi mở AIVN”) và mọi lần **gọi công cụ** `mcp__…` đi qua thẻ xin phép sẵn có (`#approveCard`, `askApproval`). Bật AIVN Kinh doanh hoặc Excel cũng qua thẻ đó. Tắt, gỡ, bỏ “Luôn cho phép” là thu hồi quyền: không xin phép để bớt quyền.
 3. “Luôn cho phép” trên thẻ **công cụ** giữ nghĩa cũ (`settings.agentAlwaysAllow`, từng tên công cụ). “Luôn cho phép” trên thẻ **kết nối** chỉ có nghĩa tự chạy lại khi mở AIVN. Hai việc không gộp.
 4. Khoá bí mật không nằm dạng chữ trong `mcp.json`. Chúng đi theo cùng cách `createKeyStore` của bộ não đám mây (`src/cloud-brain.js`): `safeStorage` của hệ điều hành, hoặc chỉ trong bộ nhớ nếu máy không có kho khoá thật.
 5. “Tự làm không hỏi” không bao giờ bỏ qua công cụ MCP. `skipAsk` đã trả `false` cho tên `mcp__` (`src/agent/autonomy.js`). Kết nối cũng không đi qua `skipAsk`, vì nó không phải một lượt của mô hình. Công cụ Kinh doanh thuộc nhóm xoá, huỷ, thanh toán không được `skipAsk` bỏ qua (mục 5.4).
 6. Lịch tự động (chạy không người, `headless: true`) không nhận công cụ MCP và cũng không nhận công cụ của kết nối cửa hàng. `activeToolsRaw` đã loại MCP khi headless. beta.4 giữ nguyên và áp cùng điều kiện cho `biz_*` và `excel_*`.
 7. Mẫu AIVN AGENT chỉ thêm một đoạn vai trò vào lời nhắc. Mẫu không tự bật công tắc, không tự ghi `mcp.json`, không tự bật kết nối cửa hàng, không tự sinh tiến trình. Muốn dùng kết nối mà mẫu gợi ý, người dùng bấm Kết nối và gặp thẻ xin phép.
-8. Cửa hàng beta.4 gắn trong ứng dụng: hai kết nối chạy được và năm ô sắp có (mục 5.4). Không tải danh mục từ mạng. Bảy máy chủ nhà phát triển còn gói trên npm chỉ nằm ở Nâng cao, ghim đúng phiên bản mục 5.4, đóng trong bản cài (mục 5.9).
+8. Cửa hàng beta.4 gắn trong ứng dụng: hai kết nối chạy được và năm ô sắp có (mục 5.4). Không tải danh mục từ mạng. Nâng cao chỉ có năm mục: bốn gói stdio ghim đúng phiên bản mục 5.4, cộng Hugging Face là URL. Không có `server-time`, không có `server-brave-search`, không có `server-github`. Gói được đóng trong bản cài ở PR 3 (mục 5.9, 5.10).
 9. Tệp `mcp.json` trên đĩa giữ dạng LM Studio đọc được, trừ giá trị bí mật đã được thay bằng tham chiếu. Siêu dữ liệu của AIVN (đã duyệt, tự chạy, id danh mục, kết nối cửa hàng) nằm ở `plugins-meta.json`, không nhét thêm trường lạ vào `mcp.json`.
 10. Nâng cấp từ bản đã có `mcp.json`: máy chủ đang bật được coi là đã duyệt và được tự chạy, để không hỏi lại người đã cấu hình tay. Máy chủ thêm sau bản này thì phải qua thẻ. Kết nối cửa hàng không tự bật khi nâng cấp.
 11. Tám câu ở mục 14 đã được duyệt. Đó là quyết định, không còn là câu hỏi. Xung đột với hướng cửa hàng được gọi tên ở đầu mục 14, không âm thầm đảo các câu còn lại.
@@ -116,7 +116,7 @@ Màu và hình: nền `--bg` / `--card`, viền `--line`, accent `#D7263D`, ch�
 
 Kinh doanh đã chạy trong tiến trình chính: `src/crm/crm.js`, `src/crm/biz.js` (danh sách trắng `BIZ_CALLS`), SQLite `userData/crm.db`, IPC `crm:call`. Màn hình `crm` có các tab Tổng quan, Liên hệ, CRM, Việc cần làm, Bán hàng, Kho, Hoá đơn, Báo cáo. Chưa có công cụ AIVN AGENT cho các hàm này.
 
-Excel đã đọc và ghi trong tiến trình: `src/crm/sheet.js` (`parseXlsx`, `toXlsx`, `parseCsv`, `toCsv`, chặn công thức khi ghi CSV) qua `fflate`. Không cần cài Microsoft Excel. Chưa có công cụ AIVN AGENT riêng cho bảng tính.
+Excel trên màn hình Kinh doanh vẫn đọc và ghi trong tiến trình: `src/crm/sheet.js` (`parseXlsx`, `toXlsx`, `parseCsv`, `toCsv`, chặn công thức khi ghi CSV) qua `fflate`. Không cần cài Microsoft Excel. Kết nối Excel của AIVN AGENT không dùng `sheet.js`; đó là gói MCP ở mục 5.4.
 
 ## 4. Nguyên tắc giao diện
 
@@ -151,7 +151,7 @@ Khung màn hình chính:
 └──────────────────────────────────────────────────────────┘
 ```
 
-Tìm kiếm trên màn hình chính lọc ô cửa hàng và các dòng trong tab Của tôi. So khớp bỏ dấu (`foldVi`): tên hiển thị và câu mô tả. Không khớp lệnh, không khớp tên gói, không gọi mạng. Hết kết quả: “Không thấy “{0}”.” Không mời nhập `mcp.json` trên màn hình này; việc đó nằm ở Nâng cao.
+Tìm kiếm trên màn hình chính lọc ô cửa hàng và các dòng trong tab Của tôi. So khớp bỏ dấu (`foldVi`): tên hiển thị và câu mô tả. Không khớp lệnh, không khớp tên gói, không gọi mạng. Hết kết quả: “Không thấy? Thêm máy chủ MCP ở Nâng cao”, và câu đó là liên kết mở ngăn Nâng cao. Đây là câu duy nhất trên màn hình chính được nhắc máy chủ MCP (mục 18.2).
 
 `#mcpBadges`: bấm một huy hiệu thì mở hộp thoại. Nếu đó là kết nối cửa hàng thì cuộn tới ô. Nếu đó là máy chủ MCP thì mở Nâng cao và cuộn tới dòng đó.
 
@@ -171,9 +171,9 @@ Nút chính mang chỉ báo khi N ≥ 1: “{0} đã kết nối”. N = 0 thì 
 
 ### 5.2 Chỉ báo “N đã kết nối”
 
-N là số kết nối **đang chạy**:
+N là số kết nối người dùng đang giữ:
 
-- kết nối cửa hàng có `enabled === true` (AIVN Kinh doanh, Excel);
+- kết nối cửa hàng có `enabled === true`, kể cả khi đang “chờ dùng lần đầu”;
 - máy chủ MCP có `state === "on"` và không `disabled`.
 
 Không tính `starting`, `error`, `off`, ô Sắp có, và ô cửa hàng chưa bấm Kết nối.
@@ -200,7 +200,7 @@ Thứ tự cố định. “Đã kết nối” không phải một tab; đó l�
 
 Tab Tệp, Mạng, Lập trình, Tri thức bị bỏ. Đây là xung đột với mục 14.6, ghi ở mục 14.
 
-Tab Tài chính, và bất kỳ tab nhóm nào trống: “Chưa có ứng dụng trong nhóm này.” Tab Tất cả không vẽ tiêu đề của nhóm trống.
+Tab Tài chính trống: “Chưa có ứng dụng tài chính.” rồi “Nhóm này sẽ có thêm ứng dụng trong các bản sau.” Tab nhóm khác mà trống: “Chưa có ứng dụng trong nhóm này.” Tab Tất cả không vẽ tiêu đề của nhóm trống.
 
 Tab Của tôi rỗng: “Chưa kết nối ứng dụng nào.” Không nhắc `mcp.json` ở dòng trống này.
 
@@ -208,16 +208,16 @@ Dòng trong Của tôi dùng cùng kiểu ô với cửa hàng: logo hoặc ch�
 
 ### 5.4 Danh mục cửa hàng và danh mục Nâng cao
 
-Hai danh sách khác nhau. Cửa hàng không có id nào trùng id máy chủ MCP.
+Hai danh sách khác nhau. Id cửa hàng không trùng id danh mục Nâng cao. Khoá `excel` trong `mcp.json` là mục cửa hàng ghi, không phải một dòng Nâng cao.
 
 #### Cửa hàng — chạy được trong beta.4
 
-Không sinh tiến trình, không `npx`, không ghi `mcp.json`. Dữ liệu ở mục 9.2.
+AIVN Kinh doanh không sinh tiến trình, không `npx`, không ghi `mcp.json`. Excel ghi một mục `mcp.json` và chạy gói đã ghim (mục 5.9); ô không hiện lệnh. Dữ liệu meta ở mục 9.2.
 
 | id | Nhóm | vi | en | zh | Chạy thế nào |
 |---|---|---|---|---|---|
 | `biz` | sales | AIVN Kinh doanh | AIVN Business | AIVN 业务 | Trong tiến trình chính, gọi đúng các hàm `BIZ_CALLS` của `src/crm/biz.js`. Không thêm nghiệp vụ ngoài danh sách trắng đó. |
-| `excel` | productivity | Excel | Excel | Excel | Trong tiến trình chính, `src/crm/sheet.js`. Chỉ tệp `.xlsx` và `.csv` trong thư mục được phép (`agentFolders`). |
+| `excel` | productivity | Excel | Excel | Excel | Gói `@negokaz/excel-mcp-server@0.12.0` (MIT). AIVN vẫn tự chặn đường dẫn trước mỗi lần gọi (mục 18). |
 
 Câu một dòng:
 
@@ -238,14 +238,9 @@ Quy tắc thẻ khi **gọi** công cụ (khác với thẻ lúc bấm Kết n�
 
 `skipAsk` trả `false` cho sáu tên ở hàng cuối. Các hàm sửa còn lại đi qua `needsApproval` như `write_file`.
 
-**Excel.** Hai công cụ:
+**Excel.** Chủ repo chọn gói `@negokaz/excel-mcp-server@0.12.0` (MIT, Kazuki Negoro), không dùng `src/crm/sheet.js` làm kết nối của AIVN AGENT. `sheet.js` vẫn phục vụ màn hình Kinh doanh. Mọi công cụ của gói nhận `fileAbsolutePath`. Trước mỗi lần `callTool`, AIVN tự `realpath` (đi theo liên kết tượng trưng, kể cả tệp chưa có bằng cách lấy thư mục cha có thật) và từ chối nếu đường dẫn thật nằm ngoài danh sách thư mục của riêng Excel. Lần kết nối đầu, danh sách đó được chép từ thư mục được phép của AIVN AGENT. “Chi tiết” → “Đổi thư mục” chỉ sửa danh sách của Excel, không sửa quyền của AIVN AGENT. Việc gói cũng tự kiểm không thay bước này. PR lõi (`excelCallError`, `getExcelFolders`) đã làm bước chặn và đọc `connectors.excel.folders`. Đóng gói gói vào bản cài là PR 3. Không gọi `npx` lúc người dùng bấm.
 
-| Tên | Việc | Thẻ |
-|---|---|---|
-| `excel_read` | `parseXlsx` hoặc `parseCsv` trong thư mục được phép | Không thẻ, cùng luật với `read_file` |
-| `excel_write` | `toXlsx` hoặc `toCsv` trong thư mục được phép. CSV giữ lối chặn công thức đang có trong `sheet.js` | Cùng thẻ với `write_file`. Ghi đè thì `danger: true` |
-
-Không có công cụ xoá riêng. Xoá tệp vẫn là `delete_file`. Không tự động hoá ứng dụng Excel đang cài trên máy. Thư mục của Excel là đúng `agentFolders`, không mở thêm một phạm vi như máy chủ filesystem từng làm.
+Đọc (`excel_describe_sheets`, `excel_read_sheet`) không thẻ, cùng mức với `read_file`. Ghi (`excel_write_to_sheet`, `excel_create_table`, `excel_copy_sheet`, `excel_format_range`) qua `#approveCard`. `excel_screen_capture` không bật trong beta.4. Không tự động hoá ứng dụng Excel đang cài trên máy.
 
 Khi cả hai kết nối đang bật, riêng Kinh doanh đã thêm 28 công cụ. Trên mô hình dưới 8 tỉ, ngưỡng 20 ở mục 5.8 sẽ cảnh báo. Đó là mục 14.1 đang chạy, không phải lỗi, và không phải lý do để tự bỏ bớt công cụ.
 
@@ -271,19 +266,15 @@ Phiên bản dưới đây là bản `npm view` trả về ngày 22/10/2026. Kh�
 
 | id | vi | Gói ghim | Ghi chú |
 |---|---|---|---|
-| `filesystem` | Thư mục | `@modelcontextprotocol/server-filesystem@2.0.0` | Cần chọn thư mục. Khác `agentFolders`. |
-| `fetch` | Đọc trang web | `mcp-fetch-server@1.1.2` | Tự mở mạng. |
-| `brave` | Tìm kiếm Brave | `@modelcontextprotocol/server-brave-search@0.6.2` | npm ghi gói đã ngừng hỗ trợ. Ghim đúng bản cuối. Cần `BRAVE_API_KEY`. |
-| `huggingface` | Hugging Face | không có gói; `url` `https://huggingface.co/mcp` | Đầu `Authorization` tuỳ chọn. |
-| `github` | GitHub | `@modelcontextprotocol/server-github@2025.4.8` | npm ghi gói đã ngừng hỗ trợ. Ghim đúng bản cuối. Cần `GITHUB_PERSONAL_ACCESS_TOKEN`. |
-| `memory` | Ghi nhớ MCP | `@modelcontextprotocol/server-memory@2.0.0` | Không ghi vào mục Ghi nhớ của AIVN. |
-| `thinking` | Suy nghĩ từng bước | `@modelcontextprotocol/server-sequential-thinking@2.0.0` | |
+| `filesystem` | Thư mục | `@modelcontextprotocol/server-filesystem@2.0.0` | Cần chọn thư mục. Khác `agentFolders`. Giấy phép upstream: MIT cho phần cũ, Apache-2.0 cho phần đã chuyển (repo `modelcontextprotocol/servers`). Tarball npm không kèm tệp LICENSE; PR 3 chép LICENSE upstream vào SBOM. |
+| `fetch` | Đọc trang web | `mcp-fetch-server@1.1.2` | MIT. Tự mở mạng. |
+| `huggingface` | Hugging Face | không có gói; `url` `https://huggingface.co/mcp` | Đầu `Authorization` tuỳ chọn. Không có gói để ghi SBOM. |
+| `memory` | Ghi nhớ MCP | `@modelcontextprotocol/server-memory@2.0.0` | Cùng giấy phép upstream với filesystem. |
+| `thinking` | Suy nghĩ từng bước | `@modelcontextprotocol/server-sequential-thinking@2.0.0` | Cùng giấy phép upstream với filesystem. |
 
-`@modelcontextprotocol/server-time` không còn trên registry (`npm view` trả 404 ngày 22/10/2026). beta.4 không đưa mục Giờ, không chọn gói của người khác để thay. Id `time` để trống cho đến khi chủ repo chỉ một gói. Đây là sửa theo thực tế so với bảng tám mục cũ, ghi ở mục 14.
+Chủ repo bỏ ba mục khỏi beta.4: `@modelcontextprotocol/server-time` (404 trên registry), `@modelcontextprotocol/server-brave-search` và `@modelcontextprotocol/server-github` (npm ghi đã ngừng hỗ trợ). Không chọn gói thay. Không ghim, không đóng vào bản cài, không có dòng SBOM.
 
-Mô tả ngắn của bảy mục giữ nguyên bảng cũ (filesystem, fetch, brave, huggingface, github, memory, thinking) và chỉ hiện trong Nâng cao. Hai gói đã ngừng hỗ trợ thêm một câu, chỉ ở Nâng cao: “Gói này trên npm đã ngừng được hỗ trợ. AIVN ghim đúng bản cuối và không tự tải bản khác.” / “This npm package is no longer supported. AIVN pins the last published version and does not download another.” / “此 npm 包已停止维护。AIVN 固定最后发布的版本，不会另行下载。”
-
-Lệnh stdio của bảy mục **không** còn là `npx -y gói@phiên bản` lúc chạy. Gói nằm trong bản cài. Tiến trình con trỏ vào tệp đã giải nén (mục 5.9). Tệp người dùng nhập vào vẫn được phép không ghim; AIVN không sửa `args`; thẻ có `danger: true`.
+Mô tả ngắn của filesystem, fetch, huggingface, memory, thinking giữ ý cũ và chỉ hiện trong Nâng cao. Lệnh stdio của các mục này **không** còn là `npx -y gói@phiên bản` lúc chạy. Gói nằm trong bản cài. Tiến trình con trỏ vào tệp đã giải nén (mục 5.9). Tệp người dùng nhập vào vẫn được phép không ghim; AIVN không sửa `args`; thẻ có `danger: true`.
 
 Thư mục của `filesystem` là phạm vi của tiến trình MCP, không tự thêm vào `agentFolders`, cũng không lấy `agentFolders` làm mặc định. Người dùng chọn lại mỗi lần kết nối mới.
 
@@ -294,10 +285,11 @@ Trạng thái bộ nhớ của `createMcpManager` giữ nguyên (`off`, `startin
 | Trạng thái UI | Khi nào | vi | en | zh | Nút |
 |---|---|---|---|---|---|
 | `available` | Cửa hàng chạy được, chưa bật | Chưa kết nối | Not connected | 未连接 | Kết nối |
-| `soon` | Ô Sắp có | Sắp có | Coming soon | 即将推出 | không có nút |
+| `soon` | Ô Sắp có | Sắp có | Coming soon | 即将推出 | không có nút Kết nối; có công tắc “Báo tôi khi có” |
 | `needs-setup` | Máy chủ Nâng cao đã bấm Kết nối nhưng còn thiếu thư mục hoặc khoá | Cần thiết lập | Needs setup | 需要设置 | tiếp tục trong thẻ đã mở |
 | `starting` | Máy chủ MCP `state === "starting"` | Đang kết nối… | Connecting… | 正在连接… | không bấm được |
-| `on` | Cửa hàng `enabled`, hoặc MCP `state === "on"` | Đã kết nối | Connected | 已连接 | Ngắt kết nối |
+| `waiting` | Cửa hàng đã cho phép, chưa có lần AIVN AGENT dùng | Đã kết nối · chờ dùng lần đầu | Connected · waiting for first use | 已连接 · 等待首次使用 | Ngắt kết nối |
+| `on` | Cửa hàng đã chạy ở lần dùng đầu, hoặc MCP `state === "on"` | Đã kết nối | Connected | 已连接 | Ngắt kết nối |
 | `off` | Có bản ghi nhưng đang tắt, không lỗi | Đã tắt | Off | 已关闭 | Kết nối |
 | `error` | MCP `state === "error"` | Lỗi | Error | 出错 | Thử lại |
 
@@ -305,17 +297,19 @@ Màu viên trạng thái dùng lại `.mcp-srv .st`. `available` và `off` dùng
 
 ### 5.6 Luồng bấm
 
-**Kết nối AIVN Kinh doanh hoặc Excel:**
+**Kết nối AIVN Kinh doanh:**
 
 1. Bấm “Kết nối”.
 2. Đóng hộp thoại.
 3. Thẻ xin phép (mục 8.3). Không có dòng Lệnh. Hết giờ hoặc Từ chối: không ghi meta, không thêm công cụ.
-4. Cho phép: ghi `plugins-meta.json` → `connectors.<id>` (`approvedAt`, `enabled: true`, `autoStart` theo ô trên thẻ). Không đụng `mcp.json`. Không `start` tiến trình.
-5. Mở lại hộp thoại. Viên thành “Đã kết nối”. Lượt sau của AIVN AGENT mới thấy công cụ.
+4. Cho phép: ghi `plugins-meta.json` → `connectors.biz` (`approvedAt`, `enabled: true`). Không có ô tự chạy. Không đụng `mcp.json`. Không `start` tiến trình.
+5. Mở lại hộp thoại. Viên là “Đã kết nối · chờ dùng lần đầu”. Trạng thái này được nhớ qua lần mở sau. Không bắt người dùng bấm Kết nối lại. Lần AIVN AGENT dùng tới mới chạy (mục 18.5).
 
-**Ô Sắp có:** không có việc bấm. Không xổ.
+**Kết nối Excel:** cùng bước 1–3, cùng không có ô tự chạy. Cho phép thì ghi `connectors.excel` (`approvedAt`, `enabled: true`, `folders` chép từ thư mục được phép của AIVN AGENT tại thời điểm đó) và ghi mục `excel` trong `mcp.json` với args ghim `@negokaz/excel-mcp-server@0.12.0`. Không `start` lúc bấm. Viên “Đã kết nối · chờ dùng lần đầu” giữ qua lần mở sau. Tiến trình chỉ chạy ở lần AIVN AGENT dùng tới. Lần ghi đầu sau mỗi lần mở ứng dụng vẫn qua `#approveCard`. Trong “Chi tiết”, chỉ hiện tên thư mục, đường dẫn đầy đủ khi rê chuột, và “Đổi thư mục”. Nút đó chỉ sửa `connectors.excel.folders`, không sửa `agentFolders`.
 
-**Ngắt kết nối cửa hàng:** ghi `enabled: false` ngay, không thẻ. Công cụ biến khỏi lượt sau. Bản ghi và các dòng “Luôn cho phép” của từng công cụ vẫn còn đến khi gỡ. Bật lại một kết nối đã có `approvedAt` thì ghi `enabled: true`, không thẻ, vì quyền đã được cho. Chưa có `approvedAt` thì đi lại thẻ kết nối. Bật thêm “Tự kết nối khi mở AIVN” vẫn là một thẻ riêng, kể cả khi kết nối đã duyệt.
+**Ô Sắp có:** không có nút Kết nối. Có công tắc “Báo tôi khi có”. Bật thì ghi cờ cục bộ `notify.<id>: true` trong `plugins-meta.json`. Không gọi mạng. Chữ phụ: “AIVN sẽ báo bạn ngay trong ứng dụng khi có. Không gửi gì ra ngoài.” Khi một bản sau làm ứng dụng đó chạy được, AIVN hiện một thông báo trong ứng dụng cho id nào đang bật cờ. Tắt công tắc thì xoá cờ.
+
+**Ngắt kết nối cửa hàng:** ghi `enabled: false` ngay, không thẻ. Công cụ biến khỏi lượt sau. Bản ghi và các dòng “Luôn cho phép” của từng công cụ vẫn còn đến khi gỡ. Bật lại một kết nối đã có `approvedAt` thì ghi `enabled: true` và viên về “chờ dùng lần đầu”, không thẻ, vì quyền đã được cho. Chưa có `approvedAt` thì đi lại thẻ kết nối. Ô cửa hàng không có “Tự kết nối khi mở AIVN”.
 
 **Gỡ kết nối cửa hàng:** `modalAsk`, không phải thẻ xin phép. Chữ như mục 11.2, với tên ứng dụng. Đồng ý thì xoá `connectors.<id>`, xoá mọi `agentAlwaysAllow` có tiền tố `biz_` (với Kinh doanh) hoặc đúng `excel_write` (với Excel). Không đụng `mcp.json`.
 
@@ -323,11 +317,11 @@ Màu viên trạng thái dùng lại `.mcp-srv .st`. `available` và `off` dùng
 
 - Không cần thiết lập (`memory`, `thinking`, `fetch`): đóng hộp thoại, thẻ, Cho phép thì ghi `mcp.json` bằng lệnh đã đóng gói (mục 5.9), ghi meta, rồi `start`.
 - Cần thư mục (`filesystem`): hộp thoại chọn thư mục đang có. Huỷ thì dừng. Thẻ ghi đủ đường dẫn.
-- Cần khoá (`github`, `brave`, Hugging Face nếu người dùng điền): ô mật khẩu trong ngăn Nâng cao, gửi một lần qua IPC, thẻ chỉ nêu tên biến.
+- Cần khoá (Hugging Face nếu người dùng điền): ô mật khẩu trong ngăn Nâng cao, gửi một lần qua IPC, thẻ chỉ nêu tên biến. Không có mục Brave hay GitHub.
 
 **Dòng đang kết nối, cửa hàng:** bấm thân ô thì xổ danh sách công cụ bằng câu tiếng thường ngày. Không có nhật ký tiến trình, không có lệnh.
 
-**Dòng máy chủ MCP** (Của tôi hoặc Nâng cao), kể cả khi `off` hoặc `error`: bấm thân dòng thì xổ. Phần xổ có danh sách công cụ nếu đã từng `listTools`, câu lỗi, 60 dòng nhật ký cuối, lệnh đã che, “Kết nối lại”, “Gỡ”, và ô “Tự kết nối khi mở AIVN”. Ô `available` của danh mục Nâng cao và ô `soon` không xổ. Gỡ dùng `modalAsk`.
+**Dòng máy chủ MCP** (Của tôi hoặc Nâng cao), kể cả khi `off` hoặc `error`: bấm thân dòng thì xổ. Phần xổ có danh sách công cụ nếu đã từng `listTools`, câu lỗi, 60 dòng nhật ký cuối, lệnh đã che, “Kết nối lại”, “Gỡ”, và ô “Tự kết nối khi mở AIVN”. Ô cửa hàng không có ô này. Ô `available` của danh mục Nâng cao và ô `soon` không xổ. Gỡ dùng `modalAsk`.
 
 **Kết nối lại** máy chủ đã duyệt: `start()` lại, không thẻ mới. Chưa duyệt thì đi luồng Kết nối.
 
@@ -335,11 +329,11 @@ Màu viên trạng thái dùng lại `.mcp-srv .st`. `available` và `off` dùng
 
 **Gỡ máy chủ MCP:** `modalAsk`. Đồng ý thì `stop`, xoá khoá trong `mcp.json`, xoá bí mật, xoá meta, xoá mọi `agentAlwaysAllow` có tiền tố `mcp__<safeName>__`.
 
-**Bật “Tự kết nối khi mở AIVN” khi đang tắt:** qua thẻ kết nối, vì đó là cho chạy lúc không có người ngồi máy. Với cửa hàng, “tự kết nối” có nghĩa bật lại công cụ lúc mở AIVN, không có tiến trình. Tắt ô này thì không cần thẻ.
+**Bật “Tự kết nối khi mở AIVN” khi máy chủ Nâng cao đang tắt:** qua thẻ kết nối, vì đó là cho chạy lúc không có người ngồi máy. Tắt ô này thì không cần thẻ. Ô cửa hàng không có việc này: kết nối được nhớ, và ứng dụng chỉ chạy ở lần dùng đầu.
 
 **Nhập `mcp.json`:** chỉ trong Nâng cao. Mục 6.
 
-**Nâng cao:** ô văn bản và nút “Lưu & kết nối lại” chuyển từ `#mcpBlock` vào ngăn này, kèm đúng câu cảnh báo MCP đang có. Danh sách bảy máy chủ nằm trên ô văn bản. Lưu vẫn `validate`. Máy chủ mới, hoặc máy chủ đổi `command` / `args` / `url` / `headers` / `env`, bị xoá `approvedAt` và **không** được `start` cho đến khi có thẻ. Chỉ đổi `timeout` thì không mất duyệt.
+**Nâng cao:** ô văn bản và nút “Lưu & kết nối lại” chuyển từ `#mcpBlock` vào ngăn này, kèm đúng câu cảnh báo MCP đang có. Danh sách năm mục nằm trên ô văn bản. Lưu vẫn `validate`. Máy chủ mới, hoặc máy chủ đổi `command` / `args` / `url` / `headers` / `env`, bị xoá `approvedAt` và **không** được `start` cho đến khi có thẻ. Chỉ đổi `timeout` thì không mất duyệt.
 
 ### 5.7 `data-testid`
 
@@ -371,9 +365,11 @@ Kỳ vọng đã biết: bật AIVN Kinh doanh trên mô hình dưới 8 tỉ s�
 
 Người dùng thường không có Node.js. Kết nối gắn sẵn phải chạy ngay trong bản cài.
 
-**Cửa hàng (AIVN Kinh doanh, Excel).** Không có tiến trình con. Mã đã nằm trong `build.files` (`src/**/*` vào `app.asar`): `src/crm/biz.js`, `src/crm/crm.js`, `src/crm/sheet.js`. `fflate` và `sql.js` đã là phụ thuộc, và `asarUnpack` đã giải nén `node_modules/**`. Không thêm dòng `extraResources`. Không gọi `npx`. Không dùng `utilityProcess`. Không dùng `resources/node`.
+**Cửa hàng — AIVN Kinh doanh.** Không có tiến trình con. Mã đã nằm trong `build.files` (`src/**/*` vào `app.asar`): `src/crm/biz.js`, `src/crm/crm.js`, `src/crm/sheet.js`. `fflate` và `sql.js` đã là phụ thuộc, và `asarUnpack` đã giải nén `node_modules/**`. Không thêm dòng `extraResources`. Không gọi `npx`. Không dùng `utilityProcess`. Không dùng `resources/node`.
 
-**Bảy máy chủ stdio trong Nâng cao** (khi người dùng bấm Kết nối, không phải lúc mở ứng dụng):
+**Cửa hàng — Excel.** Cùng cách đóng gói với bốn máy chủ stdio bên dưới, làm ở PR 3: khai báo `@negokaz/excel-mcp-server@0.12.0` trong `dependencies`, giải nén qua `asarUnpack`, sinh bằng `process.execPath` và `ELECTRON_RUN_AS_NODE=1`. Không `npx` lúc bấm. Không trỏ `resources/node`. `sheet.js` không phải kết nối của mô hình. Chặn đường dẫn đã có trong PR 1. Logo là tệp cục bộ ở mục 18.6, không tải lúc chạy.
+
+**Bốn máy chủ stdio trong Nâng cao** (`filesystem`, `fetch`, `memory`, `thinking`; khi người dùng bấm Kết nối, không phải lúc mở ứng dụng):
 
 1. Khai báo đúng phiên bản ở mục 5.4 trong `dependencies` của `package.json`, để máy đóng gói tải một lần lúc dựng. Không phải `npx` trên máy người dùng.
 2. `electron-builder` đã đóng `node_modules` vào asar và giải nén cả thư mục (`asarUnpack` có `node_modules/**`). Gói nằm ở `app.asar.unpacked/node_modules/…` trong bản NSIS, bản portable, AppImage và bản macOS.
@@ -383,9 +379,23 @@ Người dùng thường không có Node.js. Kết nối gắn sẵn phải ch�
 
 **Cập nhật phiên bản.** Đổi số trong `package.json`, dựng lại, phát hành một bản AIVN. `electron-updater` thay cả ứng dụng; gói MCP đi cùng asar, không có kênh cập nhật riêng, không có tệp sidecar, không sửa `latest.yml` chỉ vì các gói này. Máy người dùng không tự tải gói mới.
 
-**Lệnh người dùng gõ trong Nâng cao** (`npx -y một-gói-khác`, không ghim) vẫn đi `resolveCommand` như hôm nay: có thể thành Electron + `npx-cli.js` và **có thể tải mã**. Thẻ `danger: true`, câu “Lệnh này không ghim phiên bản. npx có thể tải mã mới.” Cửa hàng và bảy nút danh mục không bao giờ đi đường này.
+**Lệnh người dùng gõ trong Nâng cao** (`npx -y một-gói-khác`, không ghim) vẫn đi `resolveCommand` như hôm nay: có thể thành Electron + `npx-cli.js` và **có thể tải mã**. Thẻ `danger: true`, câu “Lệnh này không ghim phiên bản. npx có thể tải mã mới.” Cửa hàng và năm nút danh mục không bao giờ đi đường này.
 
 Hugging Face là URL, không có gói để đóng. Nó chỉ chạy khi máy có mạng, và chỉ từ Nâng cao.
+
+### 5.10 Giấy phép và dòng SBOM
+
+PR 1 chưa thêm các gói này vào `package.json`. PR 3, lúc đóng vào bản cài, thêm một dòng SBOM cho từng gói dưới đây và chép tệp LICENSE đi kèm. Không có dòng cho gói không đóng.
+
+| Gói | Phiên bản | Giấy phép | Dòng SBOM |
+|---|---|---|---|
+| `@modelcontextprotocol/server-filesystem` | 2.0.0 | MIT cho phần cũ, Apache-2.0 cho phần đã chuyển. Nguồn: https://github.com/modelcontextprotocol/servers/blob/main/LICENSE . Tarball npm không kèm LICENSE; PR 3 chép LICENSE upstream. | `@modelcontextprotocol/server-filesystem@2.0.0` — MIT OR Apache-2.0 — modelcontextprotocol/servers |
+| `mcp-fetch-server` | 1.1.2 | MIT. Copyright (c) 2025 Zach Caceres, Piotr Wilkin. | `mcp-fetch-server@1.1.2` — MIT — Zach Caceres, Piotr Wilkin |
+| `@modelcontextprotocol/server-memory` | 2.0.0 | Cùng giấy phép upstream với filesystem. Tarball npm không kèm LICENSE. | `@modelcontextprotocol/server-memory@2.0.0` — MIT OR Apache-2.0 — modelcontextprotocol/servers |
+| `@modelcontextprotocol/server-sequential-thinking` | 2.0.0 | Cùng giấy phép upstream với filesystem. Tarball npm không kèm LICENSE. | `@modelcontextprotocol/server-sequential-thinking@2.0.0` — MIT OR Apache-2.0 — modelcontextprotocol/servers |
+| `@negokaz/excel-mcp-server` | 0.12.0 | MIT. Copyright (c) 2025 Kazuki Negoro. | `@negokaz/excel-mcp-server@0.12.0` — MIT — Kazuki Negoro |
+
+Không đóng, không ghim, không có dòng SBOM: `@modelcontextprotocol/server-time`, `@modelcontextprotocol/server-brave-search`, `@modelcontextprotocol/server-github`. Hugging Face là URL, không có gói.
 
 ## 6. Nhập `mcp.json` kiểu LM Studio
 
@@ -432,7 +442,7 @@ Cỡ tệp nhập tối đa 256 KiB. Quá cỡ, không phải JSON, hoặc gốc
 
 Một máy chủ lỗi thì máy chủ đó không vào; các máy chủ khác của cùng tệp vẫn vào được. Lỗi nằm trong bản tóm tắt, không làm `config()` rơi về danh sách rỗng.
 
-Id `biz` và `excel` không phải khoá `mcp.json`. Nhập một tệp có khoá trùng tên như vậy vẫn là máy chủ MCP của người dùng, hiện ở Của tôi, không biến thành kết nối cửa hàng.
+Id `biz` không phải khoá `mcp.json`. Khoá `excel` do cửa hàng ghi là kết nối Excel, không phải một mục Nâng cao. Nhập một tệp có khoá `biz` hoặc `excel` mà gói hoặc URL không khớp danh mục Nâng cao thì vẫn là máy chủ của người dùng, hiện ở Của tôi, không biến thành kết nối cửa hàng.
 
 ### 6.2 Xung đột
 
@@ -450,7 +460,7 @@ So với `mcp.json` đang có, từng khoá:
 
 Không có lựa chọn “ghi đè im lặng”. Không tự đổi tên thành `tên-2` khi nhập. Đổi tên `tên-2` chỉ dùng khi bấm một mục danh mục Nâng cao mà khoá id đó đã có trong `mcp.json` nhưng `catalogId` khác: khoá mới là `<id>-2`, `<id>-3`, … Không áp dụng cho nhập tệp, và không áp dụng cho `biz` / `excel`.
 
-Gán `catalogId` khi nhập: đề xuất ở mục 17.5, chưa phải quyết định mục 14. Trước khi chủ repo duyệt đề xuất đó, máy chủ nhập vào có `catalogId: null` và nằm ở Của tôi.
+Gán `catalogId` khi nhập theo mục 17.5 đã chốt. Khớp gói (bỏ phần `@phiên bản`) hoặc URL đã chuẩn hoá, và id đó còn trống, thì nhận id Nâng cao. Chỉ trùng tên khoá, như một máy chủ tên `fetch` chạy lệnh khác, thì `catalogId` null và nằm ở Của tôi.
 
 ### 6.3 Đọc tệp đang có cho chặt hơn mà không làm mất máy chủ
 
@@ -619,11 +629,11 @@ Mô tả công cụ do `listTools` của máy chủ MCP trả về giữ nguyên
 
 | Việc | Thẻ |
 |---|---|
-| Bật AIVN Kinh doanh hoặc Excel lần đầu, hoặc bật `autoStart` | Thẻ kết nối cửa hàng, `tool: "connector_connect"` |
+| Bật AIVN Kinh doanh hoặc Excel lần đầu | Thẻ kết nối cửa hàng, `tool: "connector_connect"`, không có ô tự chạy |
 | `start` máy chủ MCP chưa có `approvedAt` | Thẻ kết nối MCP, `tool: "mcp_connect"` |
 | Nhập một nhóm máy chủ mới và chạy chúng | Một thẻ nhập |
 | Thay thế máy chủ trùng tên | Thẻ thay thế, `danger: true` |
-| Bật “Tự kết nối khi mở AIVN” | Thẻ kết nối tương ứng |
+| Bật “Tự kết nối khi mở AIVN” trên máy chủ Nâng cao | Thẻ kết nối máy chủ. Ô cửa hàng không có ô này |
 | Gọi công cụ `mcp__…` | Thẻ đang có trong vòng AIVN AGENT |
 | Gọi `biz_*` hoặc `excel_write` theo bảng mục 5.4 | Thẻ công cụ AIVN, không phải thẻ MCP |
 | Sửa JSON làm đổi lệnh, đối số, địa chỉ, đầu mục hoặc tên biến | Xoá duyệt; muốn chạy thì thẻ kết nối |
@@ -653,10 +663,10 @@ Thêm `details`: mảng cặp nhãn/giá trị, vẽ trong khối “Chi tiết�
 
 - Tiêu đề: `Cho phép kết nối “{0}”?`
 - `sub`: tên ứng dụng
-- `alwaysLabel`: `Tự bật lại kết nối này khi mở AIVN`
-- `fields`: với Kinh doanh, “Việc” và “Dữ liệu nằm trên máy này (crm.db)”. Với Excel, “Việc”, “Chỉ trong thư mục được phép”, “Không cần cài Microsoft Excel”.
-- `details`: rỗng. Không có dòng Lệnh, không có dòng Loại.
-- `warn`: Kinh doanh — “AIVN Kinh doanh đọc và sửa dữ liệu kinh doanh trên máy này. Xoá, huỷ và ghi nhận thanh toán vẫn hỏi bạn từng lần.” Excel — “Ghi tệp Excel trong thư mục được phép. Ghi đè vẫn hỏi bạn trước.”
+- Không có `alwaysLabel` và không có ô tự chạy. Một dòng: “Kết nối được giữ khi bạn mở lại AIVN.”
+- `fields`: với Kinh doanh, “Việc” và “Dữ liệu nằm trên máy này (crm.db)”. Với Excel, “Việc”, tên thư mục (đường dẫn đầy đủ khi rê chuột), “Không cần cài Microsoft Excel”.
+- `details`: rỗng trên thẻ xin phép. “Đổi thư mục” nằm trong “Chi tiết” của ô cửa hàng sau khi đã kết nối, không nằm trên thẻ này, và chỉ sửa danh sách thư mục của Excel.
+- `warn`: Kinh doanh — “AIVN Kinh doanh đọc và sửa dữ liệu kinh doanh trên máy này. Xoá, huỷ và ghi nhận thanh toán vẫn hỏi bạn từng lần.” Excel — “Ghi tệp Excel trong thư mục của Excel. Ghi đè vẫn hỏi bạn trước.”
 - `danger: false` lúc kết nối. Nguy hiểm nằm ở từng lần gọi, theo mục 5.4.
 
 **Kết nối MCP** — `tool: "mcp_connect"`:
@@ -667,7 +677,7 @@ Thêm `details`: mảng cặp nhãn/giá trị, vẽ trong khối “Chi tiết�
 - `fields`: tên biến bí mật (“không có” nếu không), câu “Dữ liệu rời khỏi máy này” chỉ khi `url` không phải vòng lặp cục bộ. Không đặt lệnh ở `fields`.
 - `details`: một dòng “Lệnh” (đã che bí mật) hoặc địa chỉ, và một dòng “Loại” (`stdio`, `http` hoặc `sse`). Người dùng mở “Chi tiết” mới thấy. `http` nội bộ thêm câu “Địa chỉ http này nằm trong mạng nội bộ của bạn.” vào `fields`, vì đó là cảnh báo chứ không phải lệnh. Lệnh không ghim thêm câu “Lệnh này không ghim phiên bản. npx có thể tải mã mới.” vào `fields`.
 - `warn`: đúng câu cảnh báo MCP đang có trong `#mcpBlock` (mục 11.1). Không viết câu thứ hai.
-- `danger: true` khi lệnh không thuộc danh mục Nâng cao, khi lệnh stdio không có `gói@phiên bản`, hoặc khi `url` là `http` trong ba dải nội bộ. Vòng lặp cục bộ không vì `http` mà thành `danger`. Bảy mục danh mục đã đóng gói không bị coi là không ghim.
+- `danger: true` khi lệnh không thuộc danh mục Nâng cao, khi lệnh stdio không có `gói@phiên bản`, hoặc khi `url` là `http` trong ba dải nội bộ. Vòng lặp cục bộ không vì `http` mà thành `danger`. Năm mục danh mục đã đóng gói (kể cả Excel) không bị coi là không ghim.
 
 **Nhập** — `tool: "mcp_import"`:
 
@@ -688,7 +698,7 @@ Thêm `details`: mảng cặp nhãn/giá trị, vẽ trong khối “Chi tiết�
 
 **Công cụ:** giữ `buildCard`. Không đổi tiêu đề. Đối số trên thẻ cắt như hôm nay; khoá có tên bí mật (mục 8.4) hiện `••••` thay vì giá trị. Thẻ công cụ không có dòng Lệnh của máy chủ. Nếu một thẻ công cụ MCP cần hiện lệnh máy chủ thì lệnh đó cũng nằm trong `details`, đóng mặc định; beta.4 không thêm dòng đó vào thẻ công cụ.
 
-**Chỉ bật tự chạy, kết nối đã duyệt:** đề xuất mục 17.6. Chưa duyệt thì làm như trên, có ô.
+**Chỉ bật tự chạy trên máy chủ Nâng cao đã duyệt:** mục 17.6. Thẻ không có ô, một dòng “Cho phép máy chủ này tự chạy mỗi khi mở AIVN.” Ô cửa hàng không có đường này.
 
 ### 8.4 Khoá bí mật
 
@@ -698,7 +708,7 @@ Tệp `userData/mcp-secrets.json`:
 {
   "v": 1,
   "entries": {
-    "mcp:github:GITHUB_PERSONAL_ACCESS_TOKEN": { "enc": "<base64 safeStorage>" }
+    "mcp:hf-mcp-server:Authorization": { "enc": "<base64 safeStorage>" }
   }
 }
 ```
@@ -727,13 +737,13 @@ Renderer không được `start`. Mọi đường `start` của máy chủ MCP (
 3. `url` là `http` nhưng không phải vòng lặp cục bộ và không thuộc `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` (xét đúng chữ trong url, không phân giải DNS) → không chạy. `http` nội bộ được chạy, và thẻ ở bước 2 phải có `danger: true`.
 4. Có `auth` → không chạy, lỗi “chưa hỗ trợ đăng nhập OAuth”. Trường được giữ trên đĩa. beta.4 không mở trình duyệt đăng nhập.
 5. Giải bí mật thất bại (tham chiếu cụt) → `error` trên máy chủ, không chạy với biến rỗng im lặng.
-6. Id thuộc bảy mục danh mục → lệnh thực tế là `execPath` + tệp đã giải nén (mục 5.9), kể cả khi `mcp.json` còn ghi `npx` từ bản cũ. Không gọi mạng để đổi gói.
+6. Id thuộc năm mục danh mục Nâng cao, hoặc mục `excel` của cửa hàng → lệnh thực tế là `execPath` + tệp đã giải nén (mục 5.9), kể cả khi `mcp.json` còn ghi `npx` từ bản cũ. Không gọi mạng để đổi gói.
 
 `plugins:connect` với `biz` hoặc `excel` không đi bước `start`. Nó chỉ qua `approveCard` rồi ghi `connectors`.
 
 `approveCard` là lối duy nhất tới thẻ: khi bộ chạy QA đang active thì gọi `qa.approve`, không thì `askApproval`. Bộ chạy QA phải trả `{ ok: false }` cho `connector_connect`, `mcp_connect`, `mcp_import`, `mcp_replace` và mọi thẻ có `tool` khớp `^mcp__`, kể cả khi chữ trên thẻ không khớp `RISK_RE`. Sáu công cụ Kinh doanh `danger` ở mục 5.4 cũng bị QA từ chối. Hôm nay `answerFor` có thể cho phép một thẻ MCP nếu chữ không rơi vào gửi/xoá/mua/khoá. beta.4 bịt riêng các thẻ này; các bước màn hình không rủi ro của QA giữ như cũ.
 
-Khởi động: thay `startEnabled()` bằng chỉ `autoStart && approvedAt && !disabled` cho máy chủ MCP. Kết nối cửa hàng `autoStart && approvedAt` thì đặt `enabled: true`, không sinh tiến trình, không hiện thẻ. Nâng cấp: máy chủ đã có trong `mcp.json`, không `disabled`, và chưa có bản ghi meta, được gán `approvedAt` (mốc nâng cấp) và `autoStart: true` **một lần**, ghi vào meta, có dòng nhật ký. Không hiện thẻ lúc nâng cấp. Không tự bật `biz` hay `excel`.
+Khởi động máy chủ Nâng cao: thay `startEnabled()` bằng chỉ `autoStart && approvedAt && !disabled`. PR 1 không đổi thân `startEnabled`. Kết nối cửa hàng không có `autoStart`. Nếu `enabled && approvedAt` thì nhớ là đã kết nối và để trạng thái “chờ dùng lần đầu”. Không `start` lúc mở ứng dụng, không hiện thẻ, không bắt bấm Kết nối lại. Lần AIVN AGENT gọi tới mới chạy. Lần ghi đầu sau mỗi lần mở ứng dụng vẫn qua `#approveCard`. Nâng cấp: máy chủ Nâng cao đã có trong `mcp.json`, không `disabled`, và chưa có bản ghi meta, được gán `approvedAt` (mốc nâng cấp) và `autoStart: true` **một lần**, ghi vào meta, có dòng nhật ký. Không hiện thẻ lúc nâng cấp. Không tự bật `biz` hay `excel`.
 
 ### 8.6 Phạm vi và thu hồi
 
@@ -744,20 +754,20 @@ Khởi động: thay `startEnabled()` bằng chỉ `autoStart && approvedAt && !
 | Ngắt một kết nối | Công cụ của nó biến ở lượt sau. “Luôn cho phép” từng công cụ vẫn còn đến khi gỡ hoặc bấm × |
 | Gỡ | Xoá cấu hình của đúng kết nối đó, bí mật nếu là máy chủ, meta, và các dòng “Luôn cho phép” của nó |
 | × trên chip “Luôn cho phép” | Bỏ một tên công cụ, như hôm nay |
-| Tắt “Tự kết nối khi mở AIVN” | Lần mở sau không tự bật; phiên đang chạy không bị giết |
+| Tắt “Tự kết nối khi mở AIVN” trên máy chủ Nâng cao | Lần mở sau không tự bật; phiên đang chạy không bị giết |
 | Đổi `command` / `args` / `url` / đầu mục / tập tên biến | Mất `approvedAt` và `autoStart` của máy chủ MCP |
 
 Công cụ MCP không được thêm vào nhóm “Tự làm không hỏi”. Không thêm ô “luôn cho phép cả máy chủ” cho từng lần gọi công cụ: mỗi công cụ vẫn một dòng trong `agentAlwaysAllow`.
 
-Thư mục `filesystem` trong Nâng cao và thư mục được phép của AIVN là hai phạm vi. Thẻ kết nối phải hiện đường dẫn MCP trong phần Chi tiết. Công cụ tệp của AIVN không vì thế mà đọc được thư mục đó. Excel dùng đúng thư mục được phép, và thẻ nói rõ điều đó trên `fields`.
+Thư mục `filesystem` trong Nâng cao, thư mục được phép của AIVN AGENT, và thư mục của Excel là ba phạm vi. Thẻ kết nối phải hiện đường dẫn MCP trong phần Chi tiết. Công cụ tệp của AIVN không vì thế mà đọc được thư mục đó. Excel chỉ đọc `connectors.excel.folders`. Lần kết nối đầu chép danh sách từ AIVN AGENT. “Đổi thư mục” sau đó không đụng `agentFolders`, và đổi `agentFolders` cũng không đổi danh sách của Excel.
 
-Máy chủ từ xa: thẻ nói dữ liệu rời máy. Máy chủ stdio: phần Chi tiết có lệnh. Hugging Face, Brave và GitHub có câu dữ liệu rời máy trong mô tả Nâng cao và trên thẻ.
+Máy chủ từ xa: thẻ nói dữ liệu rời máy. Máy chủ stdio: phần Chi tiết có lệnh. Hugging Face có câu dữ liệu rời máy trong mô tả Nâng cao và trên thẻ. Brave, GitHub và time không có mục.
 
 ## 9. Mô hình dữ liệu
 
 ### 9.1 `userData/mcp.json`
 
-Chỉ máy chủ MCP. Tương thích LM Studio, cộng tham chiếu bí mật. AIVN Kinh doanh và Excel không có mục ở đây.
+Chỉ máy chủ MCP. Tương thích LM Studio, cộng tham chiếu bí mật. AIVN Kinh doanh không có mục ở đây. Excel có một mục khoá `excel` do cửa hàng ghi ở PR 3, args ghim `@negokaz/excel-mcp-server@0.12.0`. Mục đó không nằm trong danh mục Nâng cao. `server-time`, `server-brave-search` và `server-github` không được ghim và không có dòng SBOM. Tệp người dùng nếu mang các khoá đó thì chúng ở Của tôi, không được thêm vào danh mục.
 
 Khi người dùng kết nối một mục danh mục Nâng cao, khoá là id danh mục (`filesystem`, không phải tên gói). Tệp vẫn ghi dạng LM Studio đọc được: `npx -y gói@phiên bản` đã ghim, để xuất ra máy khác không thành một đường dẫn chỉ có trên máy này. `start()` của đúng id danh mục không chạy dòng `npx` đó. Nó thay bằng `execPath` và tệp đã giải nén (mục 5.9, bước 6 của mục 8.5).
 
@@ -768,10 +778,9 @@ Khi người dùng kết nối một mục danh mục Nâng cao, khoá là id da
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem@2.0.0", "D:\\DuAn"]
     },
-    "github": {
+    "excel": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github@2025.4.8"],
-      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": { "$aivnSecret": "mcp:github:GITHUB_PERSONAL_ACCESS_TOKEN" } }
+      "args": ["-y", "@negokaz/excel-mcp-server@0.12.0"]
     },
     "hf-mcp-server": {
       "url": "https://huggingface.co/mcp",
@@ -794,9 +803,16 @@ Dòng `command: npx` trong ví dụ là những gì tệp LM Studio và tệp ng
   "connectors": {
     "biz": {
       "approvedAt": "2026-10-22T15:00:00.000Z",
-      "autoStart": true,
       "enabled": true
+    },
+    "excel": {
+      "approvedAt": "2026-10-22T15:00:00.000Z",
+      "enabled": true,
+      "folders": ["D:\\DuAn"]
     }
+  },
+  "notify": {
+    "gmail": true
   },
   "servers": {
     "filesystem": {
@@ -808,7 +824,7 @@ Dòng `command: npx` trong ví dụ là những gì tệp LM Studio và tệp ng
 }
 ```
 
-`connectors` chỉ có `biz` và `excel`. Không có khoá cho ô Sắp có. `servers` có khoá là khoá trong `mcp.json`, không phải `safeName`. Máy chủ không còn trong `mcp.json` thì bản ghi `servers` bị xoá lúc lưu. `catalogId` null nghĩa là dòng “Của tôi” không khớp danh mục Nâng cao.
+`connectors` chỉ có `biz` và `excel`. Không có `autoStart` trên hai khoá này. `connectors.excel.folders` là danh sách riêng của Excel. `notify` là cờ “Báo tôi khi có”, chỉ id ô Sắp có, chỉ trên máy này, không có mạng. `servers` có khoá là khoá trong `mcp.json`, không phải `safeName`. Máy chủ không còn trong `mcp.json` thì bản ghi `servers` bị xoá lúc lưu. `catalogId` null nghĩa là dòng “Của tôi”: tên khoá không đủ để nhận id Nâng cao (mục 17.5).
 
 Không đặt các cờ này trong `settings.json`.
 
@@ -822,9 +838,9 @@ Mục 7.3. Một khoá `agentTemplate` cho cả hồ sơ. `settings.agentAlwaysA
 
 `settings.mcpToolWarnSig` là chuỗi chữ ký cảnh báo mục 5.8. Không phải bí mật. Đổi tập kết nối đang bật thì chữ ký hết hạn vì nội dung chữ ký đổi; không cần khoá riêng.
 
-Logo cửa hàng là tệp trong `src/renderer/logos/`, đi theo `src/**/*` vào asar. Không phải URL, không tải lúc chạy. `src/renderer/logos/NOTICE.md` ghi nguồn và giới hạn nhãn hiệu của từng tệp. Ô AIVN Kinh doanh dùng chính biểu tượng ứng dụng (`build/icon.png`), không cần tệp nhãn của bên khác. PR triển khai mới thêm các tệp ảnh; PR tài liệu này không nhét ảnh.
+Logo cửa hàng là tệp trong `src/renderer/logos/`, đi theo `src/**/*` vào asar. Không phải URL, không tải lúc chạy. `src/renderer/logos/CREDITS.md` ghi nguồn, chủ sở hữu và điều khoản của từng tệp. Ô AIVN Kinh doanh dùng chính biểu tượng ứng dụng (`build/icon.png`), không cần tệp nhãn của bên khác. PR lõi ghi mục CREDITS của icon Excel; tệp ảnh được thêm khi ô Excel vào (mục 18.6). Không sửa, không đổi màu icon đó.
 
-Bảy mục Nâng cao không dùng logo giả. Đề xuất mục 17.11.
+Năm mục Nâng cao dùng chữ cái trên nền trung tính, trừ khi nhà phát hành có hướng dẫn logo cho phép lưu tệp. Chữ cái lấy từ id danh mục hoặc tên thương hiệu chưa dịch (mục 18.6).
 
 Không còn cờ `deferInAll`.
 
@@ -832,7 +848,7 @@ Không còn cờ `deferInAll`.
 
 `plugins:list` trả hai mảng.
 
-Cửa hàng, mỗi ô: `id`, `group`, `state` (`available` | `soon` | `on` | `off`), `enabled`, `autoStart`, `approved`. Không có `command`, không có `logs`.
+Cửa hàng, mỗi ô: `id`, `group`, `state` (`available` | `soon` | `waiting` | `on` | `off`), `enabled`, `approved`, `notify` (chỉ ô Sắp có). Không có `autoStart`, không có `command`, không có `logs`. Excel thêm `folderNames` (tên thư mục) và `folders` chỉ để hiện khi rê chuột.
 
 Máy chủ, mỗi dòng: `name`, `catalogId`, `state`, `enabled`, `kind`, `commandRedacted`, `toolCount`, `tools[{name, description}]`, `secretKeyNames[]`, `secretsSecure`, `autoStart`, `approved`, `error`, `logs` (đã che). Không gửi `env` hay `headers`. `commandRedacted` chỉ để vẽ trong phần xổ và trong Nâng cao, không để vẽ lưới cửa hàng.
 
@@ -844,7 +860,7 @@ Renderer vẽ, dịch, lọc tab, gửi ý định. Tiến trình chính kiểm 
 
 | Kênh | Ai gọi | Việc | Trả về |
 |---|---|---|---|
-| `plugins:catalog` | renderer | Cửa hàng và bảy mục Nâng cao, không bí mật | `store[]` (id, nhóm, `soon`), `advanced[]` (id, `needs`: `folder` \| `secret` \| `none`, tên biến nếu có, phiên bản) |
+| `plugins:catalog` | renderer | Cửa hàng và năm mục Nâng cao, không bí mật | `store[]` (id, nhóm, `soon`), `advanced[]` (id, `needs`: `folder` \| `secret` \| `none`, tên biến nếu có, phiên bản) |
 | `plugins:list` | renderer | trạng thái đã che | mục 9.5 |
 | `plugins:connect` | renderer | Thẻ rồi ghi. MCP thì còn `start`. Cửa hàng thì không `start`. | `{ ok, canceled?, timeout?, error?, id? }` |
 | `plugins:disconnect` | renderer | Tắt (`remove: false`) hoặc gỡ (`remove: true`) | `{ ok }` |
@@ -885,7 +901,7 @@ Bản en và zh đang có trong `src/i18n/en.js` và `src/i18n/zh.js` dùng lạ
 | {0} đã kết nối | {0} connected | 已连接 {0} 个 |
 | Chưa kết nối | Not connected | 未连接 |
 | Tìm ứng dụng… | Search apps… | 搜索应用… |
-| Không thấy “{0}”. | Nothing matches “{0}”. | 没有找到“{0}”。 |
+| Không thấy? Thêm máy chủ MCP ở Nâng cao | Not here? Add an MCP server in Advanced | 没找到？在“高级”里添加 MCP 服务器 |
 | Nâng cao | Advanced | 高级 |
 | Nhập mcp.json… | Import mcp.json… | 导入 mcp.json… |
 | Nâng cao: mcp.json | Advanced: mcp.json | 高级：mcp.json |
@@ -902,6 +918,14 @@ Bản en và zh đang có trong `src/i18n/en.js` và `src/i18n/zh.js` dùng lạ
 | Lỗi | Error | 出错 |
 | Cần thiết lập | Needs setup | 需要设置 |
 | Sắp có | Coming soon | 即将推出 |
+| Báo tôi khi có | Tell me when it's ready | 可用时通知我 |
+| Sẽ báo bạn | We'll tell you | 会通知你 |
+| AIVN sẽ báo bạn ngay trong ứng dụng khi có. Không gửi gì ra ngoài. | AIVN will tell you inside the app when it's ready. Nothing is sent out. | 可用时 AIVN 会在应用内通知你。不会向外发送任何内容。 |
+| Đã kết nối · chờ dùng lần đầu | Connected · waiting for first use | 已连接 · 等待首次使用 |
+| Kết nối được giữ khi bạn mở lại AIVN. | The connection stays when you reopen AIVN. | 重新打开 AIVN 后连接仍会保留。 |
+| Đổi thư mục | Change folder | 更换文件夹 |
+| Chưa có ứng dụng tài chính. | No finance apps yet. | 还没有财务应用。 |
+| Nhóm này sẽ có thêm ứng dụng trong các bản sau. | More apps will be added to this group in later versions. | 以后的版本会在这个分组里加入更多应用。 |
 | Chờ đăng nhập Google. | Waiting on Google sign-in. | 等待 Google 登录。 |
 | Chưa có ứng dụng trong nhóm này. | Nothing in this group yet. | 这个分组里还没有应用。 |
 | Chưa kết nối ứng dụng nào. | No apps connected yet. | 还没有连接任何应用。 |
@@ -926,7 +950,7 @@ Bản en và zh đang có trong `src/i18n/en.js` và `src/i18n/zh.js` dùng lạ
 
 Tên và câu mô tả ô cửa hàng: bảng mục 5.4. Tên mẫu: mục 7.2 và 7.5. Câu “Gói này trên npm đã ngừng…”: mục 5.4.
 
-Dòng gợi ý khi công tắc MCP tắt chỉ hiện trong Nâng cao, kèm nút Kết nối của bảy mục bị tắt. Ô cửa hàng không bị tắt theo công tắc này (đề xuất 17.3).
+Dòng gợi ý khi công tắc MCP tắt chỉ hiện trong Nâng cao, kèm nút Kết nối của năm mục bị tắt. Ô cửa hàng không bị tắt theo công tắc này (mục 17.3 đã chốt).
 
 ### 11.2 Thẻ xin phép
 
@@ -984,6 +1008,13 @@ Câu mới của beta.4:
 | Tệp mcp.json lớn hơn 256 KB. | The mcp.json file is larger than 256 KB. | mcp.json 文件超过 256 KB。 |
 | Tệp xuất không có khoá bí mật. Máy khác phải nhập lại khoá. | The exported file has no secrets. Another computer will need the keys entered again. | 导出的文件不含密钥。换一台电脑需要重新填写密钥。 |
 | Đã có "{0}". | "{0}" is already there. | 已经有“{0}”。 |
+| "headers" của "{0}" phải là đối tượng. | "headers" of "{0}" must be an object. | “{0}”的 "headers" 必须是对象。 |
+| Không giải được khoá bí mật “{0}”. | Could not unlock the secret “{0}”. | 无法解开密钥“{0}”。 |
+| Hai công cụ “{0}” và “{1}” trùng tên sau khi rút gọn. | The tools “{0}” and “{1}” have the same name once shortened. | 工具“{0}”和“{1}”缩短后名称相同。 |
+| Hãy chỉ tệp Excel trong thư mục được phép. | Point at an Excel file inside an allowed folder. | 请指定允许文件夹中的 Excel 文件。 |
+| Chưa có thư mục nào được phép cho Excel. Hãy chọn thư mục trong Chi tiết. | Excel has no allowed folder yet. Choose a folder in Details. | Excel 还没有允许的文件夹。请在详情里选择文件夹。 |
+| Tệp “{0}” nằm ngoài thư mục được phép. | The file “{0}” is outside the allowed folders. | 文件“{0}”不在允许的文件夹内。 |
+| Không tìm thấy tệp “{0}” trong thư mục được phép. | Could not find the file “{0}” in an allowed folder. | 在允许的文件夹里找不到文件“{0}”。 |
 
 “Lệnh này không ghim phiên bản…” và “Địa chỉ http này nằm trong mạng nội bộ của bạn.” là dòng trên thẻ, không phải lỗi từ chối nhập. Nhập vẫn được. `auth` không phải lỗi cú pháp: tệp giữ nguyên, máy chủ không chạy, câu OAuth ở trên hiện trong bản tóm tắt.
 
@@ -1002,7 +1033,7 @@ Mỗi PR triển khai (mục 15) phải thêm hoặc nối ít nhất một ki�
 | `http://127.0.0.1/mcp`, `http://10.1.2.3/mcp`, `http://172.16.0.1/mcp`, `http://172.31.255.255/mcp`, `http://192.168.1.2/mcp` | cùng tệp | hợp lệ. 192.168 và 10 và 172.16/12 được đánh dấu nội bộ để thẻ `danger: true`. 127.0.0.1 không gắn cờ đó |
 | `http://172.15.0.1/mcp`, `http://172.32.0.1/mcp`, `http://8.8.8.8/mcp`, `http://nas.local/mcp` | cùng tệp | từ chối, không phân giải DNS |
 | `https://…` | cùng tệp | hợp lệ, không cờ nội bộ |
-| Danh mục Nâng cao | hằng số danh mục | đúng bảy id; đúng số phiên bản mục 5.4; không có `time`; không có Playwright; không có Context7; không có mục nào là `npx -y` trần |
+| Danh mục Nâng cao | hằng số danh mục | đúng năm id `filesystem`, `fetch`, `huggingface`, `memory`, `thinking`; đúng số phiên bản mục 5.4; không có `time`, `brave`, `github`, Playwright, Context7; không có mục nào là `npx -y` trần |
 | Lệnh chạy của id danh mục | hàm dựng lệnh, không mạng | `command` là `execPath`, `env.ELECTRON_RUN_AS_NODE === "1"`, đối số không chứa `npx-cli.js`, không chứa `resources/node` |
 | Lưới cửa hàng | hàm thuần dựng ô | có `biz`, `excel`, năm id Sắp có; không có id máy chủ; không có chuỗi `npx` hay `stdio` |
 | Ô Sắp có | cùng hàm | không có hành động kết nối; cộng 0 công cụ |
@@ -1040,7 +1071,7 @@ Chưa có kiểm thử Electron cho hộp thoại thì PR giao diện thêm mộ
 | Rủi ro | Cách chặn trong thiết kế |
 |---|---|
 | Màn hình chính lại hiện lệnh | Lưới không nhận `commandRedacted`. Kiểm thử cấm chuỗi `npx` và `stdio` trên ô cửa hàng |
-| Người không có Node.js không kết nối được Kinh doanh hoặc Excel | Hai kết nối không sinh tiến trình |
+| Người không có Node.js không kết nối được Kinh doanh hoặc Excel | Kinh doanh không sinh tiến trình. Excel chạy gói đã đóng trong bản cài bằng Electron, không cần Node trên máy |
 | `npx -y` tải mã lúc chạy cho danh mục | Danh mục chạy tệp đã giải nén bằng Electron + `ELECTRON_RUN_AS_NODE`. Cấm `npx-cli.js` trong lệnh danh mục |
 | MCP bị trỏ vào `resources/node` | Cấm trong kiểm thử. Tệp đó là máy llama |
 | Ô JSON hoặc `mcp:preset` chạy mã không qua thẻ | Mọi `start` qua hàm kiểm tra mục 8.5 |
@@ -1050,9 +1081,10 @@ Chưa có kiểm thử Electron cho hộp thoại thì PR giao diện thêm mộ
 | Khoá nằm trong `mcp.json` rồi bị sao chép | Tách lúc nhập và lúc lưu, xuất không kèm khoá |
 | Máy không có kho khoá | Không ghi đĩa, đúng câu mục 3.4 |
 | Quá nhiều công cụ khi bật Kinh doanh | Cảnh báo mục 5.8. Không cắt 28 tên `biz_*` |
-| Gói Brave và GitHub đã ngừng hỗ trợ | Chỉ ở Nâng cao, ghim bản cuối, có câu nói rõ |
+| Gói Brave, GitHub cũ và time | Không có mục, không ghim, không có dòng SBOM |
 | Bịa gói thay cho `server-time` | Không có mục Giờ trong beta.4 |
-| Logo tải từ mạng hoặc ô màu giả thương hiệu | Tệp trong `src/renderer/logos/` cộng `NOTICE.md`. Nâng cao không có ô vàng |
+| Logo tải từ mạng hoặc ô màu giả thương hiệu | Tệp trong `src/renderer/logos/` cộng `CREDITS.md`. Icon Excel giữ nguyên, không đổi màu. Nâng cao không có ô vàng |
+| Người dùng tưởng “Đổi thư mục” của Excel đổi quyền AIVN AGENT | Chỉ sửa `connectors.excel.folders` |
 | Ô Sắp có bị bấm kết nối | Không có nút, không có IPC |
 | QA tự cho phép thẻ | `answerFor` từ chối các tên ở mục 12 |
 | Mẫu bảo mô hình bỏ qua thẻ | Nguyên tắc đứng trước đoạn vai trò |
@@ -1065,9 +1097,9 @@ Các câu dưới đây đã được chốt trong PR #1. Không mở lại, tr�
 
 ### Xung đột với hướng cửa hàng
 
-1. **Mục 14.6 bị thay một phần.** Tab Tệp, Mạng, Lập trình, Tri thức và cờ `deferInAll` không còn. Ý cũ — đừng đưa filesystem, fetch, memory ra màn hình hằng ngày — được giữ và mở rộng: cả nhóm máy chủ nhà phát triển rời khỏi lưới. Chúng không bị xoá khỏi sản phẩm. Bảy mục còn gói nằm ở Nâng cao. Máy chủ người dùng đã có trong `mcp.json` hiện ở Của tôi, không hiện lệnh khi dòng đang thu.
-2. **Mục `time` không đóng gói được.** `@modelcontextprotocol/server-time` trả 404 trên registry ngày 22/10/2026. Bảng tám mục của bản thiết kế trước coi như còn bảy mục cộng Hugging Face là URL. Không chọn gói thay thế trong tài liệu này.
-3. **Mục 14.2 không bị đảo, nhưng cách chạy đổi.** Vẫn ghim `gói@phiên bản`. Vẫn cấm `@latest` và cấm `npx -y` trần trong danh mục. Vẫn không viết phiên bản vào `args` của tệp người dùng; thẻ tệp đó vẫn `danger: true`. Điểm đổi: danh mục không còn **chạy** bằng `npx` lúc người dùng bấm, vì `npx` vẫn tải mã và máy thường không có Node. Gói nằm trong bản cài và được sinh bằng Electron + `ELECTRON_RUN_AS_NODE` (mục 5.9). Cửa hàng không có gói npm nên không có số để ghim.
+1. **Mục 14.6 bị thay một phần.** Tab Tệp, Mạng, Lập trình, Tri thức và cờ `deferInAll` không còn. Ý cũ — đừng đưa filesystem, fetch, memory ra màn hình hằng ngày — được giữ và mở rộng: cả nhóm máy chủ nhà phát triển rời khỏi lưới. Chúng không bị xoá khỏi sản phẩm. Nâng cao còn năm mục (bốn gói stdio và Hugging Face là URL). Máy chủ người dùng đã có trong `mcp.json` hiện ở Của tôi, không hiện lệnh khi dòng đang thu.
+2. **Mục `time`, Brave và GitHub không đóng gói.** `@modelcontextprotocol/server-time` trả 404. Chủ repo cũng bỏ `@modelcontextprotocol/server-brave-search` và `@modelcontextprotocol/server-github`. Không chọn gói thay. Không có dòng SBOM.
+3. **Mục 14.2 không bị đảo, nhưng cách chạy đổi.** Vẫn ghim `gói@phiên bản`. Vẫn cấm `@latest` và cấm `npx -y` trần trong danh mục. Vẫn không viết phiên bản vào `args` của tệp người dùng; thẻ tệp đó vẫn `danger: true`. Điểm đổi: danh mục không còn **chạy** bằng `npx` lúc người dùng bấm, vì `npx` vẫn tải mã và máy thường không có Node. Gói nằm trong bản cài và được sinh bằng Electron + `ELECTRON_RUN_AS_NODE` (mục 5.9). AIVN Kinh doanh không có gói npm. Excel có một gói đã ghim, `@negokaz/excel-mcp-server@0.12.0`.
 4. **Mục 14.1 giữ nguyên và áp thêm cho cửa hàng.** `biz_*` và `excel_*` đếm vào ngưỡng 20 và vào ngân sách token. Ô Sắp có đếm 0. Không tự bỏ công cụ.
 5. **Mục 7.2, cột gợi ý.** `coder` và `research` không còn trỏ `filesystem` và `fetch` trên thanh hằng ngày. `files` trỏ `excel`. Đoạn vai trò giữ ý cũ và được viết đủ chữ ở mục 7.5. Mục 14.5 (một mẫu cho cả hồ sơ) không đổi.
 6. **Mục 14.3, 14.4, 14.7, 14.8 không đổi.** 14.4 là lý do Gmail, Drive, Calendar không có nút Kết nối, và lý do không có ô Sheets.
@@ -1089,11 +1121,11 @@ Mỗi PR vào `wip-0.16`, không gộp một lần. PR tài liệu này không n
 
 | PR | Việc | Không làm |
 |---|---|---|
-| 1. Lõi `mcp.json` | `validate` theo mục 6.1 và 6.3, kể cả ba dải `http` nội bộ và từ chối `http` công cộng; `headers` vào transport; `timeout` vào `callTool`; tham chiếu `$aivnSecret` được giải qua một hàm tiêm vào (chưa có UI); từ chối `safeName` trùng và tên công cụ cắt trùng; kiểm thử `test/mcp.test.js` | Hộp thoại, mẫu, không đổi `startEnabled`, chưa thêm phụ thuộc MCP |
-| 2. Bí mật và thẻ xin phép | `mcp-secrets.json` theo `createKeyStore`; `plugins-meta.json` gồm `connectors` và `servers`; `approveCard` với `alwaysLabel`, `details` (dòng Lệnh đóng mặc định), và `danger` cho `http` nội bộ cùng lệnh không ghim; bịt `mcp:save` / `mcp:preset` / `startEnabled`; nâng cấp meta một lần; QA từ chối thẻ MCP và `connector_connect`; che nhật ký | HTML cửa hàng |
-| 3. Cửa hàng và Nâng cao | `index.html`, `styles.css`, `app.js`, preload, khoá i18n mục 11; lưới mục 4 và 5; logo cục bộ và `NOTICE.md`; năm ô Sắp có không có nút; dời `#mcpBlock` vào ngăn Nâng cao; bảy mục và phiên bản mục 5.4; phụ thuộc npm đúng số đó; `start` danh mục bằng `execPath` + tệp bin đã giải nén, cấm `npx-cli.js` và cấm `resources/node`; nút trên `#agentBar` và lệnh Ctrl+K; gợi ý khi công tắc MCP tắt chỉ ở Nâng cao; cảnh báo mục 5.8 trên thanh; kiểm tra tĩnh testid | `templates.json`, không gọi mạng trong kiểm thử lệnh |
+| 1. Lõi `mcp.json` | `validate` theo mục 6.1 và 6.3, kể cả ba dải `http` nội bộ và từ chối `http` công cộng; `headers` vào transport; `timeout` vào `callTool`; tham chiếu `$aivnSecret` được giải qua một hàm tiêm vào (chưa có UI); từ chối `safeName` trùng và tên công cụ cắt trùng; `excelCallError` đọc `getExcelFolders`; `claimCatalogId` theo mục 17.5; kiểm thử `test/mcp.test.js` và `test/v016-fplugins-mcp.test.js` | Hộp thoại, mẫu, không đổi `startEnabled`, chưa thêm phụ thuộc MCP, chưa nhét tệp ảnh logo |
+| 2. Bí mật và thẻ xin phép | `mcp-secrets.json` theo `createKeyStore`; `plugins-meta.json` gồm `connectors` (không `autoStart` cho cửa hàng; `excel.folders`), `notify` và `servers`; `approveCard` với `alwaysLabel` chỉ cho máy chủ Nâng cao, `details` (dòng Lệnh đóng mặc định), và `danger` cho `http` nội bộ cùng lệnh không ghim; bịt `mcp:save` / `mcp:preset` / `startEnabled` cho máy chủ Nâng cao; cửa hàng nhớ đã kết nối và chạy trễ; nâng cấp meta một lần; QA từ chối thẻ MCP và `connector_connect`; che nhật ký | HTML cửa hàng |
+| 3. Cửa hàng và Nâng cao | `index.html`, `styles.css`, `app.js`, preload, khoá i18n mục 11; lưới mục 4 và 5; icon Excel nguyên bản và `CREDITS.md`; năm ô Sắp có không có nút Kết nối, có “Báo tôi khi có”; trạng thái chờ dùng lần đầu; tab Tài chính dùng câu mục 11.1; dời `#mcpBlock` vào ngăn Nâng cao; năm mục và phiên bản mục 5.4; phụ thuộc npm đúng số đó và dòng SBOM mục 5.10; `start` danh mục bằng `execPath` + tệp bin đã giải nén, cấm `npx-cli.js` và cấm `resources/node`; nút trên `#agentBar` và lệnh Ctrl+K; gợi ý khi công tắc MCP tắt chỉ ở Nâng cao; cảnh báo mục 5.8 trên thanh; kiểm tra tĩnh testid. Giữ nguyên thứ tự `error-view.js`, `drafts.js`, `gen-chrome.js` | `templates.json`, không gọi mạng trong kiểm thử lệnh, không sửa màu icon Excel, không thêm brave, github, time |
 | 4. Mẫu và công cụ cửa hàng | `src/agent/templates.json` đúng mục 7.5; đọc/ghi `agent-templates.json`; một `agentTemplate`; cắm `systemPrompt`; hộp thoại mẫu; chip câu gợi ý; `biz_*` và `excel_*` vào `activeToolsRaw` khi `connectors` bật và không headless; thẻ theo bảng mục 5.4; ngưỡng 5.8 trong vòng lượt (không cắt danh sách) | Không tự bật kết nối khi áp dụng mẫu |
-| 5. Nhập / xuất / đối soát | Luồng xung đột mục 6.2, xuất không bí mật và không kèm cửa hàng, câu lỗi mục 11.3, gán `catalogId` chỉ nếu mục 17.5 được duyệt, soát en/zh bằng kiểm thử i18n sẵn có | Không phát hành, không sửa `latest.yml` |
+| 5. Nhập / xuất / đối soát | Luồng xung đột mục 6.2, xuất không bí mật và không kèm cửa hàng, câu lỗi mục 11.3, gán `catalogId` bằng `claimCatalogId` (mục 17.5), soát en/zh bằng kiểm thử i18n sẵn có | Không phát hành, không sửa `latest.yml` |
 
 PR 2 phụ thuộc PR 1. PR 3 phụ thuộc PR 2 (nút Kết nối phải đã đi qua hàm kiểm tra, và `connectors` đã có chỗ ghi). PR 4 phụ thuộc PR 2 về tệp meta, và nên vào sau PR 3 để hai nút trên `#agentBar` không xung đột hàng. PR 5 sau PR 2 và PR 3.
 
@@ -1145,7 +1177,7 @@ Không ghim phiên bản và http nội bộ là dòng trên thẻ, không phả
 
 Tài liệu trước không nói nút trên thanh bị khoá. Bản mẫu tự khoá cả hộp thoại.
 
-**Đề xuất, chờ chủ repo duyệt:** nút “Kết nối ứng dụng” trên `#agentBar` luôn bấm được. Khi công tắc tắt, nút Kết nối của bảy mục Nâng cao bị tắt và ngăn Nâng cao hiện đúng câu gợi ý ở mục 11.1. Ô AIVN Kinh doanh và Excel vẫn bấm được, vì công tắc và khoá `agentMcp` hôm nay chỉ nói về công cụ MCP. Không dùng công tắc này để tắt cửa hàng, kẻo đổi nghĩa một nhãn đang có.
+**Đã chốt:** nút “Kết nối ứng dụng” trên `#agentBar` luôn bấm được. Khi công tắc tắt, nút Kết nối của năm mục Nâng cao bị tắt và ngăn Nâng cao hiện đúng câu gợi ý ở mục 11.1. Ô AIVN Kinh doanh và Excel vẫn bấm được. Không dùng công tắc này để tắt cửa hàng.
 
 ### 17.4 Dòng đang tắt hoặc đang lỗi có xổ và gỡ được không
 
@@ -1153,15 +1185,18 @@ Tài liệu trước không nói nút trên thanh bị khoá. Bản mẫu tự k
 
 ### 17.5 Nhập tệp có nhận id danh mục không
 
-Mục 9 nói `catalogId` null là “Của tôi”, và không nói nhập tệp tự nhận id. Bản mẫu tự gán khi gói hoặc URL khớp và id còn trống.
+**Đã chốt (bản mẫu 4.3).** Chỉ id danh mục Nâng cao, và chỉ khi id đó còn trống. Khớp khi một trong hai điều sau đúng:
 
-**Đề xuất, chờ chủ repo duyệt:** chỉ với máy chủ Nâng cao. Nếu gói (bỏ phần `@phiên bản`) hoặc URL khớp một id danh mục và id đó chưa có trong `servers`, gán `catalogId`. Ngược lại để null và hiện ở Của tôi, không nhân đôi ô. `biz` và `excel` không bao giờ được gán từ `mcp.json`. Nếu đề xuất bị bác, mọi máy chủ nhập vào có `catalogId: null` (mục 6.2).
+- Tên gói trong `command` hoặc `args`, bỏ phần `@phiên bản`. `@modelcontextprotocol/server-filesystem@2.0.0` khớp `filesystem`. `mcp-fetch-server@1.1.2` khớp `fetch`.
+- URL đã chuẩn hoá khớp URL của mục. Chuẩn hoá: máy chủ viết thường, bỏ dấu `/` cuối của đường dẫn. `https://HuggingFace.CO/mcp/` khớp `https://huggingface.co/mcp`.
 
-### 17.6 Ô “Luôn cho phép” khi chỉ bật tự chạy, và dòng Lệnh
+Trùng tên khoá không đủ. Máy chủ tên `fetch` mà lệnh không phải `mcp-fetch-server` có `catalogId: null` và hiện ở Của tôi. Id đã có trong `servers` thì máy chủ sau cũng vào Của tôi, không nhân đôi ô. `claimCatalogId` trong `src/mcp.js` làm đúng luật này. `biz` không bao giờ được gán từ `mcp.json`. Gói Excel không phải id Nâng cao, nên nhập gói đó không chiếm ô cửa hàng.
 
-**Đã chốt bởi hướng mới:** dòng Lệnh (và dòng Loại đi cùng lệnh) nằm trong “Chi tiết”, đóng mỗi lần thẻ hiện. Thẻ AIVN Kinh doanh và Excel không có dòng đó.
+### 17.6 Ô tự chạy, và dòng Lệnh
 
-**Đề xuất, chờ chủ repo duyệt:** cùng một thẻ `mcp_connect` hoặc `connector_connect`. Lần kết nối đầu vẫn có ô, nhãn là `alwaysLabel`. Khi kết nối đã duyệt và việc mới duy nhất là bật tự chạy: không có ô, một dòng “Cho phép máy chủ này tự chạy mỗi khi mở AIVN.” Cho phép thì đặt `autoStart`. Bản mẫu làm gần như vậy; tài liệu này nhận phần giải thích, không nhận việc bỏ dòng Lệnh khỏi thiết kế.
+**Đã chốt.** Dòng Lệnh (và dòng Loại đi cùng lệnh) nằm trong “Chi tiết”, đóng mỗi lần thẻ hiện. Thẻ AIVN Kinh doanh và Excel không có dòng đó, và không có ô tự chạy. Kết nối cửa hàng được nhớ; ứng dụng chạy ở lần dùng đầu (mục 5.6, 8.5).
+
+Máy chủ Nâng cao vẫn có ô “Tự kết nối khi mở AIVN”. Lần kết nối đầu, ô đó là `alwaysLabel`. Khi kết nối đã duyệt và việc mới duy nhất là bật tự chạy: không có ô, một dòng “Cho phép máy chủ này tự chạy mỗi khi mở AIVN.” Cho phép thì đặt `autoStart`.
 
 ### 17.7 Máy không có kho khoá
 
@@ -1181,10 +1216,48 @@ Mục 9 nói `catalogId` null là “Của tôi”, và không nói nhập tệp
 
 ### 17.11 Logo
 
-**Đã chốt bởi hướng mới:** logo thật, tệp cục bộ trong `src/renderer/logos/`, kèm `NOTICE.md` (nguồn và nhãn hiệu). Không tải URL lúc chạy. Ô Kinh doanh dùng biểu tượng AIVN. Cửa hàng cần tệp cho Excel, Zalo, Gmail, Drive, Calendar, Notion. Ô vàng của Hugging Face trên bản mẫu không được đưa vào ứng dụng.
+**Đã chốt.** Không tải URL lúc chạy. Ô Kinh doanh dùng biểu tượng AIVN. Icon Excel là tệp chính thức của Microsoft, lưu cục bộ, không sửa và không đổi màu. Mục CREDITS nằm ở `src/renderer/logos/CREDITS.md`: nguồn, chủ sở hữu Microsoft, và điều khoản nhãn hiệu (không phải CC0). PR lõi ghi mục đó; tệp ảnh vào cùng ô Excel (mục 18.6).
 
-**Đề xuất, chờ chủ repo duyệt:** dòng Nâng cao dùng một chữ cái trên nền trung tính của AIVN, cho đến khi có tệp logo và dòng NOTICE được xem. Không vẽ ô màu giả thương hiệu.
+Các nhãn khác: theo hướng dẫn logo đã công bố của nhà phát hành. Không có hướng dẫn cho phép lưu tệp thì dùng chữ cái trên nền trung tính. Chữ lấy từ id danh mục hoặc tên thương hiệu chưa dịch, không lấy từ tên hiển thị đã dịch. Ô vàng của Hugging Face trên bản mẫu không được đưa vào ứng dụng.
 
 ### 17.12 Mục 14 còn hiệu lực không
 
-**Còn, với đúng các xung đột đã liệt kê ở đầu mục 14.** Không mở lại OAuth, http nội bộ, một mẫu cho cả hồ sơ, cấm Playwright và Context7, `alwaysLabel`, ngưỡng công cụ, hay luật ghim phiên bản. Cách chạy gói đã ghim đổi từ `npx` lúc bấm sang tệp trong bản cài. Tab nhà phát triển trên màn hình chính không còn.
+**Còn, với đúng các xung đột đã liệt kê ở đầu mục 14.** Không mở lại OAuth, http nội bộ, một mẫu cho cả hồ sơ, cấm Playwright và Context7, `alwaysLabel` trên thẻ máy chủ Nâng cao, ngưỡng công cụ, hay luật ghim phiên bản. Cách chạy gói đã ghim đổi từ `npx` lúc bấm sang tệp trong bản cài. Tab nhà phát triển trên màn hình chính không còn. Ô cửa hàng không có ô tự chạy.
+
+## 18. Quyết định khi triển khai
+
+Các mục dưới đây chốt sau bản thiết kế, theo bản mẫu 4.3 (https://khoik647-ai.github.io/aivn-prototype/connect.html). PR 1 làm phần lõi đã ghi trong mục 15. Phần giao diện để PR sau.
+
+### 18.1 Ngăn chi tiết
+
+PR 3. Mọi ô cửa hàng có ngăn chi tiết không bao giờ trống: một đến hai câu mô tả, quyền theo mức Chỉ đọc / Ghi / Hỏi trước, dữ liệu ở máy này hay đám mây, nhà phát triển và phiên bản, nút Kết nối hoặc Ngắt kết nối. Lệnh và kiểu vận chuyển nằm trong “Chi tiết” đóng sẵn.
+
+### 18.2 “Báo tôi khi có” và ô tìm trống
+
+PR 3. Ô Sắp có có công tắc “Báo tôi khi có” / “Tell me when it's ready” / “可用时通知我”. Cờ `notify` chỉ trên máy, không gọi mạng. Bản sau hỗ trợ ứng dụng thì hiện thông báo trong ứng dụng. Ô tìm không ra kết quả: “Không thấy? Thêm máy chủ MCP ở Nâng cao”. Câu đó là liên kết mở Nâng cao, và là chỗ duy nhất trên màn hình chính được nhắc máy chủ MCP.
+
+### 18.3 Chữ
+
+Một bảng, mục 11. Bản nháp lấy từ bản mẫu 4.3. Câu ngắn, xưng “bạn”. Màn hình chính không dùng chữ MCP, máy chủ, công cụ, trừ câu tìm trống ở mục 18.2.
+
+### 18.4 Thư mục của Excel
+
+Excel có danh sách thư mục riêng, `connectors.excel.folders`. Lần kết nối đầu chép từ thư mục được phép của AIVN AGENT. “Chi tiết” → “Đổi thư mục” chỉ sửa danh sách đó. `excelCallError` chỉ xét danh sách này. Đổi danh sách của Excel không đổi `agentFolders`, và ngược lại.
+
+### 18.5 Nhớ đã kết nối, chạy ở lần dùng đầu
+
+Ô cửa hàng không có ô tự chạy. `enabled` được nhớ qua lần mở sau. Viên là “Đã kết nối · chờ dùng lần đầu” cho đến khi AIVN AGENT dùng tới. Không bắt bấm Kết nối lại. Lần ghi đầu sau mỗi lần mở ứng dụng vẫn qua `#approveCard`. Máy chủ Nâng cao vẫn có ô tự chạy và vẫn có thể `start` lúc mở AIVN. PR 1 không đổi thân `startEnabled`.
+
+### 18.6 Icon Excel và CREDITS
+
+Khi ô Excel vào, dùng icon chính thức của Microsoft, tệp cục bộ, không sửa, không đổi màu.
+
+- Tệp: `src/renderer/logos/excel.svg`
+- Nguồn: https://res.cdn.office.net/files/fabric-cdn-prod_20221201.001/assets/brand-icons/product/svg/excel_48x1.svg
+- Chủ sở hữu: Microsoft
+- Điều khoản: nhãn hiệu Microsoft, không phải CC0, không phải MIT hay Apache-2.0. Chỉ dùng để chỉ sản phẩm Microsoft Excel, theo https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks . Không sửa hình. Không ngụ ý Microsoft bảo trợ AIVN.
+- Đã kiểm tra ngày 22/10/2026: URL trả HTTP 200, `image/svg+xml`. Cùng tệp cũng có ở https://static2.sharepointonline.com/files/fabric/assets/brand-icons/product/svg/excel_48x1.svg (chuyển tới https://res-1.cdn.office.net/files/fabric/assets/brand-icons/product/svg/excel_48x1.svg).
+
+Mục này đã ghi trong `src/renderer/logos/CREDITS.md`. PR của ô Excel phải lặp lại nguồn, chủ sở hữu và điều khoản trong mô tả PR để người duyệt kiểm. PR 1 không nhét tệp ảnh.
+
+Nhãn khác theo hướng dẫn đã công bố. Không có hướng dẫn thì dùng chữ cái từ id hoặc tên thương hiệu chưa dịch.
