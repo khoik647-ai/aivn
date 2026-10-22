@@ -169,7 +169,8 @@
   "footer.11": "FAQ",
   "footer.12": "<span>© 2026 AIVN · NGUYỄN NGỌC KHÔI SINH VIÊN VLU</span><span>Developed by NGUYỄN NGỌC KHÔI SINH VIÊN VLU</span>",
   "foot.phone": "Phone:",
-  "foot.phonenum": "+84 896 403 538"
+  "foot.phonenum": "+84 896 403 538",
+  "beta.1": "🧪 <a class=\"beta-link\" href=\"https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.2.7/AIVN-Setup-0.16.0-beta.2.7.exe\" rel=\"noopener\" style=\"font-weight:600;color:var(--accent)\">Download beta 0.16.0-beta.2.7 (test version, Windows)</a> · ~245 MB<br/><small>⚠ Test version: it may still have bugs and does not update automatically. For everyday use, choose the stable version above. SHA-256: <code class=\"beta-sha\" style=\"word-break:break-all;font-size:.82em\">421af85e5766e99b6cdf7e163981646087ff794c88b9d44f7dff8b572bac3b98</code></small>"
  },
  "attr": {
   "@aria-label.1": "AIVN home",
