@@ -2397,7 +2397,7 @@ $('#rail').addEventListener('focusout', () => { railTip.hidden = true; });
 // Thẻ Runtime: phiên bản bộ máy, tải/gỡ CUDA (NVIDIA), chọn runtime cho llama-server
 const rtSize = (b) => (b / 1024 ** 3 >= 1 ? (b / 1024 ** 3).toFixed(2) + ' GB' : Math.round(b / 1024 ** 2) + ' MB');
 async function paintRuntime() {
-  const r = await window.api.runtimeStatus(); const c = r.cuda;
+  const r = await A.runtimeStatus(); const c = r.cuda;
   $('#rtPref').value = r.pref;
   const bundled = r.platform === 'win32' ? 'Vulkan' : r.platform === 'darwin' ? 'Metal' : 'CPU';
   $('#rtVersions').innerHTML = `llama.cpp (llama-server) <b>${esc(r.versions.llamaServer)}</b> — bản đi kèm: ${esc(bundled)}${c.installed ? ' · CUDA 12.4' : ''}<br>node-llama-cpp ${esc(r.versions.nodeLlamaCpp || '?')} (trò chuyện chữ${r.chatGpu ? ', GPU: ' + esc(String(r.chatGpu)) : ''}) · Electron ${esc(r.versions.electron)}`;
@@ -2419,16 +2419,16 @@ function paintRtJob(j) {
   $('#rtProg').hidden = !j; $('#rtCancel').hidden = !j;
   if (j) { $('#rtProg').max = j.total || 1; $('#rtProg').value = j.received || 0; $('#rtProg').title = { download: 'Đang tải', verify: 'Đang kiểm tra SHA-256', extract: 'Đang giải nén' }[j.phase] || ''; }
 }
-window.api.onRuntimeProgress((j) => { paintRtJob(j); if (!j && setTab.cur === 'runtime') paintRuntime().catch(() => {}); });
-$('#rtPref').addEventListener('change', async (e) => { const r = await window.api.runtimeSet(e.target.value); if (r && r.note) toast(r.note); });
+A.onRuntimeProgress((j) => { paintRtJob(j); if (!j && setTab.cur === 'runtime') paintRuntime().catch(() => {}); });
+$('#rtPref').addEventListener('change', async (e) => { const r = await A.runtimeSet(e.target.value); if (r && r.note) toast(r.note); });
 $('#rtInstall').addEventListener('click', async () => {
   $('#rtInstall').hidden = true; paintRtJob({ received: 0, total: 1, phase: 'download' });
-  const r = await window.api.runtimeInstall();
+  const r = await A.runtimeInstall();
   if (r.ok) toast('Đã tải runtime CUDA. Áp dụng từ lần nạp mô hình nhìn ảnh tiếp theo.'); else if (!r.busy) toast(cleanErr(r.error || 'Không tải được runtime CUDA.'), !r.cancelled);
   paintRuntime().catch(() => {});
 });
-$('#rtCancel').addEventListener('click', () => window.api.runtimeCancel());
-$('#rtRemove').addEventListener('click', async () => { const r = await window.api.runtimeRemove(); if (!r.ok) toast(cleanErr(r.error || 'Không gỡ được runtime CUDA.'), true); paintRuntime().catch(() => {}); });
+$('#rtCancel').addEventListener('click', () => A.runtimeCancel());
+$('#rtRemove').addEventListener('click', async () => { const r = await A.runtimeRemove(); if (!r.ok) toast(cleanErr(r.error || 'Không gỡ được runtime CUDA.'), true); paintRuntime().catch(() => {}); });
 // Trang Cài đặt: các thẻ bên trái, phím ↑↓ di chuyển giữa thẻ
 function setTab(tab) {
   if (!document.querySelector(`[data-spane="${tab}"]`)) tab = 'general';
@@ -2533,3 +2533,5 @@ document.addEventListener('click', async (e) => {
 });
 // tải xong mắt nhìn: AIVN tự đặt làm mô hình định vị (main) — làm mới biểu ngữ AIVN AGENT
 A.onDlDone(() => setTimeout(() => { if (typeof refreshAgent === 'function') refreshAgent().catch(() => {}); }, 800));
+// Dòng CUỐI của app.js: một lỗi khi nạp (vd. gọi cầu nối không tồn tại — beta.2.3) làm mọi dòng sau nó không chạy; QA (qa-ui) kiểm cờ này
+window.__aivnBoot = 'ok';

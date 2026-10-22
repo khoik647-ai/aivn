@@ -126,6 +126,9 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
   const deadline = t0 + args.timeout * 1000;
   try {
     await ensure(); res.resources.start = await resources();
+    // lỗi khi nạp giao diện xảy ra TRƯỚC khi bộ chạy gắn bộ nghe console → kiểm cờ ở dòng cuối app.js (beta.2.3: window.api làm hỏng thẻ Cài đặt mà consoleErrors vẫn 0)
+    { let boot = null; for (let i = 0; i < 25 && boot !== 'ok'; i++) { boot = await js("window.__aivnBoot || null").catch(() => null); if (boot !== 'ok') await sleep(200); }
+      if (boot !== 'ok') { res.consoleErrors.push({ at: Date.now() - t0, msg: 'app.js không chạy hết khi nạp (thiếu window.__aivnBoot) — có lỗi JavaScript lúc khởi động, các nút phía sau lỗi sẽ không hoạt động', src: 'app.js' }); failed++; } }
     if (script.size) { const [w, h] = script.size; win.setContentSize(+w, +h); }
     const steps = script.steps.map(normStep);
     for (let n = 0; n < steps.length; n++) {
