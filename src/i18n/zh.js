@@ -106,6 +106,7 @@
     ": toàn bộ cuộc trò chuyện, ghi nhớ, lịch tự động, cài đặt và nhật ký thao tác sẽ bị xoá vĩnh viễn.": "：所有对话、记忆、自动日程、设置和操作日志都将被永久删除。",
     "; dùng read_file với đường dẫn trên để đọc phần còn lại": "；用 read_file 读取上面的路径以查看其余部分",
     "; mô hình chính hiện là mô hình nhìn ảnh lớn — không cần nếu đã có mô hình định vị.": "；当前主模型是大型视觉模型 — 若已有屏幕定位模型则无需此项。",
+    "AGENT đang chờ bạn cho phép": "AGENT 正在等待你允许",
     "AIVN AGENT chỉ xem, đọc, ghi tệp trong các thư mục này.": "AIVN AGENT 只在这些文件夹中查看、读取和写入文件。",
     "AIVN AGENT ghi nhớ": "AIVN AGENT 记忆",
     "AIVN AGENT gần như không thao tác được với mô hình này.": "使用此模型时 AIVN AGENT 几乎无法操作电脑。",

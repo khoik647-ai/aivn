@@ -68,6 +68,7 @@
  ": hỗ trợ công cụ",
  ": toàn bộ cuộc trò chuyện, ghi nhớ, lịch tự động, cài đặt và nhật ký thao tác sẽ bị xoá vĩnh viễn.",
  "; dùng read_file với đường dẫn trên để đọc phần còn lại",
+ "AGENT đang chờ bạn cho phép",
  "AIVN AGENT chỉ xem, đọc, ghi tệp trong các thư mục này.",
  "AIVN AGENT ghi nhớ",
  "AIVN AGENT gần như không thao tác được với mô hình này.",

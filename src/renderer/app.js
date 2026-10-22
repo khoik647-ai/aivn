@@ -156,6 +156,7 @@ function setMode(mode) {
   if (state.models) $('#modelSelect').innerHTML = modelOptionsHtml(state.models, state.status.loaded ? state.status.id : '', mode === 'agent');
   if (mode === 'agent') refreshAgent();
   paintGenChrome();
+  if (mode === 'agent') focusApproveIfWaiting();
 }
 const convoMode = (c) => c.mode === 'agent' ? 'agent' : 'chat';
 
@@ -1711,32 +1712,44 @@ function apShow() {
   $('#apReasonBox').hidden = true; $('#apReason').value = '';
   $('#apAlwaysRow').hidden = !c.allowAlways; $('#apAlways').checked = false; $('#apWarn').hidden = true; // không bao giờ bật sẵn
   card.hidden = false; state.genPhase = 'ask'; if (state.genKind === 'agent') paintGenChrome(); else setPhase('ask');
-  $('#apDeny').focus({ preventScroll: true }); card.scrollTop = 0;
-  card.scrollIntoView({ block: 'nearest' });
+  paintAgentWait();
+  if (approveLive()) { $('#apDeny').focus({ preventScroll: true }); card.scrollTop = 0; card.scrollIntoView({ block: 'nearest' }); }
 }
+function approveLive() {
+  const card = $('#approveCard'); const view = $('#view-chat');
+  return ApproveGate.approveOperable({ viewActive: !!(view && view.classList.contains('active')), agentMode: !!(view && view.classList.contains('agent-mode')), cardHidden: !card || card.hidden, focused: !!(card && document.activeElement && card.contains(document.activeElement)) });
+}
+function paintAgentWait() { const el = $('#agentWait'); if (el) el.hidden = !(apOpen || apQueue.length); }
+function focusApproveIfWaiting() { if (!apOpen || !approveLive()) return; const card = $('#approveCard'); $('#apDeny').focus({ preventScroll: true }); card.scrollTop = 0; card.scrollIntoView({ block: 'nearest' }); }
 function apAnswer(ok, withReason = false) {
+  if (!approveLive()) return; // B177: Trò chuyện không được phép hay từ chối
   const c = apOpen; if (!c) return;
   const reason = withReason ? $('#apReason').value.trim() : '';
   const always = ok && c.allowAlways && $('#apAlways').checked;
   apOpen = null; $('#approveCard').hidden = true; state.genPhase = ok ? 'act' : 'think'; if (state.genKind === 'agent') paintGenChrome(); else setPhase(state.genPhase);
   A.agentApproveReply({ id: c.id, ok, reason, always });
   if (always) toast(`Đã chọn “Luôn cho phép” cho ${c.label || c.tool}. Bỏ trong Cài đặt AIVN AGENT.`);
+  paintAgentWait();
   apShow();
 }
 $('#apAllow').addEventListener('click', () => apAnswer(true));
-$('#apDeny').addEventListener('click', () => { if (!$('#apReasonBox').hidden && $('#apReason').value.trim()) apAnswer(false, true); else apAnswer(false); });
+$('#apDeny').addEventListener('click', () => { if (!approveLive()) return; if (!$('#apReasonBox').hidden && $('#apReason').value.trim()) apAnswer(false, true); else apAnswer(false); });
 $('#apDenyReason').addEventListener('click', () => {
+  if (!approveLive()) return;
   if ($('#apReasonBox').hidden) { $('#apReasonBox').hidden = false; $('#apReason').focus(); $('#apDenyReason').textContent = 'Gửi lý do & từ chối'; return; }
   apAnswer(false, true); $('#apDenyReason').textContent = 'Từ chối kèm lý do';
 });
 $('#apAlways').addEventListener('change', (e) => { const c = apOpen; $('#apWarn').hidden = !e.target.checked; $('#apWarn').textContent = '⚠ ' + ((c && c.warn) || 'AIVN AGENT sẽ dùng công cụ này mà không hỏi lại.') + ' Bạn có thể bỏ trong Cài đặt AIVN AGENT.'; });
 document.addEventListener('keydown', (e) => {
   if (!apOpen) return;
+  const operable = approveLive();
+  if (!operable) return; // B177: Ctrl+Enter / Esc ở Trò chuyện không duyệt
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); apAnswer(true); }
   else if (e.key === 'Escape') { e.preventDefault(); if (!$('#apReasonBox').hidden && document.activeElement === $('#apReason') && $('#apReason').value.trim()) apAnswer(false, true); else apAnswer(false); }
 }, true);
+$('#agentWait').addEventListener('click', () => show('agent'));
 A.onAgentApprove((c) => { apQueue.push(c); apShow(); });
-A.onAgentApproveCancel(({ id }) => { if (apOpen && apOpen.id === id) { apOpen = null; $('#approveCard').hidden = true; apShow(); } const i = apQueue.findIndex(x => x.id === id); if (i >= 0) apQueue.splice(i, 1); });
+A.onAgentApproveCancel(({ id }) => { if (apOpen && apOpen.id === id) { apOpen = null; $('#approveCard').hidden = true; apShow(); } const i = apQueue.findIndex(x => x.id === id); if (i >= 0) apQueue.splice(i, 1); paintAgentWait(); });
 
 if (A.onNotice) A.onNotice((n) => toast((n.kind === 'warn' ? '⚠ ' : '') + n.text, n.kind === 'warn'));
 
