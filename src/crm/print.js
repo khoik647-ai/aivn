@@ -91,7 +91,7 @@ function render(doc, { company: c, lang = 'vi', qr = null, generatedAt = new Dat
 h1 { text-align: center; font-size: 17pt; margin: 14px 0 2px; letter-spacing: .5px; text-transform: uppercase; } .sub { text-align: center; margin: 0 0 12px; } .sub b { font-size: 11pt; }
 .party { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; margin: 6px 0 10px; } .kv { margin: 1px 0; } .kv span { color: #444; }
 table { width: 100%; border-collapse: collapse; } .lines th, .lines td { border: 1px solid #9aa5b1; padding: 4px 6px; vertical-align: top; } .lines thead th { background: #eef2f6; font-weight: 600; text-align: left; } .lines tfoot td { background: #f7f9fb; }
-.n { text-align: right !important; white-space: nowrap; } .c { text-align: center !important; width: 9mm; } tr { break-inside: avoid; } thead { display: table-header-group; }
+.n { text-align: right !important; white-space: nowrap; } .c { text-align: center !important; width: 9mm; white-space: nowrap; } tr { break-inside: avoid; } thead { display: table-header-group; }
 .tot { width: 58%; margin: 8px 0 0 auto; } .tot td { padding: 3px 6px; } .tot .grand td { font-weight: 700; border-top: 1.5px solid #111; font-size: 11pt; } .small { font-size: 9pt; } .muted { color: #666; font-weight: normal; }
 .words { margin: 8px 0; } .notes { margin: 8px 0; } .qr { display: flex; gap: 14px; align-items: center; border: 1px solid #9aa5b1; border-radius: 6px; padding: 8px; margin: 10px 0; break-inside: avoid; width: fit-content; }
 .qr-img svg { width: 34mm; height: 34mm; display: block; } .qr-t { font-weight: 700; margin-bottom: 2px; }
@@ -115,18 +115,22 @@ function describe(biz, crm, type, id) {
     const o = biz.getOrder(id); const sale = o.status === 'sale';
     return { type, title: sale ? 'Đơn bán hàng' : 'Báo giá', number: o.number, date: o.date, partner: o.contact, side: 'out', lines: o.lines, tax_rounding: o.tax_rounding,
       amount_untaxed: o.subtotal, amount_total: o.total, notes: o.notes, notesLabel: 'Điều khoản và ghi chú', stamp: o.status === 'cancel' ? 'Đã huỷ' : '',
-      meta: [['Ngày báo giá', o.date], ['Hiệu lực đến', o.valid_until], ['Điều khoản thanh toán', o.payment_days ? `${o.payment_days} ngày` : 'Thanh toán ngay', true], ['Ngày giao cam kết', o.commitment_date], ['Người phụ trách', o.owner]].filter(x => x[1]).map(([k, v, tr]) => [k, /^\d{4}-\d{2}-\d{2}$/.test(v) ? dmy(v) : v, tr]),
+      // Odoo: đơn đã xác nhận in «Ngày đặt hàng» (ngày xác nhận) và bỏ «Hiệu lực đến» — chỉ báo giá mới có hạn hiệu lực
+      meta: [sale ? ['Ngày đặt hàng', o.confirmed_at ? localYmd(o.confirmed_at) : o.date] : ['Ngày báo giá', o.date], ['Hiệu lực đến', sale ? '' : o.valid_until], ['Điều khoản thanh toán', o.payment_days ? `${o.payment_days} ngày` : 'Thanh toán ngay', true], ['Ngày giao cam kết', o.commitment_date], ['Người phụ trách', o.owner]].filter(x => x[1]).map(([k, v, tr]) => [k, /^\d{4}-\d{2}-\d{2}$/.test(v) ? dmy(v) : v, tr]),
       signs: [[sale ? 'Khách hàng' : 'Khách hàng xác nhận', ''], [c.signer_title || 'Đại diện công ty', signer]], company: c };
   }
   if (type === 'invoice') {
     const inv = biz.getInvoice(id); const vendor = inv.side === 'in';
+    // Odoo in kèm điều khoản thanh toán và người phụ trách của đơn gốc trên hoá đơn
+    const src = (() => { try { return inv.so_id ? biz.getOrder(inv.so_id) : inv.po_id && biz.getPurchase ? biz.getPurchase(inv.po_id) : null; } catch { return null; } })();
+    const terms = src && inv.kind.endsWith('invoice') ? (src.payment_days ? `${src.payment_days} ngày` : 'Thanh toán ngay') : '';
     const label = { out_invoice: 'Hoá đơn bán hàng', out_refund: 'Giấy báo có', in_invoice: 'Hoá đơn nhà cung cấp', in_refund: 'Giấy báo có nhà cung cấp' }[inv.kind];
     const pay = { out_invoice: 'Đã thu', out_refund: 'Đã hoàn', in_invoice: 'Đã trả', in_refund: 'Đã nhận hoàn' }[inv.kind];
     return { type, title: label, number: inv.number, date: inv.invoice_date, partner: inv.partner, side: inv.side, lines: inv.lines, tax_rounding: inv.tax_rounding, state: inv.state,
       amount_untaxed: inv.amount_untaxed, amount_total: inv.amount_total, residual: inv.residual, residualLabel: (inv.kind === 'out_invoice' || inv.kind === 'in_refund') ? 'Còn phải thu' : 'Còn phải trả',
       payments: (inv.payments || []).map(p => ({ label: pay, date: p.date, amount: p.amount })), notes: inv.notes,
       stamp: inv.state === 'cancel' ? 'Đã huỷ' : inv.state === 'draft' ? 'Nháp' : inv.payment_state === 'paid' ? 'Đã thanh toán' : '',
-      meta: [['Ngày hoá đơn', dmy(inv.invoice_date)], ['Hạn thanh toán', dmy(inv.due_date)], ['Đơn bán hàng', inv.so_number], ['Đơn mua hàng', inv.po_number], ['Số tham chiếu', inv.ref], ['Đảo của', inv.reversed_number]].filter(x => x[1]),
+      meta: [['Ngày hoá đơn', dmy(inv.invoice_date)], ['Hạn thanh toán', dmy(inv.due_date)], ['Đơn bán hàng', inv.so_number], ['Đơn mua hàng', inv.po_number], ['Số tham chiếu', inv.ref], ['Đảo của', inv.reversed_number], ['Điều khoản thanh toán', terms, true], ['Người phụ trách', src && !vendor ? src.owner : '']].filter(x => x[1]),
       signs: vendor ? [['Người lập', c.accountant], ['Kế toán', ''], [c.signer_title || 'Giám đốc', signer]] : [['Người mua hàng', ''], ['Người bán hàng', signer]],
       legal: inv.side === 'out' ? 'Chứng từ nội bộ — không thay thế hoá đơn điện tử theo Nghị định 123/2020/NĐ-CP.' : '', company: c,
       qr: inv.kind === 'out_invoice' && inv.state === 'posted' && inv.residual > 0 ? biz.invoiceQr(id) : null };
@@ -136,7 +140,7 @@ function describe(biz, crm, type, id) {
     return { type, kind: p.kind, title: p.kind === 'in' ? 'Phiếu nhập kho' : p.kind === 'out' ? 'Phiếu giao hàng' : 'Phiếu điều chỉnh tồn kho', number: p.number, date: p.done_at ? localYmd(p.done_at) : p.scheduled,
       partner: p.partner_id ? (crm.getContact ? (crm.getContact(p.partner_id) || {}) : {}) : {}, side: p.kind === 'in' ? 'in' : 'out', state: p.state, stamp: p.state === 'cancel' ? 'Đã huỷ' : '',
       lines: p.moves.map(m => ({ name: m.product_name, sku: (products[m.product_id] || {}).sku, unit: m.unit, qty: m.qty, qty_done: m.qty_done, unit_cost: m.unit_cost })), notes: p.notes,
-      meta: [['Ngày dự kiến', dmy(p.scheduled)], ['Chứng từ gốc', p.origin], ['Trạng thái', p.state_vi, true]].filter(x => x[1]),
+      meta: [['Ngày dự kiến', dmy(p.scheduled)], ['Chứng từ gốc', p.origin], ['Trạng thái', p.state_vi, true], ['Phiếu chờ phần còn lại', (p.backorders || []).map(b => b.number).filter(Boolean).join(', ')]].filter(x => x[1]),
       signs: p.kind === 'in' ? [['Người lập phiếu', ''], ['Người giao hàng', ''], ['Thủ kho', ''], ['Kế toán trưởng', c.accountant]] : [['Người lập phiếu', ''], ['Thủ kho', ''], ['Người giao hàng', ''], ['Người nhận hàng', '']], company: c };
   }
   if (type === 'purchase') {
