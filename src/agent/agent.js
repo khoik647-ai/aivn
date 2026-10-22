@@ -1321,7 +1321,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     }
     // B192 (QA beta.3: Notepad không có chữ nào mà vẫn “done”): thao tác quyết định chưa có tác dụng đã kiểm trên màn hình → không báo xong, nói trung thực
     if (outcome === 'done' && compOn && !sentDone && finishReason !== 'abort') { const ef = RT.effectOf(steps, query);
-      if (!ef.ok) { outcome = 'failed'; warning = null; deps.log && deps.log(`[aivn agent] B192: thao tác quyết định chưa có tác dụng (${ef.why}, ${ef.n || 0} lần gõ) → không báo xong`);
+      if (!ef.ok) { outcome = 'failed'; deps.log && deps.log(`[aivn agent] B192: thao tác quyết định chưa có tác dụng (${ef.why}, ${ef.n || 0} lần gõ) → không báo xong`);
         text = honestOf(ef.why === 'typed' ? say(LG, 'chưa thấy chữ nào được gõ vào ứng dụng trên màn hình') : say(LG, 'bước cuối chưa có tác dụng trên màn hình')); } }
     try { if (!headless && deps.recipes && names.includes('screen_act')) { if (outcome === 'done' && finishReason !== 'abort' && !timedOut && steps.some(x => x.name === 'screen_act' && x.status === 'ok')) deps.recipes.put(query, steps); else if (recipe && outcome === 'failed') deps.recipes.drop(query); } } catch {}
     return { text: (text || '').trim(), steps, usage, finishReason, urls, memories: sys.memories.map(m => m.text), tools: names, warning, outcome, sources: srcOut.sources || [], grounding: srcOut.grounding || null, replayed: recipe ? recipe.steps.length : 0 };
