@@ -2,7 +2,7 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const A = window.aivn;
-const state = { settings: null, models: [], status: { loaded: false }, convos: [], current: null, generating: null, generatingConv: null, genKind: null, genPhase: null, genNote: '', agentFoot: '', _genStatsShown: '', catalog: [], mode: 'chat', lastByMode: {}, agent: null };
+const state = { settings: null, models: [], status: { loaded: false }, convos: [], current: null, generating: null, generatingConv: null, generatingByMode: { chat: null, agent: null }, genKind: null, genPhase: null, genNote: '', agentFoot: '', _genStatsShown: '', catalog: [], mode: 'chat', lastByMode: {}, agent: null };
 const isAgent = () => state.mode === 'agent';
 // B172: bản nháp chưa gửi của từng trang (Trò chuyện, AIVN AGENT, Lịch, Ghi nhớ) trong phiên này
 const DraftsAPI = window.AIVN_DRAFTS;
@@ -136,8 +136,8 @@ function setMode(mode) {
     drafts.stash(state.mode, readComposer(state.mode), pending);
     if (state.current) state.lastByMode[state.mode] = state.current.id;
     state.mode = mode;
-    // B173: cuộc đang stream có thể chưa có trong danh sách (chưa lưu) hoặc bản trong danh sách là bản cũ trên đĩa
-    state.current = ChatStream.convoForMode({ mode, id: state.lastByMode[mode], convos: state.convos, generating: state.generatingConv });
+    // B173/B178: cuộc đang chạy có thể chưa có trong danh sách (chưa lưu) hoặc bản trong danh sách là bản cũ trên đĩa. Mỗi trang một object.
+    state.current = ChatStream.convoForMode({ mode, id: state.lastByMode[mode], convos: state.convos, generating: state.generatingConv, generatingByMode: state.generatingByMode });
     const got = drafts.take(mode);
     const text = got.apply.input != null ? got.apply.input : '';
     if (input.value !== text) input.value = text;
@@ -686,7 +686,7 @@ function convoHit(c, q) {
 function renderConvos() {
   const q = fold(($('#convoQ') && $('#convoQ').value || '').trim());
   let mine = state.convos.filter(c => convoMode(c) === state.mode);
-  const gen = state.generatingConv; // B173: cuộc mới chưa saveConvo vẫn hiện trong danh sách khi đang stream
+  const gen = ChatStream.generatingFor(state.mode, state.generatingConv, state.generatingByMode); // B173/B178: cuộc mới chưa saveConvo vẫn hiện khi đang chạy
   if (gen && convoMode(gen) === state.mode && !mine.some(c => c.id === gen.id)) mine = [gen, ...mine];
   const rows = mine.map(c => [c, convoHit(c, q)]).filter(([, h]) => h.ok);
   $('#convoList').innerHTML = rows.map(([c, h]) => `<div class="convo ${state.current && c.id === state.current.id ? 'active' : ''}" data-id="${c.id}"><span data-noi18n title="${esc(c.title)}">${esc(c.title)}${h.snip ? `<small class="convo-snip">${esc(h.snip)}</small>` : ''}</span><button class="exp" title="Xuất ra tệp (.md/.txt/.json)" aria-label="Xuất ra tệp" data-testid="convo-export">⤓</button><button class="del" title="Xoá">✕</button></div>`).join('')
@@ -701,7 +701,8 @@ $('#convoList').addEventListener('click', async (e) => {
   const row = e.target.closest('.convo'); if (!row) return;
   if (e.target.closest('.exp')) { await exportConvo(row.dataset.id); return; }
   if (e.target.classList.contains('del')) { await A.deleteConvo(row.dataset.id); if (state.current && state.current.id === row.dataset.id) state.current = null; await loadConvos(); renderMessages(); return; }
-  state.current = (state.generatingConv && state.generatingConv.id === row.dataset.id) ? state.generatingConv : state.convos.find(c => c.id === row.dataset.id); renderConvos(); renderMessages();
+  const genRow = ChatStream.generatingFor(state.mode, state.generatingConv, state.generatingByMode);
+  state.current = (genRow && genRow.id === row.dataset.id) ? genRow : state.convos.find(c => c.id === row.dataset.id); renderConvos(); renderMessages();
   if (typeof state.streamFlush === 'function') state.streamFlush();
 });
 $('#messages').addEventListener('click', async (e) => {
@@ -968,7 +969,7 @@ $('#composer').addEventListener('submit', async (e) => {
 // Một lượt trả lời (dùng cho gửi mới, tạo lại, sửa rồi gửi lại). userMsg và reply đã nằm trong conv.messages.
 async function runTurn(conv, userMsg, reply, { docsToSend = [], directImgs = [] } = {}) {
   const vision = !!state.status.vision;
-  reply.streaming = true; state.generatingConv = conv; // B173: renderMessages dựng lại DOM vẫn trỏ đúng cuộc này
+  reply.streaming = true; state.generatingConv = conv; state.generatingByMode.chat = conv; // B173/B178: renderMessages dựng lại DOM vẫn trỏ đúng cuộc này
   renderMessages();
   const ri = conv.messages.indexOf(reply);
   const liveBody = () => ChatStream.streamBody({ query: (i) => document.querySelector('#messages .msg[data-i="' + i + '"]'), conv, visible: state.current, visibleMode: state.mode, index: ri });
@@ -1041,7 +1042,7 @@ async function runTurn(conv, userMsg, reply, { docsToSend = [], directImgs = [] 
     setGenNote('');
   } finally {
     off(); offThink(); offInfo(); offRag(); offRec();
-    state.generating = null; state.generatingConv = null; state.streamFlush = null; delete reply.streaming;
+    state.generating = null; state.generatingConv = null; state.generatingByMode.chat = null; state.streamFlush = null; delete reply.streaming;
     state.genKind = null; state.genNote = ''; state.genPhase = null;
     paintGenChrome();
     conv.updatedAt = Date.now(); await A.saveConvo(conv); await loadConvos(); renderMessages();
@@ -1603,7 +1604,7 @@ async function sendAgent(text) {
   const box = $('#messages');
   const stick = () => { box.scrollTop = box.scrollHeight; };
   const startEl = msgEl(); if (startEl) startEl.querySelector('.body').classList.add('cursor');
-  const reqId = uid(); state.generating = reqId; state.genKind = 'agent'; state.genPhase = null; genStartedAt = Date.now();
+  const reqId = uid(); state.generating = reqId; state.genKind = 'agent'; state.generatingByMode.agent = conv; state.lastByMode.agent = conv.id; state.genPhase = null; genStartedAt = Date.now(); // B178: việc mới chưa lưu vẫn được chọn lại khi quay về AGENT
   setGenNote('Đang chuẩn bị (công cụ, ghi nhớ)…');
   const paintNote = (el) => { const n = el.querySelector('.err-note'); if (n) n.innerHTML = errNoteHtml(reply); };
   const paintSteps = () => { const el = msgEl(); if (!el) return; const w = el.querySelector('.steps-wrap'); const open = new Set($$('details.step[open], details.step-more[open]', w).map(d => d.dataset.step)); w.innerHTML = stepsHtml(reply, open); paintNote(el); stick(); };
@@ -1645,7 +1646,11 @@ async function sendAgent(text) {
     paintGenChrome();
     if (onAgent) { setPhase('done'); setTimeout(() => { if (!state.generating) setPhase(null); }, 4000); }
     else setPhase(null);
-    conv.updatedAt = Date.now(); await A.saveConvo(conv); await loadConvos(); renderMessages();
+    state.generatingByMode.agent = null;
+    conv.updatedAt = Date.now(); await A.saveConvo(conv); await loadConvos();
+    const picked = ChatStream.selectAfterRun({ visibleMode: state.mode, current: state.current, conv, convos: state.convos }); // B178: lưu xong thì chọn lại việc, không để trang chào trống
+    if (picked.selected) { state.current = picked.current; state.lastByMode.agent = picked.current.id; }
+    renderConvos(); renderMessages();
     if (reply.steps.some(x => x.name === 'save_memory' && x.status === 'ok')) refreshMemCount();
     if (reply.steps.some(x => x.name === 'create_reminder' && x.status === 'ok')) refreshSchedCount();
   }
