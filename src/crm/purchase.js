@@ -174,15 +174,18 @@ function createPurchase({ db, crm, now, today, log = () => {}, h }) {
     const sign = (i) => (i.kind === 'in_refund' ? -1 : 1);
     const byMonth = new Map(); for (const i of all) { const k = i.invoice_date.slice(0, 7); const g = byMonth.get(k) || { key: k, untaxed: 0, tax: 0, total: 0, count: 0 }; g.untaxed += sign(i) * i.amount_untaxed; g.tax += sign(i) * i.amount_tax; g.total += sign(i) * i.amount_total; g.count++; byMonth.set(k, g); }
     const t = today(); const aged = new Map();
-    for (const i of db.all("SELECT * FROM invoices WHERE state = 'posted' AND kind = 'in_invoice'").map(h.pubInvoice).filter(i => i.residual > 0)) {
+    // #38: giấy báo có NCC chưa được đối trừ / chưa nhận lại tiền (vd. báo có cho hoá đơn đã trả đủ) là tiền NCC nợ lại mình → trừ vào công nợ phải trả (Odoo Aged Payable cũng vậy)
+    for (const i of db.all("SELECT * FROM invoices WHERE state = 'posted' AND kind IN ('in_invoice','in_refund')").map(h.pubInvoice).filter(i => i.residual > 0)) {
       const late = isDate(i.due_date) ? daysBetween(i.due_date, t) : 0; const b = late <= 0 ? 'current' : late <= 30 ? 'd30' : late <= 60 ? 'd60' : late <= 90 ? 'd90' : 'older';
-      const g = aged.get(i.partner_id) || { partner_id: i.partner_id, partner_name: i.partner_name, current: 0, d30: 0, d60: 0, d90: 0, older: 0, total: 0 }; g[b] += i.residual; g.total += i.residual; aged.set(i.partner_id, g);
+      const amt = sign(i) * i.residual;
+      const g = aged.get(i.partner_id) || { partner_id: i.partner_id, partner_name: i.partner_name, current: 0, d30: 0, d60: 0, d90: 0, older: 0, total: 0, credit: 0 }; g[b] += amt; g.total += amt; if (amt < 0) g.credit -= amt; aged.set(i.partner_id, g);
     }
     const agedRows = [...aged.values()].sort((a, b) => b.total - a.total);
     const sum = (k) => all.reduce((a, i) => a + sign(i) * i[k], 0);
-    const paid = db.get("SELECT COALESCE(SUM(p.amount), 0) AS s FROM payments p JOIN invoices i ON i.id = p.invoice_id WHERE i.kind = 'in_invoice'").s;
-    return { byMonth: [...byMonth.values()].sort((a, b) => a.key.localeCompare(b.key)), totals: { untaxed: sum('amount_untaxed'), tax: sum('amount_tax'), total: sum('amount_total'), paid },
-      aged: agedRows, agedTotals: ['current', 'd30', 'd60', 'd90', 'older', 'total'].reduce((o, k) => (o[k] = agedRows.reduce((a, r) => a + r[k], 0), o), {}) };
+    // #38: “Đã trả” theo NGÀY thanh toán trong khoảng lọc (trước đây cộng mọi lần trả từ trước tới nay → lệch chứng từ khi lọc theo tháng)
+    const payIn = (kind) => db.all("SELECT p.amount, p.date FROM payments p JOIN invoices i ON i.id = p.invoice_id WHERE i.kind = ? AND i.state = 'posted'", [kind]).filter(p => inRange(p.date || '', from, to)).reduce((a, p) => a + p.amount, 0);
+    return { byMonth: [...byMonth.values()].sort((a, b) => a.key.localeCompare(b.key)), totals: { untaxed: sum('amount_untaxed'), tax: sum('amount_tax'), total: sum('amount_total'), paid: payIn('in_invoice'), refunded: payIn('in_refund') },
+      aged: agedRows, agedTotals: ['current', 'd30', 'd60', 'd90', 'older', 'total', 'credit'].reduce((o, k) => (o[k] = agedRows.reduce((a, r) => a + r[k], 0), o), {}) };
   }
   function purchaseOverview() {
     const orders = listPurchases({ kind: 'orders' });

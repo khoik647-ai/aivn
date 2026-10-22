@@ -82,6 +82,46 @@ test('Mua hàng (nghiệm thu): đơn 10 × 1.000.000, nhận 6 → tồn +6, ph
   assert.strictEqual(biz.getInvoice(b2.id).residual, 0);
 });
 
+test('#38 báo cáo khớp chứng từ: phân tích mua hàng = tổng các đơn; công nợ phải trả = Σ còn phải trả của hoá đơn NCC − báo có NCC chưa đối trừ; “Đã trả” lọc theo ngày trả', async () => {
+  day = '2026-09-10'; const { biz, ven, ban, ship, crm } = await setup();
+  const ven2 = crm.saveContact({ name: 'Cơ sở Sắt Thép Hoà Phát', kind: 'company' });
+  // tháng 9: đơn 2 bàn, nhận đủ, hoá đơn trả đủ
+  let a = biz.confirmPurchase(biz.savePurchase({ partner_id: ven.id, lines: [{ product_id: ban.id, qty: 2, price: 1000000 }] }).id);
+  biz.validatePicking(a.pickings[0].id); const ba = biz.postInvoice(biz.createBill(a.id).id); biz.registerPayment(ba.id, { amount: ba.amount_total });
+  // tháng 10: đơn 10 @1.000.000 + vận chuyển 8%, nhận 6, hoá đơn, trả 2.000.000; NCC thứ hai trả chậm
+  day = '2026-10-21';
+  let b = biz.confirmPurchase(biz.savePurchase({ partner_id: ven.id, payment_days: 30, lines: [{ product_id: ban.id, qty: 10, price: 1000000 }, { product_id: ship.id, qty: 1, price: 500000 }] }).id);
+  const pk = biz.getPicking(b.pickings[0].id); biz.setDone(pk.id, { [pk.moves[0].id]: 6 }); biz.validatePicking(pk.id);
+  const bb = biz.postInvoice(biz.createBill(b.id).id); assert.strictEqual(bb.amount_total, 6 * 1100000 + 540000);
+  biz.registerPayment(bb.id, { amount: 2000000 });
+  let c = biz.confirmPurchase(biz.savePurchase({ partner_id: ven2.id, lines: [{ product_id: ban.id, qty: 1, price: 900000 }] }).id);
+  biz.validatePicking(c.pickings[0].id); const bc = biz.postInvoice(biz.createBill(c.id).id);
+  // phân tích mua hàng = cộng từ chứng từ
+  const docs = [a, b, c].map(x => biz.getPurchase(x.id));
+  const pr = biz.purchaseReport({});
+  assert.strictEqual(pr.totals.orders, 3); assert.strictEqual(pr.totals.untaxed, docs.reduce((s, d) => s + d.subtotal, 0)); assert.strictEqual(pr.totals.total, docs.reduce((s, d) => s + d.total, 0));
+  assert.strictEqual(pr.totals.received, docs.reduce((s, d) => s + d.lines.reduce((x, l) => x + l.qty_received, 0), 0)); assert.strictEqual(pr.totals.billed, docs.reduce((s, d) => s + d.lines.reduce((x, l) => x + l.qty_billed, 0), 0));
+  for (const gb of ['vendor', 'product', 'category']) { const r = biz.purchaseReport({ groupBy: gb }); assert.strictEqual(r.rows.reduce((s, x) => s + x.untaxed, 0), pr.totals.untaxed, gb); }
+  assert.strictEqual(biz.purchaseReport({ from: '2026-10-01', to: '2026-10-31' }).totals.untaxed, docs[1].subtotal + docs[2].subtotal);
+  // công nợ phải trả = Σ residual của hoá đơn NCC, theo từng NCC; Tổng quan khớp
+  const bills = biz.listInvoices({ scope: 'in' }).filter(i => i.state === 'posted');
+  let ap = biz.payablesReport({}); const open = bills.filter(i => i.kind === 'in_invoice').reduce((s, i) => s + i.residual, 0);
+  assert.strictEqual(open, bb.amount_total - 2000000 + bc.amount_total); assert.strictEqual(ap.agedTotals.total, open); assert.strictEqual(biz.overview().payable, open);
+  assert.strictEqual(ap.aged.find(r => r.partner_id === ven.id).total, bb.amount_total - 2000000); assert.strictEqual(ap.aged.find(r => r.partner_id === ven2.id).total, bc.amount_total);
+  assert.strictEqual(ap.totals.paid, ba.amount_total + 2000000);
+  // lọc tháng 10: “Đã trả” chỉ tính tiền trả trong tháng 10 (trước đây cộng cả tiền trả tháng 9)
+  const oct = biz.payablesReport({ from: '2026-10-01', to: '2026-10-31' });
+  assert.strictEqual(oct.totals.paid, 2000000); assert.strictEqual(oct.totals.total, bb.amount_total + bc.amount_total);
+  // báo có cho hoá đơn tháng 9 ĐÃ TRẢ ĐỦ → NCC nợ lại mình: công nợ phải trả của NCC đó giảm (như Odoo Aged Payable), Tổng quan khớp
+  const rf = biz.postInvoice(biz.creditNote(ba.id, {}).id); assert.strictEqual(rf.residual, ba.amount_total);
+  ap = biz.payablesReport({});
+  assert.strictEqual(ap.aged.find(r => r.partner_id === ven.id).total, bb.amount_total - 2000000 - ba.amount_total); assert.strictEqual(ap.agedTotals.credit, ba.amount_total);
+  assert.strictEqual(ap.agedTotals.total, open - ba.amount_total); assert.strictEqual(biz.overview().payable, ap.agedTotals.total); assert.strictEqual(biz.overview().vendorCredit, ba.amount_total);
+  // NCC hoàn tiền → hết phần trừ
+  biz.registerPayment(rf.id, { amount: ba.amount_total }); ap = biz.payablesReport({});
+  assert.strictEqual(ap.agedTotals.total, open); assert.strictEqual(ap.agedTotals.credit, 0); assert.strictEqual(ap.totals.refunded, ba.amount_total);
+});
+
 test('Mua hàng: dịch vụ lập hoá đơn theo số đã đặt; huỷ đơn chưa nhận huỷ luôn phiếu nhập; đặt lại nháp; xoá RFQ', async () => {
   day = '2026-10-21'; const { biz, ven, ban, ship } = await setup();
   let po = biz.confirmPurchase(biz.savePurchase({ partner_id: ven.id, lines: [{ product_id: ban.id, qty: 2, price: 1000000 }, { product_id: ship.id, qty: 1, price: 500000 }] }).id);

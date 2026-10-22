@@ -1977,6 +1977,7 @@
     "quá giờ": "past due time",
     "quá hạn": "overdue",
     "quá hạn {0}": "{0} overdue",
+    "đã trừ báo có nhà cung cấp {0}": "{0} vendor credit deducted",
     "rút gọn {0} lần quan sát màn hình cũ": "shortened {0} old screen observation{s}",
     "rút gọn {0} tin cũ còn ~{1} ký tự": "shortened {0} old message{s} to ~{1} characters",
     "sau 15 phút không dùng": "after 15 minutes idle",

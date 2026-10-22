@@ -502,8 +502,9 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
     const orders = listOrders({ kind: 'orders' });
     const inv = db.all("SELECT * FROM invoices WHERE state = 'posted' AND kind IN ('out_invoice','out_refund')").map(pubInvoice);
     const bills = db.all("SELECT * FROM invoices WHERE state = 'posted' AND kind = 'in_invoice'").map(pubInvoice);
+    const vendorCredit = db.all("SELECT * FROM invoices WHERE state = 'posted' AND kind = 'in_refund'").map(pubInvoice).reduce((a, i) => a + i.residual, 0);
     return {
-      payable: bills.reduce((a, i) => a + i.residual, 0),
+      payable: bills.reduce((a, i) => a + i.residual, 0) - vendorCredit, vendorCredit, // #38: khớp báo cáo công nợ phải trả (giấy báo có NCC chưa đối trừ được trừ ra)
       payableOverdue: { n: bills.filter(i => i.overdue).length, sum: bills.filter(i => i.overdue).reduce((a, i) => a + i.residual, 0) },
       quotesDraft: db.get("SELECT count(*) AS n FROM quotes WHERE status IN ('draft','sent')").n,
       toInvoice: orders.filter(o => o.invoice_status === 'to_invoice').length,
