@@ -93,38 +93,90 @@ function summarize(file) {
 
 // Ước lượng bộ nhớ khi nạp: phần trọng số trên GPU tỉ lệ số lớp; bộ đệm K/V của các lớp trên GPU nằm trên GPU (mặc định llama.cpp)
 const MB = 1024 * 1024;
+const GB = 1024 * MB;
 // Số lớp tối đa đưa lên GPU mà vẫn giữ trọn ngữ cảnh: mỗi lớp trên GPU mang theo trọng số + bộ đệm K/V của lớp đó (mặc định llama.cpp).
 // Dùng chung cho engine.loadPlans (khi nạp thật) và hộp nạp (ước lượng hiển thị) để hai bên luôn khớp nhau.
 const computeBuf = (ctx) => 300 * MB + ctx * 2048;
-function gpuFit({ fileSize, layers, kvPerToken }, { ctx = 8192, kvScale = 1, vram = null } = {}) {
+// B190: tệp GGUF lớn hơn phần trọng số thật sự nằm trên GPU (siêu dữ liệu, căn chỉnh). 0,86 khớp phép đo llama.cpp
+// trên RTX 4070 SUPER 12 GB — Qwen3-14B Q4 dự kiến ~10,6 GB và nạp đủ 41/41 @ 16384; gpt-oss-20b MXFP4 đủ 25/25.
+const WEIGHT_PACK = 0.86;
+// Lề trống: khoảng 5 % VRAM, kẹp 300–512 MiB. Không còn giữ 8 % + ~1 GiB (công thức cũ để 14B ở 37/41).
+const headroomBytes = (total) => Math.min(512 * MB, Math.max(300 * MB, (total || 0) * 0.05));
+const FIT_FLOOR = 256 * MB; // chỉ offload trọn khi nhu cầu còn dưới VRAM trống ít nhất chừng này
+function freeBytes(vram) {
+  if (!vram || !(vram.total > 0)) return 0;
+  return Math.max(0, Math.min(vram.free || vram.total, vram.total));
+}
+// n = số lớp vừa ngân sách; confident = trọng số + KV + bộ đệm tính toán còn dưới VRAM trống (trừ FIT_FLOOR).
+function fitCount({ fileSize, layers, kvPerToken }, { ctx = 8192, kvScale = 1, vram = null } = {}) {
   const L = (layers || 32) + 1;
-  if (!vram || !(vram.total > 0)) return null;
-  const avail = Math.min(vram.free || vram.total, vram.total) * 0.92 - computeBuf(ctx);
-  const perLayer = fileSize / L;
-  const kvPerLayer = kvPerToken && layers ? kvPerToken * ctx * kvScale / layers : 400 * MB * kvScale / L;
-  return Math.max(0, Math.min(L, Math.floor(avail / (perLayer + kvPerLayer))));
+  const free = freeBytes(vram);
+  const scratch = computeBuf(ctx);
+  const weights = (fileSize || 0) * WEIGHT_PACK;
+  const kv = kvPerToken && layers ? kvPerToken * ctx * kvScale : 400 * MB * kvScale;
+  const per = weights / L + kv / (layers || L);
+  const avail = free - headroomBytes(vram.total) - scratch;
+  let n = per > 0 ? Math.floor(Math.max(0, avail) / per) : 0;
+  n = Math.max(0, Math.min(L, n));
+  const fullCost = weights + kv + scratch;
+  const confident = fullCost > 0 && fullCost <= free - FIT_FLOOR;
+  if (confident) n = L;
+  const used = (n / L) * weights + kv * (layers ? Math.min(1, n / layers) : n / L) + (n ? scratch : 0);
+  return { n, L, confident, used, free, kvBytes: kv };
+}
+function gpuFit(model, opts = {}) {
+  if (!opts.vram || !(opts.vram.total > 0)) return null;
+  return fitCount(model, opts).n;
+}
+// B190: thứ tự ưu tiên — trọn lớp + đúng ngữ cảnh (KV đang dùng) → trọn lớp với KV q8_0 nếu được phép → một phần.
+// q8_0 tự bật chỉ khi GPU rời dưới 6 GB (B163), hoặc khi người gọi đặt allowQ8. KV f16 người dùng chọn thì không đổi.
+function chooseOffload(model, { ctx = 8192, kvType, kvScale, vram = null, allowQ8 } = {}) {
+  const L = (model.layers || 32) + 1;
+  const scale = kvScale != null ? kvScale : (kvType === 'q8_0' ? 0.55 : 1);
+  if (!vram || !(vram.total > 0)) return { gpuLayers: L, totalLayers: L, kv: scale < 0.9 ? 'q8_0' : 'f16', confident: false, used: 0, free: 0 };
+  const allow = allowQ8 != null ? !!allowQ8 : (kvType !== 'f16' && scale >= 0.9 && vram.total < 6 * GB);
+  const cur = fitCount(model, { ctx, kvScale: scale, vram });
+  const pack = (r, kv) => ({ gpuLayers: r.n, totalLayers: r.L, kv, confident: r.confident, used: r.used, free: r.free });
+  if (cur.confident || cur.n >= cur.L) return pack(cur, scale < 0.9 ? 'q8_0' : 'f16');
+  if (allow) {
+    const q8 = fitCount(model, { ctx, kvScale: 0.55, vram });
+    if (q8.confident) return pack(q8, 'q8_0');
+  }
+  return pack(cur, scale < 0.9 ? 'q8_0' : 'f16');
 }
 // B170: mô hình nhìn ảnh chạy bằng llama-server; số lớp GPU do --fit của llama-server chọn: VRAM TRỐNG của đúng thiết bị đó
 // trừ lề --fit-target (AIVN đặt rõ = serverMarginMiB) trừ bộ đệm tính toán; mmproj nạp SAU nên nằm trong lề.
-// Hộp nạp dùng đúng công thức này (trước đây dùng 92 % VRAM, không trừ lề 1 GiB của llama.cpp → báo 23/37 trong khi thật là 16/37).
-const serverMarginMiB = (mmprojBytes = 0) => Math.max(1024, Math.round((mmprojBytes || 0) / MB) + 512);
+// GPU dưới 8 GB giữ lề cũ (tối thiểu 1024 MiB) — laptop 4 GB đo thật 16/37 @16K. GPU lớn: lề 300–512 MiB + mmproj, không còn sàn 1 GiB.
+const serverMarginMiB = (mmprojBytes = 0, vram = null) => {
+  const mm = Math.round((mmprojBytes || 0) / MB);
+  const big = vram && vram.total >= 8 * GB;
+  if (!big) return Math.max(1024, mm + 512);
+  return Math.round(headroomBytes(vram.total) / MB) + mm;
+};
 function serverFit({ fileSize, layers, kvPerToken }, { ctx = 8192, kvScale = 1, vram = null, mmprojBytes = 0 } = {}) {
   const L = (layers || 32) + 1;
   if (!vram || !(vram.total > 0)) return null;
-  const avail = Math.min(vram.free || vram.total, vram.total) - serverMarginMiB(mmprojBytes) * MB - computeBuf(ctx);
+  const avail = freeBytes(vram) - serverMarginMiB(mmprojBytes, vram) * MB - computeBuf(ctx);
   const perLayer = fileSize / L;
   const kvPerLayer = kvPerToken && layers ? kvPerToken * ctx * kvScale / layers : 400 * MB * kvScale / L;
-  return Math.max(0, Math.min(L, Math.floor(avail / (perLayer + kvPerLayer))));
+  return Math.max(0, Math.min(L, Math.floor(Math.max(0, avail) / (perLayer + kvPerLayer))));
 }
-function autoLayers(g, { ctx = 8192, kvType = 'f16', vram = null, server = null } = {}) {
-  const kvScale = kvType === 'q8_0' ? 0.55 : 1;
-  const n = server ? serverFit(g, { ctx, kvScale, vram, mmprojBytes: server.mmprojBytes || 0 }) : gpuFit(g, { ctx, kvScale, vram });
-  return n == null ? (g.layers || 32) + 1 : n;
+function autoLayers(g, o = {}) {
+  if (o.server) {
+    const kvScale = o.kvType === 'q8_0' || o.kvScale < 0.9 ? 0.55 : 1;
+    const n = serverFit(g, { ctx: o.ctx, kvScale, vram: o.vram, mmprojBytes: o.server.mmprojBytes || 0 });
+    return n == null ? (g.layers || 32) + 1 : n;
+  }
+  return chooseOffload(g, o).gpuLayers;
 }
 function estimate(g, o = {}) {
-  const { fileSize, layers, kvPerToken } = g; const { ctx = 8192, kvType = 'f16', gpu = true } = o;
+  const { fileSize, layers, kvPerToken } = g; let { ctx = 8192, kvType = 'f16', gpu = true } = o;
   let { gpuLayers = 0 } = o; const auto = gpuLayers === 'auto' || gpuLayers == null;
-  if (auto) gpuLayers = gpu ? autoLayers(g, o) : 0;
+  if (auto && gpu && !o.server) {
+    const d = chooseOffload(g, o);
+    gpuLayers = d.gpuLayers;
+    if (d.kv === 'q8_0' && kvType !== 'f16') kvType = 'q8_0';
+  } else if (auto) gpuLayers = gpu ? autoLayers(g, o) : 0;
   const L = (layers || 32) + 1; // + lớp đầu ra
   const n = gpu ? Math.max(0, Math.min(L, gpuLayers)) : 0;
   const frac = n / L;
@@ -147,4 +199,4 @@ function cachedSummary(file) {
   cache.set(key, v); return v;
 }
 
-module.exports = { serverMarginMiB, serverFit, readMeta, summarize, estimate, autoLayers, gpuFit, computeBuf, cachedSummary, FILE_TYPES };
+module.exports = { serverMarginMiB, serverFit, readMeta, summarize, estimate, autoLayers, gpuFit, chooseOffload, fitCount, headroomBytes, computeBuf, cachedSummary, FILE_TYPES, WEIGHT_PACK };

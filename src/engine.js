@@ -73,34 +73,56 @@ const MB = 1024 * 1024;
 const mmprojBytes = (p) => { try { return p ? require('fs').statSync(p).size : 0; } catch { return 0; } };
 // Kế hoạch nạp: thử lần lượt từ nhanh nhất tới an toàn nhất
 // 0.15.2: KHÔNG BAO GIỜ thu nhỏ ngữ cảnh dưới minCtx (mặc định 8192 — lời nhắc hệ thống + công cụ của AIVN AGENT cần chỗ).
-// Thiếu VRAM thì đưa ít lớp lên GPU hơn; ngữ cảnh chỉ giảm (tới minCtx) ở các phương án cuối cùng.
-function loadPlans({ gpu, vram, fileSize, geo, ctx, userLayers, kvScale = 1, minCtx = 8192 }) {
-  const plans = []; const add = (p) => { p = { ...p, minCtx: Math.min(minCtx, p.ctx) }; if (!plans.some(x => x.gpuLayers === p.gpuLayers && x.ctx === p.ctx)) plans.push(p); };
+// B190: thiếu VRAM thì bớt lớp GPU trước; ngữ cảnh chỉ giảm sau khi đã bớt lớp. Offload trọn khi trọng số + KV + bộ đệm vừa VRAM trống.
+function loadPlans({ gpu, vram, fileSize, geo, ctx, userLayers, kvScale = 1, minCtx = 8192, capLayers, safe = false } = {}) {
+  const plans = [];
+  const add = (p) => {
+    const row = { mode: p.mode, gpuLayers: p.gpuLayers, ctx: p.ctx, minCtx: Math.min(minCtx, p.ctx) };
+    if (p.kv) row.kv = p.kv;
+    if (p.confident && !safe) row.confident = true;
+    if (!plans.some(x => x.gpuLayers === row.gpuLayers && x.ctx === row.ctx && x.kv === row.kv)) plans.push(row);
+  };
   if (geo && geo.trainCtx) ctx = Math.min(ctx, geo.trainCtx);
   minCtx = Math.min(minCtx, ctx);
   const small = Math.max(minCtx, Math.min(ctx, 2048));
   if (gpu) {
     const L = geo.layers ? geo.layers + 1 : null; // + lớp đầu ra
     if (Number.isInteger(userLayers) && userLayers >= 0) add({ mode: userLayers ? 'gpu-manual' : 'cpu', gpuLayers: userLayers, ctx });
-    let fitN = null;
+    let fitN = null, fitKv = null, fitSure = false;
     if (L && vram && vram.total > 0 && gpu !== 'metal') {
-      // 0.16: cùng công thức với hộp nạp (src/gguf.js) — mỗi lớp trên GPU mang theo cả bộ đệm K/V của nó
-      fitN = require('./gguf').gpuFit({ fileSize, layers: geo.layers, kvPerToken: geo.kvPerToken }, { ctx, kvScale, vram });
+      // 0.16 / B190: cùng công thức với hộp nạp (src/gguf.js)
+      const choice = require('./gguf').chooseOffload({ fileSize, layers: geo.layers, kvPerToken: geo.kvPerToken }, { ctx, kvScale, vram });
+      fitN = choice.gpuLayers; fitKv = choice.kv === 'q8_0' ? 'q8_0' : null; fitSure = !!choice.confident;
+      if (Number.isInteger(capLayers) && capLayers >= 0 && capLayers < fitN) { fitN = capLayers; fitSure = false; }
     }
     if (fitN === null) add({ mode: 'gpu', gpuLayers: 'auto', ctx });
-    else if (fitN >= L) add({ mode: 'gpu', gpuLayers: L, ctx });
-    else if (fitN > 0) add({ mode: 'gpu-partial', gpuLayers: fitN, ctx });
+    else if (fitN >= L) add({ mode: 'gpu', gpuLayers: L, ctx, kv: fitKv, confident: fitSure });
+    else if (fitN > 0) add({ mode: 'gpu-partial', gpuLayers: fitN, ctx, kv: fitKv });
     const base = fitN ?? (L || 32);
     if (base > 4) add({ mode: 'gpu-partial', gpuLayers: Math.floor(base * 3 / 4), ctx });
     if (base > 4) add({ mode: 'gpu-partial', gpuLayers: Math.floor(base / 2), ctx });
-    if (base > 4) add({ mode: 'gpu-partial', gpuLayers: Math.floor(base / 2), ctx: small });
-    if (base > 8) add({ mode: 'gpu-partial', gpuLayers: Math.floor(base / 4), ctx }); // ít lớp → KV trên GPU cũng ít; vẫn nhanh hơn chỉ CPU
+    if (base > 8) add({ mode: 'gpu-partial', gpuLayers: Math.floor(base / 4), ctx });
+    // ngữ cảnh giảm SAU khi đã bớt lớp (và chỉ khi còn chỗ dưới minCtx)
+    if (base > 4 && small < ctx) add({ mode: 'gpu-partial', gpuLayers: Math.max(1, Math.floor(base / 2)), ctx: small });
     add({ mode: 'cpu', gpuLayers: 0, ctx });
-    add({ mode: 'cpu', gpuLayers: 0, ctx: small });
-  } else { add({ mode: 'cpu-only', gpuLayers: 0, ctx }); add({ mode: 'cpu-only', gpuLayers: 0, ctx: small }); }
+    if (small < ctx) add({ mode: 'cpu', gpuLayers: 0, ctx: small });
+  } else { add({ mode: 'cpu-only', gpuLayers: 0, ctx }); if (small < ctx) add({ mode: 'cpu-only', gpuLayers: 0, ctx: small }); else add({ mode: 'cpu-only', gpuLayers: 0, ctx: small }); }
   // phương án cuối: CPU, ngữ cảnh 4096 (vẫn trò chuyện được; AIVN AGENT sẽ tự xin nạp lại với ngữ cảnh lớn hơn khi cần)
   if (ctx > 4096) { const last = { mode: gpu ? 'cpu' : 'cpu-only', gpuLayers: 0, ctx: 4096 }; if (!plans.some(x => x.gpuLayers === 0 && x.ctx === 4096)) plans.push({ ...last, minCtx: 4096 }); }
   return plans;
+}
+// B190: lần nạp thất bại (hết VRAM) chỉ bước xuống tối đa 3 lần trên GPU rồi một lần CPU — không lặp vô hạn.
+function oomSchedule(plans) {
+  const gpu = [], cpu = [];
+  for (const p of plans) (p.gpuLayers === 'auto' || Number(p.gpuLayers) > 0 ? gpu : cpu).push(p);
+  const picked = [];
+  const push = (p) => { if (p && !picked.includes(p)) picked.push(p); };
+  push(gpu[0]);
+  push(gpu.find(p => p !== gpu[0] && p.ctx === (gpu[0] && gpu[0].ctx) && (p.gpuLayers !== gpu[0].gpuLayers || p.kv !== gpu[0].kv)));
+  push(gpu.find(p => gpu[0] && p.ctx < gpu[0].ctx));
+  for (const p of gpu) if (picked.length < 3) push(p);
+  push(cpu[0]);
+  return picked;
 }
 
 async function loadModel(id, modelPath, opts = {}) {
@@ -113,17 +135,39 @@ async function loadModel(id, modelPath, opts = {}) {
     loading = (async () => {
       await unloadModel();
       const l = await getLlama().catch(() => null);
+      const vramV = l && l.gpu ? await vramInfo(l).catch(() => null) : null;
+      const geoV = await modelGeometry(modelPath).catch(() => ({ layers: null }));
+      const gg = require('./gguf');
+      const fitTargetMiB = gg.serverMarginMiB(mmprojBytes(opts.mmproj), vramV);
+      // B190: GPU lớn và mô hình vừa VRAM → -ngl trọn lớp, không --fit-target ~1 GiB. GPU nhỏ giữ --fit (lề B170).
+      let sureLayers = null, partialLayers = null;
+      if (!Number.isInteger(opts.gpuLayers) && geoV && geoV.layers && vramV && vramV.total > 0) {
+        const choice = gg.chooseOffload({ fileSize: opts.fileSize || 0, layers: geoV.layers, kvPerToken: geoV.kvPerToken }, { ctx: opts.contextSize || 4096, vram: vramV, allowQ8: false });
+        if (choice.confident && vramV.total >= 8 * 1024 * 1024 * 1024 && !opts.safe) sureLayers = choice.totalLayers;
+        else if (choice.gpuLayers > 0 && choice.gpuLayers < choice.totalLayers) partialLayers = Math.max(1, Math.floor(choice.gpuLayers * 3 / 4));
+      }
       const vpf = opts.perf || {}; const vx = { ...(vpf.threads ? { threads: vpf.threads } : {}), ...(vpf.batchSize ? { batchSize: vpf.batchSize } : {}), extraArgs: opts.serverArgs, serverExe: opts.serverExe || null,
         // B168/B170: chọn GPU rời trên máy nhiều GPU, lề VRAM rõ ràng cho --fit (cùng công thức với ước lượng ở hộp nạp), số lớp/KV/flash attention người dùng đặt
         multiGpu: await (l && l.gpu ? Promise.resolve().then(() => l.getGpuDeviceNames()) : Promise.resolve([])).then(n => (n || []).length > 1).catch(() => false), devicePref: opts.devicePref ?? null,
-        fitTargetMiB: require('./gguf').serverMarginMiB(mmprojBytes(opts.mmproj)), ...(Number.isInteger(opts.gpuLayers) ? { gpuLayers: opts.gpuLayers } : {}),
+        fitTargetMiB, ...(Number.isInteger(opts.gpuLayers) ? { gpuLayers: opts.gpuLayers } : sureLayers != null ? { gpuLayers: sureLayers } : {}),
         ...(opts.kvCache ? { kvCache: opts.kvCache } : {}), ...(opts.flashAttention != null ? { flashAttention: opts.flashAttention } : {}) }; // B26: số luồng/lô của từng mô hình áp dụng cả cho llama-server
-      try { await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: !!(l && l.gpu), ...vx }); }
-      catch (e) {
+      const visionTry = async (extra) => { await getVision().stop().catch(() => {}); await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: !!(l && l.gpu), ...vx, ...extra }); };
+      try {
+        await visionTry({});
+      } catch (e) {
         if (!(l && l.gpu) || ['VCREDIST', 'NO_SERVER'].includes(e.code)) throw e;
-        console.warn('[engine] máy chủ nhìn ảnh lỗi với GPU, thử lại bằng CPU: ' + e.message);
-        await getVision().stop().catch(() => {});
-        await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: false, ...vx });
+        // một bước xuống (bớt lớp, vẫn đúng ngữ cảnh) rồi mới CPU — tối đa 2 lần thử lại
+        const stepped = sureLayers != null ? Math.max(1, Math.floor(sureLayers * 3 / 4)) : (Number.isInteger(opts.gpuLayers) && opts.gpuLayers > 0 ? Math.floor(opts.gpuLayers / 2) : partialLayers);
+        let recovered = false;
+        if (stepped != null) {
+          try { console.warn('[engine] máy chủ nhìn ảnh hết VRAM, thử lại với ít lớp hơn: ' + stepped); await visionTry({ gpuLayers: stepped, fitTargetMiB: 0 }); recovered = true; }
+          catch (e2) { if (['VCREDIST', 'NO_SERVER'].includes(e2.code)) throw e2; }
+        }
+        if (!recovered) {
+          console.warn('[engine] máy chủ nhìn ảnh lỗi với GPU, thử lại bằng CPU: ' + e.message);
+          await getVision().stop().catch(() => {});
+          await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: false, ...vx, gpuLayers: 0, fitTargetMiB: 0 });
+        }
       }
       visionOn = true;
     })();
@@ -142,19 +186,21 @@ async function loadModel(id, modelPath, opts = {}) {
     let fileSize = opts.fileSize || 0; if (!fileSize) { try { fileSize = require('fs').statSync(modelPath).size; } catch {} }
     const pf = opts.perf || {};
     const kvQuant = !!pf.kvQuant;
-    const plans = loadPlans({ gpu: l.gpu, vram, fileSize, geo, ctx: ctxMax, userLayers: opts.gpuLayers, kvScale: kvQuant ? 0.55 : 1, minCtx: opts.minContextSize || 8192 });
-    const ctxOpts = (plan, kv) => ({ contextSize: { min: plan.minCtx, max: plan.ctx },
+    const plans = oomSchedule(loadPlans({ gpu: l.gpu, vram, fileSize, geo, ctx: ctxMax, userLayers: opts.gpuLayers, kvScale: kvQuant ? 0.55 : 1, minCtx: opts.minContextSize || 8192, capLayers: opts.capLayers, safe: !!opts.safe }));
+    // B190: ghim đúng ngữ cảnh của phương án (không để node-llama-cpp tự cắt từ max xuống min). Hết VRAM thì ném lỗi và bước xuống.
+    const ctxOpts = (plan, kv) => ({ contextSize: plan.ctx, ...(plan.confident ? { ignoreMemorySafetyChecks: true } : {}),
       ...(pf.threads ? { threads: pf.threads } : {}), ...(pf.batchSize ? { batchSize: Math.min(pf.batchSize, plan.ctx) } : {}), ...(pf.flashAttention != null ? { flashAttention: kv ? true : pf.flashAttention } : {}),
       ...(kv ? { experimentalKvCacheKeyType: 'Q8_0', experimentalKvCacheValueType: 'Q8_0' } : {}) });
     for (const plan of plans) {
       let model = null;
       try {
         let lastPct = -1; model = await l.loadModel({ modelPath, gpuLayers: plan.gpuLayers, onLoadProgress: (x) => { const pct = Math.floor(x * 100); if (pct >= lastPct + 2 || pct === 100) { lastPct = pct; try { progressCb && progressCb({ id, pct, mode: plan.mode }); } catch {} } }, ...(opts.useMmap === false ? { useMmap: false } : {}), ...(opts.useMlock ? { useMlock: true } : {}) });
-        let context, kvUsed = kvQuant;
+        let context, kvUsed = plan.kv === 'q8_0' || kvQuant;
         try { context = await model.createContext(ctxOpts(plan, kvUsed)); }
         catch (e) { if (!kvUsed) throw e; kvUsed = false; attempts.push({ mode: `${plan.mode} KV q8_0`, message: String(e && e.message || e) }); context = await model.createContext(ctxOpts(plan, false)); } // KV nén lỗi (mô hình/GPU không hỗ trợ) → f16
         let tokenPredictor; if (pf.lookup) { try { const { InputLookupTokenPredictor } = await getLib(); tokenPredictor = new InputLookupTokenPredictor(); } catch {} }
         current = { id, path: modelPath, model, context, tokenPredictor, loadedAt: Date.now(), mode: plan.mode, meta: { name: geo.name, arch: geo.arch, sizeLabel: geo.sizeLabel, toolTemplate: geo.toolTemplate, trainCtx: geo.trainCtx || null }, gpuLayers: model.gpuLayers, totalLayers: geo.layers ? geo.layers + 1 : null, attempts: attempts.map(a => a.mode + ': ' + a.message),
+          offload: { gpu: Number.isInteger(plan.gpuLayers) ? plan.gpuLayers : model.gpuLayers, ctx: plan.ctx, kv: kvUsed ? 'q8_0' : 'f16', oom: attempts.length > 0, confident: !!plan.confident },
           perf: { threads: pf.threads || l.cpuMathCores || null, batchSize: pf.batchSize || 512, kv: kvUsed ? 'q8_0' : 'f16', flashAttention: context.flashAttention ?? null, lookup: !!tokenPredictor, profile: pf.effective || null } };
         return;
       } catch (e) {
@@ -184,7 +230,7 @@ async function unloadModel() {
 function status() {
   // B123: bộ máy THẬT đang chạy mô hình nhìn ảnh (llama-server), không phải GPU của node-llama-cpp
   if (visionOn) { const v = getVision().status(); if (v) return { loaded: true, id: v.id, path: v.path, contextSize: v.contextSize, vision: true, gpu: llama && llama.gpu, backend: serverBackend(v), gpuLayers: v.gpuLayers ?? null, totalLayers: v.totalLayers ?? null, device: v.device || null, toolMode: v.textTools ? 'text' : 'native', runtime: v.runtime || 'bundled', runtimeFallback: v.runtimeFallback || null, meta: v.template ? { toolTemplate: !!v.template.nativeTools } : null }; }
-  return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, meta: current.meta || null, perf: current.perf || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: !!loading };
+  return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, meta: current.meta || null, perf: current.perf || null, offload: current.offload || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: !!loading };
 }
 
 // Một chuỗi ngữ cảnh dùng lại giữa các lượt (giữ bộ nhớ đệm KV: lượt sau chỉ tính phần mới của lời nhắc)
@@ -446,7 +492,7 @@ function embed(texts, kind = 'passage') {
 function countTokens(text) { if (!current) return Math.ceil(text.length / 3); try { return current.model.tokenize(text).length; } catch { return Math.ceil(text.length / 3); } }
 
 async function countTokensAsync(texts) { if (visionOn) { const r = await getVision().countTokens(texts); if (r) return r; } return texts.map(countTokens); }
-module.exports = { setLoadProgress, loadPlans, modelGeometry, vramInfo, countTokens, countTokensAsync, hardwareInfo, loadModel, unloadModel, status, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount };
+module.exports = { setLoadProgress, loadPlans, oomSchedule, modelGeometry, vramInfo, countTokens, countTokensAsync, hardwareInfo, loadModel, unloadModel, status, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount };
 
 // B123: llama-server CUDA → 'cuda'; bản đi kèm → vulkan (Windows) / metal (Mac) / cpu (Linux); 0 lớp lên GPU → 'cpu'
 function serverBackend(v) { if (!v) return null; if (v.gpuLayers === 0) return 'cpu'; if (v.runtime === 'cuda') return 'cuda'; return process.platform === 'win32' ? 'vulkan' : process.platform === 'darwin' ? 'metal' : 'cpu'; }
