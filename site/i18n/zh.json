@@ -167,17 +167,20 @@
   "footer.9": "隐私",
   "footer.10": "支持",
   "footer.11": "常见问题",
-  "footer.12": "<span>© 2026 AIVN · NGUYỄN NGỌC KHÔI SINH VIÊN VLU</span><span>开发者：NGUYỄN NGỌC KHÔI SINH VIÊN VLU</span>",
+  "footer.12": "<span>© 2026 AIVN · NGUYỄN NGỌC KHÔI SINH VIÊN VLU</span><span>开发者：NGUYỄN NGỌC KHÔI SINH VIÊN VLU（文郎大学学生）</span>",
   "foot.phone": "电话：",
   "foot.phonenum": "+84 896 403 538",
-  "beta.1": "🧪 <a class=\"beta-link\" href=\"https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.2.7/AIVN-Setup-0.16.0-beta.2.7.exe\" rel=\"noopener\" style=\"font-weight:600;color:var(--accent)\">下载测试版 0.16.0-beta.2.7（试用版，Windows）</a> · ~245 MB<br/><small>⚠ 测试版本，可能仍有错误，且不会自动更新。日常使用请选择上方的稳定版。SHA-256：<code class=\"beta-sha\" style=\"word-break:break-all;font-size:.82em\">421af85e5766e99b6cdf7e163981646087ff794c88b9d44f7dff8b572bac3b98</code></small>"
+  "hero.arm": "<b>Apple Silicon</b><small>M1、M2、M3、M4… 芯片 · 约 __MB_ARM__ MB</small>",
+  "cta.arm": "<b>Apple Silicon</b><small>M1、M2、M3、M4… 芯片 · 约 __MB_ARM__ MB</small>",
+  "footer.sub": "（文郎大学学生）",
+  "beta.1": "<a class=\"beta-link\" href=\"https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.2.7/AIVN-Setup-0.16.0-beta.2.7.exe\" rel=\"noopener\">🧪 下载 <span class=\"nw\">0.16.0-beta.2.7</span> 测试版（Windows） <span class=\"beta-size\">· 约 245 MB</span></a><span class=\"beta-mnote\">📱 此测试版只能安装在 Windows 电脑上，请在电脑上打开本页下载。</span><small>⚠ 测试版可能仍有错误，也不会自动更新。日常使用请选择上方的稳定版。<span class=\"nw\">SHA-256：</span><code class=\"beta-sha\">421af85e5766e99b6cdf7e163981646087ff794c88b9d44f7dff8b572bac3b98</code></small>"
  },
  "attr": {
   "@aria-label.1": "AIVN 首页",
   "@aria-label.2": "打开菜单",
   "@aria-label.3": "移动端菜单",
   "@title.4": "下载 Windows 10/11 版 AIVN 安装程序（64 位，约 __MB_WIN__ MB）",
-  "@title.5": "下载 macOS 13 及以上版本的 AIVN",
+  "@title.5": "下载 macOS 13 及以上版本的 AIVN（Apple 芯片约 __MB_ARM__ MB，Intel 约 __MB_X64__ MB）",
   "@title.6": "即将推出",
   "@aria-label.7": "AIVN 的 AIVN AGENT 模式示意图",
   "@placeholder.8": "搜索模型，例如：gemma",

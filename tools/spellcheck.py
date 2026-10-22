@@ -5,7 +5,7 @@ import json, os, re, subprocess, sys
 from collections import defaultdict
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 VI_CH = re.compile(r'[ăâđêôơưàáạảãầấậẩẫằắặẳẵèéẹẻẽềếệểễìíịỉĩòóọỏõồốộổỗờớợởỡùúụủũừứựửữỳýỵỷỹ]', re.I)
-def strip_tags(s): return re.sub(r'<[^>]+>', ' ', s)
+def strip_tags(s): return re.sub(r'\b[0-9a-f]{64}\b', ' ', re.sub(r'<[^>]+>', ' ', s))  # bỏ thẻ và mã SHA-256
 def js_strings(src):
     out = []
     for m in re.finditer(r"'((?:[^'\\\n]|\\.)*)'|\"((?:[^\"\\\n]|\\.)*)\"|`((?:[^`\\]|\\.)*)`", src):
