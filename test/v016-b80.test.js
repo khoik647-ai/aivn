@@ -9,7 +9,7 @@ async function withServer(fn, extra = {}) {
   const engine = { status: () => ({ loaded: true, id: 'm1' }), countTokens: (t) => String(t).length,
     async generate(messages, o = {}) { calls.push({ messages, o }); const text = 'Xin chào. Hết.### đuôi'; if (o.onToken) for (const ch of text.match(/.{1,3}/gs)) { if (o.signal && o.signal.aborted) { const e = new Error('aborted'); e.name = 'AbortError'; throw e; } o.onToken(ch); } return { text, finishReason: 'stop', usage: { completion_tokens: 5 } }; } };
   const api = createApiServer({ engine, models: () => [{ id: 'm1', mtime: Date.now() }], ensureModel: async () => {}, log: (m) => logs.push(m), getOpts: () => ({}), ...extra });
-  const port = 20000 + Math.floor(Math.random() * 20000);
+  const port = 20000 + Math.floor(Math.random() * 12000); // dưới dải cổng tạm của Linux (32768+) để không trùng cổng nguồn của kết nối khác (EADDRINUSE)
   await api.start(port, '127.0.0.1');
   try { return await fn(`http://127.0.0.1:${port}`, logs, calls); } finally { await api.stop(); }
 }

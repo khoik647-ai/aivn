@@ -19,7 +19,8 @@ test('B144/B145/B146/B148/B143: lời khối beta vi/en/zh, SHA-256 không ngắ
   const f = live(); fixes(f, ['--sizes', '240075606,259835253,272736118']); beta(f); const h = fs.readFileSync(f, 'utf8'); const D = dict(h);
   const vi = h.match(/data-i18n="beta\.1"[^>]*>([\s\S]*?)<\/div><script>/)[1]; const T = { vi, en: D.en['beta.1'], zh: D.zh['beta.1'] };
   assert.match(T.vi, /Tải bản thử nghiệm <span class="nw">0\.16\.0-beta\.2\.7<\/span> cho Windows/); assert.match(T.vi, /Nếu dùng hằng ngày/);
-  assert.match(T.en, /Download the <span class="nw">0\.16\.0-beta\.2\.7<\/span> beta for Windows/);
+  assert.match(T.en, /Download test version <span class="nw">0\.16\.0-beta\.2\.7<\/span> for Windows/);
+  assert.ok(!/<\/span>\s+beta\b/i.test(T.en), 'en: lặp “beta” sau số phiên bản');
   assert.match(T.zh, /下载 <span class="nw">0\.16\.0-beta\.2\.7<\/span> 测试版（Windows）/); assert.ok(!/试用版/.test(T.zh)); assert.match(T.zh, /测试版可能仍有错误，也不会自动更新/);
   for (const [l, t] of Object.entries(T)) {
     assert.ok(!/beta <span class="nw">0\.16\.0-beta|beta 0\.16\.0-beta/i.test(t), l + ': lặp “beta”');

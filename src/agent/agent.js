@@ -16,6 +16,7 @@ const web = require('./web');
 const { DAY_VI } = require('./scheduler');
 const CP = require('./compact');
 const RT = require('./retry');
+const { say, sys: sysTr, langOf } = require('./say'); // B182: câu do mã ghép theo ngôn ngữ trả lời
 const WR = require('./web-read');
 // B156: lỗi của mã JavaScript tưởng có trình duyệt/DOM
 const DOM_ERR_RE = /\b(?:window|document|navigator|location|localStorage|alert|fetch|XMLHttpRequest|chrome)\b(?: is not defined|\.[\w.]+ is not a function)|Cannot read propert(?:y|ies) of undefined \(reading '(?:querySelector|getElementById|body)'/i;
@@ -225,19 +226,21 @@ function tidyAnswer(text, steps) {
   return t;
 }
 // Chốt chặn cuối: mô hình vẫn khẳng định đã gửi khi chưa kiểm chứng → thay bằng câu trung thực
-function guardClaims(text, steps) {
+function guardClaims(text, steps, lang = 'vi') {
   let t = String(text || '');
   if (OCR_CLAIM_RE.test(t) && !ocrDone(steps)) t = t.replace(/\s*\(?[^.\n()]{0,30}(xác nhận|kiểm tra|thấy)[^.\n()]{0,24}(qua|bằng|nhờ)\s+OCR\)?/giu, '');
   if (SEND_CLAIM_RE.test(t) && !/(chưa|không)\s+(được\s+)?(gửi|xác nhận)/iu.test(t) && !sendVerified(steps)) {
     const acted = steps.filter(x => x.name === 'screen_act' && x.status === 'ok').map(x => x.summary).filter(Boolean).slice(-4);
     const why = ([...steps].reverse().find(x => x.verify && x.verify.sent === false) || { verify: {} }).verify.why;
-    return { text: `Mình CHƯA xác nhận được là tin nhắn đã gửi tới đúng người${why ? ` (${why})` : ''}.` + (acted.length ? ` Các thao tác đã làm: ${acted.join('; ')}.` : '') + ' Bạn kiểm tra lại cửa sổ trò chuyện giúp mình, hoặc giao lại việc để mình làm lại từng bước.', warning: 'AIVN chặn một câu báo “đã gửi” chưa có bằng chứng trên màn hình.' };
+    return { blocked: true, text: (why ? say(lang, 'Mình CHƯA xác nhận được là tin nhắn đã gửi tới đúng người ({0}).', sysTr(lang, why)) : say(lang, 'Mình CHƯA xác nhận được là tin nhắn đã gửi tới đúng người.')) + (acted.length ? ' ' + say(lang, 'Các thao tác đã làm: {0}.', acted.map(a => sysTr(lang, a)).join('; ')) : '') + ' ' + say(lang, 'Bạn kiểm tra lại cửa sổ trò chuyện giúp mình, hoặc giao lại việc để mình làm lại từng bước.'), warning: say(lang, 'AIVN chặn một câu báo “đã gửi” chưa có bằng chứng trên màn hình.') };
   }
   return { text: t, warning: null };
 }
 const FAKE_NUDGE = '[AIVN kiểm tra] Bạn CHƯA gọi công cụ nào trong lượt này, nên chưa có việc gì thực sự được làm. Không được viết bước giả (như "[screen,act] …") hay nói đã làm. Hãy gọi công cụ thật ngay bây giờ (khối <tool_call> hoặc lời gọi công cụ), hoặc nói thẳng là bạn không làm được và vì sao.';
 const REPEAT_WARN = 'Mô hình bắt đầu lặp lại cùng một câu nên AIVN đã tự dừng lại. Mẹo: chọn mô hình được đánh dấu dùng được cho AIVN AGENT, và nạp ít mô hình cùng lúc nếu GPU ít bộ nhớ.';
 const BUDGET_WARN = 'Lượt này đã dài quá giới hạn của AIVN AGENT nên được dừng lại. Hãy chia việc thành các bước nhỏ hơn.';
+// B182: “chưa làm được” theo ngôn ngữ trả lời; lý do (mô hình viết hoặc chữ hệ thống đã dịch) chèn nguyên văn
+const cannotText = (lang, why) => { const w = String(why == null ? '' : why).trim().replace(/[.。\s]+$/u, ''); return w ? say(lang, 'Mình chưa làm được việc này: {0}.', w) : say(lang, 'Mình chưa làm được việc này.'); };
 const REPEAT_NUDGE = '(Kiểm tra tự động của AIVN) Bạn đang lặp lại cùng một câu. Dừng lặp: trả lời ngắn gọn, mỗi ý một lần, không hỏi lại.';
 const REPEAT_ACT_NUDGE = '(Kiểm tra tự động của AIVN) Bạn đang lặp lại câu hỏi xin phép. Người dùng ĐÃ yêu cầu bạn làm, và các công cụ máy tính đang bật. Không hỏi lại, không viết hướng dẫn: gọi công cụ đầu tiên ngay bây giờ (vd. open_app để mở ứng dụng).';
 const CANNOT = { name: 'cannot_do', description: 'Dùng khi không có công cụ phù hợp hoặc không thể làm yêu cầu. Nêu lý do ngắn gọn bằng tiếng Việt.', parameters: { type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'] } };
@@ -807,7 +810,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const REFUSED_SEND_MSG = who && msg ? `Mình CHƯA gửi tin “${msg}” cho “${who}”: bước gửi đã bị từ chối nên không có tin nào được gửi.` : who ? `Mình CHƯA gửi tin cho “${who}”: bước gửi đã bị từ chối nên không có tin nào được gửi.` : 'Mình CHƯA gửi tin: bước gửi đã bị từ chối nên không có tin nào được gửi.';
     return REFUSED_SEND_MSG;
   }
-  async function runInner({ messages, convoId = null, signal, onToken = () => {}, onStep = () => {}, onStatus = () => {}, headless = false, confirm, confirmScreen, approve = null, qa = false }) {
+  async function runInner({ messages, convoId = null, signal, onToken = () => {}, onStep = () => {}, onStatus = () => {}, headless = false, confirm, confirmScreen, approve = null, qa = false, lang: langArg = null }) {
     const s = S_();
     if (!headless && s.agentMcp !== false && deps.mcp && typeof deps.mcp.ensureLazy === 'function') {
       try { await deps.mcp.ensureLazy(); } catch {}
@@ -935,7 +938,8 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const steps = [], seen = new Map(); const retry = RT.createRetryTracker();
     const look = { same: 0, sig: '', hint: '', blocked: 0 }; // B40
     let outcome = null, honestUsed = false; // QA runner / báo cáo: done | failed | blocked | asked_user (chỉ “done” khi không có câu trả lời trung thực “chưa xong”)
-    const honestOf = (reason) => { honestUsed = true; let rcp = null; try { rcp = require('./send-verify').recipientOf(query); } catch {} const m = /\b(zalo|messenger|telegram|teams|slack|discord|whatsapp|viber)\b/i.exec(String(query || '')); return RT.honestStatus({ query, tracker: retry, steps, reason, recipient: rcp, app: m ? m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() : '' }); };
+    const LG = langOf(langArg || (() => { try { return replyLang(query, S_().uiLang); } catch { return 'vi'; } })()); // B182: ngôn ngữ của câu cuối/cảnh báo do mã ghép
+    const honestOf = (reason) => { honestUsed = true; let rcp = null; try { rcp = require('./send-verify').recipientOf(query); } catch {} const m = /\b(zalo|messenger|telegram|teams|slack|discord|whatsapp|viber)\b/i.exec(String(query || '')); return RT.honestStatus({ query, tracker: retry, steps, reason, recipient: rcp, app: m ? m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase() : '', lang: LG }); };
     (runStore.getStore() || {}).steps = steps;
     // B67: “Xong” CHỈ khi mục tiêu đã kiểm chứng. Việc trên màn hình (screen_act) cần kiểm chứng thật (đã gửi/đã thấy kết quả);
     // bước cuối là kết quả cũ “(lặp lại)” hoặc lần thao tác cuối chưa có tác dụng → nói thật đã thử gì, chưa xong ở đâu
@@ -1068,7 +1072,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       const last = round === maxRounds - 1 || calls >= maxCalls;
       // B165: trần thời gian của một lượt + báo tiến độ (beta.2.8: kịch bản A chạy 515 s, người dùng phải bấm Dừng)
       const elapsedMs = Date.now() - t0;
-      if (round > 0 && elapsedMs > capMs && !(signal && signal.aborted)) { text = honestOf(`đã chạy quá ${Math.round(capMs / 1000)} giây`); warning = null; finishReason = 'stop'; outcome = 'failed'; timedOut = true; deps.log && deps.log(`[aivn agent] B165: dừng vì quá trần thời gian ${Math.round(capMs / 1000)} s (${steps.length} bước)`); break; }
+      if (round > 0 && elapsedMs > capMs && !(signal && signal.aborted)) { text = honestOf(say(LG, 'đã chạy quá {0} giây', Math.round(capMs / 1000))); warning = null; finishReason = 'stop'; outcome = 'failed'; timedOut = true; deps.log && deps.log(`[aivn agent] B165: dừng vì quá trần thời gian ${Math.round(capMs / 1000)} s (${steps.length} bước)`); break; }
       onStatus({ stage: 'think', round, elapsedMs, capMs });
       let streamed = '';
       const forcing = round === 0 && forceFirst && !last && !answerOnly;
@@ -1095,13 +1099,13 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
             let fr = null; try { const compTools = tools.filter(t => COMP.includes(t.name)); fr = await callModel([...(compTools.length ? compTools : tools), CANNOT], { toolChoice: 'required', temperature: 0, maxTokens: 400, signal }); } catch (e) { deps.log && deps.log('[aivn agent] buộc gọi công cụ sau khi lặp lỗi: ' + e.message); }
             const c = fr && fr.toolCalls && fr.toolCalls[0];
             if (c && c.name !== 'cannot_do' && names.includes(c.name)) { msgs.pop(); msgs.pop(); r = { ...fr, text: '', toolCalls: [c] }; loopHit = null; }
-            else { text = c && c.arguments && c.arguments.reason ? 'Mình chưa làm được việc này: ' + String(c.arguments.reason) : kept; warning = REPEAT_WARN; finishReason = 'stop'; break; }
+            else { text = c && c.arguments && c.arguments.reason ? cannotText(LG, c.arguments.reason) : kept; warning = say(LG, REPEAT_WARN); finishReason = 'stop'; break; }
           } else { msgs.push({ role: 'assistant', content: kept }, { role: 'user', content: REPEAT_NUDGE }); continue; }
-        } else { text = kept; warning = REPEAT_WARN; finishReason = 'stop'; break; }
+        } else { text = kept; warning = say(LG, REPEAT_WARN); finishReason = 'stop'; break; }
       }
       if (signal?.aborted || r.finishReason === 'abort') { text = r.text || streamed; finishReason = 'abort'; break; }
-      if (usage.completion_tokens >= turnBudget && (!r.toolCalls || !r.toolCalls.length)) { text = RG.trimLoop(stripFake(r.text || '')).text; warning = warning || BUDGET_WARN; finishReason = 'length'; break; }
-      if (forcing && r.toolCalls && r.toolCalls[0] && r.toolCalls[0].name === 'cannot_do') { const why = r.toolCalls[0].arguments && r.toolCalls[0].arguments.reason; text = 'Mình chưa làm được việc này' + (why ? ': ' + String(why) : '.'); finishReason = 'stop'; break; }
+      if (usage.completion_tokens >= turnBudget && (!r.toolCalls || !r.toolCalls.length)) { text = RG.trimLoop(stripFake(r.text || '')).text; warning = warning || say(LG, BUDGET_WARN); finishReason = 'length'; break; }
+      if (forcing && r.toolCalls && r.toolCalls[0] && r.toolCalls[0].name === 'cannot_do') { const why = r.toolCalls[0].arguments && r.toolCalls[0].arguments.reason; text = cannotText(LG, why); finishReason = 'stop'; break; }
       const escN = names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')); const toolNameRe = names.length ? new RegExp(`\\b(?:${escN.join('|')})\\b\\s*(?:[({<]|[A-Za-z_]\\w*\\s*[=:])|<(?:${escN.join('|')})>|<function=`) : null;
       if ((!r.toolCalls || !r.toolCalls.length) && r.finishReason !== 'abort' && (/<tool_call>|"name"\s*:/.test(r.text || '') || (toolNameRe && toolNameRe.test(r.text || '')))) {
         // mô hình viết lời gọi công cụ dạng văn bản (vd. SmolVLM qua llama-server, Qwen nhỏ; B44: `system_action action="volume_up"`): tự tách thành lời gọi thật,
@@ -1151,12 +1155,12 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
           let fr = null; try { const compTools = tools.filter(t => COMP.includes(t.name)); fr = await callModel([...(compTools.length ? compTools : tools), CANNOT], { toolChoice: 'required', temperature: 0, maxTokens: 400, signal }); } catch (e) { deps.log && deps.log('[aivn agent] buộc gọi công cụ lỗi: ' + e.message); }
           const c = fr && fr.toolCalls && fr.toolCalls[0];
           if (c && c.name !== 'cannot_do' && names.includes(c.name)) { r = { ...fr, text: '', toolCalls: [c] }; }
-          else { text = c && c.arguments && c.arguments.reason ? 'Mình chưa làm được việc này: ' + String(c.arguments.reason) : guardClaims(claimed, steps).text; const blockedClaim = text !== claimed; if (!blockedClaim) text = ''; warning = noActionWarn(steps, gateOk()) || (blockedClaim ? guardClaims(claimed, steps).warning : null); finishReason = 'stop'; break; }
+          else { text = c && c.arguments && c.arguments.reason ? cannotText(LG, c.arguments.reason) : guardClaims(claimed, steps, LG).text; const blockedClaim = text !== claimed; if (!blockedClaim) text = ''; warning = say(LG, noActionWarn(steps, gateOk())) || (blockedClaim ? guardClaims(claimed, steps, LG).warning : null); finishReason = 'stop'; break; }
         } else {
           text = r.text; finishReason = r.finishReason;
           if (fake) {
             const did = steps.some(x => COMP.includes(x.name) && x.status === 'ok');
-            if (!did) warning = noActionWarn(steps, gateOk());
+            if (!did) warning = say(LG, noActionWarn(steps, gateOk()));
             text = stripFake(String(text || '').replace(/<tool_call>[\s\S]*?(<\/tool_call>|$)/g, '').replace(/<\/?tool_result[^>]*>/g, '')).trim();
             if (!text && did) text = doneText();
           }
@@ -1243,9 +1247,9 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       if (signal?.aborted) { finishReason = 'abort'; break; }
       if (readAfterSubmit) { answerOnly = true; continue; } // B164: lượt sau chỉ trả lời từ trang AIVN vừa đọc
       if (sentDone) { outcome = 'done'; finishReason = 'stop'; warning = null; text = `Đã gửi tin “${String(sentDone.msg).slice(0, 200)}”${sentDone.to ? ` tới “${sentDone.to}”` : ''} và đã kiểm chứng trên màn hình: thấy tin trong khung chat, ô soạn tin đã trống.`; deps.log && deps.log(`[aivn agent] B101: gửi xong và đã kiểm chứng → kết thúc việc`); break; }
-      if (hardStop) { outcome = hardStop.ask ? 'asked_user' : hardStop.wrong || hardStop.sendRefused ? 'blocked' : 'failed'; text = hardStop.sendRefused ? refusedSendText(hardStop.sendRefused) : hardStop.ask ? hardStop.ask : hardStop.wrong ? `⚠ ${hardStop.why}. AIVN AGENT đã dừng, không gửi thêm gì. Bạn mở cuộc trò chuyện đó để thu hồi/xoá tin giúp mình.` : honestOf(hardStop.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng theo yêu cầu của công cụ: ${hardStop.why}`); break; }
+      if (hardStop) { outcome = hardStop.ask ? 'asked_user' : hardStop.wrong || hardStop.sendRefused ? 'blocked' : 'failed'; text = hardStop.sendRefused ? refusedSendText(hardStop.sendRefused) : hardStop.ask ? hardStop.ask : hardStop.wrong ? say(LG, '⚠ {0}. AIVN AGENT đã dừng, không gửi thêm gì. Bạn mở cuộc trò chuyện đó để thu hồi/xoá tin giúp mình.', sysTr(LG, String(hardStop.why || '').replace(/[.\s]+$/, ''))) : honestOf(hardStop.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng theo yêu cầu của công cụ: ${hardStop.why}`); break; }
       // B39: cùng một cách đã hỏng mà mô hình cứ quay lại (bị chặn 2–3 lần) → dừng sớm, báo trung thực những gì đã thử
-      if (look.blocked >= 2) { text = honestOf('quan sát màn hình nhiều lần liền mà mô hình không làm bước nào'); warning = null; finishReason = 'stop'; deps.log && deps.log('[aivn agent] dừng sớm (B40): quan sát lặp lại'); break; }
+      if (look.blocked >= 2) { text = honestOf(say(LG, 'quan sát màn hình nhiều lần liền mà mô hình không làm bước nào')); warning = null; finishReason = 'stop'; deps.log && deps.log('[aivn agent] dừng sớm (B40): quan sát lặp lại'); break; }
       { const cs = cyc.stuck(); if (cs) { text = honestOf(cs.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng sớm (B66b ${cs.kind}): ${cs.why}`); break; } }
       { const gu = retry.giveUp(); if (gu) { text = honestOf(gu.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng sớm (B39): ${gu.why}`); break; } }
     }
@@ -1253,10 +1257,10 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     if (/^\s*Lỗi:/.test(text || '') && steps.some(x => x.status === 'error')) {
       const e = steps.filter(x => x.status === 'error').at(-1);
       const why = String(e.summary || '').replace(/^\(lặp lại\)\s*/, '').split(/\s*(?:Bước tiếp|Gợi ý cho mô hình|Không mở trang web)/)[0].trim().replace(/[.\s]+$/, '');
-      text = `Mình chưa làm được việc này: ${why}.` + (e.name === 'open_app' ? ' Bạn kiểm tra lại tên ứng dụng giúp mình (hoặc bấm "Kiểm tra quét ứng dụng" trong Cài đặt → Nâng cao để xem AIVN thấy những ứng dụng nào).' : '');
+      text = cannotText(LG, sysTr(LG, why)) + (e.name === 'open_app' ? ' ' + say(LG, 'Bạn kiểm tra lại tên ứng dụng giúp mình (hoặc bấm "Kiểm tra quét ứng dụng" trong Cài đặt → Nâng cao để xem AIVN thấy những ứng dụng nào).') : '');
     }
     // B95: các bước của AIVN chưa có tác dụng mà câu cuối lại đổ cho ứng dụng (“Zalo có thể đang gặp sự cố”) → nói trung thực những gì đã thử
-    if (!hardStop && finishReason !== 'abort' && !honestUsed && retry.failures().length && RT.blamesApp(text)) { deps.log && deps.log('[aivn agent] câu cuối đổ lỗi cho ứng dụng trong khi bước của AIVN chưa có tác dụng → báo trung thực (B95)'); text = honestOf('các bước gõ/bấm của AIVN AGENT chưa có tác dụng — không phải lỗi của ứng dụng'); warning = null; }
+    if (!hardStop && finishReason !== 'abort' && !honestUsed && retry.failures().length && RT.blamesApp(text)) { deps.log && deps.log('[aivn agent] câu cuối đổ lỗi cho ứng dụng trong khi bước của AIVN chưa có tác dụng → báo trung thực (B95)'); text = honestOf(say(LG, 'các bước gõ/bấm của AIVN AGENT chưa có tác dụng — không phải lỗi của ứng dụng')); warning = null; }
     if (!String(text || '').trim() && finishReason !== 'abort' && steps.some(x => x.status === 'ok')) {
       // hết vòng/giới hạn mà mô hình chưa kịp báo cáo: tự tóm tắt những gì công cụ đã làm thật
       const okSteps = steps.filter(x => x.status === 'ok');
@@ -1266,7 +1270,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     if (autoRead && autoRead.ok && !hardStop && finishReason !== 'abort' && (WR.NO_TOOL_RE.test(String(text || '')) || !String(text || '').trim() || /^Đã làm:\n/.test(String(text || '')))) {
       const ex = WR.excerpt(autoRead.text, query);
       text = ex.length ? `Mình đã đọc trang ${autoRead.url} trong ${autoRead.browser}. Thông tin trên trang:\n${ex.map(l => '- ' + l).join('\n')}\n\nNguồn: ${autoRead.url}` : `Mình đã mở và đọc trang ${autoRead.url} trong ${autoRead.browser} nhưng không thấy thông tin bạn cần trên trang đó.`;
-      deps.log && deps.log(`[aivn agent] B155: mô hình vẫn không trả lời từ trang → câu trả lời lấy ${ex.length} dòng của trang ${autoRead.url}`); if (warning === NO_ACTION_OK_WARN || warning === NO_ACTION_WARN) warning = null;
+      deps.log && deps.log(`[aivn agent] B155: mô hình vẫn không trả lời từ trang → câu trả lời lấy ${ex.length} dòng của trang ${autoRead.url}`); if ([NO_ACTION_OK_WARN, NO_ACTION_WARN].some(w => warning === w || warning === say(LG, w))) warning = null;
     }
     let srcOut = {};
     if (!hardStop && finishReason !== 'abort' && String(text || '').trim() && (autoRead && autoRead.ok || steps.some(x => ['screen_look', 'screen_act'].includes(x.name) && x.status === 'ok'))) { // kịch bản A
@@ -1282,11 +1286,11 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       text = withSource(text, query, msgs, { sources: page && page.url ? [{ url: page.url, kind: 'address' }] : [], out: srcOut });
       if (srcOut.urls && srcOut.urls.length) deps.log && deps.log(`[aivn agent] B118: đường dẫn trong câu trả lời: ${srcOut.urls.map(u => `${u.said} → ${u.url || 'BỎ'} (${u.how})`).join(' · ')}`);
     }
-    if (fakeSeen && !warning && finishReason !== 'abort' && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) warning = noActionWarn(steps, gateOk());
+    if (fakeSeen && !warning && finishReason !== 'abort' && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) warning = say(LG, noActionWarn(steps, gateOk()));
     // B30: không có chữ nào và không bước nào làm được → báo rõ “mô hình không trả lời”, không để câu trả lời rỗng
-    if (!String(text || '').trim() && finishReason !== 'abort' && !steps.some(x => x.status === 'ok')) { text = EMPTY_ANSWER(Math.round((Date.now() - t0) / 1000)); if (warning === NO_ACTION_OK_WARN || warning === NO_ACTION_WARN) warning = null; deps.log && deps.log(`[aivn agent] câu trả lời trống sau ${Math.round((Date.now() - t0) / 1000)} giây, ${steps.length} bước — báo lỗi rõ cho người dùng`); }
-    if (finishReason !== 'abort' && relWins.length && NOT_INSTALLED_RE.test(text || '')) { text = `Ứng dụng này ĐANG MỞ trên máy (cửa sổ “${String(relWins[0].title).slice(0, 60)}”), nhưng mình chưa làm xong việc trên cửa sổ đó. Bạn giao lại việc giúp mình nhé.`; warning = warning || 'AIVN AGENT định nói ứng dụng chưa cài trong khi cửa sổ của nó đang mở — đã sửa lại câu trả lời.'; }
-    if (finishReason !== 'abort') { const g = guardClaims(text, steps); if (g.text !== text && /CHƯA xác nhận/.test(g.text)) honestUsed = true; text = tidyAnswer(g.text, steps); if (g.warning) warning = warning || g.warning; }
+    if (!String(text || '').trim() && finishReason !== 'abort' && !steps.some(x => x.status === 'ok')) { text = EMPTY_ANSWER(Math.round((Date.now() - t0) / 1000)); if ([NO_ACTION_OK_WARN, NO_ACTION_WARN].some(w => warning === w || warning === say(LG, w))) warning = null; deps.log && deps.log(`[aivn agent] câu trả lời trống sau ${Math.round((Date.now() - t0) / 1000)} giây, ${steps.length} bước — báo lỗi rõ cho người dùng`); }
+    if (finishReason !== 'abort' && relWins.length && NOT_INSTALLED_RE.test(text || '')) { text = say(LG, 'Ứng dụng này ĐANG MỞ trên máy (cửa sổ “{0}”), nhưng mình chưa làm xong việc trên cửa sổ đó. Bạn giao lại việc giúp mình nhé.', String(relWins[0].title).slice(0, 60)); warning = warning || say(LG, 'AIVN AGENT định nói ứng dụng chưa cài trong khi cửa sổ của nó đang mở — đã sửa lại câu trả lời.'); }
+    if (finishReason !== 'abort') { const g = guardClaims(text, steps, LG); if (g.blocked) honestUsed = true; text = tidyAnswer(g.text, steps); if (g.warning) warning = warning || g.warning; }
     // B25: tin đã bị gửi NHẦM chỗ → luôn báo rõ cho người dùng (dù mô hình có nói hay không)
     const wrong = steps.filter(x => x.verify && x.verify.wrongChat);
     if (wrong.length) { const w = wrong[wrong.length - 1].verify; const note = `⚠ Tin nhắn đã bị GỬI NHẦM: ${w.why}. Hãy mở cuộc trò chuyện “${w.wrongTo || 'đó'}” để thu hồi/xoá tin nếu cần.`; if (!String(text).includes('GỬI NHẦM')) text = `${note}\n\n${text}`.trim(); warning = note; }
@@ -1297,9 +1301,9 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     if (finishReason !== 'abort' && RT.promiseEnding(text) && steps.some(x => COMP.includes(x.name))) {
       const verified = steps.some(x => x.verify && x.verify.sent) && !retry.lastBad();
       deps.log && deps.log(`[aivn agent] câu trả lời kết thúc bằng lời hứa → thay bằng trạng thái thật: ${String(text).slice(-120)}`);
-      text = verified ? String(text).split(/\n+/).filter(l => !RT.promiseEnding(l)).join('\n').trim() || 'Đã làm xong và kiểm chứng trên màn hình.' : honestOf('mô hình định làm tiếp nhưng lượt đã kết thúc');
+      text = verified ? String(text).split(/\n+/).filter(l => !RT.promiseEnding(l)).join('\n').trim() || say(LG, 'Đã làm xong và kiểm chứng trên màn hình.') : honestOf(say(LG, 'mô hình định làm tiếp nhưng lượt đã kết thúc'));
     }
-    if (finishReason !== 'abort') { const fc = RT.finalCheck(text, retry); if (fc) warning = warning || fc; }
+    if (finishReason !== 'abort') { const fc = RT.finalCheck(text, retry, LG); if (fc) warning = warning || fc; }
     // B104: việc gửi tin chưa xong mà ô soạn còn chữ AIVN gõ → xoá (hoặc báo rõ còn đó); người dùng bấm Dừng → không thao tác thêm
     if (!sentDone && deps.computer && deps.computer.cleanupDraft && require('./send-verify').msgSend(String(query || '')) && !require('./send-verify').DRAFT_ONLY.test(String(query || ''))) {
       try {
@@ -1317,7 +1321,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     // B111 (máy thật beta.2.5: exit 0 mà câu cuối “Không tìm thấy cuộc trò chuyện…”; mở chat chỉ qua ensure_app): việc MỞ chat chỉ XONG khi có bước kiểm tiêu đề khớp người nhận
     if (outcome === 'done' && compOn && openChatTask(query) && require('./send-verify').recipientOf(query) && !sentDone && !steps.some(chatVerifiedStep)) {
       outcome = 'failed'; deps.log && deps.log('[aivn agent] B111: việc mở cuộc trò chuyện nhưng chưa có bước nào kiểm tiêu đề khớp người nhận → không báo xong');
-      if (!/chưa|không/iu.test(String(text || ''))) text = `${String(text || '').trim()}\n\nMình CHƯA xác nhận được đã mở đúng cuộc trò chuyện “${require('./send-verify').recipientOf(query)}” (tiêu đề khung chat chưa khớp).`.trim();
+      if (!/chưa|không|\bnot\b|n't\b|未|没|尚/iu.test(String(text || ''))) text = say(LG, '{0} Mình CHƯA xác nhận được đã mở đúng cuộc trò chuyện “{1}” (tiêu đề khung chat chưa khớp).', String(text || '').trim() + '\n\n', require('./send-verify').recipientOf(query)).replace(/\n\n /, '\n\n').trim();
     }
     try { if (!headless && deps.recipes && names.includes('screen_act')) { if (outcome === 'done' && finishReason !== 'abort' && !timedOut && steps.some(x => x.name === 'screen_act' && x.status === 'ok')) deps.recipes.put(query, steps); else if (recipe && outcome === 'failed') deps.recipes.drop(query); } } catch {}
     return { text: (text || '').trim(), steps, usage, finishReason, urls, memories: sys.memories.map(m => m.text), tools: names, warning, outcome, sources: srcOut.sources || [], grounding: srcOut.grounding || null, replayed: recipe ? recipe.steps.length : 0 };
@@ -1326,4 +1330,4 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
   return { refusedSendText, run, replyLang, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck, localizeText };
 }
 
-module.exports = { groundAnswer, sourcesOf, readTextOf, UNGROUNDED_MSG, BROWSER_TASK_RE, SOURCE_UNSEEN_MSG, OPEN_CHAT_RE, openChatTask, chatVerifiedStep, CHAT_VERIFIED_RE, withSource, seenUrls, scrubToolNames, isAppTask, appOf, NO_APP_ACTION_WARN, noActionWarn, NO_ACTION_WARN, NO_ACTION_OK_WARN, EMPTY_ANSWER, editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };
+module.exports = { groundAnswer, sourcesOf, readTextOf, UNGROUNDED_MSG, BROWSER_TASK_RE, SOURCE_UNSEEN_MSG, OPEN_CHAT_RE, openChatTask, chatVerifiedStep, CHAT_VERIFIED_RE, withSource, seenUrls, scrubToolNames, isAppTask, appOf, NO_APP_ACTION_WARN, noActionWarn, NO_ACTION_WARN, NO_ACTION_OK_WARN, EMPTY_ANSWER, editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, BUDGET_WARN, cannotText, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };

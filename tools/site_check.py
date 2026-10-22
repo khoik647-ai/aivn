@@ -109,7 +109,7 @@ for r in res:
             if not (r['mobileCls'] and r['mnoteShown']): bad.append(f'{k}: điện thoại không hiện dòng “mở trên máy tính”')
             if r['detected']: bad.append(f'{k}: điện thoại bị nhận là {r["detected"]}')
             if r.get('overflowAfter'): bad.append(f'{k}: tràn ngang sau khi mở menu')
-        if kind in ('mac', 'mac-arm64', 'ios'):
+        if kind in ('mac', 'mac-arm64'):  # B183: iPhone/iPad không hiện tệp Mac (cùng cách android — chỉ dòng 📱)
             arch = [m.split(' ')[0] for m in r['macLinks']]; want = ['arm64'] if kind == 'mac-arm64' else ['arm64', 'x64']
             if arch != want: bad.append(f'{k}: tệp Mac hiện {arch}, cần {want}')
             for m in r['macLinks']:

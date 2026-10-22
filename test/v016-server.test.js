@@ -7,7 +7,7 @@ const { createApiServer, keyOk } = require('../src/server');
 async function withServer(opts, host, fn) {
   const engine = { status: () => ({ loaded: true, id: 'm1' }), countTokens: () => 1 };
   const api = createApiServer({ engine, models: () => [{ id: 'm1', mtime: Date.now() }], ensureModel: async () => {}, log: () => {}, getOpts: () => opts });
-  const port = 20000 + Math.floor(Math.random() * 20000);
+  const port = 20000 + Math.floor(Math.random() * 12000); // dưới dải cổng tạm của Linux (32768+) để không trùng cổng nguồn của kết nối khác (EADDRINUSE)
   await api.start(port, host);
   try { return await fn(`http://127.0.0.1:${port}`, api); } finally { await api.stop(); }
 }

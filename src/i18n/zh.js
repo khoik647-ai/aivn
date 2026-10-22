@@ -2,6 +2,26 @@
 // Thuật ngữ theo docs/glossary.md. Thêm chuỗi giao diện mới → chạy `node build/i18n-extract.cjs` rồi thêm bản dịch ở đây (test/v016-i18n.test.js kiểm tra đủ).
 (function (root) {
   const D = {
+    "tin “{0}” vẫn còn trong ô soạn — CHƯA gửi": "消息“{0}”仍在输入框中——尚未发送",
+    "tiêu đề cuộc trò chuyện đang mở không phải “{0}” — có thể đang ở sai cuộc trò chuyện": "当前打开的聊天标题不是“{0}”——可能进错了聊天",
+    "tiêu đề cuộc trò chuyện đang mở không phải “{0}” (đang là “{1}”) — có thể đang ở sai cuộc trò chuyện": "当前打开的聊天标题不是“{0}”（而是“{1}”）——可能进错了聊天",
+    "không thấy bong bóng tin “{0}” trong khung tin nhắn sau khi gửi": "发送后，聊天中没有出现消息气泡“{0}”",
+    "- {0}: {1} lần, {2}": "- {0}：{1} 次，{2}",
+    "AIVN chưa kiểm chứng được bước cuối trên màn hình ({0}: {1}). Hãy xem lại màn hình trước khi tin là đã xong.": "AIVN 未能在屏幕上核实最后一步（{0}：{1}）。确认完成之前，请先看一下屏幕。",
+    "Bạn có thể mở sẵn đúng cửa sổ/màn hình cần dùng rồi giao lại việc, hoặc tự làm bước này.": "你可以先打开需要用的窗口/界面，再重新交代任务，或者自己完成这一步。",
+    "Bạn giúp mình mở sẵn cuộc trò chuyện “{0}” rồi giao lại việc (hoặc tự gửi tin) nhé.": "请先打开聊天“{0}”，再重新交代任务（或自己发送消息）。",
+    "Bạn giúp mình mở sẵn cuộc trò chuyện “{0}” trong {1} rồi giao lại việc (hoặc tự gửi tin) nhé.": "请先在 {1} 中打开聊天“{0}”，再重新交代任务（或自己发送消息）。",
+    "Mình chưa làm xong việc này ({0}), nên dừng lại thay vì thử mãi một cách đã hỏng.": "这件事我还没做完（{0}），所以先停下，而不是一直重试已失败的方法。",
+    "Mình chưa làm xong việc này, nên dừng lại thay vì thử mãi một cách đã hỏng.": "这件事我还没做完，所以先停下，而不是一直重试已失败的方法。",
+    "Mình chưa làm được việc này.": "我还没能完成这件事。",
+    "Đã làm xong và kiểm chứng trên màn hình.": "已完成，并已在屏幕上核实。",
+    "Đã làm {0} bước nhưng chưa kiểm chứng được là xong.": "已执行 {0} 步，但还无法核实已经完成。",
+    "Đã thử:": "已尝试：",
+    "đã chạy quá {0} giây": "已运行超过 {0} 秒",
+    "⚠ {0}. AIVN AGENT đã dừng, không gửi thêm gì. Bạn mở cuộc trò chuyện đó để thu hồi/xoá tin giúp mình.": "⚠ {0}。AIVN AGENT 已停止，没有再发送任何内容。请打开那个聊天，撤回/删除这条消息。",
+    "quan sát màn hình nhiều lần liền mà mô hình không làm bước nào": "连续多次查看屏幕，但模型没有执行任何步骤",
+    "các bước gõ/bấm của AIVN AGENT chưa có tác dụng — không phải lỗi của ứng dụng": "AIVN AGENT 的输入/点击步骤没有效果——这不是应用的问题",
+    "mô hình định làm tiếp nhưng lượt đã kết thúc": "模型打算继续，但这一轮已经结束",
     "\"{0}\" là tệp rỗng.": "“{0}”是空文件。",
     "\"{0}\" quá lớn ({1} MB). Giới hạn là {2} MB mỗi tệp âm thanh/video.": "“{0}”太大（{1} MB）。每个音频/视频文件上限为 {2} MB。",
     "\"{0}\" quá lớn ({1}). Giới hạn là 20 MB mỗi tệp.": "“{0}”太大（{1}）。每个文件上限为 20 MB。",
@@ -2202,7 +2222,6 @@
     "Đang suy nghĩ tiếp…": "正在继续思考…",
     "Đang suy nghĩ…": "正在思考…",
     "Đang suy nghĩ… (bước {0})": "正在思考…（第 {0} 步）",
-    "Đang trả lời — bấm Dừng trước đã": "正在回答 — 请先点击停止",
     "Đang trả lời…": "正在回答…",
     "Đang tìm trên Hugging Face…": "正在搜索 Hugging Face…",
     "Đang tìm đoạn liên quan trong tài liệu…": "正在文档中查找相关段落…",
@@ -2708,6 +2727,8 @@
     "“{0}” là thư mục, không phải tệp.": "“{0}” 是文件夹，不是文件。",
     "AGENT đang chạy — đợi xong hoặc sang AGENT bấm Dừng": "AGENT 正在运行 — 请等它结束，或切到 AGENT 点击停止",
     "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "对话正在运行 — 请等它结束，或切到对话点击停止",
+    "AGENT đang chạy — bấm Dừng ở dưới": "AGENT 正在运行 — 请点击下方的停止",
+    "Trò chuyện đang chạy — bấm Dừng ở dưới": "对话正在运行 — 请点击下方的停止",
     "Cho phép kết nối “{0}”?": "允许连接“{0}”？",
     "Tự kết nối lại máy chủ này khi mở AIVN": "打开 AIVN 时重新连接此服务器",
     "Luôn chạy sẵn": "始终就绪",
@@ -2775,7 +2796,7 @@
     "Chạy: {0}": "运行：{0}",
     "LỖI: {0}": "错误：{0}",
     "(dùng Node đi kèm AIVN)": "（使用 AIVN 自带的 Node）",
-    "Đã tắt": "已关闭",
+    "Đã tắt": "已关闭"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

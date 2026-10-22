@@ -2,6 +2,26 @@
 // Thuật ngữ theo docs/glossary.md. Thêm chuỗi giao diện mới → chạy `node build/i18n-extract.cjs` rồi thêm bản dịch ở đây (test/v016-i18n.test.js kiểm tra đủ).
 (function (root) {
   const D = {
+    "tin “{0}” vẫn còn trong ô soạn — CHƯA gửi": "the message “{0}” is still in the compose box — NOT sent",
+    "tiêu đề cuộc trò chuyện đang mở không phải “{0}” — có thể đang ở sai cuộc trò chuyện": "the open chat's header is not “{0}” — this may be the wrong chat",
+    "tiêu đề cuộc trò chuyện đang mở không phải “{0}” (đang là “{1}”) — có thể đang ở sai cuộc trò chuyện": "the open chat's header is not “{0}” (it is “{1}”) — this may be the wrong chat",
+    "không thấy bong bóng tin “{0}” trong khung tin nhắn sau khi gửi": "the message bubble “{0}” did not appear in the chat after sending",
+    "- {0}: {1} lần, {2}": "- {0}: {1} time{s}, {2}",
+    "AIVN chưa kiểm chứng được bước cuối trên màn hình ({0}: {1}). Hãy xem lại màn hình trước khi tin là đã xong.": "AIVN could not verify the last step on the screen ({0}: {1}). Check the screen before trusting that it is done.",
+    "Bạn có thể mở sẵn đúng cửa sổ/màn hình cần dùng rồi giao lại việc, hoặc tự làm bước này.": "You can open the right window/screen first and then give me the task again, or do this step yourself.",
+    "Bạn giúp mình mở sẵn cuộc trò chuyện “{0}” rồi giao lại việc (hoặc tự gửi tin) nhé.": "Please open the chat “{0}” first and then give me the task again (or send the message yourself).",
+    "Bạn giúp mình mở sẵn cuộc trò chuyện “{0}” trong {1} rồi giao lại việc (hoặc tự gửi tin) nhé.": "Please open the chat “{0}” in {1} first and then give me the task again (or send the message yourself).",
+    "Mình chưa làm xong việc này ({0}), nên dừng lại thay vì thử mãi một cách đã hỏng.": "I haven't finished this task ({0}), so I stopped instead of endlessly retrying a failed approach.",
+    "Mình chưa làm xong việc này, nên dừng lại thay vì thử mãi một cách đã hỏng.": "I haven't finished this task, so I stopped instead of endlessly retrying a failed approach.",
+    "Mình chưa làm được việc này.": "I couldn't do this yet.",
+    "Đã làm xong và kiểm chứng trên màn hình.": "Done and verified on the screen.",
+    "Đã làm {0} bước nhưng chưa kiểm chứng được là xong.": "Did {0} step{s}, but could not verify that the task is done.",
+    "Đã thử:": "Tried:",
+    "đã chạy quá {0} giây": "ran for more than {0} seconds",
+    "⚠ {0}. AIVN AGENT đã dừng, không gửi thêm gì. Bạn mở cuộc trò chuyện đó để thu hồi/xoá tin giúp mình.": "⚠ {0}. AIVN AGENT stopped and sent nothing more. Please open that chat to recall/delete the message.",
+    "quan sát màn hình nhiều lần liền mà mô hình không làm bước nào": "looked at the screen many times in a row without the model taking any step",
+    "các bước gõ/bấm của AIVN AGENT chưa có tác dụng — không phải lỗi của ứng dụng": "AIVN AGENT's typing/clicking steps had no effect — this is not the app's fault",
+    "mô hình định làm tiếp nhưng lượt đã kết thúc": "the model meant to continue, but the turn had already ended",
     "\"{0}\" là tệp rỗng.": "\"{0}\" is an empty file.",
     "\"{0}\" quá lớn ({1} MB). Giới hạn là {2} MB mỗi tệp âm thanh/video.": "\"{0}\" is too large ({1} MB). The limit is {2} MB per audio/video file.",
     "\"{0}\" quá lớn ({1}). Giới hạn là 20 MB mỗi tệp.": "\"{0}\" is too large ({1}). The limit is 20 MB per file.",
@@ -2202,7 +2222,6 @@
     "Đang suy nghĩ tiếp…": "Thinking further…",
     "Đang suy nghĩ…": "Thinking…",
     "Đang suy nghĩ… (bước {0})": "Thinking… (step {0})",
-    "Đang trả lời — bấm Dừng trước đã": "Answering — click Stop first",
     "Đang trả lời…": "Answering…",
     "Đang tìm trên Hugging Face…": "Searching Hugging Face…",
     "Đang tìm đoạn liên quan trong tài liệu…": "Finding relevant passages in the document…",
@@ -2708,6 +2727,8 @@
     "“{0}” là thư mục, không phải tệp.": "“{0}” is a folder, not a file.",
     "AGENT đang chạy — đợi xong hoặc sang AGENT bấm Dừng": "AGENT is running — wait until it finishes, or switch to AGENT and click Stop",
     "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "Chat is running — wait until it finishes, or switch to Chat and click Stop",
+    "AGENT đang chạy — bấm Dừng ở dưới": "AGENT is running — click Stop below",
+    "Trò chuyện đang chạy — bấm Dừng ở dưới": "Chat is running — click Stop below",
     "Cho phép kết nối “{0}”?": "Allow “{0}” to connect?",
     "Tự kết nối lại máy chủ này khi mở AIVN": "Connect this server again when AIVN opens",
     "Luôn chạy sẵn": "Always ready",
@@ -2775,7 +2796,7 @@
     "Chạy: {0}": "Run: {0}",
     "LỖI: {0}": "ERROR: {0}",
     "(dùng Node đi kèm AIVN)": "(uses the Node bundled with AIVN)",
-    "Đã tắt": "Off",
+    "Đã tắt": "Off"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.en = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

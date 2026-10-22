@@ -34,7 +34,7 @@ test('B174: beta chỉ có .exe → máy Mac thấy “chỉ có cho Windows” 
   assert.match(T.vi, /Trên Mac, bạn hãy dùng bản ổn định 0\.15\.3:/); assert.match(T.en, /On a Mac, please use the stable version 0\.15\.3:/); assert.match(T.zh, /在 Mac 上请使用稳定版 0\.15\.3：/);
   // CSS: Mac/điện thoại/Linux không bao giờ thấy phần .exe; Windows không thấy phần Mac; Chrome biết chip → chỉ một tệp Mac
   for (const sel of ['html.beta-os-mac .beta-dl .beta-win', 'html.is-mobile .beta-dl .beta-win', 'html.beta-os-linux .beta-dl .beta-win']) assert.ok(h.includes(sel), sel);
-  assert.match(h, /html\.beta-os-win \.beta-dl \.beta-mac,html\.beta-os-linux \.beta-dl \.beta-mac,html\.beta-os-android \.beta-dl \.beta-mac\{display:none\}/);
+  assert.match(h, /html\.beta-os-win \.beta-dl \.beta-mac,html\.beta-os-linux \.beta-dl \.beta-mac,html\.beta-os-android \.beta-dl \.beta-mac,html\.beta-os-ios \.beta-dl \.beta-mac\{display:none\}/);
   assert.match(h, /html\.beta-arch-arm64 \.beta-dl \.beta-mac-link\[data-arch=x64\]/);
   // link đầu trang: câu “chỉ có cho Windows” cho Mac (chưa có tệp Mac), điện thoại, Linux
   assert.match(h, /"mac":1,"ios":1,"android":1,"linux":1/);
@@ -48,7 +48,8 @@ test('B174: beta có đủ tệp Mac → link Mac trỏ đúng tệp beta theo c
     for (const c of ['a', 'b', 'c']) assert.ok(t.includes(c.repeat(64)), `${l}: thiếu SHA-256 ${c}`);
     assert.match(t, l === 'zh' ? /约 268 MB/ : /~268 MB/); assert.match(t, l === 'zh' ? /约 281 MB/ : /~281 MB/);
   }
-  assert.match(T.vi, /Tải bản thử nghiệm <span class="nw">0\.16\.0-beta\.2\.8<\/span> cho Mac Apple Silicon/); assert.match(T.en, /for Intel Mac/); assert.match(T.zh, /（Intel 芯片 Mac）/);
+  assert.match(T.vi, /Tải bản thử nghiệm <span class="nw">0\.16\.0-beta\.2\.8<\/span> cho Mac Apple Silicon/); assert.match(T.en, /Download test version <span class="nw">0\.16\.0-beta\.2\.8<\/span> for Intel Mac/); assert.match(T.zh, /（Intel 芯片 Mac）/);
+  for (const l of ['vi', 'en', 'zh']) assert.ok(!/<\/span>\s+beta\b/i.test(T[l]), l + ': lặp “beta” sau số phiên bản');
 });
 test('B174: chỉ có MỘT tệp Mac, thiếu .exe, hay bản ổn định thiếu tệp Mac → từ chối (không đăng nửa vời)', () => {
   assert.notStrictEqual(build([EXE, ARM]).r.status, 0);
@@ -84,6 +85,7 @@ test('B174: publish-beta-site.sh dựng khối từ tài sản thật (beta + La
   const c = fs.readFileSync(path.join(root, 'tools/site_check.py'), 'utf8');
   for (const n of ["'mac-safari-arm64-1280'", "'mac-safari-intel-1280'", "'mac-chrome-arm64-1280'", "'iphone-375'", "'desktop-1280'", "'linux-1280'"]) assert.ok(c.includes(n), n);
   assert.match(c, /vẫn được mời tải \.exe/);
+  assert.match(c, /kind in \('mac', 'mac-arm64'\)/); assert.ok(!/kind in \('mac', 'mac-arm64', 'ios'\)/.test(c), 'site_check vẫn đòi iPhone hiện link Mac');
 });
 test('B174: release.sh — bản beta luôn build + đính tệp Mac, từ chối khi thiếu, không bao giờ đính latest*.yml, đăng prerelease không Latest', () => {
   const s = fs.readFileSync(path.join(root, 'release.sh'), 'utf8');
