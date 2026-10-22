@@ -98,7 +98,7 @@ test('B57: AGENT trả lời theo ngôn ngữ câu lệnh / giao diện; câu tr
 
 test('B56: chữ trắng trên nút màu (“✉ Thư mới”, “Gửi”) đọc được bằng lượt OCR khối màu đảo màu', { skip: process.platform !== 'linux' ? 'cần xvfb' : false, timeout: 120000 }, () => {
   const { spawnSync } = require('child_process');
-  const r = spawnSync('xvfb-run', ['-a', path.join(root, 'node_modules/.bin/electron'), path.join(root, 'test/fixtures/b56-ocr.js'), '--no-sandbox'], { cwd: root, encoding: 'utf8', timeout: 110000 });
+  const r = spawnSync('xvfb-run', ['-a', path.join(root, 'node_modules/.bin/electron'), path.join(root, 'test/fixtures/b56-ocr.js'), '--no-sandbox', '--user-data-dir=' + require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'aivn-b56-ud-'))], { cwd: root, encoding: 'utf8', timeout: 110000, env: { ...process.env, AIVN_USER_DATA: require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'aivn-b56-ud2-')) } });
   const m = /B56RESULT (.*)/.exec(r.stdout || ''); assert.ok(m, (r.stderr || '').slice(-500));
   const d = JSON.parse(m[1]); const all = d.boosted.join(' | ');
   assert.match(all, /Thư mới/); assert.match(all, /Gửi/);
