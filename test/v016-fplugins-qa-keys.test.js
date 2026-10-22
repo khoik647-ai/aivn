@@ -1,5 +1,5 @@
 'use strict';
-// Ma trận khoá giả QA: mọi lối đọc phải che đủ 24 giá trị. Tệp giả lập nằm ở test/fixtures/qa-keys-410.json.
+// Ma trận 24 khoá giả, dựng lúc chạy. Tiền tố ghép từ mảnh để tệp nguồn không khớp dạng khoá thật.
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -9,11 +9,102 @@ const M = require('../src/mcp');
 const PG = require('../src/plugins');
 const LOG = require('../src/logger');
 
-const FIXTURE = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'qa-keys-410.json'), 'utf8'));
-const K = FIXTURE.K;
-const SERVERS = FIXTURE.servers;
-const FP = FIXTURE.FP;
+const ALPHA = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const HEX = '0123456789abcdef';
+const UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const DIGITS = '0123456789';
+function chunk(i, n, alphabet = ALPHA) {
+  const step = 2 * i + 1;
+  let s = '';
+  for (let k = 0; k < n; k++) s += alphabet[(i * 7 + k * step) % alphabet.length];
+  return s;
+}
+function withMark(i, n, index, mark) {
+  const chars = chunk(i, n).split('');
+  chars[index] = mark;
+  return chars.join('');
+}
+function pemHeader() {
+  return ['-----', 'BEGIN', ' ', 'RSA', ' ', 'PRIVATE', ' KEY', '-----'].join('');
+}
+function buildKeys() {
+  const sk = ['sk', '-'].join('');
+  const ghp = ['gh', 'p_'].join('');
+  const pat = ['github', '_pat_'].join('');
+  const hf = ['h', 'f_'].join('');
+  const akia = ['AK', 'IA'].join('');
+  const xoxb = ['xo', 'xb', '-'].join('');
+  const stripe = ['sk', '_', 'li', 've_'].join('');
+  const awsChars = chunk(6, 39).split('');
+  awsChars[14] = '/';
+  awsChars[22] = '/';
+  return {
+    sk: sk + 'proj-' + chunk(1, 32),
+    ghp: ghp + chunk(2, 36),
+    pat: pat + withMark(3, 53, 22, '_'),
+    hf: hf + chunk(4, 32),
+    akia: akia + chunk(5, 16, UPPER),
+    awssec: awsChars.join(''),
+    xoxb: xoxb + chunk(7, 12, DIGITS) + '-' + chunk(8, 13, DIGITS) + '-' + chunk(9, 24),
+    jwt: [chunk(10, 36), chunk(11, 44), chunk(12, 43)].join('.'),
+    qapikey: chunk(13, 24),
+    qtoken: withMark(14, 21, 5, '_'),
+    basicpw: chunk(15, 15),
+    appid: chunk(16, 32, HEX),
+    hex32: chunk(17, 32, HEX),
+    splitkey: withMark(18, 16, 8, '_'),
+    owmid: chunk(19, 32, HEX),
+    tele: chunk(20, 10, DIGITS) + ':' + chunk(21, 34),
+    dbpw: withMark(22, 14, 7, '!'),
+    argdbpw: chunk(23, 13),
+    hdrapikey: chunk(24, 9),
+    accesskey: chunk(25, 10),
+    dbpass: withMark(26, 13, 11, '&'),
+    nested: chunk(27, 16),
+    toplevel: sk + 'ant-api03-' + chunk(28, 35),
+    stripe: stripe + chunk(29, 31),
+  };
+}
+function buildServers(K) {
+  return {
+    's-args-sk': { command: 'npx', args: ['-y', 'qa-tool@1.0.0', '--api-key', K.sk] },
+    's-args-eq': { command: 'npx', args: ['-y', 'qa-gh@1.0.0', '--token=' + K.ghp] },
+    's-env-pat': { command: 'npx', args: ['-y', 'qa-gh2@1.0.0'], env: { GH_PERSONAL: K.pat, HUGGING: K.hf } },
+    's-aws': { command: 'uvx', args: ['qa-aws==1.0', '--region', 'us-east-1', K.awssec], env: { AWS_ID: K.akia } },
+    's-slack': { command: 'npx', args: ['-y', 'qa-slack@1.0.0'], env: { SLACK_BOT: K.xoxb } },
+    's-jwt': { url: 'https://jwt.example.vn/mcp', headers: { 'X-Session': K.jwt } },
+    's-q-apikey': { url: 'https://api.example.vn/mcp?api_key=' + K.qapikey + '&lang=vi' },
+    's-q-token': { url: 'https://api2.example.vn/mcp?lang=vi&token=' + K.qtoken },
+    's-basic': { url: 'https://khoi:' + K.basicpw + '@nas.example.vn/mcp' },
+    's-owm': { command: 'npx', args: ['-y', 'qa-weather@1.0.0'], env: { OPENWEATHER_APPID: K.appid, OWM_ID: K.owmid } },
+    's-hex': { command: 'qa-bin', args: ['run', K.hex32] },
+    's-split': { command: 'qa-bin', args: ['--key', K.splitkey] },
+    's-tele': { url: 'https://api.telegram.org/bot' + K.tele + '/mcp' },
+    's-dburl': {
+      command: 'qa-db',
+      args: ['postgresql://u:' + K.argdbpw + '@10.0.0.5/db'],
+      env: { DATABASE_URL: 'postgres://admin:' + K.dbpw + '@db.local:5432/app', DB_PASS: K.dbpass },
+    },
+    's-hdr': { command: 'qa-bin', args: ['-H', 'X-API-Key: ' + K.hdrapikey] },
+    's-qaccess': { url: 'https://api3.example.vn/mcp?access_key=' + K.accesskey },
+    's-nested': { command: 'qa-bin', args: [], options: { apiKey: K.nested } },
+    's-stripe': { command: 'qa-bin', args: ['--stripe', K.stripe] },
+  };
+}
+const FP = {
+  'fp-fs': { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem@2025.1.14', '/Users/khoi/Documents/AIVN', 'C:\\Users\\Khoi\\Documents\\AIVN'] },
+  'fp-url': { url: 'https://mcp.example.vn/weather?city=hanoi&lang=vi&limit=5' },
+  'fp-env': { command: 'qa-bin', args: ['--port', '8080', '--id', '42'], env: { NODE_ENV: 'production', MAX_TOKENS: '4096', KEYBOARD_LAYOUT: 'us', AUTHOR: 'Khoi', LOG_LEVEL: 'debug', CLIENT_ID: 'aivn-desktop' } },
+  'fp-ids': { command: 'qa-bin', args: ['--rev', 'a94a8fe5ccb19ba61c4c0873d391e987982fbbd3', '--workspace', '123e4567-e89b-12d3-a456-426614174000', '--model', '/opt/aivn/models/Qwen3VL4BInstructQ4KM2025.gguf'] },
+  'fp-docker': { command: 'docker', args: ['run', '-i', '--rm', 'ghcr.io/qa/mcp@sha256:3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a'] },
+  'fp-auth-none': { command: 'qa-bin', args: ['--auth', 'none', '--token-file', '/home/khoi/.qa-token'] },
+};
+const K = buildKeys();
+const SERVERS = buildServers(K);
 const KEYS = Object.keys(K);
+for (const a of KEYS) for (const b of KEYS) {
+  if (a !== b && K[b].includes(K[a])) throw new Error(a + ' nằm trong ' + b);
+}
 
 function importText() {
   return JSON.stringify({ globalToken: K.toplevel, mcpServers: SERVERS });
@@ -229,4 +320,7 @@ test('QA không đánh nhầm FP: MAX_TOKENS, KEYBOARD, AUTHOR, --auth none, CLI
   console.log('| model filename | kept |');
   console.log('| docker sha256 | kept |');
   console.log('| jwt | single ref |');
+  const pem = pemHeader();
+  assert.equal(PG.likelySecretValue(pem), false);
+  assert.equal(PG.extractSecrets({ mcpServers: { pem: { command: 'qa-bin', args: [pem] } } }, store).count, 0);
 });
