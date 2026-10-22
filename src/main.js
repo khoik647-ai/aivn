@@ -2525,7 +2525,7 @@ comp.addEventListener('focus',()=>{if(TRAP)setTimeout(()=>q.focus(),0)});q.addEv
     }
     if (process.env.AIVN_QA_B21_MODE === 'ensure') { // ensure_app: Zalo giả bị cửa sổ khác che → đưa lên + chờ sẵn sàng; open_chat dùng lại; cửa sổ ẩn → lỗi rõ, không treo
       const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:240px 1fr;height:100vh}#l{border-right:1px solid #ccc;padding:8px}#q{width:200px;font-size:20px;padding:5px}.it{padding:10px 4px;cursor:pointer}#c{display:flex;flex-direction:column}#h{font-weight:bold;padding:12px 16px;border-bottom:1px solid #ccc}#m{flex:1;padding:16px}#comp{font-size:20px;margin:10px;padding:8px}</style>
-<div id=l><input id=q placeholder="Tìm kiếm"><button id=cl hidden>Đóng</button><div id=list></div></div><div id=c><div id=h></div><div id=m></div><input id=comp placeholder="Nhập tin nhắn"></div>
+<div id=l><input id=q placeholder="Tìm kiếm" style="width:120px"><button id=cl hidden style="border:0;background:none;font-size:20px">Đóng</button><div id=list></div></div><div id=c><div id=h></div><div id=m></div><input id=comp placeholder="Nhập tin nhắn"></div>
 <script>const chats=['Nhóm Lớp K27','My Documents','Trần Văn Bình'];window.S={cur:'',sent:[]};const fold=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').toLowerCase();
 function list(f){const el=document.getElementById('list');el.innerHTML='';for(const c of chats.filter(c=>!f||fold(c).includes(fold(f)))){const d=document.createElement('div');d.className='it';d.textContent=c;d.onclick=()=>open(c);el.appendChild(d);}}
 function open(n){S.cur=n;h.textContent=n;document.title='Zalo';m.innerHTML='';comp.focus();} /* B122: như Zalo thật — mở chat xong ô tìm kiếm VẪN còn chữ + nút Đóng */
@@ -2542,6 +2542,8 @@ comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sen
       t.minimize(); cover.focus(); await sleep(800); out.minimizedBefore = t.isMinimized();
       await stepE('ensure-minimized', () => d.ensureApp({ app: 'Zalo', timeout_ms: 20000 }, { ...ce, userQuery: qe + '  ' }));
       out.minimizedAfter = t.isMinimized();
+      // B124: Zalo ĐÃ ở trước, hiện, không thu nhỏ → ensure_app phải xong < ~2 giây (không OCR/không khởi động)
+      t.focus(); await sleep(600); await stepE('ensure-already', () => d.ensureApp({ app: 'Zalo', timeout_ms: 20000 }, { ...ce, userQuery: qe + '    ' }));
       cover.focus(); await sleep(600);
       await stepE('ensure-openchat', () => d.act({ action: 'open_chat', window: 'Zalo' }, { ...ce, userQuery: qe + '   ' }));
       await stepE('ensure-send', () => d.act({ action: 'type_text', text: 'AIVN ensure test', submit: true }, { ...ce, userQuery: qe + '   ' }));

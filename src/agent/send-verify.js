@@ -248,9 +248,14 @@ function regionsOf(obs) {
   else cut = CUT_MEMO.has(wkey) ? CUT_MEMO.get(wkey) : 0.3;
   const ip = els.find(e => rel(e).ry < 0.16 && rel(e).left > 0.55 && INFO_PANEL.test(nm(e)));
   const panelL = ip ? Math.max(0.5, (2 * (ip.b[0] + ip.b[2] / 2) - (W[0] + W[2]) - W[0]) / W[2] - 0.02) : 2;
+  // B124/B122 (ô tìm kiếm còn chữ “My Documents” sau lần tìm hụt, OCR chỉ thấy cột trái): chữ trong HÀNG Ô TÌM KIẾM (cạnh nút “Đóng”) không phải tiêu đề khung chat
+  const sClose = searchClose(obs); const sLeft = searchLeftover(obs);
+  const inSearchRow = (e) => (sLeft && e === sLeft) || (sClose && rel(e).left < 0.35 && Math.abs(e.b[1] + e.b[3] / 2 - sClose.y) <= Math.max(14, e.b[3]) && e.b[0] <= sClose.x + 5);
   for (const e of els) {
     const { ry, left, rx } = rel(e); const txt = [e.name, e.value].filter(Boolean).join(' ').trim();
     if (!txt) continue;
+    if (inSearchRow(e)) { out.list.push(txt); continue; }
+    if (sClose && !hasRight && left < 0.35) { out.list.push(txt); continue; } // ô tìm kiếm đang mở, OCR chỉ thấy cột trái → đó là danh sách kết quả, không phải tiêu đề
     if (rx >= panelL && !(e.editable || e.focused)) { out.side.push(txt); continue; }
     if (e.editable || e.focused) { if (!searchy(e)) out.composer.push(e.value != null ? e.value : (e.ocr ? e.name : '')); continue; }
     if (hasRight && left < cut) { out.list.push(txt); continue; }
@@ -409,7 +414,10 @@ function chatGate({ query, text, searchField = false, submit = false, proc = '',
   const nearName = !onlyName(text, recipient) && nameOnly; // gần giống tên (thêm vài ký tự): chỉ chặn khi CHƯA mở đúng cuộc trò chuyện
   if (onlyName(text, recipient)) return `KHÔNG gõ “${String(text).slice(0, 40)}”: ô đang nhận chữ CHƯA được xác nhận là ô Tìm kiếm (có thể là ô soạn tin của cuộc trò chuyện đang mở${header.filter(Boolean).length ? ` “${String(header.filter(Boolean)[0]).slice(0, 40)}”` : ''} — gõ tên + Enter ở đó sẽ GỬI tên thành tin nhắn). Làm lần lượt: 1) screen_act click vào ô/chữ “Tìm kiếm” của ứng dụng; 2) type_text "${recipient}" với element là CHÍNH ô tìm kiếm đó; 3) bấm vào kết quả đúng tên “${recipient}”. Nếu tên “${recipient}” đã hiện sẵn trong danh sách bên trái, bấm thẳng vào tên đó thay vì gõ.`;
   const k = nameKey(recipient);
-  const hdr = cleanHeader(header.filter(Boolean)).filter(h => !MENU_BAR(h)); // B97: cùng cách làm sạch với kiểm tra --approve-send-to
+  const hdr0 = cleanHeader(header.filter(Boolean)).filter(h => !MENU_BAR(h)); // B97: cùng cách làm sạch với kiểm tra --approve-send-to
+  // B124: lần tìm gần nhất KHÔNG thấy người nhận → chữ “đầu khung” trùng đúng chữ vừa gõ tìm là chữ còn trong Ô TÌM KIẾM, không phải tiêu đề (chỉ chặt hơn, không bao giờ nới)
+  const lastS = Array.isArray(state.searches) && state.searches.length ? state.searches[state.searches.length - 1] : null;
+  const hdr = lastS && lastS.found === false ? hdr0.filter(h => fold(h).trim() !== fold(lastS.text).trim()) : hdr0;
   // B27: màn hình (tiêu đề cửa sổ “Ứng dụng - Tên”, hoặc đầu khung chat đúng tên) cho thấy ĐÚNG người nhận → cho gõ, không dựa vào cờ nội bộ
   // tiêu đề cửa sổ (do hệ điều hành báo) là bằng chứng chắc; chữ OCR ở đầu khung chỉ được tin khi lượt này ĐÃ tìm người nhận (có thể là chữ khác lọt vào vùng đầu khung)
   const al = state.aliases || [];

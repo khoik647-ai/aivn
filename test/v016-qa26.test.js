@@ -157,3 +157,61 @@ test('B123b/c: runtime-active luôn có chữ; lời giới thiệu không còn 
   assert.doesNotMatch(zh, /通常比 Vulkan 更快/); assert.match(zh, /在部分 GPU 上可能比 Vulkan 更快/);
   for (const k of ['Chưa nạp mô hình nhìn ảnh — lần nạp tới sẽ dùng: {0}']) { assert.ok(en.includes(JSON.stringify(k)), 'en ' + k); assert.ok(zh.includes(JSON.stringify(k)), 'zh ' + k); }
 });
+
+// ---------- B124: tốc độ ----------
+const EA = require('../src/agent/ensure-app'); const SV = require('../src/agent/send-verify');
+function fakeWin(o) {
+  let t = 0; const calls = { look: 0, launch: 0, focus: 0 }; const w = { hwnd: 7, title: 'Zalo', proc: 'Zalo', vis: true, min: false, hung: false, active: true, covered: 0, b: [0, 0, 1200, 800], ...o };
+  return { calls, d: { now: () => t, sleep: async (ms) => { t += ms; }, log: () => {}, webApp: () => null,
+    state: async () => { t += 300; return { windows: [{ ...w }], procs: [{ pid: 1, proc: 'Zalo', path: 'C:\\Zalo.exe' }] }; },
+    focus: async () => { calls.focus++; w.active = true; w.min = false; return { ok: true, how: 'set' }; },
+    launch: async () => { calls.launch++; return { ok: false }; },
+    look: async () => { calls.look++; t += 8000; return { sig: 'same', text: 'Zalo' }; } }, clock: () => t };
+}
+test('B124: ensure_app khi cửa sổ ĐÃ ở trước, hiện, không thu nhỏ, không treo → sẵn sàng ngay: 0 lần nhìn, không khởi động, < 2 giây', async () => {
+  const F = fakeWin({}); const r = await EA.ensureApp('Zalo', F.d);
+  assert.ok(r.ok && r.how === 'already' && r.fast, JSON.stringify(r)); assert.strictEqual(F.calls.look, 0); assert.strictEqual(F.calls.launch, 0); assert.strictEqual(F.calls.focus, 0);
+  assert.ok(r.ms < 2000, 'ms=' + r.ms); assert.ok(r.steps.some(x => /sẵn sàng ngay \(bỏ bước nhìn chờ\)/.test(x)));
+  // trước B124: 2 lần nhìn (máy thật 22–41 giây) — vẫn giữ được bằng slowReady
+  const F2 = fakeWin({}); const r2 = await EA.ensureApp('Zalo', F2.d, { slowReady: true }); assert.strictEqual(F2.calls.look, 2); assert.ok(r2.ms >= 16000, 'đường cũ ' + r2.ms);
+});
+test('B124: thu nhỏ / bị che / treo / ẩn → KHÔNG đi đường nhanh (vẫn khôi phục + chờ sẵn sàng)', async () => {
+  for (const o of [{ min: true, active: false }, { active: false, covered: 0.8 }]) { const F = fakeWin(o); const r = await EA.ensureApp('Zalo', F.d); assert.ok(r.ok && !r.fast && F.calls.look >= 2, JSON.stringify(o) + JSON.stringify(r)); }
+  const F = fakeWin({ hung: true }); const r = await EA.ensureApp('Zalo', F.d, { timeoutMs: 3000 }); assert.ok(!r.fast);
+  // màn hình đăng nhập theo tiêu đề vẫn bị bắt ở đường nhanh
+  const L = fakeWin({ title: 'Zalo - Đăng nhập' }); const rl = await EA.ensureApp('Zalo', L.d); assert.ok(!rl.ok && rl.code === 'login', JSON.stringify(rl));
+});
+test('B124 (mã): open_chat chạy chế độ nhanh (không mô tả ảnh ở bước tự động, OCR thấy kết quả thì khỏi chờ/hỏi thêm); ensure nhìn chỉ OCR; đo thời gian + số lần nhìn', () => {
+  const s = src('src/desktop-agent.js');
+  assert.match(s, /if \(s\.quick && vision === 'auto' && !question\) vision = 'off';/);
+  assert.match(s, /s0\.quick = true;[\s\S]{0,200}B124: open_chat xong sau \$\{Date\.now\(\) - t0\} ms, \$\{s0\.obsN\} lần quan sát[\s\S]{0,80}finally \{ s0\.quick = false; \}/);
+  assert.match(s, /const early = s\.quick && o2 && o2\.obs && judge\(o2\) === 'yes';/);
+  assert.match(s, /if \(s\.quick && qv\) \{ o2 = await observe\(ctx, \{\}\); verdict = judge\(o2\); if \(verdict !== 'yes'\) \{ o2 = await observe\(ctx, \{ question: qv \}\);/);
+  assert.match(s, /const o = await observe\(ctx, \{ thumb: false, vision: 'off' \}\); s\.ensureObsText/);
+  assert.match(s, /if \(e\.fast\) s\.obs = null;/, 'đường nhanh không nhìn → open_chat phải nhìn mới, không dùng màn hình cũ');
+});
+test('B124: chữ còn trong ô tìm kiếm / danh sách kết quả (OCR chỉ thấy cột trái) KHÔNG được coi là tiêu đề khung chat', () => {
+  // đúng dữ liệu box (Zalo giả, ô tìm “My Documents” còn chữ, đang mở “Nhóm Lớp K27”)
+  const obs = { win: { title: 'Zalo', proc: 'electron', b: [45, 69, 1000, 600] }, elements: [{ name: 'Đóng', ocr: true, b: [54, 118, 47, 19] }, { name: 'My Documents', ocr: true, b: [53, 154, 145, 20] }] };
+  const R = SV.regionsOf(obs); assert.deepStrictEqual(R.header, []); assert.ok(R.list.includes('My Documents'));
+  // không có nút Đóng (ô tìm đã đóng) → giữ cách cũ
+  const R2 = SV.regionsOf({ ...obs, elements: [{ name: 'My Documents', ocr: true, b: [400, 80, 145, 20] }, { name: 'xin chào', ocr: true, b: [420, 300, 100, 20] }] }); assert.deepStrictEqual(R2.header, ['My Documents']);
+  // lần tìm gần nhất KHÔNG thấy người nhận → “đầu khung” trùng chữ vừa tìm không chứng minh đã mở chat
+  const st = { searches: [{ text: 'My Documents', found: false }] };
+  const g = SV.chatGate({ query: 'Nhắn Zalo cho My Documents: "AIVN ensure test". Không cần hỏi lại.', text: 'AIVN ensure test', searchField: false, submit: true, proc: 'Zalo', title: 'Zalo', state: st, header: ['My Documents'], ocrHeader: ['My Documents'], composer: [] });
+  assert.ok(g && !st.chatOpen, 'phải chặn: ' + g);
+  const st2 = { searches: [{ text: 'My Documents', found: true }], lastSearch: { q: 'My Documents' } };
+  const g2 = SV.chatGate({ query: 'Nhắn Zalo cho My Documents: "AIVN ensure test". Không cần hỏi lại.', text: 'AIVN ensure test', searchField: false, submit: true, proc: 'Zalo', title: 'Zalo', state: st2, header: ['My Documents'], ocrHeader: ['My Documents'], composer: [] });
+  assert.strictEqual(g2, null, 'tìm thấy + đầu khung đúng tên → cho gõ như cũ');
+});
+test('B124: UIA thử RawView khi ControlView gần như rỗng + trả chẩn đoán (lớp gốc, framework, con cấp 1); script PowerShell hợp lệ', () => {
+  const s = src('src/agent/uitree.js');
+  assert.match(s, /\$out = Walk \(\[System\.Windows\.Automation\.TreeWalker\]::ControlViewWalker\) 10;/);
+  assert.match(s, /if \(\$named -lt 3\) \{\n  try \{ \$o2 = Walk \(\[System\.Windows\.Automation\.TreeWalker\]::RawViewWalker\) 6;/);
+  assert.match(s, /els = \$out; seen = \$seen; via = \$via; diag = \$diag;/);
+  assert.match(src('src/desktop-agent.js'), /B124: UIA “\$\{pk\}”: duyệt/);
+  const pw = ['/tmp/pwsh/pwsh', '/usr/bin/pwsh'].find(f => fs.existsSync(f));
+  if (pw) { const m = s.match(/const PS_TREE = PS_PRELUDE \+ String\.raw`([\s\S]*?)`;/); const f = path.join(require('os').tmpdir(), 'aivn-pstree-' + process.pid + '.ps1'); fs.writeFileSync(f, m[1]);
+    const r = require('child_process').spawnSync(pw, ['-NoProfile', '-c', `$e=$null;$t=$null;[void][System.Management.Automation.Language.Parser]::ParseFile('${f}',[ref]$t,[ref]$e);$e.Count`], { encoding: 'utf8' }); fs.unlinkSync(f);
+    assert.strictEqual(r.stdout.trim(), '0', 'lỗi cú pháp PowerShell: ' + r.stdout + r.stderr); }
+});

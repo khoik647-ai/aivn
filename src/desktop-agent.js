@@ -259,6 +259,7 @@ function createDesktopAgent(deps) {
   async function observe(ctx, { query = '', ocr = 'auto', thumb = true, vision = 'auto', question = '' } = {}) {
     const s = await begin(ctx); status('Đang quan sát màn hình…');
     const t0 = Date.now();
+    if (s.quick && vision === 'auto' && !question) vision = 'off'; // B124: các bước tự động của open_chat chỉ cần OCR/cây (mô tả ảnh ~4–5 giây/lần)
     // hộp thoại của chính ứng dụng (Lưu thành…, Mở…) đang ở trước: quan sát hộp thoại đó thay vì cửa sổ chính
     let hw = s.target && s.target.hwnd ? s.target.hwnd : 0; s.dialog = null;
     if (hw && process.platform !== 'darwin') { try { const d = U.activeDialogOf(await U.windows(), s.target); if (d) { hw = d.hwnd; s.dialog = d.title || 'hộp thoại'; deps.log && deps.log('desk', `Đang có hộp thoại “${d.title}” của cùng ứng dụng — quan sát hộp thoại`); } } catch {} }
@@ -272,6 +273,8 @@ function createDesktopAgent(deps) {
     }
     if (raw && raw.win && raw.win.hwnd && !s.target) s.target = { hwnd: raw.win.hwnd, pid: raw.win.pid, proc: raw.win.proc, title: raw.win.title };
     const named = (Array.isArray(raw.els) ? raw.els : []).filter(x => x && x.n && U.INTERACTIVE.has(x.r)).length;
+    // B124 (máy thật: cây giao diện 0 phần tử có tên ở MỌI lần nhìn Zalo/Chrome → toàn OCR, chậm): ghi chẩn đoán UIA một lần/ứng dụng/phiên; RawView đã được thử
+    if (raw && (raw.diag || raw.via === 'raw')) { const pk = String((raw.win && raw.win.proc) || ''); s.uiaDiag = s.uiaDiag || {}; if (!s.uiaDiag[pk]) { s.uiaDiag[pk] = 1; deps.log && deps.log('desk', `B124: UIA “${pk}”: duyệt ${raw.via === 'raw' ? 'RawView (ControlView gần như rỗng)' : 'ControlView'}${raw.diag ? ` · đã xét ${raw.diag.seenControl}/${raw.diag.seen} nút, ${raw.diag.named} có tên · gốc lớp “${raw.diag.cls}” framework “${raw.diag.fw}” · con cấp 1: ${(raw.diag.kids || []).slice(0, 8).join(' ; ') || '(không có)'}` : ` · ${named} phần tử có tên`}`); } }
     let ocrLines = [];
     const proc = (raw.win && raw.win.proc) || (s.target && s.target.proc) || '';
     const poor = !!(raw.noTree || raw.error || named < 8 || U.poorTreeApp(proc));
@@ -305,6 +308,7 @@ function createDesktopAgent(deps) {
     }
     s.lastSeen = seen;
     const src = [raw.noTree ? null : raw.error ? 'cây giao diện lỗi: ' + raw.error.slice(0, 120) : `cây giao diện ${named} phần tử có tên`, ocrLines.length ? `OCR ${ocrLines.length} cụm chữ` : null, eyesKind ? 'ảnh chụp + ' + eyesKind : null].filter(Boolean).join(' · ');
+    s.obsN = (s.obsN || 0) + 1;
     deps.log && deps.log('desk', `Quan sát: "${obs.win ? obs.win.title : '?'}" · ${obs.elements.length} phần tử (${src}) · ${Date.now() - t0} ms`);
     status(`Đã quan sát: ${obs.elements.length} phần tử`);
     let text2 = text;
@@ -548,7 +552,7 @@ function createDesktopAgent(deps) {
       },
       look: async (w) => {
         s.target = { hwnd: w.hwnd, pid: w.pid, proc: w.proc, title: w.title }; s.obs = null;
-        const o = await observe(ctx, { thumb: false }); s.ensureObsText = o && o.text ? o.text : '';
+        const o = await observe(ctx, { thumb: false, vision: 'off' }); s.ensureObsText = o && o.text ? o.text : ''; // B124: chờ sẵn sàng chỉ cần OCR/cây, không mô tả ảnh (~4–5 giây/lần)
         const els = (s.obs && s.obs.elements) || [];
         return { sig: els.length ? screenHash(s.obs) + '|' + U.fold((s.obs.win && s.obs.win.title) || w.title || '') : null, text: els.map(e => e.name || e.value || '').filter(Boolean).join(' · ').slice(0, 4000) };
       },
@@ -558,13 +562,14 @@ function createDesktopAgent(deps) {
   async function ensureApp(a, ctx) {
     const app = String(a.app || a.window || a.name || '').trim(); if (!app) throw new Error('Cần tên ứng dụng (app).');
     const s = await begin(ctx); status(`Đang chuẩn bị ${app}…`);
+    s.ensureObsText = ''; const tE = Date.now();
     const r = await require('./agent/ensure-app').ensureApp(app, ensureDepsFor(s, ctx), { timeoutMs: Number(a.timeout_ms) > 0 ? Number(a.timeout_ms) : 45000 });
-    deps.log && deps.log('desk', `ensure_app ${app}: ${r.ok ? 'SẴN SÀNG' : 'LỖI ' + r.code} sau ${Math.round(r.ms / 100) / 10} giây — ${r.steps.join(' → ')}`);
+    deps.log && deps.log('desk', `ensure_app ${app}: ${r.ok ? 'SẴN SÀNG' : 'LỖI ' + r.code} sau ${Math.round(r.ms / 100) / 10} giây${r.fast ? ' (B124: đường nhanh, tổng ' + (Date.now() - tE) + ' ms)' : ''} — ${r.steps.join(' → ')}`);
     if (r.ok) {
-      const w = r.window; s.target = { hwnd: w.hwnd, pid: w.pid, proc: w.proc, title: w.title }; s.ensured = { app, at: Date.now(), hwnd: w.hwnd };
+      const w = r.window; s.target = { hwnd: w.hwnd, pid: w.pid, proc: w.proc, title: w.title }; s.ensured = { app, at: Date.now(), hwnd: w.hwnd, fast: !!r.fast };
       const what = { already: 'đã ở trước', restored: 'đã khôi phục từ thu nhỏ', raised: 'đã đưa lên trước (đang bị che)', launched: 'đã khởi động', tray: 'đã mở lại từ khay hệ thống', web: 'đã mở trên trình duyệt' }[r.how] || r.how;
       const o = s.ensureObsText || '';
-      return { forModel: `${app} sẵn sàng: cửa sổ “${w.title}” (${what}).${r.warn ? ' CẢNH BÁO: ' + r.warn + '.' : ''} Các bước: ${r.steps.join('; ')}.${o ? '\n' + o : ''}`, summary: r.how === 'already' ? `${app}: đã ở trước` : r.how === 'restored' ? `${app}: đã khôi phục từ thu nhỏ` : r.how === 'raised' ? `${app}: đã đưa lên trước (đang bị che)` : r.how === 'launched' ? `${app}: đã khởi động` : r.how === 'tray' ? `${app}: đã mở lại từ khay hệ thống` : r.how === 'web' ? `${app}: đã mở trên trình duyệt` : `${app}: sẵn sàng`, how: r.how, window: w, steps: r.steps };
+      return { fast: !!r.fast, forModel: `${app} sẵn sàng: cửa sổ “${w.title}” (${what}).${r.warn ? ' CẢNH BÁO: ' + r.warn + '.' : ''} Các bước: ${r.steps.join('; ')}.${o ? '\n' + o : ''}`, summary: r.how === 'already' ? `${app}: đã ở trước` : r.how === 'restored' ? `${app}: đã khôi phục từ thu nhỏ` : r.how === 'raised' ? `${app}: đã đưa lên trước (đang bị che)` : r.how === 'launched' ? `${app}: đã khởi động` : r.how === 'tray' ? `${app}: đã mở lại từ khay hệ thống` : r.how === 'web' ? `${app}: đã mở trên trình duyệt` : `${app}: sẵn sàng`, how: r.how, window: w, steps: r.steps };
     }
     return { error: r.error, code: r.code, ask: r.ask || null, stop: !!r.stop, forModel: r.error, summary: r.code === 'login' ? `${app}: màn hình đăng nhập — hỏi bạn` : r.code === 'not-found' ? `${app}: chưa mở được` : r.code === 'timeout' ? `${app}: chưa sẵn sàng (quá hạn)` : r.code === 'hung' ? `${app}: không phản hồi` : r.code === 'tray' ? `${app}: chưa mở được từ khay hệ thống` : `${app}: lỗi`, detail: r.error, steps: r.steps };
   }
@@ -595,6 +600,11 @@ function createDesktopAgent(deps) {
     } catch (e) { note('chưa xoá được ô tìm kiếm: ' + String(e.message || e).split('\n')[0]); return { cleared: false }; }
   }
   async function openChat(a, ctx) {
+    const s0 = await begin(ctx); const t0 = Date.now(); s0.quick = true; s0.obsN = 0;
+    try { const r = await openChatInner(a, ctx); deps.log && deps.log('desk', `B124: open_chat xong sau ${Date.now() - t0} ms, ${s0.obsN} lần quan sát`); return r; }
+    finally { s0.quick = false; }
+  }
+  async function openChatInner(a, ctx) {
     const s = await begin(ctx); const q = ctx && ctx.userQuery ? String(ctx.userQuery) : '';
     const rcp = q ? SV.recipientOf(q) || (SV.CURRENT_CHAT.test(q) ? null : null) : null;
     if (!rcp) { const ask = SV.askWho(); return { error: 'chưa rõ người nhận', stop: true, ask, forModel: ask, summary: 'chưa rõ người nhận — hỏi bạn' }; }
@@ -605,7 +615,7 @@ function createDesktopAgent(deps) {
     // ensure_app trước: mở/khôi phục/đưa lên trước + chờ sẵn sàng (trừ khi vừa làm cho đúng ứng dụng này trong lượt)
     if (app) {
       const fresh = s.ensured && U.fold(s.ensured.app) === U.fold(app) && Date.now() - s.ensured.at < 120e3;
-      if (!fresh) { const e = await ensureApp({ app }, ctx); if (e.error) { if (e.ask || e.code !== 'not-found') return { ...e, forModel: `open_chat: ${e.forModel}`, stop: true }; note(`chưa chuẩn bị được “${app}”: ${e.summary}`); try { await look({ window: app }, ctx); } catch {} } else note(`${e.summary}`); }
+      if (!fresh) { const e = await ensureApp({ app }, ctx); if (e.fast) s.obs = null; if (e.error) { if (e.ask || e.code !== 'not-found') return { ...e, forModel: `open_chat: ${e.forModel}`, stop: true }; note(`chưa chuẩn bị được “${app}”: ${e.summary}`); try { await look({ window: app }, ctx); } catch {} } else note(`${e.summary}`); }
       else { try { await look({ window: app }, ctx); note(`chuyển tới “${app}”`); } catch (e) { note(`chưa chuyển được tới “${app}”: ${String(e.message).split('\n')[0]}`); } }
     }
     if (!s.obs) await observe(ctx, { thumb: false });
@@ -1109,9 +1119,13 @@ function createDesktopAgent(deps) {
         const judge = (oo) => { const hits = matches(oo).length; if (hits >= (oo.poor ? 2 : 1)) return 'yes';
           const d = U.fold(oo.seen || ''); if (oo.seen) return /^\W*(co|yes)\b/.test(d) ? 'yes' : /^\W*(dang tai|loading)/.test(d) ? 'loading' : 'no'; return 'no'; };
         let verdict = 'no', waited = 0;
-        for (let i = 0; i < 3; i++) { // tối đa ~4,5 giây chờ kết quả
+        // B124: open_chat — lần nhìn ngay sau khi gõ đã thấy kết quả khớp (OCR) → khỏi chờ + nhìn thêm (mỗi lần nhìn trên máy thật 6–13 giây)
+        const early = s.quick && o2 && o2.obs && judge(o2) === 'yes'; if (early) { verdict = 'yes'; deps.log && deps.log('desk', 'B124: kết quả tìm đã hiện ngay sau khi gõ — bỏ lần chờ/nhìn thêm'); }
+        for (let i = 0; !early && i < 3; i++) { // tối đa ~4,5 giây chờ kết quả
           const ms = i === 0 ? 1200 : 1500; await sleep(ms); waited += ms; if (ctx.signal && ctx.signal.aborted) break;
-          o2 = await observe(ctx, { question: o.poor || deps.engine.status().vision ? ask : '' }); verdict = judge(o2);
+          const qv = o.poor || deps.engine.status().vision ? ask : '';
+          if (s.quick && qv) { o2 = await observe(ctx, {}); verdict = judge(o2); if (verdict !== 'yes') { o2 = await observe(ctx, { question: qv }); verdict = judge(o2); } } // B124: OCR thấy kết quả → khỏi hỏi mô hình nhìn ảnh
+          else { o2 = await observe(ctx, { question: qv }); verdict = judge(o2); }
           if (verdict !== 'loading') break;
         }
         s.searches = s.searches || []; s.searches.push({ text: q, found: verdict === 'yes' });

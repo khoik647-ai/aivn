@@ -124,6 +124,13 @@ async function ensureApp(app, d, opt = {}) {
       }
       if (warn) note(warn);
     }
+    // B124 (máy thật beta.2.6: “đã ở trước” mất 22–41 giây vì 2 lần nhìn OCR + mô tả ảnh): cửa sổ ĐÃ ở trước, đang hiện, không thu nhỏ,
+    // không treo → sẵn sàng ngay, không khởi động/không OCR (mục tiêu < 2 giây). Màn hình đăng nhập: chỉ kiểm theo tiêu đề.
+    if (how0 === 'already' && !opt.slowReady && w0 && w0.active && !w0.min && w0.vis !== false && !w0.hung) {
+      note('cửa sổ đang ở trước, đang hiện, không thu nhỏ, không treo → sẵn sàng ngay (bỏ bước nhìn chờ)');
+      if (!opt.noLoginCheck) { const why = loginWall(w0.title, ''); if (why) { const ask = loginAsk(title || app, why); return { ...fail('login', ask, { window: w0 }), ask, stop: true }; } }
+      return { ok: true, app, how: how0, window: w0, warn, steps, ms: now() - t0, fast: true };
+    }
     // chờ sẵn sàng: không treo, cây giao diện/OCR giống nhau 2 lần nhìn liên tiếp
     let prev = null, hungSince = null, looks = 0, last = null;
     for (;;) {

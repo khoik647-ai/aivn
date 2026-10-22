@@ -172,6 +172,10 @@ test('ensure_app thật (Electron + Xvfb + xfwm4, Zalo giả): bị che → đư
   assert.ok(st['ensure-covered'].steps.some(x => /sẵn sàng sau \d+ lần nhìn/.test(x)));
   assert.strictEqual(d.minimizedBefore, true); assert.strictEqual(d.minimizedAfter, false);
   assert.ok(st['ensure-minimized'].ok && st['ensure-minimized'].how === 'restored', JSON.stringify(st['ensure-minimized']));
+  // B124: đã ở trước → đường nhanh, không nhìn chờ, < 2 giây
+  const ea = st['ensure-already']; assert.ok(ea && ea.ok && ea.how === 'already', JSON.stringify(ea));
+  assert.ok(ea.ms < 2000, 'B124: ensure_app khi đã ở trước phải < 2 giây, đo được ' + ea.ms + ' ms');
+  assert.ok(ea.steps.some(x => /sẵn sàng ngay \(bỏ bước nhìn chờ\)/.test(x)), JSON.stringify(ea.steps)); assert.ok(!ea.steps.some(x => /lần nhìn/.test(x)));
   assert.match(st['ensure-openchat'].forModel, /Zalo: đã đưa lên trước|Zalo: đã ở trước/, 'open_chat phải chạy ensure_app trước');
   assert.deepStrictEqual(d.final.sent, [], 'không gửi gì khi chưa xác nhận người nhận');
   // B122: fake Zalo giữ chữ tìm sau khi mở chat (như máy thật) → open_chat phải xoá ô tìm kiếm và kiểm đã trống
