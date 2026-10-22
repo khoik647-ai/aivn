@@ -204,6 +204,12 @@ function initStores() {
     temperature: 0.7, maxTokens: 1024, contextSize: 0, perfMode: 'auto', apiPort: 1234, apiAutoStart: false, apiLan: false, apiCors: false, apiKey: '', apiTtlMin: 0, imported: [], lastModel: null, hfToken: '', uiLang: 'vi', theme: 'light', themeFx: 'full', rag: true, vision: true,
     agentFolders: [], agentWeb: false, agentPython: false, agentMemory: true, agentTemperature: 0.2, agentComputer: true, agentScreen: false, agentScreenMode: 'each', agentAutonomy: false, agentScreenBudget: 40, agentAutoReadOnly: false, keepInTray: false, openAtLogin: false,
   });
+  // bản chuyển thư mục mô hình còn dở (sập máy giữa chừng): đủ tệp thì trỏ sang đích, thiếu thì hoàn tác — không để mô hình “biến mất”
+  try {
+    const rec = require('./models-dir').recoverMove(path.join(ud, 'models-move.json'));
+    if (rec && rec.resumed) { settings.data.modelsDir = rec.dir; settings.save(); LOG.log('app', 'Tiếp tục chuyển thư mục mô hình còn dở → ' + rec.dir); }
+    else if (rec && rec.rolledBack) LOG.log('app', 'Đã hoàn tác chuyển thư mục mô hình còn dở; dữ liệu vẫn ở ' + rec.dir);
+  } catch (e) { LOG.log('app', 'Không xử lý được bản chuyển mô hình còn dở: ' + e.message); }
   // thư mục mô hình do người dùng chọn (Cài đặt → Chung / Mô hình của tôi → Đổi thư mục); ổ đã rút / không ghi được → về mặc định, báo trong nhật ký
   if (!QA_PROFILE && settings.data.modelsDir) { const v = require('./models-dir').validateTarget(settings.data.modelsDir); if (v.ok) paths.models = v.dir; else { modelsDirProblem = `${settings.data.modelsDir}: ${v.error}`; LOG.log('app', 'Thư mục mô hình đã chọn không dùng được, tạm dùng thư mục mặc định: ' + modelsDirProblem); } }
   // B84: --agent-settings-from main — chép cài đặt AIVN AGENT (agent*) từ hồ sơ thật sang hồ sơ QA; hồ sơ thật chỉ ĐỌC
@@ -1279,11 +1285,15 @@ function registerIpc() {
     if (mode === 'move') {
       const st = engine.status(); if (st.loaded && st.path && path.resolve(st.path).startsWith(path.resolve(old) + path.sep)) { await engine.unloadModel(); send('model:status', engine.status()); }
       dirMove = { ac: new AbortController() }; LOG.log('app', `Chuyển mô hình: ${old} → ${v.dir}`);
-      try { const r = await MD.moveModels(old, v.dir, { signal: dirMove.ac.signal, onProgress: (p) => send('models:dir-progress', p) });
+      const journal = path.join(paths.userData, 'models-move.json');
+      try { const r = await MD.moveModels(old, v.dir, { signal: dirMove.ac.signal, journal, onProgress: (p) => { try { send('models:dir-progress', p); } catch (err) { LOG.log('app', 'Tiến độ chuyển mô hình: ' + err.message); } } });
         paths.models = v.dir; settings.data.modelsDir = v.dir; settings.data.modelDirsExtra = (settings.data.modelDirsExtra || []).filter(d => path.resolve(d) !== path.resolve(v.dir)); settings.save();
+        try { MD.journalClear(journal); } catch {}
         LOG.log('app', `Đã chuyển ${r.moved} tệp (${(r.bytes / 1024 ** 3).toFixed(2)} GB)${r.sameDrive ? ' (cùng ổ, đổi tên)' : ''} → ${v.dir}`); send('models:dir-progress', { finished: true, ...r });
+        // B189: gửi thêm một sự kiện tiến độ SAU khi invoke đã trả — tái hiện thanh kẹt khi IPC đến muộn (chỉ QA)
+        if (String(process.env.AIVN_QA_MODE || '') === '1' && process.env.AIVN_MDIR_LATE_PROGRESS === '1') setTimeout(() => { try { send('models:dir-progress', { done: 1, total: 1, file: 'late.gguf', bytesDone: 1, bytesTotal: 1 }); } catch {} }, 400);
         return { ok: true, ...r, info: dirInfo() };
-      } catch (e) { LOG.log('app', 'Chuyển mô hình dừng: ' + e.message); send('models:dir-progress', { finished: true, error: e.message }); return { ok: false, error: e.message, info: dirInfo() }; }
+      } catch (e) { LOG.log('app', 'Chuyển mô hình dừng: ' + e.message); try { send('models:dir-progress', { finished: true, error: e.message, code: e.code || '' }); } catch {} return { ok: false, error: e.message, code: e.code || '', info: dirInfo() }; }
       finally { dirMove = null; }
     }
     // chỉ trỏ sang thư mục mới: thư mục cũ vẫn được quét

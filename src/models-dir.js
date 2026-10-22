@@ -3,6 +3,8 @@
 // chuyển mô hình hiện có sang (có tiến độ; cùng ổ thì đổi tên tức thì, khác ổ thì chép rồi kiểm kích thước rồi mới xoá bản cũ)
 // hoặc chỉ trỏ sang thư mục mới (thư mục cũ vẫn được quét để mô hình cũ còn hiện).
 const fs = require('fs'); const path = require('path');
+const { Transform } = require('stream');
+const { pipeline } = require('stream/promises');
 const GB = 1024 ** 3; const MARGIN = 512 * 1024 ** 2; // chừa 512 MB cho hệ điều hành / tệp tạm
 const gb = (n) => (n / GB).toFixed(1).replace('.', ',');
 // ổ đĩa / gốc gắn kết để hiện cho người dùng (“ổ D:”)
@@ -29,34 +31,120 @@ function listFiles(root) {
   walk(root, ''); return out;
 }
 const sameDevice = (a, b) => { try { return fs.statSync(existingAncestor(a)).dev === fs.statSync(existingAncestor(b)).dev; } catch { return false; } };
-// chuyển mô hình: onProgress({ done, total, file, bytesDone, bytesTotal }); signal để huỷ (tệp đang chép dở bị xoá, bản gốc giữ nguyên)
-async function moveModels(from, to, { onProgress = () => {}, signal = null, statfs, copy = false } = {}) {
-  const files = listFiles(from); const bytesTotal = files.reduce((s, f) => s + f.size, 0);
+const STALL_MSG = 'Chuyển thư mục mô hình bị dừng vì quá lâu không thấy tiến triển. Mô hình vẫn nằm ở thư mục cũ, không mất tệp. Hãy bấm Thử lại.';
+const ABORT_MSG = 'Đã huỷ chuyển mô hình.';
+function pruneEmpty(d) {
+  let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+  for (const e of es) if (e.isDirectory()) { const p = path.join(d, e.name); pruneEmpty(p); try { fs.rmdirSync(p); } catch {} }
+}
+function journalWrite(file, obj) {
+  if (!file) return;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = file + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(obj)); fs.renameSync(tmp, file);
+}
+function journalClear(file) { if (!file) return; try { fs.rmSync(file, { force: true }); } catch {} try { fs.rmSync(file + '.tmp', { force: true }); } catch {} }
+// Sự kiện tiến độ đến SAU khi lượt chuyển đã xong không được bật lại thanh (IPC send và lời invoke có thể đảo thứ tự khi máy nặng).
+function dirProgressGate(job, p) {
+  if (!job || !job.moving) return { moving: false, show: false };
+  if (!p || p.finished) return { moving: false, show: false, hide: true, error: (p && p.error) || null, code: (p && p.code) || null };
+  return { moving: true, show: true };
+}
+// Bản chuyển dở (sập giữa chừng): đủ tệp ở đích → trỏ sang đích; thiếu → đưa tệp đã đổi tên về chỗ cũ, xoá bản chép dở.
+function recoverMove(file) {
+  let j; try { j = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+  if (!j || !j.from || !j.to || !Array.isArray(j.rels)) { journalClear(file); return null; }
+  const destOk = (f) => { try { return fs.statSync(path.join(j.to, f.rel)).size === f.size; } catch { return false; } };
+  const srcOk = (f) => { try { return fs.statSync(path.join(j.from, f.rel)).size === f.size; } catch { return false; } };
+  if (j.rels.length && j.rels.every(destOk)) {
+    for (const f of j.rels) { try { fs.rmSync(path.join(j.from, f.rel), { force: true }); } catch {} }
+    pruneEmpty(j.from); journalClear(file); return { resumed: true, dir: path.resolve(j.to) };
+  }
+  for (const f of j.rels) {
+    const src = path.join(j.from, f.rel), dst = path.join(j.to, f.rel);
+    try { fs.rmSync(dst + '.aivn-moving', { force: true }); } catch {}
+    if (srcOk(f)) { try { fs.rmSync(dst, { force: true }); } catch {} }
+    else if (!fs.existsSync(src) && destOk(f)) { try { fs.mkdirSync(path.dirname(src), { recursive: true }); fs.renameSync(dst, src); } catch { try { fs.copyFileSync(dst, src); if (fs.statSync(src).size === f.size) fs.rmSync(dst, { force: true }); } catch {} } }
+    else { try { if (fs.existsSync(dst)) fs.rmSync(dst, { force: true }); } catch {} }
+  }
+  pruneEmpty(j.to); journalClear(file); return { rolledBack: true, dir: path.resolve(j.from) };
+}
+async function copyOne(src, tmp, { signal, onBytes, copyFile }) {
+  if (copyFile) return copyFile(src, tmp, { signal, onBytes });
+  let n = 0;
+  const count = new Transform({ transform(chunk, _enc, cb) { n += chunk.length; try { if (onBytes) onBytes(n); } catch {} cb(null, chunk); } });
+  await pipeline(fs.createReadStream(src, { highWaterMark: 4 << 20 }), count, fs.createWriteStream(tmp), { signal });
+}
+// chuyển mô hình: onProgress({ done, total, file, bytesDone, bytesTotal }); signal để huỷ.
+// Bản gốc chỉ xoá sau khi MỌI tệp đã nằm đủ ở đích. Lỗi / hết hạn / huỷ → đổi tên ngược hoặc xoá bản chép dở, không mất tệp.
+async function moveModels(from, to, { onProgress = () => {}, signal = null, statfs, copy = false, stallMs = 60000, journal = null, copyFile = null, afterEach = null } = {}) {
+  const files = listFiles(from).filter(f => !String(f.rel).endsWith('.aivn-moving'));
+  const bytesTotal = files.reduce((s, f) => s + f.size, 0);
   const same = !copy && sameDevice(from, to); // copy: buộc chép (kiểm thử đường khác ổ)
   if (!same) checkSpace(to, bytesTotal, statfs);
-  let bytesDone = 0, done = 0; const moved = [], skipped = [];
-  for (const f of files) {
-    if (signal && signal.aborted) throw Object.assign(new Error('Đã huỷ chuyển mô hình.'), { code: 'ABORT' });
-    const src = path.join(from, f.rel), dst = path.join(to, f.rel); fs.mkdirSync(path.dirname(dst), { recursive: true });
-    if (fs.existsSync(dst) && fs.statSync(dst).size === f.size) { fs.rmSync(src, { force: true }); skipped.push(f.rel); bytesDone += f.size; done++; onProgress({ done, total: files.length, file: f.rel, bytesDone, bytesTotal }); continue; }
-    let renamed = false; if (same) { try { fs.renameSync(src, dst); renamed = true; } catch {} }
-    if (!renamed) {
-      const tmp = dst + '.aivn-moving';
-      try {
-        await new Promise((resolve, reject) => { const rs = fs.createReadStream(src, { highWaterMark: 4 << 20 }), ws = fs.createWriteStream(tmp); let base = bytesDone;
-          const ab = () => { rs.destroy(); ws.destroy(); reject(Object.assign(new Error('Đã huỷ chuyển mô hình.'), { code: 'ABORT' })); }; if (signal) signal.addEventListener('abort', ab, { once: true });
-          rs.on('data', (c) => { base += c.length; onProgress({ done, total: files.length, file: f.rel, bytesDone: base, bytesTotal }); });
-          rs.on('error', reject); ws.on('error', reject); ws.on('finish', () => { if (signal) signal.removeEventListener('abort', ab); resolve(); }); rs.pipe(ws); });
-        if (fs.statSync(tmp).size !== f.size) throw new Error(`Chép “${f.rel}” không đủ dữ liệu`);
-        fs.renameSync(tmp, dst); fs.rmSync(src, { force: true });
-      } catch (e) { try { fs.rmSync(tmp, { force: true }); } catch {} throw e; }
+  const rels = files.map(f => ({ rel: f.rel, size: f.size }));
+  journalWrite(journal, { from: path.resolve(from), to: path.resolve(to), rels, phase: 'moving' });
+  const made = []; let bytesDone = 0, done = 0; const moved = [], skipped = [];
+  const stallAc = new AbortController(); let timer = null; let lastTell = 0;
+  const arm = () => { if (!(stallMs > 0)) return; clearTimeout(timer); timer = setTimeout(() => { try { stallAc.abort('stall'); } catch {} }, stallMs); };
+  const onUserAbort = () => { try { stallAc.abort('user'); } catch {} };
+  if (signal) { if (signal.aborted) onUserAbort(); else signal.addEventListener('abort', onUserAbort, { once: true }); }
+  const asStall = () => Object.assign(new Error(STALL_MSG), { code: 'ESTALL' });
+  const asAbort = () => Object.assign(new Error(ABORT_MSG), { code: 'ABORT' });
+  const fail = (e) => {
+    const reason = stallAc.signal.aborted ? stallAc.signal.reason : null;
+    if (reason === 'stall' || (e && e.code === 'ESTALL')) return asStall();
+    if (reason === 'user' || (signal && signal.aborted) || (e && (e.code === 'ABORT' || e.name === 'AbortError'))) return asAbort();
+    return e instanceof Error ? e : new Error(String(e || 'Không đổi được thư mục mô hình'));
+  };
+  const race = (p) => new Promise((resolve, reject) => {
+    if (stallAc.signal.aborted) { reject(fail(new Error('aborted'))); return; }
+    const onAb = () => reject(fail(new Error('aborted')));
+    stallAc.signal.addEventListener('abort', onAb, { once: true });
+    Promise.resolve(p).then(v => { stallAc.signal.removeEventListener('abort', onAb); resolve(v); }, e => { stallAc.signal.removeEventListener('abort', onAb); reject(fail(e)); });
+  });
+  const tell = (p, force) => {
+    const now = Date.now(); if (!force && now - lastTell < 200) { arm(); return; } lastTell = now; arm();
+    try { onProgress(p); } catch {}
+  };
+  const rollback = () => {
+    for (const m of made.reverse()) {
+      const src = path.join(from, m.rel), dst = path.join(to, m.rel);
+      try { fs.rmSync(dst + '.aivn-moving', { force: true }); } catch {}
+      if (m.kind === 'rename') {
+        if (!fs.existsSync(src) && fs.existsSync(dst)) { try { fs.mkdirSync(path.dirname(src), { recursive: true }); try { fs.renameSync(dst, src); } catch { fs.copyFileSync(dst, src); if (fs.statSync(src).size === fs.statSync(dst).size) fs.rmSync(dst, { force: true }); } } catch {} }
+      } else { try { fs.rmSync(dst, { force: true }); } catch {} }
     }
-    bytesDone += f.size; done++; moved.push(f.rel); onProgress({ done, total: files.length, file: f.rel, bytesDone, bytesTotal });
-  }
-  // dọn thư mục rỗng còn lại ở chỗ cũ (không xoá thư mục gốc)
-  const prune = (d) => { let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of es) if (e.isDirectory()) { prune(path.join(d, e.name)); try { fs.rmdirSync(path.join(d, e.name)); } catch {} } };
-  prune(from);
-  return { moved: moved.length, skipped: skipped.length, files: files.length, bytes: bytesTotal, sameDrive: same };
+    journalClear(journal);
+  };
+  arm();
+  try {
+    for (const f of files) {
+      if (stallAc.signal.aborted || (signal && signal.aborted)) throw fail(new Error('aborted'));
+      const src = path.join(from, f.rel), dst = path.join(to, f.rel); fs.mkdirSync(path.dirname(dst), { recursive: true });
+      if (fs.existsSync(dst) && fs.statSync(dst).size === f.size) {
+        skipped.push(f.rel); bytesDone += f.size; done++; tell({ done, total: files.length, file: f.rel, bytesDone, bytesTotal }, true);
+        if (afterEach) await race(Promise.resolve().then(() => afterEach({ rel: f.rel, index: done })));
+        continue;
+      }
+      let renamed = false;
+      if (same) { try { fs.renameSync(src, dst); renamed = true; made.push({ rel: f.rel, kind: 'rename' }); } catch {} }
+      if (!renamed) {
+        const tmp = dst + '.aivn-moving';
+        try {
+          await race(copyOne(src, tmp, { signal: stallAc.signal, copyFile, onBytes: (n) => tell({ done, total: files.length, file: f.rel, bytesDone: bytesDone + Math.min(n, f.size), bytesTotal }, false) }));
+          if (!fs.existsSync(tmp) || fs.statSync(tmp).size !== f.size) throw new Error(`Chép “${f.rel}” không đủ dữ liệu`);
+          fs.renameSync(tmp, dst); made.push({ rel: f.rel, kind: 'copy' });
+        } catch (e) { try { fs.rmSync(tmp, { force: true }); } catch {} throw fail(e); }
+      }
+      bytesDone += f.size; done++; moved.push(f.rel); tell({ done, total: files.length, file: f.rel, bytesDone, bytesTotal }, true);
+      if (afterEach) await race(Promise.resolve().then(() => afterEach({ rel: f.rel, index: done })));
+    }
+    journalWrite(journal, { from: path.resolve(from), to: path.resolve(to), rels, phase: 'commit' });
+    for (const f of files) { try { fs.rmSync(path.join(from, f.rel), { force: true }); } catch {} }
+    pruneEmpty(from);
+    return { moved: moved.length, skipped: skipped.length, files: files.length, bytes: bytesTotal, sameDrive: same };
+  } catch (e) { rollback(); throw (e && (e.code === 'ESTALL' || e.code === 'ABORT')) ? e : fail(e); }
+  finally { clearTimeout(timer); if (signal) try { signal.removeEventListener('abort', onUserAbort); } catch {} }
 }
 // B79 (QA lượt 8): xoá mô hình đã tải — tệp mô hình (mọi phần nếu tách), tệp thị giác mmproj nếu KHÔNG mô hình nào khác dùng chung, rồi dọn thư mục trống.
 // Không bao giờ xoá gì ngoài thư mục mô hình. Trả về danh sách tệp đã xoá.
@@ -70,4 +158,4 @@ function deleteModelFiles(m, all, root) {
   for (let d = path.dirname(m.path); inRoot(d) && path.resolve(d) !== path.resolve(root); d = path.dirname(d)) { try { fs.rmdirSync(d); } catch { break; } }
   return gone;
 }
-module.exports = { deleteModelFiles, freeBytes, checkSpace, spaceError, validateTarget, listFiles, moveModels, driveOf, MARGIN };
+module.exports = { deleteModelFiles, freeBytes, checkSpace, spaceError, validateTarget, listFiles, moveModels, driveOf, MARGIN, recoverMove, journalClear, dirProgressGate, STALL_MSG, ABORT_MSG };

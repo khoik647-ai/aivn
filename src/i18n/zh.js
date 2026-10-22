@@ -2726,7 +2726,10 @@
     "Kiểm tra lại đường dẫn, tên tệp, và xem thư mục đó có nằm trong thư mục được phép không.": "请检查路径、文件名，以及该文件夹是否在允许的文件夹中。",
     "“{0}” là thư mục, không phải tệp.": "“{0}” 是文件夹，不是文件。",
     "AGENT đang chạy — đợi xong hoặc sang AGENT bấm Dừng": "AGENT 正在运行 — 请等它结束，或切到 AGENT 点击停止",
-    "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "对话正在运行 — 请等它结束，或切到对话点击停止"
+    "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "对话正在运行 — 请等它结束，或切到对话点击停止",
+    "Không chuyển xong thư mục mô hình": "未能完成移动模型文件夹",
+    "Thử lại": "重试",
+    "Chuyển thư mục mô hình bị dừng vì quá lâu không thấy tiến triển. Mô hình vẫn nằm ở thư mục cũ, không mất tệp. Hãy bấm Thử lại.": "移动模型文件夹已停止，因为太久没有进展。模型仍在原文件夹中，没有丢失文件。请点击重试。"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;
