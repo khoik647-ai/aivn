@@ -24,4 +24,5 @@ test('Electron: thẻ Runtime vẽ được (phiên bản llama-server + node-ll
   const r = JSON.parse(fs.readFileSync(path.join(d, 'r.json'), 'utf8'));
   assert.deepStrictEqual(r.steps.filter(s => !s.ok).map(s => `${s.n} ${s.action}: ${s.error}`), []); assert.deepStrictEqual(r.consoleErrors, []); assert.strictEqual(r.status, 'done');
   assert.match(r.reads.ver, /llama-server\) b\d+/); assert.match(r.reads.ver, /node-llama-cpp \d+\.\d+\.\d+/); assert.match(r.reads.cuda, /\S/);
+  assert.match(r.reads.active, /Chưa nạp mô hình nhìn ảnh — lần nạp tới sẽ dùng: (CUDA|bản đi kèm \((Vulkan|Metal|CPU)\))/, 'B123: runtime-active phải có chữ');
 });

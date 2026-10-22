@@ -2412,7 +2412,9 @@ async function paintRuntime() {
   const bundled = r.platform === 'win32' ? 'Vulkan' : r.platform === 'darwin' ? 'Metal' : 'CPU';
   $('#rtVersions').innerHTML = `llama.cpp (llama-server) <b>${esc(r.versions.llamaServer)}</b> — bản đi kèm: ${esc(bundled)}${c.installed ? ' · CUDA 12.4' : ''}<br>node-llama-cpp ${esc(r.versions.nodeLlamaCpp || '?')} (trò chuyện chữ${r.chatGpu ? ', GPU: ' + esc(String(r.chatGpu)) : ''}) · Electron ${esc(r.versions.electron)}`;
   const actRt = r.active ? (r.active.runtime === 'cuda' ? 'CUDA' : `bản đi kèm (${bundled})`) : '';
-  $('#rtActive').textContent = !r.active ? '' : r.active.fallback ? `Đang chạy: ${r.active.id} — ${actRt}. CUDA lỗi nên đã quay về bản đi kèm: ${r.active.fallback}` : `Đang chạy: ${r.active.id} — ${actRt}`;
+  const prefRt = r.pref === 'cuda' ? 'CUDA' : `bản đi kèm (${bundled})`;
+  // B123: luôn có chữ (QA đọc data-testid="runtime-active"): chưa nạp mô hình nhìn ảnh → nói runtime sẽ dùng
+  $('#rtActive').textContent = !r.active ? `Chưa nạp mô hình nhìn ảnh — lần nạp tới sẽ dùng: ${prefRt}` : r.active.fallback ? `Đang chạy: ${r.active.id} — ${actRt}. CUDA lỗi nên đã quay về bản đi kèm: ${r.active.fallback}` : `Đang chạy: ${r.active.id} — ${actRt}`;
   const gpu = c.gpu ? `${c.gpu.name} · driver ${c.gpu.driver}${c.gpu.vramMiB ? ' · ' + (c.gpu.vramMiB / 1024).toFixed(1) + ' GB VRAM' : ''}` : '';
   const lines = [];
   if (gpu) lines.push(esc(gpu));

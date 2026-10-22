@@ -135,3 +135,25 @@ test('B122 (Electron, chat giả giữ chữ tìm như Zalo): sau open_chat ô t
   assert.doesNotMatch(st.forModel.split('Màn hình bây giờ')[1] || '', /Đóng/, 'màn hình trả cho mô hình phải là màn hình SAU khi xoá');
   assert.match(fs.readFileSync(path.join(ud, 'logs', 'aivn.log'), 'utf8'), /B122: sau open_chat “Trần Quỳnh Anh”: ô tìm kiếm đã trống/);
 });
+
+// ---------- B123: nhãn runtime ----------
+test('B123a: [load] ghi bộ máy THẬT (llama-server CUDA/Vulkan/Metal/CPU), không phải GPU của node-llama-cpp', () => {
+  const E = require('../src/engine');
+  const plat = process.platform === 'win32' ? 'vulkan' : process.platform === 'darwin' ? 'metal' : 'cpu';
+  assert.strictEqual(E.serverBackend({ runtime: 'cuda', gpuLayers: 37 }), 'cuda');
+  assert.strictEqual(E.serverBackend({ runtime: 'bundled', gpuLayers: 37 }), plat);
+  assert.strictEqual(E.serverBackend({ runtime: 'cuda', gpuLayers: 0 }), 'cpu');
+  assert.strictEqual(E.serverBackend(null), null);
+  assert.match(src('src/engine.js'), /vision: true, gpu: llama && llama\.gpu, backend: serverBackend\(v\)/);
+  assert.match(src('src/main.js'), /gpu: st\.backend \|\| st\.gpu, runtime: st\.vision \? \(st\.runtime \|\| 'bundled'\) : 'node-llama-cpp'/);
+});
+test('B123b/c: runtime-active luôn có chữ; lời giới thiệu không còn nói CUDA “thường nhanh hơn” (vi/en/zh); số đo vẫn hiện', () => {
+  assert.match(src('src/renderer/app.js'), /Chưa nạp mô hình nhìn ảnh — lần nạp tới sẽ dùng: \$\{prefRt\}/);
+  const html = src('src/renderer/index.html');
+  assert.doesNotMatch(html, /thường nhanh hơn Vulkan/); assert.match(html, /trên một số GPU có thể nhanh hơn Vulkan \(xem số đo bên dưới\)/);
+  assert.match(html, /data-testid="runtime-cuda-note">Tuỳ chọn\. Đo trên RTX 4070 SUPER/);
+  const en = src('src/i18n/en.js'), zh = src('src/i18n/zh.js');
+  assert.doesNotMatch(en, /usually faster than Vulkan/); assert.match(en, /faster than Vulkan on some GPUs \(see the measurement below\)/);
+  assert.doesNotMatch(zh, /通常比 Vulkan 更快/); assert.match(zh, /在部分 GPU 上可能比 Vulkan 更快/);
+  for (const k of ['Chưa nạp mô hình nhìn ảnh — lần nạp tới sẽ dùng: {0}']) { assert.ok(en.includes(JSON.stringify(k)), 'en ' + k); assert.ok(zh.includes(JSON.stringify(k)), 'zh ' + k); }
+});
