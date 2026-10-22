@@ -16,7 +16,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const { riskOf, RISKY_NAME, ACT_LABEL, ALIASES } = require('./agent/desk-policy');
 const AU = require('./agent/autonomy');
 
-const DRAFT_SEND = /(chỉ soạn|soạn sẵn|không gửi|đừng gửi|chưa gửi|don't send|do not send|draft only|只起草|不要发送|别发送|先不要发)/iu;
+const DRAFT_SEND = SV.DRAFT_ONLY; // lệnh chỉ soạn (một nguồn: send-verify)
 // B94/B101: chữ vừa gõ nằm ở đâu — 'composer' (ô soạn tin), 'wrong' (ô khác, vd. ô tìm kiếm) hoặc null (không đọc được)
 function landedOf(before, obs, text, composerBox) {
   const SVl = require('./agent/send-verify'); const Ul = require('./agent/uitree');

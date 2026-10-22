@@ -6,7 +6,7 @@
 //   3) thấy bong bóng tin vừa gửi trong khung tin nhắn (không tính ô soạn, tiêu đề, danh sách bên trái).
 const fold = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 const HONOR = /^(ban|anh|chi|em|co|chu|bac|ong|ba|me|bo|ma|thay|di|cau|mo|duong|thim|sep|giao su|ts|ths|pgs|mr|mrs|ms|mx|miss|dr|prof)$/;
-const STOP = String.raw`(?:trên|ở|qua|bằng|là|rằng|nội dung|với nội dung|tiêu đề|chủ đề|nói|bảo|hỏi|nhắc|chúc|mời|không cần|khỏi|đừng|và|rồi|nhé|nha|giúp|hộ|ngay|lúc|vào|on|via|in|saying|that|about|with|an email|an e-mail|a message|a text|a note)`;
+const STOP = String.raw`(?:nhưng|but|and don't|and do not|mà đừng|trên|ở|qua|bằng|là|rằng|nội dung|với nội dung|tiêu đề|chủ đề|nói|bảo|hỏi|nhắc|chúc|mời|không cần|khỏi|đừng|và|rồi|nhé|nha|giúp|hộ|ngay|lúc|vào|on|via|in|saying|that|about|with|an email|an e-mail|a message|a text|a note)`;
 const NOT_NAME = /^(tôi|mình|em|tao|tớ|me|ai|mọi người|tin|tin nhắn|lời|câu|một|email|thư|mail|cho|tới|đến|với|họ|nó|anh ấy|chị ấy|bạn ấy)$/iu;
 
 // tên người nhận trong yêu cầu: “nhắn Trần Quỳnh Anh là…”, “gửi email cho thầy Lê Văn Hùng tiêu đề…”, “Messenger: nhắn Quỳnh Anh "…"”,
@@ -55,7 +55,8 @@ function recipientOf0(query) {
   // B31 (QA lượt 5): câu tiếng Trung — 给 X 发消息/发信息/发微信 · 发(消息/信息)给 X · 告诉 X · 跟/和 X 说 · 私信 X
   const zh = /(?:给|向)\s*([^\s，。、：:"“”给向][^，。、：:"“”]{0,40}?)\s*(?:发|发送|傳|传)(?:一[条條]|个)?\s*(?:消息|信息|短信|讯息|訊息|微信|邮件|郵件|私信)/u.exec(q)
     || /(?:发|发送)(?:一[条條])?\s*(?:消息|信息|短信|邮件|私信)?\s*给\s*([^，。、：:"“”]{1,40}?)(?=\s*(?:[，。、：:"“”]|说|，|$))/u.exec(q)
-    || /(?:告诉|跟|和|私信)\s*([^，。、：:"“”]{1,40}?)\s*(?:说|讲|：|:|，)/u.exec(q);
+    || /(?:告诉|跟|和|私信)\s*([^，。、：:"“”]{1,40}?)\s*(?:说|讲|：|:|，)/u.exec(q)
+    || /给\s*([^\s，。、：:"“”给的][^，。、：:"“”给]{0,40}?)\s*的\s*(?:消息|信息|短信|讯息|訊息|邮件|郵件|私信|微信)/u.exec(q); // “起草一条给王老师的消息” (B: soạn sẵn)
   // “告诉 Trần Quỳnh Anh 明天…” (không có dấu câu): tên Latinh/tiếng Việt kết thúc ở chữ Hán đầu tiên
   const zhLatin = !zh && /(?:告诉|跟|和|私信|给|发给|通知|提醒)\s*((?:[A-Za-zÀ-ỹĐđ][A-Za-zÀ-ỹĐđ'’.-]*)(?:\s+[A-Za-zÀ-ỹĐđ][A-Za-zÀ-ỹĐđ'’.-]*){0,5})\s*(?=[\u3400-\u9fff，。：:！!？?]|$)/u.exec(q);
   if (zhLatin && !/^(?:messenger|zalo|telegram|teams|facebook|discord|gmail|outlook|email)$/i.test(zhLatin[1].trim())) return zhLatin[1].trim();
@@ -67,18 +68,19 @@ function recipientOf0(query) {
   const grp = /(?:vào|tới|đến|lên|trong|to|into)\s+(?:the\s+)?((?:nhóm|group)\s+[^,.!?:;"“”'‘’«»]{1,50}?)(?=\s+(?:trên|qua|bằng|ở|với nội dung|nội dung|là|rằng|on|via|saying)(?=[\s,.:!?]|$)|[,.!?:;"“”«»]|$)/iu.exec(q);
   if (grp && grp[1].trim().split(' ').length <= 7) return grp[1].trim().replace(/\s+(?:zalo|messenger|telegram)$/i, '');
   { const st = sayTo(q); if (st) { const n = String(st).replace(/^[\s,.;:!?]+|[\s,.;:!?]+$/g, '').replace(/\s+(?:trên|qua|ở|bằng|on|via|in)\s+(?:zalo|messenger|telegram|teams|microsoft teams|facebook|discord|slack|whatsapp|viber)$/iu, ''); if (n && !NOT_NAME.test(n) && n.split(' ').length <= 6 && !/^(?:tôi|mình|em|tao|tớ|me|i|họ|nó|mọi người|everyone)$/iu.test(n)) return n; } }
-  const verb = /(?:^|[\s:,.(])((?:soạn|viết|thảo)\s+(?:một\s+)?(?:email|e-mail|mail|thư điện tử|thư|tin nhắn|tin)(?:\s+mới)?|nhắn tin|nhắn|gửi tin nhắn|gửi tin|gửi email|gửi mail|gửi thư|gửi|chat với|chat|trò chuyện với|text|message|msg|send|email|dm|reply|respond)(?=\s)/iu.exec(q);
+  const clean = (n) => { n = String(n || '').replace(/^[\s,.;:!?]+|[\s,.;:!?]+$/g, ''); if (!n || NOT_NAME.test(n) || /^(tôi|mình|tao|tớ|me|ai|họ|nó|mọi|tin|email|thư|mail|file|tệp)$/iu.test(n.split(' ')[0]) || n.split(' ').length > 6) return null; return n; };
+  const stopRe = new RegExp(String.raw`\s+${STOP}(?=[\s,.!?:]|$)|[,.!?;]`, 'iu');
+  const take = (s) => { const i = s.search(stopRe); return clean(i >= 0 ? s.slice(0, i) : s); };
+  // B85: “gửi tin "AIVN test" cho Cloud của tôi” / “send "hi" to Lan” — nội dung trong ngoặc kép ĐỨNG TRƯỚC người nhận
+  // (cả việc chỉ soạn: “soạn sẵn tin "X" cho Y”, “draft a message "X" to Y”)
+  { const qm = /(?:^|[\s:,.(])(?:gửi|nhắn|send|text|message|(?:soạn|viết|thảo)(?:\s+(?:sẵn|nháp|trước|giúp|hộ|giùm)){0,2}|draft|compose|write|prepare)(?:\s+(?:một\s+|a\s+)?(?:(?:tin nhắn|tin|lời nhắn|email|mail|thư|message|text)|draft(?:\s+(?:message|email|text))?))?\s*[:：]?\s*["“«]([^"”»]{1,400})["”»]\s+(?:cho|tới|đến|to|for)\s+(.+)$/iu.exec(q);
+    if (qm) { const n = take(qm[2].replace(/\s+(?:trên|qua|bằng|on|via|in)\s+(?:zalo|messenger|telegram|teams|microsoft teams|facebook|discord|slack|whatsapp|viber)(?=[\s,.!?]|$).*$/iu, '')); if (n) return n; } }
+  const verb = /(?:^|[\s:,.(])((?:soạn|viết|thảo)(?:\s+(?:sẵn|nháp|trước|giúp|hộ|giùm)){0,2}\s+(?:một\s+)?(?:email|e-mail|mail|thư điện tử|thư|tin nhắn|tin)(?:\s+mới)?|nhắn tin|nhắn|gửi tin nhắn|gửi tin|gửi email|gửi mail|gửi thư|gửi|chat với|chat|trò chuyện với|text|message|msg|send|email|dm|reply|respond)(?=\s)/iu.exec(q);
   if (!verb) return null;
   // phần đầu câu: từ động từ tới chỗ bắt đầu nội dung (là/rằng/:/ngoặc kép/tiêu đề…)
   let head = q.slice(verb.index + verb[0].length).replace(/^\s+(?:giúp|hộ|giùm|dùm)(?:\s+(?:mình|tôi|em))?(?=\s)/iu, '').replace(/^\s+(?:mới\s+)?gửi(?=\s+\S)/iu, ''); // “soạn email gửi thầy Nam” → “thầy Nam”
   const cut = head.search(/\s(?:là|rằng|nội dung|với nội dung|tiêu đề|chủ đề|saying|that)(?=[\s,.:!?]|$)|[:"“”«»]/iu);
   if (cut >= 0) head = head.slice(0, cut);
-  const clean = (n) => { n = String(n || '').replace(/^[\s,.;:!?]+|[\s,.;:!?]+$/g, ''); if (!n || NOT_NAME.test(n) || /^(tôi|mình|tao|tớ|me|ai|họ|nó|mọi|tin|email|thư|mail|file|tệp)$/iu.test(n.split(' ')[0]) || n.split(' ').length > 6) return null; return n; };
-  const stopRe = new RegExp(String.raw`\s+${STOP}(?=[\s,.!?:]|$)|[,.!?;]`, 'iu');
-  const take = (s) => { const i = s.search(stopRe); return clean(i >= 0 ? s.slice(0, i) : s); };
-  // B85: “gửi tin "AIVN test" cho Cloud của tôi” / “send "hi" to Lan” — nội dung trong ngoặc kép ĐỨNG TRƯỚC người nhận
-  { const qm = /(?:^|[\s:,.(])(?:gửi|nhắn|send|text|message)(?:\s+(?:một\s+|a\s+)?(?:tin nhắn|tin|lời nhắn|email|mail|thư|message|text))?\s*[:：]?\s*["“«]([^"”»]{1,400})["”»]\s+(?:cho|tới|đến|to|for)\s+(.+)$/iu.exec(q);
-    if (qm) { const n = take(qm[2].replace(/\s+(?:trên|qua|bằng|on|via|in)\s+(?:zalo|messenger|telegram|teams|microsoft teams|facebook|discord|slack|whatsapp|viber)(?=[\s,.!?]|$).*$/iu, '')); if (n) return n; } }
   // “… cho/tới/đến/với/to <tên>”
   const m = /(?:^|\s)(?:cho|tới|đến|với|to)\s+(.+)$/iu.exec(head);
   if (m) { const n = take(m[1]); if (n) return n; }
@@ -476,4 +478,7 @@ function fileAt(el, obs) {
 // việc có nhắc tới tệp/đính kèm (bỏ phần nội dung tin trong ngoặc kép)
 const WANTS_FILE = /tệp|tep|file|đính kèm|dinh kem|attach|tài liệu|ảnh|hình|photo|picture|video|mở\s+(?:tệp|file)|文件|附件|图片|照片/iu;
 function wantsFiles(query) { return WANTS_FILE.test(String(query || '').replace(/[“"«][^”"»]*[”"»]/g, ' ')); }
-module.exports = { cleanHeader, cleanHeaderLine, searchClose, searchRowText, fileAt, searchLeftover, isComposerEl, findComposer, nameLikeText, isFileTarget, wantsFiles, FILE_NAME, composerTarget, COMPOSER_TO, namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };
+// Lệnh CHỈ SOẠN (không gửi) — một nguồn cho desktop-agent (B101 không tự bấm Enter), agent.js, qa-runner.
+// Gồm cả cách nói “soạn nháp / bản nháp / write a draft / draft a message / compose … / 起草 / 草拟 / 写一封 … 的消息”.
+const DRAFT_ONLY = /(chỉ soạn|soạn sẵn|soạn nháp|viết sẵn|viết nháp|bản nháp|không gửi|đừng gửi|chưa gửi|khoan gửi|don't send|do not send|without sending|not send|draft only|a draft|draft (?:a |an |the )?(?:message|email|mail|text|reply)|compose (?:a |an )?(?:message|email|draft)|只起草|起草|草拟|草稿|写一[封条]|不要发送|别发送|先不要发|不发送)/iu;
+module.exports = { DRAFT_ONLY, cleanHeader, cleanHeaderLine, searchClose, searchRowText, fileAt, searchLeftover, isComposerEl, findComposer, nameLikeText, isFileTarget, wantsFiles, FILE_NAME, composerTarget, COMPOSER_TO, namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };

@@ -773,7 +773,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     if (san.hidden) deps.log && deps.log(`[aivn agent] ẩn ${san.hidden} câu trả lời cũ khẳng định ứng dụng chưa cài`);
     if (san.guides) deps.log && deps.log(`[aivn agent] ẩn ${san.guides} câu trả lời cũ chỉ hướng dẫn/hỏi lại (không gọi công cụ)`);
     const appTask = compOn && isAppTask(query) ? appOf(query) : '';
-    const DRAFT_RE = /(chỉ soạn|soạn sẵn|không gửi|đừng gửi|chưa gửi|don't send|do not send|draft only)/iu;
+    const DRAFT_RE = require('./send-verify').DRAFT_ONLY;
     const appHint = appTask ? `\n\n(Việc này phải LÀM TRÊN ${appTask} bằng công cụ: mở ${appTask} (open_app/open_url), quan sát màn hình (screen_look) rồi thao tác (screen_act). KHÔNG viết nội dung vào khung chat thay cho việc làm.${DRAFT_RE.test(query) ? ` “Chỉ soạn/không gửi” nghĩa là làm tới khi soạn xong trong ${appTask} rồi DỪNG TRƯỚC nút Gửi.` : ''})` : '';
     // beta.2: việc MỚI trên máy (không phải câu nối tiếp, không nhắc tới “nó/đó/vừa rồi…”) → bắt đầu với ngữ cảnh sạch: không mang các bước/câu trả lời của việc trước
     // (mô hình nhỏ hay làm tiếp việc cũ hoặc chép lại câu trả lời cũ)
@@ -1102,7 +1102,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     }
     if (finishReason !== 'abort') { const fc = RT.finalCheck(text, retry); if (fc) warning = warning || fc; }
     // B104: việc gửi tin chưa xong mà ô soạn còn chữ AIVN gõ → xoá (hoặc báo rõ còn đó); người dùng bấm Dừng → không thao tác thêm
-    if (!sentDone && deps.computer && deps.computer.cleanupDraft && require('./send-verify').MSG_SEND.test(String(query || '')) && !/(chỉ soạn|soạn sẵn|không gửi|đừng gửi|chưa gửi|don't send|do not send|draft only|只起草|不要发送|别发送|先不要发)/iu.test(String(query || ''))) {
+    if (!sentDone && deps.computer && deps.computer.cleanupDraft && require('./send-verify').MSG_SEND.test(String(query || '')) && !require('./send-verify').DRAFT_ONLY.test(String(query || ''))) {
       try {
         const cd = await deps.computer.cleanupDraft({ clear: !(signal?.aborted && signal.reason !== 'timeout') });
         if (cd) { const note = draftNoteOf(cd); text = `${String(text || '').trim()}${String(text || '').trim() ? '\n\n' : ''}${note}`; }
