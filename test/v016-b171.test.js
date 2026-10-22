@@ -83,6 +83,58 @@ test('B171: khi đã có thẻ giải thích thì bỏ câu chung khỏi phần 
   assert.strictEqual(EV.presentBody('xin chào\nxin chào', []), 'xin chào\nxin chào');
 });
 
+const VI_MARK = /[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i;
+function cardLines(html) {
+  return html.replace(/<span data-noi18n>[\s\S]*?<\/span>/gi, ' ').replace(/<[^>]+>/g, '\n').split('\n').map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
+}
+test('B171: lỗi đường dẫn sai gợi ý kiểm tra đường dẫn, tên tệp và thư mục được phép', () => {
+  const raw = 'Không tìm thấy "khong-ton-tai/bao-cao.txt" trong thư mục được phép.';
+  const step = { status: 'error', label: 'Đọc tệp', name: 'read_file', icon: '📖', summary: raw, error: raw, args: { path: 'khong-ton-tai/bao-cao.txt' }, ms: 3 };
+  const said = EV.plainError(step);
+  assert.strictEqual(said, 'Không tìm thấy tệp “khong-ton-tai/bao-cao.txt” trong thư mục được phép.');
+  assert.strictEqual(EV.fixFor([said, raw].join('\n')), EV.FIX_PATH);
+  assert.ok(EV.FIX_PATH.includes('đường dẫn') && EV.FIX_PATH.includes('tên tệp') && EV.FIX_PATH.includes('thư mục được phép'));
+  assert.notStrictEqual(EV.fixFor(raw), EV.FIX_DEFAULT);
+  const near = 'Không tìm thấy "khong-ton-tai/bao-cao.txt" trong thư mục được phép. Có tệp tên gần giống: "bao-cao.txt" — nếu đúng là tệp này thì gọi lại với đúng tên đó.';
+  assert.strictEqual(EV.spokenError(near), 'Không tìm thấy tệp “khong-ton-tai/bao-cao.txt” trong thư mục được phép. Có tệp tên gần giống: “bao-cao.txt”.');
+  assert.strictEqual(EV.spokenError('Không tìm thấy "bao-cao.txt".'), 'Không tìm thấy tệp “bao-cao.txt”.');
+  assert.strictEqual(EV.spokenError('Từ chối truy cập (Access denied): "C:/ngoai/a.txt" nằm ngoài các thư mục người dùng cho phép. AIVN AGENT chỉ được làm việc trong: /home/a.'), 'Tệp “C:/ngoai/a.txt” nằm ngoài thư mục được phép.');
+  assert.strictEqual(EV.spokenError('Chưa có thư mục nào được cho phép. Người dùng cần thêm thư mục trong Cài đặt AIVN AGENT.'), 'Chưa có thư mục được phép. Hãy thêm thư mục trong Cài đặt AIVN AGENT.');
+  assert.strictEqual(EV.spokenError('Tham số đường dẫn phải là tên/đường dẫn tệp (vd. chi-tieu.csv), không phải nội dung tệp.'), 'Hãy ghi đường dẫn hoặc tên tệp, không ghi nội dung tệp.');
+  assert.strictEqual(EV.spokenError('"ghi-chu" là thư mục. Dùng list_files để xem bên trong.'), '“ghi-chu” là thư mục, không phải tệp.');
+  assert.strictEqual(EV.fixFor('không thấy phần tử'), 'Quan sát lại màn hình rồi bấm đúng chỗ. Nếu nút nằm ngoài khung, hãy cuộn tới nó.');
+});
+
+test('B171: câu lỗi en/zh lấy trọn từ bảng ngôn ngữ, không sót dấu tiếng Việt', () => {
+  const samples = [
+    { status: 'error', label: 'Đọc tệp', name: 'read_file', summary: 'Không tìm thấy "khong-ton-tai/bao-cao.txt" trong thư mục được phép.', error: 'Không tìm thấy "khong-ton-tai/bao-cao.txt" trong thư mục được phép.', args: { path: 'khong-ton-tai/bao-cao.txt' }, ms: 3 },
+    { status: 'error', label: 'Đọc tệp', name: 'read_file', summary: 'Không tìm thấy "khong-ton-tai/bao-cao.txt" trong thư mục được phép. Có tệp tên gần giống: "bao-cao.txt" — nếu đúng là tệp này thì gọi lại với đúng tên đó.', error: 'Không tìm thấy "khong-ton-tai/bao-cao.txt" trong thư mục được phép. Có tệp tên gần giống: "bao-cao.txt" — nếu đúng là tệp này thì gọi lại với đúng tên đó.', args: { path: 'khong-ton-tai/bao-cao.txt' } },
+    { status: 'error', label: 'Đọc tệp', summary: 'Không tìm thấy "bao-cao.txt".', error: 'Không tìm thấy "bao-cao.txt".', args: { path: 'bao-cao.txt' } },
+    { status: 'error', label: 'Đọc tệp', summary: 'Từ chối truy cập (Access denied): "C:/ngoai/a.txt" nằm ngoài các thư mục người dùng cho phép.', error: 'Từ chối truy cập (Access denied): "C:/ngoai/a.txt" nằm ngoài các thư mục người dùng cho phép.', args: { path: 'C:/ngoai/a.txt' } },
+    { status: 'error', label: 'Xem thư mục', summary: 'Chưa có thư mục nào được cho phép. Người dùng cần thêm thư mục trong Cài đặt AIVN AGENT.', error: 'Chưa có thư mục nào được cho phép. Người dùng cần thêm thư mục trong Cài đặt AIVN AGENT.', args: {} },
+    { status: 'error', label: 'Đọc tệp', summary: 'Tham số đường dẫn phải là tên/đường dẫn tệp (vd. chi-tieu.csv), không phải nội dung tệp.', error: 'Tham số đường dẫn phải là tên/đường dẫn tệp (vd. chi-tieu.csv), không phải nội dung tệp.', args: { path: 'dong 1, dong 2' } },
+    { status: 'error', label: 'Đọc tệp', summary: '"ghi-chu" là thư mục. Dùng list_files để xem bên trong.', error: '"ghi-chu" là thư mục. Dùng list_files để xem bên trong.', args: { path: 'ghi-chu' } },
+    errStep(),
+  ];
+  for (const st of samples) {
+    const g = EV.groupSteps([1, 2, 3, 4, 5].map(i => Object.assign({}, st, { id: 'e' + i, ms: 3 })))[0];
+    const html = EV.errorCardHtml(g, { fmtMs: (ms) => ms + ' ms' });
+    for (const lang of ['en', 'zh']) {
+      for (const line of cardLines(html)) {
+        const out = T.tr(line, lang);
+        assert.ok(!VI_MARK.test(out), lang + ' còn tiếng Việt trong “' + out + '” (gốc: ' + line + ')');
+      }
+    }
+  }
+  const leaked = T.tr('Không tìm thấy "khong-ton-tai/bao-cao.txt" trong thư mục được phép', 'zh');
+  assert.match(leaked, /Không tìm thấy/);
+  const full = T.tr('Không tìm thấy tệp “khong-ton-tai/bao-cao.txt” trong thư mục được phép.', 'en');
+  assert.strictEqual(full, 'Could not find the file “khong-ton-tai/bao-cao.txt” in an allowed folder.');
+  assert.strictEqual(T.tr('Không tìm thấy tệp “khong-ton-tai/bao-cao.txt” trong thư mục được phép.', 'zh'), '在允许的文件夹里找不到文件“khong-ton-tai/bao-cao.txt”。');
+  assert.strictEqual(T.tr(EV.FIX_PATH, 'en'), 'Check the path, the file name, and whether that folder is in the allowed folders.');
+  assert.strictEqual(T.tr(EV.FIX_PATH, 'zh'), '请检查路径、文件名，以及该文件夹是否在允许的文件夹中。');
+});
+
 test('B171: chữ mới có bản en/zh, kể cả lý do kiểm tra hiện trên thẻ', () => {
   for (const [vi, en, zh] of [
     ['Bước lỗi', 'Failed step', '失败的步骤'],

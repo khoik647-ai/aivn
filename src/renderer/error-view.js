@@ -22,8 +22,10 @@
   const FIX_LONG = 'Hãy chia việc thành từng bước ngắn hơn. Nếu máy đang bận, đóng bớt ứng dụng rồi thử lại.';
   const FIX_SETUP = 'Kiểm tra phần cần dùng đã được cài và đã bật trong Cài đặt.';
   const FIX_RETRY = 'Cách vừa rồi không có tác dụng. Hãy thử cách khác, hoặc tự làm bước này rồi giao lại phần còn lại.';
+  const FIX_PATH = 'Kiểm tra lại đường dẫn, tên tệp, và xem thư mục đó có nằm trong thư mục được phép không.';
   const FIX_DEFAULT = 'Bạn thử giao lại việc, hoặc chia thành bước ngắn hơn; nếu máy đang bận nhiều, hãy chờ máy rảnh rồi thử lại.';
   const PLAIN_RETRY = 'Đã thử lại quá nhiều lần mà bước này vẫn lỗi.';
+  // Câu lỗi đường dẫn/tệp là khoá trọn vẹn (có {0}). Không để mẫu ngắn “{0} thư mục được phép” nuốt nửa câu tiếng Việt.
 
   const stripCount = (s) => String(s || '').trim().replace(/\s×\d+\s*$/, '').trim();
   function isGenericRetry(s) {
@@ -50,18 +52,42 @@
     const verb = VERB[act] || (st && st.name === 'open_app' ? VERB.open_app : '');
     return { verb, target: target ? String(target).replace(/^\[|\]$/g, '').slice(0, 80) : '' };
   }
+  function notInFolder(p, near) {
+    if (near) return `Không tìm thấy tệp “${p}” trong thư mục được phép. Có tệp tên gần giống: “${near}”.`;
+    return `Không tìm thấy tệp “${p}” trong thư mục được phép.`;
+  }
+  function notFound(p) { return `Không tìm thấy tệp “${p}”.`; }
+  function outsideFolder(p) { return `Tệp “${p}” nằm ngoài thư mục được phép.`; }
+  function isDir(p) { return `“${p}” là thư mục, không phải tệp.`; }
+  // Đưa lỗi đường dẫn/tệp về đúng một câu có trong bảng ngôn ngữ. Phần tên tệp nằm ở {0}.
+  function spokenError(raw) {
+    const s = String(raw || '').trim();
+    let m = /^Không tìm thấy ["“]([^"”]+)["”] trong thư mục được phép\.?(?:\s*Có tệp tên gần giống:\s*["“]([^"”]+)["”][\s\S]*)?$/i.exec(s);
+    if (m) return notInFolder(m[1], m[2]);
+    m = /^Không tìm thấy ["“]([^"”]+)["”]\.?$/i.exec(s);
+    if (m) return notFound(m[1]);
+    m = /["“]([^"”]+)["”]\s*nằm ngoài/i.exec(s);
+    if (m && /thư mục/i.test(s)) return outsideFolder(m[1]);
+    if (/^chưa có thư mục nào được cho phép/i.test(s)) return 'Chưa có thư mục được phép. Hãy thêm thư mục trong Cài đặt AIVN AGENT.';
+    if (/tham số đường dẫn phải là tên|không phải nội dung tệp/i.test(s)) return 'Hãy ghi đường dẫn hoặc tên tệp, không ghi nội dung tệp.';
+    m = /^["“]([^"”]+)["”] là thư mục\b/i.exec(s);
+    if (m) return isDir(m[1]);
+    return s;
+  }
   function plainError(st) {
     st = st || {};
     const bits = [st.error, st.check].map(cleanErr).filter(x => x && !isGenericRetry(x));
-    if (bits.length) return bits[0].slice(0, 240);
-    const detail = String(st.detail || '');
-    const m = RE_WHY.exec(detail);
-    if (m) { const w = cleanErr(m[1]); if (w && !isGenericRetry(w)) return w.slice(0, 240); }
-    const fromDetail = /^lỗi:\s*\S/i.test(detail) ? cleanErr(detail.split('\n')[0]) : '';
-    if (fromDetail && !isGenericRetry(fromDetail)) return fromDetail.slice(0, 240);
-    const summary = cleanErr(st.summary);
-    if (summary && !isGenericRetry(summary)) return summary.slice(0, 240);
-    return PLAIN_RETRY;
+    let raw = bits.length ? bits[0] : '';
+    if (!raw) {
+      const detail = String(st.detail || '');
+      const m = RE_WHY.exec(detail);
+      if (m) { const w = cleanErr(m[1]); if (w && !isGenericRetry(w)) raw = w; }
+      if (!raw && /^lỗi:\s*\S/i.test(detail)) { const w = cleanErr(detail.split('\n')[0]); if (w && !isGenericRetry(w)) raw = w; }
+    }
+    if (!raw) { const summary = cleanErr(st.summary); if (summary && !isGenericRetry(summary)) raw = summary; }
+    if (!raw) return PLAIN_RETRY;
+    const spoken = spokenError(raw);
+    return spoken === raw ? spoken.slice(0, 240) : spoken;
   }
   function fixFor(text) {
     const t = String(text || '');
@@ -70,6 +96,7 @@
     if (/chưa kiểm chứng|người nhận|gửi nhầm|chưa gửi/i.test(t)) return FIX_SEND;
     if (/hộp thoại vẫn đang mở/i.test(t)) return FIX_DIALOG;
     if (/kết quả tìm|không thấy cửa sổ|chưa mở được|chưa cài|không có công cụ/i.test(t)) return FIX_FIND;
+    if (/không tìm thấy ["“]|trong thư mục được phép|nằm ngoài(?: các)? thư mục|chưa có thư mục được phép|đường dẫn hoặc tên tệp|không phải nội dung tệp|là thư mục, không phải tệp|tham số đường dẫn phải là tên/i.test(t)) return FIX_PATH;
     if (/hết số bước|quá thời gian|ngữ cảnh|vram|bộ nhớ|hết giờ/i.test(t)) return FIX_LONG;
     if (/python|chưa bật|cài đặt/i.test(t)) return FIX_SETUP;
     if (/quá tải số lần|retry\/lỗi|đã thử lại quá nhiều|đã hỏng|không có tác dụng|cách này đã thử/i.test(t)) return FIX_RETRY;
@@ -139,5 +166,5 @@
     const label = st.label || st.name || 'Không rõ bước';
     return `<div class="step-err" role="alert" data-step="${esc(st.id || '')}"><div class="er-h"><span aria-hidden="true">${esc(st.icon || '⚠')}</span><span class="er-k">Bước lỗi</span><span class="s-name">${esc(label)}</span>${auto}${verb}${tgt}${ms}${rep}<span class="s-st">lỗi</span></div><div class="er-line"><span class="er-k">Lỗi</span> <span class="er-msg">${esc(err)}</span></div><div class="er-line"><span class="er-k">Cách xử lý</span> <span class="er-fix">${esc(fix)}</span></div>${more}</div>`;
   }
-  return { esc, isGenericRetry, isErrorLine, isErrorStep, actionWhat, plainError, fixFor, groupSteps, collapseErrorLines, presentBody, orphanGroup, errorCardHtml, PLAIN_RETRY, FIX_RETRY, FIX_DEFAULT };
+  return { esc, isGenericRetry, isErrorLine, isErrorStep, actionWhat, plainError, spokenError, fixFor, groupSteps, collapseErrorLines, presentBody, orphanGroup, errorCardHtml, PLAIN_RETRY, FIX_RETRY, FIX_PATH, FIX_DEFAULT };
 });
