@@ -4,6 +4,10 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const A = window.aivn;
 const state = { settings: null, models: [], status: { loaded: false }, convos: [], current: null, generating: null, generatingConv: null, genKind: null, genPhase: null, genNote: '', agentFoot: '', _genStatsShown: '', catalog: [], mode: 'chat', lastByMode: {}, agent: null };
 const isAgent = () => state.mode === 'agent';
+// B172: bản nháp chưa gửi của từng trang (Trò chuyện, AIVN AGENT, Lịch, Ghi nhớ) trong phiên này
+const DraftsAPI = window.AIVN_DRAFTS;
+const drafts = DraftsAPI.createDrafts();
+let reopenMemEdit = false;
 
 // 0.16 i18n: định dạng số/ngày theo ngôn ngữ giao diện (vi: 1.234,5 · en: 1,234.5 · zh: 1,234.5)
 const UIL = () => (window.I18N && I18N.lang) || 'vi';
@@ -52,11 +56,20 @@ function md(src) {
 function show(view, opts = {}) {
   const rt = document.querySelector('.rail-tip'); if (rt) rt.hidden = true;
   if (view === 'security') { opts = { ...opts, tab: 'security' }; view = 'settings'; }
+  const prev = show.cur;
+  if (prev && prev !== view) {
+    drafts.stash(prev, readComposer(prev), (prev === 'chat' || prev === 'agent') ? pending : undefined);
+    if (prev === 'memory') stashMemEdit();
+  }
   clearInfoToasts(); show.cur = view;
   $$('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   const target = view === 'agent' ? 'chat' : view;
   $$('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + target));
   if (view === 'chat' || view === 'agent') setMode(view);
+  if (prev !== view) {
+    revealComposer(view);
+    if (view === 'memory' && drafts.get('memory', 'editId')) reopenMemEdit = true;
+  } else if (view === 'chat' || view === 'agent') resizeInput();
   if (view === 'schedule') refreshSched();
   if (view === 'memory') refreshMem();
   if (view === 'discover' && !$('#sugArea').hidden) renderCatalog();
@@ -65,6 +78,51 @@ function show(view, opts = {}) {
   if (view === 'server') { refreshServer(); fullBenchRefresh(); }
   if (view === 'settings') setTab(opts.tab || setTab.cur || 'general');
   document.title = 'AIVN · ' + (VIEW_TITLES[view] || 'Trò chuyện');
+}
+show.cur = 'chat';
+function readComposer(page) {
+  const live = {};
+  for (const id of (DraftsAPI.COMPOSER_FIELDS[page] || [])) {
+    const el = document.getElementById(id);
+    if (el) live[id] = el.value;
+  }
+  return live;
+}
+function stashMemEdit() {
+  const ta = document.querySelector('#memList textarea');
+  if (!ta) return; // Huỷ/Lưu đã xoá editId; không có ô sửa thì giữ nguyên (refreshMem có thể chưa vẽ lại)
+  const row = ta.closest('[data-id]');
+  drafts.note('memory', 'editId', row && row.dataset.id ? row.dataset.id : '');
+  drafts.note('memory', 'editText', ta.value);
+}
+function resizeInput() {
+  const active = $('#view-chat').classList.contains('active');
+  // ẩn thì scrollHeight = 0; không gán height:0px kẻo chữ chưa gửi bị cắt khi quay lại
+  if (DraftsAPI.nextHeight(active, active ? input.scrollHeight : 0) == null) return;
+  input.style.height = 'auto';
+  const h = DraftsAPI.nextHeight(true, input.scrollHeight);
+  if (h == null) return;
+  input.style.height = h + 'px';
+}
+function syncChatDraft() {
+  const page = state.mode === 'agent' ? 'agent' : 'chat';
+  drafts.note(page, 'input', input.value);
+}
+function revealComposer(view) {
+  const fields = DraftsAPI.COMPOSER_FIELDS[view];
+  if (!fields) return;
+  const got = drafts.take(view);
+  for (const id of fields) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const v = got.apply[id] != null ? got.apply[id] : '';
+    if (el.value !== v) el.value = v;
+  }
+  if (view === 'chat' || view === 'agent') {
+    pending = Array.isArray(got.files) ? got.files.slice() : [];
+    renderChips();
+    resizeInput();
+  }
 }
 const VIEW_TITLES = { chat: 'Trò chuyện', agent: 'AIVN AGENT', server: 'Nhà phát triển', models: 'Mô hình của tôi', discover: 'Khám phá', schedule: 'Lịch tự động', memory: 'Ghi nhớ', settings: 'Cài đặt', crm: 'Khách hàng' };
 $$('.nav-item').forEach(b => b.addEventListener('click', () => show(b.dataset.view)));
@@ -75,11 +133,17 @@ document.addEventListener('click', (e) => { const g = e.target.closest('[data-go
 // Trò chuyện thường và AIVN AGENT dùng chung khung chat; mỗi chế độ có danh sách cuộc trò chuyện riêng
 function setMode(mode) {
   if (state.mode !== mode) {
+    drafts.stash(state.mode, readComposer(state.mode), pending);
     if (state.current) state.lastByMode[state.mode] = state.current.id;
     state.mode = mode;
     // B173: cuộc đang stream có thể chưa có trong danh sách (chưa lưu) hoặc bản trong danh sách là bản cũ trên đĩa
     state.current = ChatStream.convoForMode({ mode, id: state.lastByMode[mode], convos: state.convos, generating: state.generatingConv });
-    pending = []; renderChips();
+    const got = drafts.take(mode);
+    const text = got.apply.input != null ? got.apply.input : '';
+    if (input.value !== text) input.value = text;
+    pending = Array.isArray(got.files) ? got.files.slice() : [];
+    renderChips();
+    resizeInput();
   }
   $('#view-chat').classList.toggle('agent-mode', mode === 'agent');
   // B46: gợi ý ngắn một dòng (ô nhập hẹp khi chia đôi màn hình), câu đầy đủ ở chú thích
@@ -837,7 +901,7 @@ window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault()); // không cho cửa sổ mở tệp bị thả nhầm chỗ
 
 const input = $('#input');
-input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(180, input.scrollHeight) + 'px'; });
+input.addEventListener('input', () => { resizeInput(); syncChatDraft(); });
 input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#composer').requestSubmit(); } });
 $('#composer').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -872,6 +936,7 @@ $('#composer').addEventListener('submit', async (e) => {
   const reply = { role: 'assistant', content: '', model: state.status.id };
   conv.messages.push(reply);
   input.value = ''; input.style.height = 'auto';
+  drafts.note('chat', 'input', ''); drafts.stash('chat', { input: '' }, pending);
   await runTurn(conv, userMsg, reply, { docsToSend, directImgs });
 });
 // Một lượt trả lời (dùng cho gửi mới, tạo lại, sửa rồi gửi lại). userMsg và reply đã nằm trong conv.messages.
@@ -1170,7 +1235,10 @@ const SLASH = [
 ];
 function runSlash(text) {
   const [c, ...rest] = text.split(/\s+/); const cmd = SLASH.find(x => x.c === c.toLowerCase()); if (!cmd) return false;
-  input.value = ''; input.style.height = 'auto'; $('#slashPop').hidden = true; cmd.run(rest.join(' ').trim()); return true;
+  input.value = ''; input.style.height = 'auto'; $('#slashPop').hidden = true;
+  drafts.note(state.mode === 'agent' ? 'agent' : 'chat', 'input', '');
+  drafts.stash(state.mode === 'agent' ? 'agent' : 'chat', { input: '' });
+  cmd.run(rest.join(' ').trim()); return true;
 }
 let slashSel = 0;
 function paintSlash() {
@@ -1469,6 +1537,7 @@ async function sendAgent(text) {
   if (!state.status.loaded && !cloudOn && !(await ensureLoaded())) return;
   if (!(await agentGateOk())) return; // mô hình không dùng được cho AIVN AGENT: chặn, giữ nguyên tệp đính kèm và chữ đã nhập
   let atts = pending.filter(a => a.ok); pending = []; renderChips();
+  drafts.stash('agent', { input: input.value }, pending);
   if (!text && atts.length) text = atts.every(a => a.kind === 'image') ? 'Hãy xem ảnh đính kèm và cho biết nội dung.' : 'Hãy đọc tệp đính kèm và tóm tắt ý chính.';
   if (!text) return;
   const pack = await agentAttachments(atts, text); atts = pack.atts;
@@ -1481,6 +1550,7 @@ async function sendAgent(text) {
   conv.messages.push(reply);
   const idx = conv.messages.length - 1;
   input.value = ''; input.style.height = 'auto';
+  drafts.note('agent', 'input', ''); drafts.stash('agent', { input: '' }, pending);
   renderMessages();
   const msgEl = () => $(`#messages .msg[data-i="${idx}"]`);
   const box = $('#messages');
@@ -1946,6 +2016,7 @@ function paintForm() {
   $('#schedFormTitle').textContent = sf.editing ? 'Sửa lịch' : 'Tạo lịch mới'; $('#sfCancel').hidden = !sf.editing;
 }
 function resetForm() {
+  drafts.clear('schedule');
   sf.editing = null; sf.kind = 'reminder'; sf.repeat = 'once'; sf.days = new Set([new Date().getDay()]);
   const d = new Date(Date.now() + 10 * 60e3); $('#sfTitle').value = ''; $('#sfMsg').value = ''; $('#sfPrompt').value = '';
   $('#sfDate').value = dateStr(d); $('#sfTime').value = `${p2(d.getHours())}:${p2(d.getMinutes())}`; paintForm();
@@ -1954,6 +2025,7 @@ $('#sfKind').addEventListener('click', (e) => { const b = e.target.closest('[dat
 $('#sfRepeat').addEventListener('click', (e) => { const b = e.target.closest('[data-rep]'); if (b) { sf.repeat = b.dataset.rep; paintForm(); } });
 $('#sfDays').addEventListener('click', (e) => { const b = e.target.closest('[data-d]'); if (!b) return; const d = Number(b.dataset.d); sf.days.has(d) ? sf.days.delete(d) : sf.days.add(d); paintForm(); });
 $('#sfCancel').addEventListener('click', resetForm);
+for (const id of ['sfTitle', 'sfMsg', 'sfPrompt']) { const el = document.getElementById(id); if (el) el.addEventListener('input', () => drafts.note('schedule', id, el.value)); }
 $('#schedForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const spec = { title: $('#sfTitle').value, kind: sf.kind, message: $('#sfMsg').value, prompt: $('#sfPrompt').value, repeat: sf.repeat, time: $('#sfTime').value, days: [...sf.days] };
@@ -2001,6 +2073,9 @@ A.onConvosOpen(({ id }) => openConvo(id));
 
 // --- Ghi nhớ ---
 async function refreshMem() {
+  const reopen = reopenMemEdit; reopenMemEdit = false;
+  const editId = reopen ? (drafts.get('memory', 'editId') || '') : '';
+  const editText = reopen ? (drafts.get('memory', 'editText') || '') : '';
   const [list, info] = await Promise.all([A.memList(), A.agentInfo()]);
   $('#memOn').checked = info.memory.enabled;
   $('#memMode').textContent = `Những điều AIVN AGENT đã ghi nhớ về bạn (${list.length}). Chỉ lưu trên máy này. Điều liên quan tới câu hỏi được đưa vào lời nhắc của AIVN AGENT, tìm ${info.memory.semantic ? 'theo ý nghĩa bằng BGE-M3' : 'theo từ khoá (tải BGE-M3 trong Cài đặt trò chuyện để tìm theo ý nghĩa)'}.`;
@@ -2010,17 +2085,26 @@ async function refreshMem() {
     : q && list.length ? `<div class="sched-empty">Không có ghi nhớ nào khớp “${esc($('#memQ').value.trim())}”.</div>`
     : '<div class="sched-empty">Chưa có ghi nhớ nào. Hãy nói với AIVN AGENT, ví dụ: “Hãy nhớ: tôi thích uống cà phê sữa đá”.</div>';
   refreshMemCount(list);
+  if (editId && show.cur === 'memory') { const row = $(`#memList [data-id="${CSS.escape(String(editId))}"]`); if (row) openMemEdit(row, editText); }
 }
 async function refreshMemCount(list) { list ||= await A.memList(); $('#memCount').hidden = !list.length; $('#memCount').textContent = list.length; }
 { let tq; $('#memQ').addEventListener('input', () => { clearTimeout(tq); tq = setTimeout(() => refreshMem(), 120); }); }
-$('#memForm').addEventListener('submit', async (e) => { e.preventDefault(); const v = $('#memNew').value.trim(); if (!v) return; try { await A.memAdd(v); $('#memNew').value = ''; refreshMem(); } catch (err) { toast(cleanErr(err.message), true); } });
+$('#memNew').addEventListener('input', () => drafts.note('memory', 'memNew', $('#memNew').value));
+$('#memForm').addEventListener('submit', async (e) => { e.preventDefault(); const v = $('#memNew').value.trim(); if (!v) return; try { await A.memAdd(v); $('#memNew').value = ''; drafts.note('memory', 'memNew', ''); refreshMem(); } catch (err) { toast(cleanErr(err.message), true); } });
+function openMemEdit(row, text) {
+  row.innerHTML = `<textarea maxlength="500">${esc(text)}</textarea><div class="acts"><button class="btn sm primary" data-mact="save">Lưu</button><button class="btn sm" data-mact="cancel">Huỷ</button></div>`;
+  const ta = row.querySelector('textarea');
+  ta.addEventListener('input', () => { drafts.note('memory', 'editId', row.dataset.id || ''); drafts.note('memory', 'editText', ta.value); });
+  ta.focus();
+}
+function closeMemEdit() { drafts.note('memory', 'editId', ''); drafts.note('memory', 'editText', ''); }
 $('#memList').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-mact]'); if (!b) return;
   const row = b.closest('.mem'); const id = row.dataset.id;
   if (b.dataset.mact === 'del') { await A.memDelete(id); refreshMem(); return; }
-  if (b.dataset.mact === 'edit') { const txt = row.querySelector('.txt').firstChild.textContent; row.innerHTML = `<textarea maxlength="500">${esc(txt)}</textarea><div class="acts"><button class="btn sm primary" data-mact="save">Lưu</button><button class="btn sm" data-mact="cancel">Huỷ</button></div>`; row.querySelector('textarea').focus(); return; }
-  if (b.dataset.mact === 'save') { try { await A.memUpdate({ id, text: row.querySelector('textarea').value }); toast('Đã lưu ✓'); } catch (err) { toast(cleanErr(err.message), true); } refreshMem(); return; }
-  if (b.dataset.mact === 'cancel') refreshMem();
+  if (b.dataset.mact === 'edit') { const txt = row.querySelector('.txt').firstChild.textContent; drafts.note('memory', 'editId', id || ''); drafts.note('memory', 'editText', txt); openMemEdit(row, txt); return; }
+  if (b.dataset.mact === 'save') { try { await A.memUpdate({ id, text: row.querySelector('textarea').value }); toast('Đã lưu ✓'); } catch (err) { toast(cleanErr(err.message), true); } closeMemEdit(); refreshMem(); return; }
+  if (b.dataset.mact === 'cancel') { closeMemEdit(); refreshMem(); }
 });
 $('#memClear').addEventListener('click', async () => { await A.memClear(); refreshMem(); });
 $('#memOn').addEventListener('change', async (e) => { state.settings = await A.setSettings({ agentMemory: e.target.checked }); refreshMem(); });
