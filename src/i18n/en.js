@@ -22,6 +22,8 @@
     "quan sát màn hình nhiều lần liền mà mô hình không làm bước nào": "looked at the screen many times in a row without the model taking any step",
     "các bước gõ/bấm của AIVN AGENT chưa có tác dụng — không phải lỗi của ứng dụng": "AIVN AGENT's typing/clicking steps had no effect — this is not the app's fault",
     "mô hình định làm tiếp nhưng lượt đã kết thúc": "the model meant to continue, but the turn had already ended",
+    "chưa thấy chữ nào được gõ vào ứng dụng trên màn hình": "no typed text appeared in the app on screen",
+    "bước cuối chưa có tác dụng trên màn hình": "the last step had no visible effect on the screen",
     "\"{0}\" là tệp rỗng.": "\"{0}\" is an empty file.",
     "\"{0}\" quá lớn ({1} MB). Giới hạn là {2} MB mỗi tệp âm thanh/video.": "\"{0}\" is too large ({1} MB). The limit is {2} MB per audio/video file.",
     "\"{0}\" quá lớn ({1}). Giới hạn là 20 MB mỗi tệp.": "\"{0}\" is too large ({1}). The limit is 20 MB per file.",

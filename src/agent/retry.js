@@ -97,4 +97,20 @@ function honestStatus({ query = '', tracker = null, steps = [], reason = '', rec
 // B95 (máy thật beta.2.2): câu cuối đổ lỗi cho ứng dụng (“Zalo có thể đang gặp sự cố / giao diện bị lỗi”) trong khi chính các bước của AIVN chưa có tác dụng
 const BLAME_RE = /(?:gặp|bị|có)\s+(?:sự cố|trục trặc|lỗi)|giao diện\s+(?:bị|có|đang)\s+(?:lỗi|vấn đề)|(?:ứng dụng|app|phần mềm)\s+(?:\S+\s+){0,3}(?:không hoạt động|bị treo|đang lỗi)|\b(?:is|may be|might be|seems to be)\s+(?:having (?:issues|problems)|broken|malfunctioning|not working)|\b(?:app|application|interface)\s+(?:error|issue|problem)s?\b|(?:出现|遇到)(?:了)?(?:问题|故障)|界面(?:出错|有问题)/iu;
 function blamesApp(text) { return BLAME_RE.test(String(text || '')); }
-module.exports = { BLAME_RE, blamesApp, PROMISE_RE, promiseEnding, honestStatus, createRetryTracker, outcome, key, alternatives, finalCheck, describe, DONE_RE };
+// B192 (QA beta.3, Notepad): gõ “chưa thấy chữ” 2 lần, bấm menu (bước “ok”) rồi câu cuối hỏi lại → vẫn outcome “done”.
+// Việc chỉ XONG khi thao tác quyết định đã có tác dụng ĐÃ KIỂM trên màn hình (step.check = kiểm tra tự động thấy chưa có tác dụng):
+//   (a) việc cần GÕ chữ vào ứng dụng mà không có bước type_text nào được kiểm là đã có chữ → 'typed'
+//   (b) bước màn hình cuối cùng (screen_act) chưa có tác dụng → 'last'
+const TYPE_TASK = /(?:^|[^\p{L}])(?:gõ|viết|(?<!đăng\s)nhập|điền|soạn|type|write|enter the text|input)(?![\p{L}])|输入|键入|写/iu;
+const actOf = (x) => String((x && x.args && x.args.action) || '').toLowerCase();
+function effectOf(steps = [], query = '') {
+  const acts = (steps || []).filter(x => x && x.name === 'screen_act' && !['screen_look', 'look', 'wait', 'ensure_app'].includes(actOf(x)));
+  if (!acts.length) return { ok: true };
+  const typed = acts.filter(x => actOf(x) === 'type_text');
+  const typedOk = typed.some(x => x.status === 'ok' && !x.check) || (steps || []).some(x => x && (x.draftIn || (x.verify && x.verify.sent)));
+  if (TYPE_TASK.test(String(query || '')) && !typedOk) return { ok: false, why: 'typed', n: typed.length };
+  const last = acts[acts.length - 1];
+  if (last.status === 'ok' && last.check) return { ok: false, why: 'last', step: last };
+  return { ok: true };
+}
+module.exports = { BLAME_RE, blamesApp, PROMISE_RE, promiseEnding, honestStatus, createRetryTracker, outcome, key, alternatives, finalCheck, describe, DONE_RE, TYPE_TASK, effectOf };
