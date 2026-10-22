@@ -34,7 +34,7 @@ else
 fi
 cd "$W/ghp"
 if git diff --quiet; then echo "trang không đổi"; else
-  git -c user.name="AIVN release" -c user.email="release@aivn.local" commit -qam "Trang web: ${VER:+link bản beta $VER}${VER:-gỡ link bản beta}"
+  git -c user.name="AIVN release" -c user.email="release@aivn.local" commit -qam "Trang web: $([[ -n "$VER" ]] && echo "link bản beta $VER" || echo "gỡ link bản beta")"
   gh auth setup-git >/dev/null 2>&1 || true; git push -q origin gh-pages; echo "đã đẩy gh-pages $(git rev-parse --short HEAD)"
 fi
 # chờ trang thật (GitHub Pages dựng lại 1–3 phút)
