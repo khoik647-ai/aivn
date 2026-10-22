@@ -709,7 +709,14 @@ $('#messages').addEventListener('click', async (e) => {
   await A.copyText(state.current.messages[Number(b.dataset.copy)].content); toast('Đã sao chép ✓');
 });
 A.onEngineCrash((e) => toast(e.message, true));
-$('#newChat').addEventListener('click', () => { state.current = null; renderConvos(); renderMessages(); $('#input').focus(); });
+$('#newChat').addEventListener('click', () => {
+  state.current = null;
+  const page = state.mode === 'agent' ? 'agent' : 'chat';
+  pending = [];
+  drafts.clearFiles(page);
+  renderChips();
+  renderConvos(); renderMessages(); $('#input').focus();
+});
 
 // biểu tượng nút thao tác tin nhắn (SVG đơn sắc: ký tự ⧉ ⑂ thiếu trong phông Windows/Linux nên hiện ô trống)
 const svgI = (d) => `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
@@ -773,7 +780,11 @@ function progLabel(p) {
   return '';
 }
 // sự kiện tiến độ đến muộn (stage 'done' sau khi đã trả kết quả) không được xoá nhãn “chờ tải bộ nghe…”
-A.onFilesProgress((p) => { const it = pending.find(a => a.loading && a.path === p.path); if (!it || (it.prog && it.prog.stage === 'wait-asr')) return; it.prog = p.stage === 'done' ? null : p; renderChips(); });
+A.onFilesProgress((p) => {
+  const it = pending.find(a => a.loading && a.path === p.path);
+  if (!it || (it.prog && it.prog.stage === 'wait-asr')) return;
+  settleAttachment(it.id, { patch: { prog: p.stage === 'done' ? null : p } });
+});
 const IMG_EXT = /\.(png|jpe?g|webp|gif|bmp)$/i;
 const OCR_NOTE = 'Mô hình hiện tại không nhìn được ảnh, AIVN đã đọc chữ trong ảnh';
 const VISION_NOTE = 'Mô hình nhìn ảnh trực tiếp';
@@ -795,6 +806,23 @@ async function imageToPng(blob) {
   const vg = v.getContext('2d'); vg.fillStyle = '#fff'; vg.fillRect(0, 0, v.width, v.height); vg.imageSmoothingQuality = 'high'; vg.drawImage(bmp, 0, 0, v.width, v.height);
   return { png: new Uint8Array(await png.arrayBuffer()), thumb: t.toDataURL('image/jpeg', 0.75), vis: v.toDataURL('image/jpeg', 0.92), width: bmp.width, height: bmp.height };
 }
+// B175: đọc xong thì sửa đúng mục theo id — đang hiện trong pending, hoặc đã cất vào bản nháp của trang kia.
+function settleAttachment(id, spec) {
+  const patch = spec && spec.patch;
+  const remove = !!(spec && spec.remove);
+  const inLive = pending.some(a => a && a.id === id);
+  const inDraft = drafts.hasFile(id);
+  if (!inLive && !inDraft) return false;
+  if (remove) {
+    if (inLive) pending = pending.filter(a => !a || a.id !== id);
+    if (inDraft) drafts.removeFile(id);
+  } else if (patch) {
+    if (inLive) Object.assign(pending.find(a => a && a.id === id), patch);
+    if (inDraft) drafts.patchFile(id, patch);
+  }
+  if (inLive) renderChips();
+  return true;
+}
 async function addImageBlobs(list) { // list: [{blob, name, size}]
   const room = MAX_FILES - pending.length;
   if (room <= 0) { toast(`Chỉ gửi kèm tối đa ${MAX_FILES} tệp mỗi lần`, true); return; }
@@ -806,16 +834,14 @@ async function addImageBlobs(list) { // list: [{blob, name, size}]
     (async () => {
       try {
         const img = await imageToPng(blob);
-        it.thumb = img.thumb; it.vis = img.vis; it.png = img.png; renderChips();
-        if (state.status.vision) { Object.assign(it, { loading: false, ok: true, text: '', direct: true }); renderChips(); return; }
+        if (!settleAttachment(it.id, { patch: { thumb: img.thumb, vis: img.vis, png: img.png } })) return;
+        if (state.status.vision) { settleAttachment(it.id, { patch: { loading: false, ok: true, text: '', direct: true } }); return; }
         const r = await A.ocrImage(img.png);
-        if (!pending.includes(it)) return;
-        if (!r || r.chars < 3) { pending = pending.filter(a => a !== it); renderChips(); toast(`Không tìm thấy chữ trong ảnh "${name}". Mô hình hiện tại không nhìn được ảnh nên AIVN chưa dùng được ảnh này.`, true); return; }
-        Object.assign(it, { loading: false, ok: true, text: r.text, ocrChars: r.chars, ocrConf: r.confidence });
+        if (!r || r.chars < 3) { settleAttachment(it.id, { remove: true }); toast(`Không tìm thấy chữ trong ảnh "${name}". Mô hình hiện tại không nhìn được ảnh nên AIVN chưa dùng được ảnh này.`, true); return; }
+        settleAttachment(it.id, { patch: { loading: false, ok: true, text: r.text, ocrChars: r.chars, ocrConf: r.confidence } });
       } catch (err) {
-        pending = pending.filter(a => a !== it); toast(`Không đọc được ảnh "${name}": ${cleanErr(err.message)}`, true);
+        settleAttachment(it.id, { remove: true }); toast(`Không đọc được ảnh "${name}": ${cleanErr(err.message)}`, true);
       }
-      renderChips();
     })();
   }
 }
@@ -824,7 +850,7 @@ function renderChips() {
   el.hidden = !pending.length;
   el.innerHTML = pending.map(a => `<div class="chip${a.loading ? ' loading' : ''}${a.kind === 'image' ? ' img' : ''}" data-id="${a.id}" title="${esc(a.name)}${a.pages ? ' · ' + a.pages + ' trang' : ''}${a.kind === 'image' ? (a.loading ? ' · đang xử lý ảnh…' : a.direct ? ' · mô hình sẽ nhìn ảnh trực tiếp' : ` · OCR ${a.ocrChars} ký tự, tin cậy ${a.ocrConf}%`) : ''}">${a.kind === 'image' && a.thumb ? `<img class="thumb" src="${a.thumb}" alt="">` : `<span class="ic">${fileIcon(a.kind)}</span>`}<span class="nm">${esc(a.name)}</span><span class="sz">${a.size ? fmtBytes(a.size) : ''}${a.duration ? ' · ' + fmtDur(a.duration) : ''}${a.loading && a.kind !== 'image' ? `${a.size ? ' · ' : ''}<span>${a.prog ? progLabel(a.prog) : 'đang đọc…'}</span>` : ''}${a.frames && a.frames.length ? ` · <span>${a.frames.length} khung hình</span>` : ''}${a.pages ? ' · ' + a.pages + ' trang' : ''}${a.kind === 'image' ? (a.loading ? (state.status.vision ? ' · đang chuẩn bị…' : ' · đang đọc chữ…') : a.direct ? ' · gửi ảnh trực tiếp' : ` · ${a.ocrChars} ký tự`) : ''}</span><button type="button" title="Bỏ tệp này" aria-label="Bỏ tệp">✕</button></div>`).join('');
 }
-$('#chips').addEventListener('click', (e) => { const c = e.target.closest('.chip'); if (c && e.target.closest('button')) { pending = pending.filter(a => a.id !== c.dataset.id); renderChips(); } });
+$('#chips').addEventListener('click', (e) => { const c = e.target.closest('.chip'); if (c && e.target.closest('button')) settleAttachment(c.dataset.id, { remove: true }); });
 async function addFiles(paths) {
   paths = paths.filter(Boolean);
   const imgs = paths.filter(p => IMG_EXT.test(p)); paths = paths.filter(p => !IMG_EXT.test(p));
@@ -845,12 +871,12 @@ async function extractInto(items) {
   const res = await A.extractFiles(items.map(i => i.path));
   const needAsr = [];
   res.forEach((r, k) => {
-    const it = items[k]; it.prog = null;
-    if (r.ok) Object.assign(it, { loading: false, ok: true, size: r.size, kind: r.kind, pages: r.pages, text: r.text, duration: r.duration || null, frames: r.frames || null });
-    else if (r.needAsr) { needAsr.push(it); it.prog = { stage: 'wait-asr' }; }
-    else { pending = pending.filter(a => a !== it); toast(r.error, true); }
+    const it = items[k];
+    if (!it) return;
+    if (r.ok) settleAttachment(it.id, { patch: { prog: null, loading: false, ok: true, size: r.size, kind: r.kind, pages: r.pages, text: r.text, duration: r.duration || null, frames: r.frames || null } });
+    else if (r.needAsr) { if (settleAttachment(it.id, { patch: { prog: { stage: 'wait-asr' } } })) needAsr.push(it); }
+    else { settleAttachment(it.id, { remove: true }); toast(r.error, true); }
   });
-  renderChips();
   if (needAsr.length) await askAsr(needAsr);
 }
 // Âm thanh/video cần bộ nghe Whisper (tải một lần). Đồng ý → tải; tải xong tự chép lời các tệp đang chờ.
@@ -859,13 +885,13 @@ async function askAsr(items) {
   const st = await A.mediaStatus().catch(() => null);
   const busy = st && st.job && ['queued', 'downloading'].includes(st.job.status);
   const ok = busy || await modalAsk({ icon: '🎧', title: 'Tải bộ nghe để chép lời âm thanh/video?', message: items.length === 1 ? `Để chép lời "${items[0].name}", AIVN cần tải bộ nghe Whisper (${fmtBytes(st ? st.size : 761859026)}, chỉ tải một lần). Bộ nghe chạy hoàn toàn trên máy, không gửi tệp đi đâu.` : `Để chép lời ${items.length} tệp âm thanh/video, AIVN cần tải bộ nghe Whisper (${fmtBytes(st ? st.size : 761859026)}, chỉ tải một lần). Bộ nghe chạy hoàn toàn trên máy, không gửi tệp đi đâu.`, okLabel: 'Tải bộ nghe', noLabel: 'Để sau' });
-  if (!ok) { pending = pending.filter(a => !items.includes(a)); renderChips(); return; }
+  if (!ok) { items.forEach(it => settleAttachment(it.id, { remove: true })); return; }
   asrWaiting.push(...items);
-  if (!busy) { try { await A.mediaInstall(); toast('Đang tải bộ nghe… Tệp sẽ được chép lời khi tải xong (xem tiến độ ở Tải xuống).'); } catch (e) { toast(cleanErr(e.message), true); pending = pending.filter(a => !items.includes(a)); asrWaiting = asrWaiting.filter(a => !items.includes(a)); renderChips(); } }
+  if (!busy) { try { await A.mediaInstall(); toast('Đang tải bộ nghe… Tệp sẽ được chép lời khi tải xong (xem tiến độ ở Tải xuống).'); } catch (e) { toast(cleanErr(e.message), true); items.forEach(it => settleAttachment(it.id, { remove: true })); asrWaiting = asrWaiting.filter(a => !items.includes(a)); } }
 }
-A.onDlDone((j) => { if (!j || j.id !== 'asr-whisper-large-v3-turbo') return; const its = asrWaiting.filter(a => pending.includes(a)); asrWaiting = []; if (its.length) { its.forEach(a => { a.prog = null; }); renderChips(); extractInto(its); } });
-A.onDlRemoved((j) => { if (j && j.id === 'asr-whisper-large-v3-turbo') { const its = asrWaiting; asrWaiting = []; pending = pending.filter(a => !its.includes(a)); renderChips(); } });
-A.onDl((j) => { if (j && j.id === 'asr-whisper-large-v3-turbo' && j.status === 'error') { const its = asrWaiting; asrWaiting = []; pending = pending.filter(a => !its.includes(a)); renderChips(); if (its.length) toast(j.error || 'Không tải được bộ nghe', true); } });
+A.onDlDone((j) => { if (!j || j.id !== 'asr-whisper-large-v3-turbo') return; const its = asrWaiting.filter(a => a && (pending.some(p => p && p.id === a.id) || drafts.hasFile(a.id))); asrWaiting = []; if (its.length) { its.forEach(a => settleAttachment(a.id, { patch: { prog: null } })); extractInto(its); } });
+A.onDlRemoved((j) => { if (j && j.id === 'asr-whisper-large-v3-turbo') { const its = asrWaiting; asrWaiting = []; its.forEach(it => settleAttachment(it.id, { remove: true })); } });
+A.onDl((j) => { if (j && j.id === 'asr-whisper-large-v3-turbo' && j.status === 'error') { const its = asrWaiting; asrWaiting = []; its.forEach(it => settleAttachment(it.id, { remove: true })); if (its.length) toast(j.error || 'Không tải được bộ nghe', true); } });
 $('#attachBtn').addEventListener('click', async () => addFiles(await A.pickFiles()));
 const chatPane = $('#chatPane'), dz = $('#dropzone'); let dragDepth = 0;
 chatPane.addEventListener('dragenter', (e) => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); dragDepth++; dz.classList.add('on'); } });

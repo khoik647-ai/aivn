@@ -49,7 +49,42 @@
       if (!b || !Object.prototype.hasOwnProperty.call(b, field)) return undefined;
       return b[field];
     }
-    return { note, stash, take, clear, get };
+    // B175: tệp đã cất không còn nằm trong mảng pending đang hiện. Tìm theo id, không theo “còn trong mảng”.
+    function fileLists() {
+      const out = [];
+      for (const page of Object.keys(FILE_PAGES)) {
+        if (Array.isArray(files[page])) out.push({ page, list: files[page] });
+      }
+      return out;
+    }
+    function hasFile(id) {
+      return fileLists().some(({ list }) => list.some(a => a && a.id === id));
+    }
+    function patchFile(id, patch) {
+      if (!patch || typeof patch !== 'object') return null;
+      let page = null;
+      for (const { page: name, list } of fileLists()) {
+        for (const item of list) {
+          if (item && item.id === id) { Object.assign(item, patch); page = name; }
+        }
+      }
+      return page;
+    }
+    function removeFile(id) {
+      let page = null;
+      for (const { page: name, list } of fileLists()) {
+        for (let i = list.length - 1; i >= 0; i--) {
+          if (list[i] && list[i].id === id) { list.splice(i, 1); page = name; }
+        }
+      }
+      return page;
+    }
+    function clearFiles(page) {
+      if (!FILE_PAGES[page]) return false;
+      files[page] = [];
+      return true;
+    }
+    return { note, stash, take, clear, get, hasFile, patchFile, removeFile, clearFiles };
   }
 
   // Khung chat đang display:none thì scrollHeight = 0. Trả null để caller không gán height: 0px (chữ còn đó nhưng bị cắt).
