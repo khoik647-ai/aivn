@@ -322,12 +322,17 @@ const SPLIT_RE = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i;
 const EMBED_RE = /(^|[-_.])(embed|embedding|bge-m3|bge-small|bge-base|bge-large|multilingual-e5|e5-(small|base|large)|nomic-embed|gte-)/i;
 const NAMES = require('./model-names'); // mục 5: tên tệp chung (q4_k_m.gguf) → id/khớp danh mục kèm tên repo
 function modelIdFromFile(f) { return NAMES.idFor(f, SPLIT_RE); }
+// Tên tệp (EMBED_RE) hoặc kiến trúc/pooling trong GGUF — cùng inspectFile của embed-server (all-MiniLM, bert, pooling mean…).
+function isEmbedGguf(full) {
+  if (EMBED_RE.test(path.basename(full))) return true;
+  try { return !!require('./embed-server').inspectFile(full); } catch { return false; }
+}
 
 // Quét thư mục mô hình (models/<tác giả>/<repo>/<tệp>.gguf và tệp ở gốc). Mô hình chia phần chỉ hiện một dòng.
 function scanDir(dir, depth, out, root = paths.models) {
   let ents = [];
   try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  const files = ents.filter(e => e.isFile() && /\.gguf$/i.test(e.name) && !/mmproj/i.test(e.name) && !EMBED_RE.test(e.name));
+  const files = ents.filter(e => e.isFile() && /\.gguf$/i.test(e.name) && !/mmproj/i.test(e.name) && !isEmbedGguf(path.join(dir, e.name)));
   const mmName = hf.pickMmprojFile(ents.filter(e => e.isFile()).map(e => e.name));
   const mmproj = mmName ? path.join(dir, mmName) : null;
   for (const e of files) {
@@ -356,6 +361,7 @@ function listModels() {
   // “chỉ trỏ sang thư mục mới”: thư mục mô hình cũ vẫn được quét (mô hình cũ vẫn hiện, vẫn nạp được)
   for (const d of settings.data.modelDirsExtra || []) if (d && path.resolve(d) !== path.resolve(paths.models) && fs.existsSync(d)) scanDir(d, 3, out, d);
   for (const full of settings.data.imported) {
+    if (isEmbedGguf(full)) continue;
     try { const s = fs.statSync(full); let mm = null; try { const n = hf.pickMmprojFile(fs.readdirSync(path.dirname(full))); if (n) mm = path.join(path.dirname(full), n); } catch {}
       out.push({ id: modelIdFromFile(full), file: path.basename(full), path: full, size: s.size, mtime: s.mtimeMs, source: 'imported', parts: 1, mmproj: mm, vision: !!mm }); } catch {}
   }
@@ -447,6 +453,7 @@ function cleanLoad(o) {
 }
 const modelLoadFor = (id) => cleanLoad(((settings.data.modelLoad || {})[id]) || {});
 let idleVramUsed = null;
+let embedProc = null; // llama-server --embeddings; dừng trước khi đo VRAM và nạp mô hình trò chuyện
 // sau khi nạp TRỌN lên GPU: VRAM tăng thêm = số đo thật cho mô hình này ở ngữ cảnh đã nạp (Khám phá / Mô hình của tôi dùng số này thay cho ước tính)
 async function measureVram(id, st) {
   if (idleVramUsed == null || !st || st.mode === 'cpu-only' || !(Number.isInteger(st.gpuLayers) && st.gpuLayers > 0 && st.gpuLayers >= (st.totalLayers || 0))) return;
@@ -505,6 +512,8 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
     if (opts.mmproj) opts.serverExe = await serverExeFor();
     LOG.log('load', `Bắt đầu nạp ${m.file}`, { size: m.size, ctx: opts.contextSize, gpuLayers: opts.gpuLayers ?? 'tự động', vision: !!opts.mmproj, ...(opts.serverArgs && opts.serverArgs.length ? { args: opts.serverArgs.join(' ') } : {}) });
     const tLoad = Date.now();
+    // Tiến trình nhúng giữ VRAM (kể cả -ngl nhỏ). Dừng trước khi đo VRAM rảnh và trước engine.loadModel.
+    if (embedProc) { try { await embedProc.stop(); } catch (e) { log('[embed] không dừng được trước khi nạp mô hình: ' + (e && e.message || e)); } }
     // B38: số đo VRAM thật — VRAM đã dùng lúc chưa nạp mô hình (màn hình, ứng dụng khác) làm mốc
     try { if (!engine.status().loaded) { const h0 = await engine.hardwareInfo(); if (h0 && h0.vram && h0.vram.total > 0 && !h0.vram.integratedOnly) idleVramUsed = h0.vram.total - h0.vram.free; } } catch {}
     try {
@@ -994,8 +1003,7 @@ function withParts(orig, text) {
 }
 
 // /v1/embeddings: llama-server --embeddings riêng (src/embed-server.js). RAG vẫn dùng ensureEmbedder() trong tiến trình engine.
-const { createEmbedServer, gpuLayersFor } = require('./embed-server');
-let embedProc = null;
+const { createEmbedServer, gpuLayersFor, chatIdsExcept } = require('./embed-server');
 function embeddingProc() {
   if (embedProc) return embedProc;
   embedProc = createEmbedServer({
@@ -1029,10 +1037,11 @@ const api = createApiServer({ engine, models: listModels, ensureModel: (m) => en
     // B80: tên mô hình nhúng kiểu OpenAI/LangChain (text-embedding-3-small, nomic-embed…) → dùng mô hình nhúng đã cài (như LM Studio);
     // chỉ báo lỗi khi tên là một mô hình TRÒ CHUYỆN đã cài (gọi nhầm endpoint).
     const srv = embeddingProc();
+    const embedRows = srv.list(embeddingDirs());
     const target = srv.resolve(model, {
-      models: srv.list(embeddingDirs()),
+      models: embedRows,
       fallbackId: EMBED.id,
-      chatIds: listModels().map(m => m.id),
+      chatIds: chatIdsExcept(listModels().map(m => m.id), embedRows),
       chatMessage: (m) => `"${m}" là mô hình trò chuyện, không tạo embeddings được. Dùng "${EMBED.id}" (hoặc bỏ trường "model").`,
     });
     return srv.open(target);

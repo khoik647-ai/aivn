@@ -19,6 +19,12 @@ const POOL = { 1: 'mean', 2: 'cls', 3: 'last', 4: 'rank', mean: 'mean', cls: 'cl
 const DLL_NOT_FOUND = [3221225781, -1073741515];
 const GB = 1024 * 1024 * 1024;
 const DEFAULT_IDLE_MS = 5 * 60 * 1000;
+// Chưa nạp mô hình trò chuyện: không bỏ -ngl (llama-server sẽ đẩy hết lớp lên GPU và giữ VRAM đến khi tiến trình tắt).
+const EMBED_IDLE_NGL = 8;
+const MAX_STRING_CHARS = 100000;
+const MAX_TOTAL_CHARS = 1000000;
+const MAX_EMBED_BODY = 2 * 1024 * 1024;
+const META_CACHE_MAX = 64;
 
 class EmbedError extends Error {
   constructor(msg, status = 500, code) { super(msg); this.status = status; this.code = code; }
@@ -40,27 +46,63 @@ function poolingOf(kv, arch) {
   return null;
 }
 
-// null khi không phải mô hình nhúng (hoặc không đọc được GGUF).
+// Ngữ cảnh huấn luyện, kẹp 128–8192. -c, -b và -ub dùng cùng số này (mặc định llama-server chỉ nhận 512 token nếu thiếu -ub).
+function contextLimit(train) {
+  const n = Number(train);
+  const ctx = Number.isFinite(n) && n > 0 ? Math.floor(n) : 512;
+  return Math.min(8192, Math.max(128, ctx));
+}
+
+// Đọc siêu dữ liệu theo mtime + kích thước: /v1/models gọi lại nhiều lần, không parse GGUF mỗi lần.
+const metaCache = new Map();
+let metaReads = 0;
 function inspectFile(file) {
   const base = path.basename(file);
   if (!/\.gguf$/i.test(base) || /mmproj/i.test(base)) return null;
+  let st;
+  try { st = fs.statSync(file); } catch { return null; }
+  const key = path.resolve(file);
+  const hit = metaCache.get(key);
+  if (hit && hit.mtime === st.mtimeMs && hit.size === st.size) return hit.info;
   let meta;
   try { meta = gguf.readMeta(file); } catch { return null; }
+  metaReads += 1;
   const kv = meta.kv || {};
   const arch = String(kv['general.architecture'] || '');
   const pooling = poolingOf(kv, arch);
   const byArch = EMBED_ARCH.has(arch);
   const byPool = !!pooling;
   const byName = EMBED_RE.test(base);
-  if (!byArch && !byPool && !byName) return null;
   const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
-  return {
+  const info = (!byArch && !byPool && !byName) ? null : {
     arch: arch || null,
     pooling,
     dims: num(kv[`${arch}.embedding_length`]),
     context: num(kv[`${arch}.context_length`]),
     size: meta.size,
   };
+  if (metaCache.size >= META_CACHE_MAX) metaCache.delete(metaCache.keys().next().value);
+  metaCache.set(key, { mtime: st.mtimeMs, size: st.size, info });
+  return info;
+}
+
+// Id mô hình nhúng không được nằm trong danh sách trò chuyện (kể cả khi tên tệp không khớp EMBED_RE).
+function chatIdsExcept(chatIds, embedModels) {
+  const skip = new Set((embedModels || []).map((m) => String((m && m.id) || m).toLowerCase()));
+  return (chatIds || []).filter((id) => !skip.has(String(id).toLowerCase()));
+}
+
+function assertInputLengths(texts) {
+  if (!Array.isArray(texts)) return;
+  let total = 0;
+  for (let i = 0; i < texts.length; i++) {
+    const s = texts[i];
+    if (typeof s !== 'string') continue;
+    const n = s.length;
+    if (n > MAX_STRING_CHARS) throw new EmbedError(`Chuỗi thứ ${i + 1} dài ${n} ký tự, vượt quá ${MAX_STRING_CHARS} ký tự cho một chuỗi embeddings.`, 400, 'INPUT_TOO_LONG');
+    total += n;
+  }
+  if (total > MAX_TOTAL_CHARS) throw new EmbedError(`Tổng văn bản dài ${total} ký tự, vượt quá ${MAX_TOTAL_CHARS} ký tự cho một yêu cầu embeddings.`, 400, 'INPUT_TOO_LONG');
 }
 
 function walkGguf(dir, depth, out, seen) {
@@ -91,15 +133,17 @@ function listEmbeddingModels(dirs) {
   return out;
 }
 
-// 0 = CPU (-ngl 0). Số nguyên dương = ít lớp. null = để llama-server tự chọn (VRAM còn rộng).
+// 0 = CPU (-ngl 0). Số nguyên dương = ít lớp. null = mô hình trò chuyện đang nạp và VRAM còn rộng, để llama-server tự chọn.
+// Chưa nạp mô hình trò chuyện trên GPU rời trên 4 GB: luôn có -ngl (EMBED_IDLE_NGL), không chiếm hết VRAM.
 function gpuLayersFor({ vramTotal = 0, vramFree = null, chatLoaded = false, integratedOnly = false } = {}) {
   if (integratedOnly || !(vramTotal > 0) || vramTotal <= 4 * GB) return 0;
   if (chatLoaded) {
     const free = vramFree == null ? 0 : vramFree;
     if (free <= 2 * GB) return 0;
     if (free <= 6 * GB) return 4;
+    return null;
   }
-  return null;
+  return EMBED_IDLE_NGL;
 }
 
 function vectorsFrom(body, n) {
@@ -118,7 +162,10 @@ function toF32(e) {
     const d = e[0].length;
     const o = new Float32Array(d);
     for (const row of e) for (let i = 0; i < d; i++) o[i] += Number(row[i]) || 0;
-    for (let i = 0; i < d; i++) o[i] /= e.length;
+    let n = 0;
+    for (let i = 0; i < d; i++) { o[i] /= e.length; n += o[i] * o[i]; }
+    n = Math.sqrt(n) || 1;
+    for (let i = 0; i < d; i++) o[i] /= n;
     return o;
   }
   return Float32Array.from(e, (x) => Number(x) || 0);
@@ -127,7 +174,7 @@ function toF32(e) {
 function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe = null, gpuLayers = () => 0 } = {}) {
   const idle = Number.isFinite(idleMs) ? idleMs : (Number(process.env.AIVN_EMBED_IDLE_MS) > 0 ? Number(process.env.AIVN_EMBED_IDLE_MS) : DEFAULT_IDLE_MS);
   const locate = findExe || VS.findServer;
-  let proc = null, port = 0, key = '', current = null, wanted = null, timer = null, spawns = 0, lastArgs = null;
+  let proc = null, port = 0, key = '', current = null, wanted = null, timer = null, spawns = 0, lastArgs = null, truncatedCount = 0, lastId = null;
   let chain = Promise.resolve();
 
   function enqueue(fn) {
@@ -190,18 +237,46 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
     }
   }
 
-  async function start(target) {
-    if (proc && current && current.path === target.path) { arm(); return { id: current.id }; }
-    await stop();
-    const exe = locate();
-    if (!exe || !fs.existsSync(exe)) throw new EmbedError('Không tìm thấy llama-server để tạo embeddings. Hãy cài lại AIVN.', 503, 'NO_SERVER');
+  // Cùng cách engine.embed: tokenize, nếu dài hơn ngữ cảnh − 4 thì detokenize phần đầu. Không có cờ cắt trong phản hồi API.
+  async function clipTexts(texts) {
+    const ctx = (current && current.ctx) || contextLimit(wanted && wanted.context);
+    const limit = Math.max(1, ctx - 4);
+    const out = [];
+    let n = 0;
+    for (const raw of texts) {
+      const text = String(raw);
+      let tokens = null;
+      try {
+        const r = await postJson('/tokenize', { content: text });
+        if (r.status < 400 && r.json && Array.isArray(r.json.tokens)) tokens = r.json.tokens;
+      } catch { tokens = null; }
+      if (!tokens) {
+        if (text.length > limit) { out.push(text.slice(0, limit)); n += 1; } else out.push(text);
+        continue;
+      }
+      if (tokens.length <= limit) { out.push(text); continue; }
+      const slice = tokens.slice(0, limit);
+      let next = null;
+      try {
+        const r = await postJson('/detokenize', { tokens: slice });
+        const content = r.json && (typeof r.json.content === 'string' ? r.json.content : (typeof r.json.text === 'string' ? r.json.text : null));
+        if (r.status < 400 && content) next = content;
+      } catch { next = null; }
+      if (next == null) next = text.slice(0, Math.max(1, Math.floor(text.length * limit / tokens.length)));
+      out.push(next);
+      n += 1;
+    }
+    if (n) {
+      truncatedCount += n;
+      log(`[embed] đã cắt ${n} chuỗi còn ${limit} token (ngữ cảnh ${ctx})`);
+    }
+    return out;
+  }
+
+  async function launch(exe, target, ngl, ctx) {
     port = await freePort();
     key = crypto.randomBytes(18).toString('hex');
-    let ngl = 0;
-    try { ngl = await Promise.resolve(gpuLayers(target)); } catch { ngl = 0; }
-    if (ngl != null && (!Number.isInteger(ngl) || ngl < 0)) ngl = 0;
-    const ctx = Math.min(8192, Math.max(128, Number(target.context) || 512));
-    const args = ['-m', target.path, '--embeddings', '--host', '127.0.0.1', '--port', String(port), '--api-key', key, '-c', String(ctx), '-np', '1', '--no-webui', '--offline'];
+    const args = ['-m', target.path, '--embeddings', '--host', '127.0.0.1', '--port', String(port), '--api-key', key, '-c', String(ctx), '-b', String(ctx), '-ub', String(ctx), '-np', '1', '--no-webui', '--offline'];
     if (target.pooling && target.pooling !== 'none') args.push('--pooling', target.pooling);
     if (Number.isInteger(ngl)) args.push('-ngl', String(ngl));
     lastArgs = args.slice();
@@ -222,8 +297,7 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
     child.on('error', (e) => { spawnErr = e; tail.push(String(e && e.message || e)); });
     const exited = new Promise((resolve) => child.once('exit', (code, signal) => resolve({ code, signal })));
     const t0 = Date.now();
-    let up = false;
-    while (!up) {
+    while (true) {
       const r = await Promise.race([exited.then((x) => ({ exit: x })), new Promise((res) => setTimeout(res, 40, null))]);
       if (spawnErr || (r && r.exit) || proc !== child) {
         if (proc === child) proc = null;
@@ -235,7 +309,7 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
       }
       try {
         const res = await fetch(`http://127.0.0.1:${port}/health`, { headers: { authorization: 'Bearer ' + key }, signal: AbortSignal.timeout(2000) });
-        if (res.ok) { up = true; break; }
+        if (res.ok) return;
       } catch {}
       if (Date.now() - t0 > healthMs) {
         try { child.kill('SIGKILL'); } catch {}
@@ -243,20 +317,50 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
         throw new EmbedError('Máy nhúng khởi động quá lâu.', 503, 'TIMEOUT');
       }
     }
-    current = { id: target.id, path: target.path };
-    log(`[embed] llama-server --embeddings sẵn sàng (cổng ${port}, mô hình ${target.id})`);
-    arm();
-    return { id: current.id };
+  }
+
+  async function start(target) {
+    if (proc && current && current.path === target.path) { arm(); return { id: current.id }; }
+    if (lastId && lastId !== target.id) log(`[embed] đổi mô hình ${lastId} → ${target.id}, khởi động lại llama-server`);
+    await stop();
+    const exe = locate();
+    if (!exe || !fs.existsSync(exe)) throw new EmbedError('Không tìm thấy llama-server để tạo embeddings. Hãy cài lại AIVN.', 503, 'NO_SERVER');
+    let ngl = 0;
+    try { ngl = await Promise.resolve(gpuLayers(target)); } catch { ngl = 0; }
+    if (ngl != null && (!Number.isInteger(ngl) || ngl < 0)) ngl = 0;
+    const ctx = contextLimit(target.context);
+    let lastErr = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await launch(exe, target, ngl, ctx);
+        current = { id: target.id, path: target.path, ctx };
+        lastId = target.id;
+        log(`[embed] llama-server --embeddings sẵn sàng (cổng ${port}, mô hình ${target.id})`);
+        arm();
+        return { id: current.id };
+      } catch (e) {
+        lastErr = e;
+        if (proc) { try { proc.kill('SIGKILL'); } catch {} proc = null; }
+        if (e.code !== 'START_FAILED' || attempt === 1) throw e;
+        log('[embed] không giữ được cổng, thử cổng khác');
+      }
+    }
+    throw lastErr;
   }
 
   function resolve(model, { models = [], fallbackId = '', chatIds = null, chatMessage = null } = {}) {
     const want = model == null ? '' : String(model).trim();
     const by = (id) => models.find((m) => m.id === id || m.id.toLowerCase() === String(id).toLowerCase());
-    if (want && Array.isArray(chatIds) && chatIds.includes(want) && want.toLowerCase() !== String(fallbackId || '').toLowerCase()) {
-      const msg = typeof chatMessage === 'function' ? chatMessage(want) : `"${want}" là mô hình trò chuyện, không tạo embeddings được. Dùng "${fallbackId}" (hoặc bỏ trường "model").`;
-      throw new EmbedError(msg, 400, 'CHAT_MODEL');
+    // Có trong danh sách nhúng thì là mô hình nhúng, kể cả khi tên tệp cũng lọt vào danh sách trò chuyện.
+    if (want) {
+      const hit = by(want);
+      if (hit) return hit;
+      const chatSet = new Set((Array.isArray(chatIds) ? chatIds : []).map((id) => String(id).toLowerCase()));
+      if (chatSet.has(want.toLowerCase()) && want.toLowerCase() !== String(fallbackId || '').toLowerCase()) {
+        const msg = typeof chatMessage === 'function' ? chatMessage(want) : `"${want}" là mô hình trò chuyện, không tạo embeddings được. Dùng "${fallbackId}" (hoặc bỏ trường "model").`;
+        throw new EmbedError(msg, 400, 'CHAT_MODEL');
+      }
     }
-    if (want) { const hit = by(want); if (hit) return hit; }
     const fb = (fallbackId && by(fallbackId)) || models[0];
     if (fb) return fb;
     throw new EmbedError('Chưa có mô hình nhúng. Hãy tải một tệp GGUF nhúng (ví dụ nomic-embed-text hoặc bge-small), hoặc BGE-M3 trong AIVN → Cài đặt → Tìm kiếm tài liệu. AIVN không tự tải mô hình này.', 400, 'NO_MODEL');
@@ -269,13 +373,14 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
   }
   async function embed(texts) {
     if (!Array.isArray(texts) || !texts.length || texts.some((t) => typeof t !== 'string')) throw new EmbedError('Thiếu văn bản để nhúng.', 400, 'BAD_INPUT');
+    assertInputLengths(texts);
     return enqueue(async () => {
       if (!proc) {
         if (!wanted) throw new EmbedError('Chưa khởi động được máy nhúng.', 503, 'NOT_STARTED');
         await start(wanted);
       }
       disarm();
-      try { return await fetchEmbeddings(texts); }
+      try { return await fetchEmbeddings(await clipTexts(texts)); }
       finally { arm(); }
     });
   }
@@ -301,8 +406,13 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
   return {
     list: (dirs) => listEmbeddingModels(dirs),
     resolve, open, embed, count, stop: () => enqueue(() => stop()),
-    stats: () => ({ spawns, running: !!proc, lastArgs, pid: proc && proc.pid || null, idleMs: idle }),
+    stats: () => ({ spawns, running: !!proc, lastArgs, pid: proc && proc.pid || null, idleMs: idle, truncated: truncatedCount }),
   };
 }
 
-module.exports = { createEmbedServer, listEmbeddingModels, gpuLayersFor, inspectFile, EmbedError, EMBED_RE, DEFAULT_IDLE_MS };
+function inspectCacheStats() { return { reads: metaReads }; }
+
+module.exports = {
+  createEmbedServer, listEmbeddingModels, gpuLayersFor, inspectFile, inspectCacheStats, EmbedError, EMBED_RE, DEFAULT_IDLE_MS,
+  contextLimit, chatIdsExcept, assertInputLengths, EMBED_IDLE_NGL, MAX_STRING_CHARS, MAX_TOTAL_CHARS, MAX_EMBED_BODY,
+};

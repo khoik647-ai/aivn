@@ -2,6 +2,7 @@
 const http = require('http');
 const crypto = require('crypto');
 const { normalizeTools, dropNullOptionals } = require('./schema');
+const { assertInputLengths, MAX_EMBED_BODY } = require('./embed-server');
 
 // tool_choice kiểu OpenAI → 'auto' | 'none' | 'required' | { name }
 function parseToolChoice(tc, tools) {
@@ -44,11 +45,16 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
   // B80: mọi phản hồi lỗi đều vào nhật ký kèm mã (trước đây 404 chỉ thấy “POST /v1/completions”, không thấy mã)
   const err = (res, code, message, type = 'invalid_request_error') => { if (code !== 401) log(`  → ${code} ${String(message).slice(0, 200)}`); return send(res, code, { error: { message, type, code } }); };
 
-  const readBody = (req) => new Promise((resolve, reject) => {
-    let size = 0; const chunks = [];
-    req.on('data', c => { size += c.length; if (size > 20e6) { reject(new Error('Body quá lớn')); req.destroy(); } else chunks.push(c); });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', reject);
+  const readBody = (req, max = 20e6, tooBig) => new Promise((resolve, reject) => {
+    let size = 0, failed = false; const chunks = [];
+    req.on('data', c => {
+      if (failed) return;
+      size += c.length;
+      if (size > max) { failed = true; reject(new Error(tooBig ? tooBig(max) : 'Body quá lớn')); setImmediate(() => { try { req.destroy(); } catch {} }); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => { if (!failed) resolve(Buffer.concat(chunks).toString('utf8')); });
+    req.on('error', (e) => { if (!failed) reject(e); });
   });
 
   // số token lời nhắc (OpenAI usage.prompt_tokens): lấy từ máy chạy nếu có, không thì đếm bằng bộ tách từ của mô hình
@@ -74,9 +80,11 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
 
     if (req.method === 'GET' && (p === '/v1/models' || p === '/models')) {
       const st = engine.status();
-      const data = models().map(m => ({ id: m.id, object: 'model', created: Math.floor(m.mtime / 1000), owned_by: 'aivn', loaded: st.loaded && st.id === m.id, ...(m.vision ? { vision: true } : {}) }));
+      let rows = [];
+      if (embeddings && typeof embeddings.list === 'function') { try { rows = embeddings.list() || []; } catch { rows = []; } }
+      const embedIds = new Set(rows.map(em => String(em.id).toLowerCase()));
+      const data = models().filter(m => !embedIds.has(String(m.id).toLowerCase())).map(m => ({ id: m.id, object: 'model', created: Math.floor(m.mtime / 1000), owned_by: 'aivn', loaded: st.loaded && st.id === m.id, ...(m.vision ? { vision: true } : {}) }));
       if (embeddings && typeof embeddings.list === 'function') {
-        let rows = []; try { rows = embeddings.list() || []; } catch { rows = []; }
         for (const em of rows) data.push({ id: em.id, object: 'model', created: Math.floor((em.mtime || Date.now()) / 1000), owned_by: 'aivn', type: 'embedding' });
       } else {
         const em = embeddings && embeddings.info();
@@ -202,12 +210,14 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
     if (req.method === 'POST' && (p === '/v1/embeddings' || p === '/embeddings')) {
       if (!embeddings) return err(res, 501, 'Máy chủ này không hỗ trợ embeddings');
       let body;
-      try { body = JSON.parse(await readBody(req) || '{}'); } catch { return err(res, 400, 'JSON không hợp lệ'); }
+      try { body = JSON.parse(await readBody(req, MAX_EMBED_BODY, (n) => `Nội dung yêu cầu embeddings quá lớn (tối đa ${n} byte).`) || '{}'); }
+      catch (e) { const msg = e && e.message || ''; return err(res, 400, /quá lớn/.test(msg) ? msg : 'JSON không hợp lệ'); }
       let input = body.input;
       if (typeof input === 'string') input = [input];
       if (!Array.isArray(input) || !input.length) return err(res, 400, 'Thiếu trường "input" (chuỗi hoặc mảng chuỗi)');
       if (input.some(x => typeof x !== 'string')) return err(res, 400, 'AIVN chỉ nhận "input" dạng chuỗi (chưa hỗ trợ mảng token)');
       if (input.length > 256) return err(res, 400, 'Tối đa 256 chuỗi mỗi yêu cầu');
+      try { assertInputLengths(input); } catch (e) { return err(res, e.status || 400, e.message); }
       const fmt = body.encoding_format || 'float';
       if (!['float', 'base64'].includes(fmt)) return err(res, 400, '"encoding_format" phải là "float" hoặc "base64"');
       let info;
