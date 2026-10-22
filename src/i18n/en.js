@@ -465,6 +465,8 @@
     "Còn phải thu": "Amount due",
     "Còn {0} lần thử trước khi phải chờ.": "{0} attempts left before you have to wait.",
     "Có bản AIVN mới {0}. Xem trong Cài đặt → Giới thiệu.": "A new AIVN version {0} is available. See Settings → About.",
+    "[cập nhật] có bản thử nghiệm {0} (chỉ báo, không tự cập nhật)": "[update] beta version {0} available (notice only, no automatic update)",
+    "Có bản thử nghiệm {0}, tải ở trang web": "There is a beta version {0}, download it from the website",
     "Có bản mới {0}": "New version {0} available",
     "Có thông báo mới. Mở khoá AIVN để xem.": "New notification. Unlock AIVN to view it.",
     "Có thể không đủ bộ nhớ": "May not have enough memory",

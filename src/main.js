@@ -1371,6 +1371,7 @@ function registerIpc() {
   ipcMain.handle('update:download', () => updater.download());
   ipcMain.handle('update:install', () => updater.install());
   ipcMain.handle('update:open', () => updater.openReleases());
+  ipcMain.handle('update:openbeta', () => updater.openBeta()); // B151: chỉ mở trang web (khối bản thử nghiệm), không tải/cài
   ipcMain.handle('update:state', () => updater.state());
   ipcMain.handle('chat:stop', (_e, reqId) => { abortGen(reqId, generations.get(reqId), 'người dùng bấm Dừng'); return true; });
 

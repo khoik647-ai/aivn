@@ -465,6 +465,8 @@
     "Còn phải thu": "应收余额",
     "Còn {0} lần thử trước khi phải chờ.": "还可尝试 {0} 次，之后需要等待。",
     "Có bản AIVN mới {0}. Xem trong Cài đặt → Giới thiệu.": "AIVN 新版本 {0} 已发布。请查看 设置 → 关于。",
+    "[cập nhật] có bản thử nghiệm {0} (chỉ báo, không tự cập nhật)": "[更新] 有测试版 {0}（仅提示，不会自动更新）",
+    "Có bản thử nghiệm {0}, tải ở trang web": "有测试版 {0}，请在网站下载",
     "Có bản mới {0}": "有新版本 {0}",
     "Có thông báo mới. Mở khoá AIVN để xem.": "有新通知。解锁 AIVN 后查看。",
     "Có thể không đủ bộ nhớ": "内存可能不足",

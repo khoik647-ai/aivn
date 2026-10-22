@@ -1251,7 +1251,12 @@ function paintUpdate(st) {
     case 'error': t.className = st.silent ? 'muted' : 'err'; t.textContent = st.error || 'Không kiểm tra được cập nhật.'; break;
     default: t.textContent = 'Bấm “Kiểm tra cập nhật” để xem có bản mới không.';
   }
+  // B151: có bản thử nghiệm công khai mới hơn → chỉ một dòng nhỏ dẫn tới trang web; KHÔNG có nút tải/cài, không bao giờ tự cập nhật lên bản này
+  const bn = $('#updateBeta'), bv = st.beta && st.beta.version;
+  if (bv && st.status !== 'checking' && st.status !== 'downloading') { $('#updBetaLink').textContent = `Có bản thử nghiệm ${bv}, tải ở trang web`; bn.hidden = false; }
+  else bn.hidden = true;
 }
+$('#updBetaLink').addEventListener('click', (e) => { e.preventDefault(); A.openBeta(); });
 $('#updCheck').addEventListener('click', async () => paintUpdate({ ...(await A.checkUpdate()), silent: false }));
 $('#updAction').addEventListener('click', async (e) => {
   const d = e.currentTarget.dataset.do;
