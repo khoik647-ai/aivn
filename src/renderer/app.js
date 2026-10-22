@@ -1744,7 +1744,7 @@ function apShow() {
   $('#apDiff').innerHTML = c.diff ? c.diff.text.split('\n').map(l => { const k = l.startsWith('+ ') ? 'add' : l.startsWith('- ') ? 'del' : 'ctx'; return `<span class="${k}"><i class="g" aria-label="${k === 'add' ? 'thêm' : k === 'del' ? 'bỏ' : ''}">${k === 'add' ? '+' : k === 'del' ? '−' : ' '}</i>${esc(k === 'ctx' ? l.replace(/^ {2}/, '') : l.slice(2)) || ' '}</span>`; }).join('') : '';
   $('#apReasonBox').hidden = true; $('#apReason').value = '';
   $('#apAlwaysRow').hidden = !c.allowAlways; $('#apAlways').checked = false; if ($('#apAlwaysText')) $('#apAlwaysText').textContent = c.alwaysLabel || 'Luôn cho phép công cụ này';
-  const connectCard = c.tool === 'connector_connect' || c.tool === 'mcp_connect' || c.tool === 'mcp_import' || c.tool === 'mcp_replace';
+  const connectCard = c.tool === 'connector_connect' || c.tool === 'mcp_connect' || c.tool === 'mcp_import' || c.tool === 'mcp_replace' || c.tool === 'excel_folders';
   $('#apWarn').hidden = !(connectCard && c.warn); if (connectCard && c.warn) $('#apWarn').textContent = c.warn; // không bao giờ bật sẵn
   card.hidden = false; state.genPhase = 'ask'; if (state.genKind === 'agent') paintGenChrome(); else setPhase('ask');
   paintAgentWait();
@@ -1774,7 +1774,7 @@ $('#apDenyReason').addEventListener('click', () => {
   if ($('#apReasonBox').hidden) { $('#apReasonBox').hidden = false; $('#apReason').focus(); $('#apDenyReason').textContent = 'Gửi lý do & từ chối'; return; }
   apAnswer(false, true); $('#apDenyReason').textContent = 'Từ chối kèm lý do';
 });
-$('#apAlways').addEventListener('change', (e) => { const c = apOpen; const connectCard = c && (c.tool === 'connector_connect' || c.tool === 'mcp_connect' || c.tool === 'mcp_import' || c.tool === 'mcp_replace'); if (connectCard) { $('#apWarn').hidden = !c.warn; $('#apWarn').textContent = c.warn || ''; return; } $('#apWarn').hidden = !e.target.checked; $('#apWarn').textContent = '⚠ ' + ((c && c.warn) || 'AIVN AGENT sẽ dùng công cụ này mà không hỏi lại.') + ' Bạn có thể bỏ trong Cài đặt AIVN AGENT.'; });
+$('#apAlways').addEventListener('change', (e) => { const c = apOpen; const connectCard = c && (c.tool === 'connector_connect' || c.tool === 'mcp_connect' || c.tool === 'mcp_import' || c.tool === 'mcp_replace' || c.tool === 'excel_folders'); if (connectCard) { $('#apWarn').hidden = !c.warn; $('#apWarn').textContent = c.warn || ''; return; } $('#apWarn').hidden = !e.target.checked; $('#apWarn').textContent = '⚠ ' + ((c && c.warn) || 'AIVN AGENT sẽ dùng công cụ này mà không hỏi lại.') + ' Bạn có thể bỏ trong Cài đặt AIVN AGENT.'; });
 document.addEventListener('keydown', (e) => {
   if (!apOpen) return;
   const operable = approveLive();
