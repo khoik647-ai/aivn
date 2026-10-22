@@ -25,13 +25,24 @@
     if (live && id != null && live.id === id) return live;
     return list.find(c => c && c.id === id && modeOf(c) === m) || null;
   }
+  // Danh sách thanh bên của một trang, kể cả việc đang chạy chưa lưu.
+  function listForMode({ mode, convos, generating, generatingByMode } = {}) {
+    const m = modeKey(mode);
+    const list = Array.isArray(convos) ? convos : [];
+    let mine = list.filter(c => c && modeOf(c) === m);
+    const gen = generatingFor(m, generating, generatingByMode);
+    if (gen && !mine.some(c => c.id === gen.id)) mine = [gen, ...mine];
+    return mine;
+  }
   // Hết lượt: lưu xong thì chọn lại đúng việc nếu đang ở trang đó và chưa mở việc khác.
   // Đang xem trang kia, hoặc đã chọn một cuộc khác, thì giữ nguyên.
-  function selectAfterRun({ visibleMode, current, conv, convos } = {}) {
+  // explicitNew: người dùng bấm “＋ Việc mới” trong lúc lượt đang chạy — không kéo về việc đó.
+  function selectAfterRun({ visibleMode, current, conv, convos, explicitNew } = {}) {
     const list = Array.isArray(convos) ? convos : [];
     const saved = (conv && list.find(c => c && c.id === conv.id)) || conv || null;
     if (!conv || modeOf(conv) !== modeKey(visibleMode)) return { current: current || null, saved, selected: false };
     const viewing = !!(current && (current === conv || current.id === conv.id));
+    if (explicitNew && !viewing) return { current: current || null, saved, selected: false };
     if (viewing || !current) return { current: saved, saved, selected: true };
     return { current, saved, selected: false };
   }
@@ -47,6 +58,6 @@
     if (!body || body.isConnected === false) return null;
     return body;
   }
-  const api = { modeOf, generatingFor, convoForMode, selectAfterRun, streamBody };
+  const api = { modeOf, generatingFor, convoForMode, listForMode, selectAfterRun, streamBody };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ChatStream = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

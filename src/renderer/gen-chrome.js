@@ -3,7 +3,7 @@
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
-  else { root.planGenChrome = api.planGenChrome; root.composerGate = api.composerGate; }
+  else { root.planGenChrome = api.planGenChrome; root.composerGate = api.composerGate; root.holdCopy = api.holdCopy; }
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   function planGenChrome({ mode, genKind, genPhase, genNote, agentFoot }) {
     const here = mode === 'agent' ? 'agent' : 'chat';
@@ -20,8 +20,19 @@
     const other = genKind === 'chat' || genKind === 'agent' ? genKind : null;
     if (!other) return 'busy-here';
     const usesLocal = (k) => k === 'chat' || (k === 'agent' && !cloudAgent);
-    if (usesLocal(other) && usesLocal(here)) return other === 'agent' ? 'wait-agent' : 'wait-chat';
-    return 'send';
+  if (usesLocal(other) && usesLocal(here)) return other === 'agent' ? 'wait-agent' : 'wait-chat';
+  return 'send';
+}
+// Câu nhắc khi không gửi được. Đang đứng trên trang bận thì bảo bấm Dừng ngay dưới ô nhập.
+// “Sang trang kia” chỉ khi trang kia mới là trang đang giữ mô hình.
+function holdCopy(gate, mode) {
+  const here = mode === 'agent' ? 'agent' : 'chat';
+  if (gate === 'busy-here' || (gate === 'wait-agent' && here === 'agent') || (gate === 'wait-chat' && here === 'chat')) {
+    return here === 'agent' ? 'AGENT đang chạy — bấm Dừng ở dưới' : 'Trò chuyện đang chạy — bấm Dừng ở dưới';
   }
-  return { planGenChrome, composerGate };
+  if (gate === 'wait-agent') return 'AGENT đang chạy — đợi xong hoặc sang AGENT bấm Dừng';
+  if (gate === 'wait-chat') return 'Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng';
+  return '';
+}
+return { planGenChrome, composerGate, holdCopy };
 });
