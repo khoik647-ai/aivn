@@ -40,7 +40,7 @@ fi
 # chờ trang thật (GitHub Pages dựng lại 1–3 phút)
 for i in $(seq 1 40); do
   P=$(curl -s "$SITE_URL?nocache=$RANDOM")
-  if [[ -n "$VER" ]]; then grep -q "data-beta-version=\"$VER\"" <<<"$P" && grep -q "$SHA" <<<"$P" && grep -q "$URL" <<<"$P" && grep -q 'beta-mnote' <<<"$P" && grep -q 'AIVN-FIX-320' <<<"$P" && { echo "TRANG THẬT OK: $SITE_URL có link beta $VER + SHA-256"; break; }
+  if [[ -n "$VER" ]]; then grep -q "data-beta-version=\"$VER\"" <<<"$P" && grep -q "$SHA" <<<"$P" && grep -q "$URL" <<<"$P" && grep -q 'beta-mnote' <<<"$P" && grep -q 'AIVN-BETA-HERO' <<<"$P" && grep -q 'AIVN-BETA-BADGE' <<<"$P" && grep -q 'AIVN-FIX-320' <<<"$P" && { echo "TRANG THẬT OK: $SITE_URL có link beta $VER + SHA-256"; break; }
   else grep -q 'AIVN-BETA' <<<"$P" || { echo "TRANG THẬT OK: đã gỡ khối beta"; break; }; fi
   [[ $i == 40 ]] && { echo "LỖI: sau 10 phút trang thật chưa đổi"; exit 4; }
   sleep 15

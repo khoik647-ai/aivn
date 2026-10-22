@@ -10,7 +10,7 @@
   "mnav.3": "开发者",
   "mnav.4": "下载",
   "mnav.5": "免费下载 AIVN",
-  "hero.1": "<span class=\"dot\"></span>0.15.3 版 · 屏幕控制始终配备“眼睛”，Zalo 搜索更可靠，主题动画可选",
+  "hero.1": "<span class=\"dot\"></span>0.15.3 版 · 屏幕控制始终配备“眼睛”，Zalo 搜索更可靠，主题动画可选<!--AIVN-BETA-BADGE--> · 已推出 <span class=\"nw\">0.16.0-beta.2.7</span> 测试版<!--/AIVN-BETA-BADGE-->",
   "hero.2": "人工智能，<br/><span class=\"grad-text\">就在你的电脑上。</span>",
   "hero.3": "AIVN 让你下载开源语言模型并与之对话，无需联网，无需注册账号，数据始终留在你的电脑上。全新的 <b>AIVN AGENT</b> 模式还能自主使用工具：读取文件、计算、撰写报告、按计划发送提醒。",
   "hero.4": "<span class=\"os-sub\">下载</span><span class=\"os-main\">Windows 版</span>",
@@ -173,7 +173,8 @@
   "hero.arm": "<b>Apple Silicon</b><small>M1、M2、M3、M4… 芯片 · 约 __MB_ARM__ MB</small>",
   "cta.arm": "<b>Apple Silicon</b><small>M1、M2、M3、M4… 芯片 · 约 __MB_ARM__ MB</small>",
   "footer.sub": "（文郎大学学生）",
-  "beta.1": "<a class=\"beta-link\" href=\"https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.2.7/AIVN-Setup-0.16.0-beta.2.7.exe\" rel=\"noopener\">🧪 下载 <span class=\"nw\">0.16.0-beta.2.7</span> 测试版（Windows） <span class=\"beta-size\">· 约 245 MB</span></a><span class=\"beta-mnote\">📱 此测试版只能安装在 Windows 电脑上，请在电脑上打开本页下载。</span><small>⚠ 测试版可能仍有错误，也不会自动更新。日常使用请选择上方的稳定版。<span class=\"nw\">SHA-256：</span><code class=\"beta-sha\">421af85e5766e99b6cdf7e163981646087ff794c88b9d44f7dff8b572bac3b98</code></small>"
+  "beta.1": "<a class=\"beta-link\" href=\"https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.2.7/AIVN-Setup-0.16.0-beta.2.7.exe\" rel=\"noopener\">🧪 下载 <span class=\"nw\">0.16.0-beta.2.7</span> 测试版（Windows） <span class=\"beta-size\">· 约 245 MB</span></a><span class=\"beta-mnote\">📱 此测试版只能安装在 Windows 电脑上，请在电脑上打开本页下载。</span><small>⚠ 测试版可能仍有错误，也不会自动更新。日常使用请选择上方的稳定版。<span class=\"nw\">SHA-256：</span><code class=\"beta-sha\">421af85e5766e99b6cdf7e163981646087ff794c88b9d44f7dff8b572bac3b98</code></small>",
+  "beta.2": "<a href=\"#tai-beta\">🧪 或者试试 <span class=\"nw\">0.16.0-beta.2.7</span> 测试版 →</a>"
  },
  "attr": {
   "@aria-label.1": "AIVN 首页",

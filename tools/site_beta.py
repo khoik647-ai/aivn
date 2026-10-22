@@ -17,6 +17,11 @@ a = ap.parse_args()
 page = open(a.html, encoding='utf-8').read()
 START, END = '<!--AIVN-BETA-->', '<!--/AIVN-BETA-->'
 page = re.sub(r'\n?' + re.escape(START) + r'.*?' + re.escape(END), '', page, flags=re.S)
+# B152: link “Hoặc thử bản beta …” ngay dưới hàng nút tải + câu nhắc trong huy hiệu phiên bản (hero.1) — cập nhật/gỡ cùng khối beta
+HSTART, HEND, BSTART, BEND = '<!--AIVN-BETA-HERO-->', '<!--/AIVN-BETA-HERO-->', '<!--AIVN-BETA-BADGE-->', '<!--/AIVN-BETA-BADGE-->'
+unbadge = lambda t: re.sub(re.escape(BSTART) + r'.*?' + re.escape(BEND), '', t, flags=re.S)
+page = re.sub(r'\n?' + re.escape(HSTART) + r'.*?' + re.escape(HEND), '', page, flags=re.S)
+page = unbadge(page)
 
 T = None
 if not a.clear:
@@ -49,18 +54,30 @@ if not a.clear:
           'if(/android|iphone|ipad|ipod|mobile/i.test(u)||(/mac/i.test(p)&&navigator.maxTouchPoints>1)||(navigator.userAgentData&&navigator.userAgentData.mobile))d.classList.add("is-mobile");'
           'document.addEventListener("click",function(e){var a=e.target&&e.target.closest&&e.target.closest(".beta-dl .beta-link");if(!a||!d.classList.contains("is-mobile"))return;'
           'e.preventDefault();var n=a.closest(".beta-dl").querySelector(".beta-mnote");if(n){n.classList.add("flash");n.scrollIntoView({block:"nearest"});}},true);})();</script>')
-    block = (f'\n{START}{css}<p class="hero-note beta-dl" data-i18n="beta.1" data-beta-version="{v}">{T["vi"]}</p>{js}{END}')
+    css = css.replace('</style>', '#tai-beta{scroll-margin-top:calc(var(--hdr,68px) + 16px)}'
+                      '.beta-hero{margin:.5rem 0 .2rem}.beta-hero .nw{white-space:nowrap}.badge{display:inline-block;line-height:1.5}.badge .dot{display:inline-block;vertical-align:middle;margin-right:8px}.badge .nw{white-space:nowrap}.beta-hero a{display:inline-block;min-height:44px;padding:.6rem 0;line-height:1.5;box-sizing:border-box;font-weight:600;color:var(--accent);text-decoration:underline;text-underline-offset:3px}</style>')
+    block = (f'\n{START}{css}<p class="hero-note beta-dl" id="tai-beta" data-i18n="beta.1" data-beta-version="{v}">{T["vi"]}</p>{js}{END}')
+    H2 = {'vi': f'<a href="#tai-beta">🧪 Hoặc thử bản beta {nv} →</a>', 'en': f'<a href="#tai-beta">🧪 Or try the {nv} beta →</a>',
+          'zh': f'<a href="#tai-beta">🧪 或者试试 {nv} 测试版 →</a>'}
+    BADGE = {'vi': f' · Có bản thử nghiệm {nv}', 'en': f' · {nv} beta available', 'zh': f' · 已推出 {nv} 测试版'}
+    BADGE = {l: BSTART + t + BEND for l, t in BADGE.items()}
     m = re.search(r'<p class="hero-note"[^>]*data-i18n="hero\.9"[^>]*>.*?</p>', page, flags=re.S)
     if not m: sys.exit('không thấy dòng ghi chú dưới hàng nút tải (data-i18n="hero.9")')
     page = page[:m.end()] + block + page[m.end():]
+    hero = f'\n{HSTART}<p class="beta-hero" data-i18n="beta.2">{H2["vi"]}</p>{HEND}'
+    page = page[:m.start()] + hero.lstrip('\n') + '\n' + page[m.start():]   # ngay dưới hàng nút tải, trên dòng ghi chú hero.9
+    mb = re.search(r'(<span class="badge" data-i18n="hero\.1">.*?)(</span>)(?=\s*\n)', page)
+    if not mb: sys.exit('không thấy huy hiệu phiên bản (data-i18n="hero.1")')
+    page = page[:mb.end(1)] + BADGE['vi'] + page[mb.end(1):]
 
 if a.i18n_dir:  # trang mẫu: lưu bản dịch vào site/i18n rồi ghép lại từ điển
     L = {}
     for l in ('vi', 'en', 'zh'):
         p = os.path.join(a.i18n_dir, l + '.json'); L[l] = json.load(open(p, encoding='utf-8'))
         if l != 'vi':
-            L[l].setdefault('text', {}).pop('beta.1', None)
-            if T: L[l]['text']['beta.1'] = T[l]
+            L[l].setdefault('text', {}).pop('beta.1', None); L[l]['text'].pop('beta.2', None)
+            L[l]['text']['hero.1'] = unbadge(L[l]['text']['hero.1'])
+            if T: L[l]['text']['beta.1'] = T[l]; L[l]['text']['beta.2'] = H2[l]; L[l]['text']['hero.1'] += BADGE[l]
             open(p, 'w', encoding='utf-8').write(json.dumps(L[l], ensure_ascii=False, indent=1) + '\n')
     D = {'en': {**L['en']['text'], **L['en']['attr']}, 'zh': {**L['zh']['text'], **L['zh']['attr']}, 'meta': {l: L[l]['meta'] for l in L}}
     page, n = re.subn(r'/\*I18N\*/.*?/\*END\*/', lambda m: '/*I18N*/' + json.dumps(D, ensure_ascii=False) + '/*END*/', page, count=1, flags=re.S)
@@ -69,8 +86,8 @@ else:  # trang đang chạy: sửa thẳng từ điển trong trang
     if not m: sys.exit('không thấy từ điển /*I18N*/…/*END*/ trong trang')
     D = json.loads(m.group(1))
     for l in ('en', 'zh'):
-        D[l].pop('beta.1', None)
-        if T: D[l]['beta.1'] = T[l]
+        D[l].pop('beta.1', None); D[l].pop('beta.2', None); D[l]['hero.1'] = unbadge(D[l]['hero.1'])
+        if T: D[l]['beta.1'] = T[l]; D[l]['beta.2'] = H2[l]; D[l]['hero.1'] += BADGE[l]
     page = page[:m.start()] + '/*I18N*/' + json.dumps(D, ensure_ascii=False) + '/*END*/' + page[m.end():]
 open(a.html, 'w', encoding='utf-8').write(page)
 print(('đã gỡ khối beta khỏi ' if a.clear else f'đã đặt khối beta {a.version} vào ') + a.html)

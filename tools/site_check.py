@@ -33,6 +33,14 @@ with sync_playwright() as p:
             pg.on('download', lambda dl: reqs.append('DOWNLOAD ' + dl.url))
             pg.goto(URL + ('&' if '?' in URL else '?') + 'lang=' + lang, wait_until='load'); pg.wait_for_timeout(600)
             r = pg.evaluate(JS); r['conf'] = name
+            # B152: link “Hoặc thử bản beta …” dưới hàng nút tải → bấm thì cuộn tới khối beta
+            hl = pg.locator('.beta-hero a')
+            if hl.count():
+                bb = hl.bounding_box(); r['heroH'] = round(bb['height']) if bb else 0; r['heroText'] = hl.inner_text()
+                hl.click(); pg.wait_for_timeout(1200)
+                r['heroScroll'] = pg.evaluate('()=>{const b=document.getElementById("tai-beta").getBoundingClientRect();return b.top>=0&&b.top<innerHeight}')
+                pg.evaluate('()=>scrollTo(0,0)'); pg.wait_for_timeout(300)
+            else: r['heroH'] = None
             # menu di động mở → tràn?
             if 'desktop' not in name:
                 pg.click('#burger'); pg.wait_for_timeout(500); r['menuOpen'] = pg.evaluate('()=>({sw:document.documentElement.scrollWidth,mw:Math.round(document.querySelector("#mobileMenu").scrollWidth),cw:document.documentElement.clientWidth})'); pg.click('#burger'); pg.wait_for_timeout(400)
@@ -53,6 +61,7 @@ for r in res:
     if r.get('menuOpen') and r['menuOpen']['sw'] > r['menuOpen']['cw']: bad.append(f'{k}: mở menu bị tràn')
     if (r['linkH'] or 0) < 44: bad.append(f'{k}: link beta cao {r["linkH"]} px < 44')
     if any(n != 1 for n in r['nwLines']): bad.append(f'{k}: “SHA-256”/số phiên bản bị ngắt dòng')
+    if r['heroH'] is not None and (r['heroH'] < 44 or not r.get('heroScroll')): bad.append(f'{k}: link beta ở đầu trang cao {r["heroH"]} px / cuộn tới khối: {r.get("heroScroll")}')
     if r['creditCount'] < 3: bad.append(f'{k}: dòng ghi công chỉ còn {r["creditCount"]}')
     if not r['footPhone'].startswith(LABEL.get(r['lang'], '?')): bad.append(f'{k}: nhãn điện thoại “{r["footPhone"]}”')
     if (r['lang'] != 'vi') != bool(r['footSub']): bad.append(f'{k}: phụ đề ghi công “{r["footSub"]}” (en/zh phải có, vi để trống)')

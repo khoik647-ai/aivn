@@ -72,3 +72,18 @@ test('B150 + chạy lại không đổi gì: CSS màn ≤ 380 px có một lần
   const a = run(); const b = run(); assert.strictEqual(a, b);
   assert.strictEqual((a.match(/\/\*AIVN-FIX-320\*\//g) || []).length, 1); assert.match(a, /\.dev-grid>\*,\.privacy>\*\{min-width:0\}/);
 });
+test('B152: link “Hoặc thử bản beta …” ngay dưới hàng nút tải + câu nhắc trong huy hiệu phiên bản, vi/en/zh; --clear gỡ sạch', () => {
+  const f = live(); fixes(f, ['--sizes', '240075606,259835253,272736118']); beta(f); const h = fs.readFileSync(f, 'utf8'); const D = dict(h);
+  const iRow = h.indexOf('id="tai-ve"'), iHero = h.indexOf('data-i18n="beta.2"'), iNote = h.indexOf('data-i18n="hero.9"'), iBlock = h.indexOf('id="tai-beta"');
+  assert.ok(iRow < iHero && iHero < iNote && iNote < iBlock, 'thứ tự: hàng nút → link beta → ghi chú → khối beta');
+  assert.match(h, /<p class="beta-hero" data-i18n="beta\.2"><a href="#tai-beta">🧪 Hoặc thử bản beta <span class="nw">0\.16\.0-beta\.2\.7<\/span> →<\/a><\/p>/);
+  assert.match(D.en['beta.2'], /^<a href="#tai-beta">🧪 Or try the <span class="nw">0\.16\.0-beta\.2\.7<\/span> beta →<\/a>$/);
+  assert.match(D.zh['beta.2'], /^<a href="#tai-beta">🧪 或者试试 <span class="nw">0\.16\.0-beta\.2\.7<\/span> 测试版 →<\/a>$/);
+  assert.match(h, /data-i18n="hero\.1">[^\n]*Phiên bản 0\.15\.3[^\n]*<!--AIVN-BETA-BADGE--> · Có bản thử nghiệm <span class="nw">0\.16\.0-beta\.2\.7<\/span><!--\/AIVN-BETA-BADGE--><\/span>/);
+  assert.match(D.en['hero.1'], /Version 0\.15\.3 .*<!--AIVN-BETA-BADGE--> · <span class="nw">0\.16\.0-beta\.2\.7<\/span> beta available<!--\/AIVN-BETA-BADGE-->$/);
+  assert.match(D.zh['hero.1'], /0\.15\.3 版 .*<!--AIVN-BETA-BADGE--> · 已推出 <span class="nw">0\.16\.0-beta\.2\.7<\/span> 测试版<!--\/AIVN-BETA-BADGE-->$/);
+  assert.match(h, /\.beta-hero a\{display:inline-block;min-height:44px/); assert.match(h, /#tai-beta\{scroll-margin-top/);
+  execFileSync('python3', [path.join(root, 'tools/site_beta.py'), '--html', f, '--clear']); const c = fs.readFileSync(f, 'utf8'); const DC = dict(c);
+  assert.ok(!/AIVN-BETA|beta\.2|tai-beta|beta-hero/.test(c), 'gỡ chưa sạch'); assert.ok(!('beta.2' in DC.en) && !/BETA/.test(DC.en['hero.1'] + DC.zh['hero.1']));
+  assert.match(c, /data-i18n="hero\.1"><span class="dot"><\/span>Phiên bản 0\.15\.3 · [^<]*<\/span>/);
+});

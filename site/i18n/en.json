@@ -10,7 +10,7 @@
   "mnav.3": "Developers",
   "mnav.4": "Download",
   "mnav.5": "Download AIVN for free",
-  "hero.1": "<span class=\"dot\"></span>Version 0.15.3 · Screen control always has “eyes”, more reliable Zalo search, theme animation options",
+  "hero.1": "<span class=\"dot\"></span>Version 0.15.3 · Screen control always has “eyes”, more reliable Zalo search, theme animation options<!--AIVN-BETA-BADGE--> · <span class=\"nw\">0.16.0-beta.2.7</span> beta available<!--/AIVN-BETA-BADGE-->",
   "hero.2": "Artificial intelligence,<br/><span class=\"grad-text\">running right on your computer.</span>",
   "hero.3": "AIVN lets you download open-source language models and chat with them without an Internet connection or an account. Your data never leaves your computer. The new <b>AIVN AGENT</b> mode can also use tools on its own: read files, do calculations, write reports and send scheduled reminders.",
   "hero.4": "<span class=\"os-sub\">Download for</span><span class=\"os-main\">Windows</span>",
@@ -173,7 +173,8 @@
   "hero.arm": "<b>Apple Silicon</b><small>M1, M2, M3, M4… chips · ~__MB_ARM__ MB</small>",
   "cta.arm": "<b>Apple Silicon</b><small>M1, M2, M3, M4… chips · ~__MB_ARM__ MB</small>",
   "footer.sub": "(student at Van Lang University)",
-  "beta.1": "<a class=\"beta-link\" href=\"https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.2.7/AIVN-Setup-0.16.0-beta.2.7.exe\" rel=\"noopener\">🧪 Download the <span class=\"nw\">0.16.0-beta.2.7</span> beta for Windows <span class=\"beta-size\">· ~245 MB</span></a><span class=\"beta-mnote\">📱 This beta only installs on Windows PCs. Open this page on a computer to download it.</span><small>⚠ Beta: it may still have bugs and does not update automatically. For everyday use, choose the stable version above. <span class=\"nw\">SHA-256:</span> <code class=\"beta-sha\">421af85e5766e99b6cdf7e163981646087ff794c88b9d44f7dff8b572bac3b98</code></small>"
+  "beta.1": "<a class=\"beta-link\" href=\"https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.2.7/AIVN-Setup-0.16.0-beta.2.7.exe\" rel=\"noopener\">🧪 Download the <span class=\"nw\">0.16.0-beta.2.7</span> beta for Windows <span class=\"beta-size\">· ~245 MB</span></a><span class=\"beta-mnote\">📱 This beta only installs on Windows PCs. Open this page on a computer to download it.</span><small>⚠ Beta: it may still have bugs and does not update automatically. For everyday use, choose the stable version above. <span class=\"nw\">SHA-256:</span> <code class=\"beta-sha\">421af85e5766e99b6cdf7e163981646087ff794c88b9d44f7dff8b572bac3b98</code></small>",
+  "beta.2": "<a href=\"#tai-beta\">🧪 Or try the <span class=\"nw\">0.16.0-beta.2.7</span> beta →</a>"
  },
  "attr": {
   "@aria-label.1": "AIVN home",
