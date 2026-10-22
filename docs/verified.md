@@ -92,6 +92,7 @@ Bài đo lại sau lỗi trên máy thật (Zalo, Outlook web, âm lượng). M�
 | **Tổng** | **13/25** | **25/25** | **25/25** |
 
 Ngưỡng của AIVN AGENT: 23/25. Kết luận:
-- Qwen3-VL 2B bị bỏ khỏi bộ chọn mô hình của AIVN AGENT (vẫn dùng để trò chuyện). Lỗi chính: gọi lại `open_app` thay vì bấm nút đã thấy, và gọi `volume_up` kèm mức thay vì đặt mức (AIVN nay tự đổi thành đặt mức, nhưng lỗi bước 2 vẫn còn).
+- Qwen3-VL 2B chưa đạt ngưỡng. Lỗi chính: gọi lại `open_app` thay vì bấm nút đã thấy, và gọi `volume_up` kèm mức thay vì đặt mức (AIVN nay tự đổi thành đặt mức, nhưng lỗi bước 2 vẫn còn).
 - Máy 12 GB VRAM: mặc định là mô hình mạnh nhất chạy mượt và đạt bài này (Qwen3-VL 8B).
-- Laptop GPU 4 GB: Qwen3-VL 4B (có thể hiện “Chạy chậm” khi phải tràn sang RAM).
+- Máy GPU dưới 6 GB: AIVN AGENT gợi ý ⭐ Qwen3-VL 2B dù chỉ đạt 13/25, vì trên laptop thật RTX 3050 Ti 4 GB (bản beta.2.7) Qwen3-VL 4B chỉ đặt được 16/37 lớp lên GPU. Qwen3-VL 4B (25/25) vẫn chọn được, mang nhãn “Chạy chậm”.
+- Máy GPU từ 6 GB trở lên: AIVN AGENT không dùng Qwen3-VL 2B (vẫn dùng để trò chuyện).

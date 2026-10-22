@@ -92,6 +92,7 @@ A re-run after failures on real computers (Zalo, Outlook on the web, volume). Ea
 | **Total** | **13/25** | **25/25** | **25/25** |
 
 AIVN AGENT threshold: 23/25. Conclusions:
-- Qwen3-VL 2B was removed from the AIVN AGENT model picker (it can still be used for chat). Main errors: calling `open_app` again instead of clicking a button it had already seen, and calling `volume_up` with a level instead of setting the level (AIVN now turns this into setting the level automatically, but the step 2 error remains).
+- Qwen3-VL 2B did not reach the threshold. Main errors: calling `open_app` again instead of clicking a button it had already seen, and calling `volume_up` with a level instead of setting the level (AIVN now turns this into setting the level automatically, but the step 2 error remains).
 - Computers with 12 GB of VRAM: the default is the strongest model that runs smoothly and passes this test (Qwen3-VL 8B).
-- Laptops with a 4 GB GPU: Qwen3-VL 4B (it may show “Runs slowly” when it has to spill over into RAM).
+- Computers with a GPU under 6 GB: AIVN AGENT suggests ⭐ Qwen3-VL 2B even though it scored only 13/25, because on a real RTX 3050 Ti 4 GB laptop (beta.2.7 build) Qwen3-VL 4B could put only 16/37 layers on the GPU. Qwen3-VL 4B (25/25) can still be chosen and is labeled “Runs slowly”.
+- Computers with a GPU of 6 GB or more: AIVN AGENT does not use Qwen3-VL 2B (it can still be used for chat).
