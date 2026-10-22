@@ -3,13 +3,19 @@
 # Dùng:  tools/publish-beta-site.sh OWNER TAG          vd. tools/publish-beta-site.sh khoik647-ai v0.16.0-beta.2.7
 #        tools/publish-beta-site.sh OWNER --clear      gỡ khối beta khỏi trang
 # Kiểm trước: release là PRERELEASE đã đăng (không nháp), KHÔNG phải Latest, không có latest*.yml; tải tài sản về khớp kích thước + SHA-256.
-# Sau: đẩy gh-pages (không ghi đè lịch sử), chờ trang thật hiện khối mới. Nhớ chạy lại tools/site_beta.py trên site/index.html
+# Trước khi đặt khối beta: tools/site_fixes.py (sửa chung, dung lượng thật của bản ổn định). Sau: đẩy gh-pages (không ghi đè lịch sử), chờ trang thật hiện khối mới. Nhớ chạy lại tools/site_beta.py trên site/index.html
 # (--i18n-dir site/i18n) rồi commit, để release.sh giữ khối beta khi dựng lại trang. Không đụng khoá admin.
 set -euo pipefail
 OWNER="${1:?OWNER}"; TAG="${2:?TAG hoặc --clear}"; REPO=aivn; HERE="$(cd "$(dirname "$0")" && pwd)"
 SITE_URL="https://$OWNER.github.io/$REPO/"
 W=$(mktemp -d /tmp/beta-site-XXXX); trap 'rm -rf "$W"' EXIT
 git clone -q --branch gh-pages --single-branch "https://github.com/$OWNER/$REPO.git" "$W/ghp"
+# B143–B150: sửa chung trang (nhận hệ điều hành, dung lượng THẬT của bản ổn định Latest cho mọi nút + title, chân trang en/zh, không tràn 320 px)
+LJ=$(gh release view --repo "$OWNER/$REPO" --json assets 2>/dev/null || gh api "repos/$OWNER/$REPO/releases/latest" --jq '{assets:[.assets[]|{name,size}]}')
+sz() { jq -r --arg n "$1" '[.assets[] | select(.name==$n) | .size][0]' <<<"$LJ"; }
+SW=$(sz AIVN-Setup.exe); SA=$(sz AIVN-mac-arm64.zip); SX=$(sz AIVN-mac-x64.zip)
+[[ "$SW" =~ ^[0-9]+$ && "$SA" =~ ^[0-9]+$ && "$SX" =~ ^[0-9]+$ ]] || { echo "LỖI: không đọc được dung lượng tài sản của bản ổn định Latest"; exit 2; }
+python3 "$HERE/site_fixes.py" --html "$W/ghp/index.html" --sizes "$SW,$SA,$SX"
 if [[ "$TAG" == "--clear" ]]; then
   python3 "$HERE/site_beta.py" --html "$W/ghp/index.html" --clear; VER=""
 else
@@ -34,8 +40,11 @@ fi
 # chờ trang thật (GitHub Pages dựng lại 1–3 phút)
 for i in $(seq 1 40); do
   P=$(curl -s "$SITE_URL?nocache=$RANDOM")
-  if [[ -n "$VER" ]]; then grep -q "data-beta-version=\"$VER\"" <<<"$P" && grep -q "$SHA" <<<"$P" && grep -q "$URL" <<<"$P" && { echo "TRANG THẬT OK: $SITE_URL có link beta $VER + SHA-256"; exit 0; }
-  else grep -q 'AIVN-BETA' <<<"$P" || { echo "TRANG THẬT OK: đã gỡ khối beta"; exit 0; }; fi
+  if [[ -n "$VER" ]]; then grep -q "data-beta-version=\"$VER\"" <<<"$P" && grep -q "$SHA" <<<"$P" && grep -q "$URL" <<<"$P" && grep -q 'beta-mnote' <<<"$P" && grep -q 'AIVN-FIX-320' <<<"$P" && { echo "TRANG THẬT OK: $SITE_URL có link beta $VER + SHA-256"; break; }
+  else grep -q 'AIVN-BETA' <<<"$P" || { echo "TRANG THẬT OK: đã gỡ khối beta"; break; }; fi
+  [[ $i == 40 ]] && { echo "LỖI: sau 10 phút trang thật chưa đổi"; exit 4; }
   sleep 15
 done
-echo "LỖI: sau 10 phút trang thật chưa đổi"; exit 4
+# kiểm bố cục trang thật ở 320/375/1280 px × vi/en/zh (cần Python có playwright + Chrome; đặt SITE_CHECK_PY, vd. /tmp/pwv/bin/python)
+if [[ -n "${SITE_CHECK_PY:-}" ]]; then "$SITE_CHECK_PY" "$HERE/site_check.py" "$SITE_URL?nocache=$RANDOM" "$W/check.json" || { echo "LỖI: trang thật chưa đạt kiểm bố cục"; exit 5; }
+else echo "(bỏ qua kiểm bố cục: chưa đặt SITE_CHECK_PY)"; fi
