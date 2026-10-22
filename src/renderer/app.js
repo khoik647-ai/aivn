@@ -2,7 +2,7 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const A = window.aivn;
-const state = { settings: null, models: [], status: { loaded: false }, convos: [], current: null, generating: null, catalog: [], mode: 'chat', lastByMode: {}, agent: null };
+const state = { settings: null, models: [], status: { loaded: false }, convos: [], current: null, generating: null, generatingConv: null, catalog: [], mode: 'chat', lastByMode: {}, agent: null };
 const isAgent = () => state.mode === 'agent';
 
 // 0.16 i18n: định dạng số/ngày theo ngôn ngữ giao diện (vi: 1.234,5 · en: 1,234.5 · zh: 1,234.5)
@@ -77,7 +77,8 @@ function setMode(mode) {
   if (state.mode !== mode) {
     if (state.current) state.lastByMode[state.mode] = state.current.id;
     state.mode = mode;
-    state.current = state.convos.find(c => c.id === state.lastByMode[mode] && convoMode(c) === mode) || null;
+    // B173: cuộc đang stream có thể chưa có trong danh sách (chưa lưu) hoặc bản trong danh sách là bản cũ trên đĩa
+    state.current = ChatStream.convoForMode({ mode, id: state.lastByMode[mode], convos: state.convos, generating: state.generatingConv });
     pending = []; renderChips();
   }
   $('#view-chat').classList.toggle('agent-mode', mode === 'agent');
@@ -87,6 +88,7 @@ function setMode(mode) {
   $('#attachBtn').hidden = false;
   $('#newChat').textContent = mode === 'agent' ? '＋ Việc mới cho AIVN AGENT' : '＋ Cuộc trò chuyện mới';
   renderConvos(); renderMessages();
+  if (typeof state.streamFlush === 'function') state.streamFlush(); // B173: vẽ ngay phần đã stream lên nút mới, không chờ token kế
   if (state.models) $('#modelSelect').innerHTML = modelOptionsHtml(state.models, state.status.loaded ? state.status.id : '', mode === 'agent');
   if (mode === 'agent') refreshAgent();
 }
@@ -618,7 +620,10 @@ function convoHit(c, q) {
 }
 function renderConvos() {
   const q = fold(($('#convoQ') && $('#convoQ').value || '').trim());
-  const mine = state.convos.filter(c => convoMode(c) === state.mode); const rows = mine.map(c => [c, convoHit(c, q)]).filter(([, h]) => h.ok);
+  let mine = state.convos.filter(c => convoMode(c) === state.mode);
+  const gen = state.generatingConv; // B173: cuộc mới chưa saveConvo vẫn hiện trong danh sách khi đang stream
+  if (gen && convoMode(gen) === state.mode && !mine.some(c => c.id === gen.id)) mine = [gen, ...mine];
+  const rows = mine.map(c => [c, convoHit(c, q)]).filter(([, h]) => h.ok);
   $('#convoList').innerHTML = rows.map(([c, h]) => `<div class="convo ${state.current && c.id === state.current.id ? 'active' : ''}" data-id="${c.id}"><span data-noi18n title="${esc(c.title)}">${esc(c.title)}${h.snip ? `<small class="convo-snip">${esc(h.snip)}</small>` : ''}</span><button class="exp" title="Xuất ra tệp (.md/.txt/.json)" aria-label="Xuất ra tệp" data-testid="convo-export">⤓</button><button class="del" title="Xoá">✕</button></div>`).join('')
     || `<div class="muted" style="padding:8px;font-size:12.5px">${q && mine.length ? `Không có cuộc trò chuyện nào khớp “${esc($('#convoQ').value.trim())}”` : isAgent() ? 'Chưa giao việc nào cho AIVN AGENT' : 'Chưa có cuộc trò chuyện nào'}</div>`;
 }
@@ -631,7 +636,8 @@ $('#convoList').addEventListener('click', async (e) => {
   const row = e.target.closest('.convo'); if (!row) return;
   if (e.target.closest('.exp')) { await exportConvo(row.dataset.id); return; }
   if (e.target.classList.contains('del')) { await A.deleteConvo(row.dataset.id); if (state.current && state.current.id === row.dataset.id) state.current = null; await loadConvos(); renderMessages(); return; }
-  state.current = state.convos.find(c => c.id === row.dataset.id); renderConvos(); renderMessages();
+  state.current = (state.generatingConv && state.generatingConv.id === row.dataset.id) ? state.generatingConv : state.convos.find(c => c.id === row.dataset.id); renderConvos(); renderMessages();
+  if (typeof state.streamFlush === 'function') state.streamFlush();
 });
 $('#messages').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-copy]'); if (!b || !state.current) return;
@@ -672,13 +678,13 @@ function renderMessages() {
     const ab = (act, ic, t) => `<button type="button" class="mact" data-mact="${act}" title="${t}" aria-label="${t}">${MICON[act] || ic}</button>`;
     const nav = m.alts && m.alts.length > 1 ? `<span class="alt-nav">${ab('prev', '‹', 'Phiên bản trước')}<span>${(m.alt ?? m.alts.length - 1) + 1}/${m.alts.length}</span>${ab('next', '›', 'Phiên bản sau')}</span>` : '';
     const copyBtn = !m.content || state.generating && isLast ? '' : `<div class="msg-acts">${nav}${m.content && !m.error ? ab('copy', '⧉', 'Sao chép') : ''}${chatMode && m.role === 'user' ? ab('edit', '✎', 'Sửa tin nhắn') : ''}${chatMode && m.role === 'assistant' && msgs[i - 1] && msgs[i - 1].role === 'user' ? ab('regen', '↻', 'Tạo lại câu trả lời') : ''}${chatMode ? ab('branch', '⑂', 'Rẽ nhánh từ đây (tạo cuộc trò chuyện mới)') + ab('del', '🗑', 'Xoá tin nhắn') : ''}</div>`;
-    const think = m.role === 'assistant' && m.thought ? `<details class="think"><summary>${m.thinkSecs ? 'Đã suy nghĩ ' + fmtSec(m.thinkSecs) : 'Quá trình suy nghĩ'}</summary><div class="think-body">${esc(m.thought)}</div></details>` : '';
+    const think = m.role === 'assistant' && m.thought ? `<details class="think"${m.streaming ? ' open' : ''}><summary>${m.thinkSecs ? 'Đã suy nghĩ ' + fmtSec(m.thinkSecs) : (m.streaming ? 'Đang suy nghĩ…' : 'Quá trình suy nghĩ')}</summary><div class="think-body">${esc(m.thought)}</div></details>` : '';
     const stats = m.role === 'assistant' && !m.error ? statsHtml(m.stats) : '';
     const srcs = m.role === 'assistant' && Array.isArray(m.sources) && m.sources.length ? `<div class="sources">${m.sources.map(x => `<div class="src" title="${esc(x.preview || '')}">📎 Trích từ: <b>${esc(x.file)}</b>, đoạn ${x.chunk}${x.page ? ` · trang ${x.page}${x.pageEnd && x.pageEnd !== x.page ? '–' + x.pageEnd : ''}` : ''}</div>`).join('')}</div>` : '';
     const ag = m.role === 'assistant' && (m.steps || m.agent);
     const extra = m.role === 'assistant' ? webSrcHtml(m) + (m.memories && m.memories.length ? `<div class="mem-used" title="${esc(m.memories.join('\n'))}">🧠 Đã dùng ${m.memories.length} ghi nhớ liên quan</div>` : '') : '';
     const sched = m.scheduled ? `<div class="sched-tag">⏰ Lịch tự động · ${new Date(m.scheduled.at).toLocaleString(LOC())}${m.scheduled.late ? ' · chạy bù (trễ)' : ''}${m.scheduled.manual ? ' · chạy thủ công' : ''}</div>` : '';
-    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN AGENT' : 'AIVN'}${m.model ? ' · ' + esc(modelLabel(m.model)) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}${think}<div class="body">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions">${/cần nhiều ngữ cảnh hơn|ngữ cảnh[^.]*quá nhỏ/i.test(m.content || '') ? '<button type="button" class="btn sm primary" data-ctx-grow="1">Tăng ngữ cảnh</button>' : ''}<button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning && m.warning !== 'blocked' ? warnBox(m.warning) : ''}${srcs}${extra}${sched}${stats}${copyBtn}</div>${warn}`;
+    return `<div class="msg ${m.role}${m.error ? ' error' : ''}${ag ? ' agent' : ''}" data-i="${i}">${m.role === 'assistant' ? `<div class="who">${ag ? 'AIVN AGENT' : 'AIVN'}${m.model ? ' · ' + esc(modelLabel(m.model)) : ''}</div>` : ''}${atts}${ag ? `<div class="steps-wrap">${stepsHtml(m)}</div>` : ''}${think}<div class="body${m.streaming ? ' cursor' : ''}">${m.role === 'assistant' ? md(m.content) : esc(m.content).replace(/\n/g, '<br>')}</div>${m.error ? `<div class="err-actions">${/cần nhiều ngữ cảnh hơn|ngữ cảnh[^.]*quá nhỏ/i.test(m.content || '') ? '<button type="button" class="btn sm primary" data-ctx-grow="1">Tăng ngữ cảnh</button>' : ''}<button type="button" class="btn sm" data-logs="open">🧾 Mở nhật ký</button><button type="button" class="btn sm" data-logs="copy">Sao chép nhật ký</button></div>` : ''}${m.warning && m.warning !== 'blocked' ? warnBox(m.warning) : ''}${srcs}${extra}${sched}${stats}${copyBtn}</div>${warn}`;
   }).join('');
   box.scrollTop = box.scrollHeight;
   paintCtxBar(lastStats(state.current));
@@ -870,10 +876,10 @@ $('#composer').addEventListener('submit', async (e) => {
 // Một lượt trả lời (dùng cho gửi mới, tạo lại, sửa rồi gửi lại). userMsg và reply đã nằm trong conv.messages.
 async function runTurn(conv, userMsg, reply, { docsToSend = [], directImgs = [] } = {}) {
   const vision = !!state.status.vision;
+  reply.streaming = true; state.generatingConv = conv; // B173: renderMessages dựng lại DOM vẫn trỏ đúng cuộc này
   renderMessages();
   const ri = conv.messages.indexOf(reply);
-  const msgEl = () => document.querySelector(`#messages .msg[data-i="${ri}"]`);
-  const bodyEl = msgEl().querySelector('.body'); bodyEl.classList.add('cursor');
+  const liveBody = () => ChatStream.streamBody({ query: (i) => document.querySelector('#messages .msg[data-i="' + i + '"]'), conv, visible: state.current, visibleMode: state.mode, index: ri });
   const reqId = uid(); state.generating = reqId; genStartedAt = Date.now(); setPhase('think');
   $('#sendBtn').hidden = true; $('#stopBtn').hidden = false; $('#genStats').textContent = 'Đang suy nghĩ…';
   const s = state.settings; const cp = chatParams();
@@ -903,19 +909,27 @@ async function runTurn(conv, userMsg, reply, { docsToSend = [], directImgs = [] 
     if (info.truncated) {
       const parts = info.files.filter(f => f.truncated).map(f => `${f.name} (~${f.usedPct}%)`).join(', ');
       userMsg.docWarning = `Tài liệu dài hơn giới hạn ngữ cảnh của mô hình, AIVN chỉ dùng một phần: ${parts}. Đã giữ phần mở đầu và các đoạn liên quan nhất tới câu hỏi. Tăng "Độ dài ngữ cảnh" trong hộp nạp mô hình (Ctrl+L) để dùng nhiều hơn.`;
-      const box = $('#messages'); const w = document.createElement('div'); w.className = 'doc-warn'; w.textContent = '⚠ ' + userMsg.docWarning;
-      box.insertBefore(w, msgEl());
+      const anchor = liveBody();
+      if (anchor) { const box = $('#messages'); const w = document.createElement('div'); w.className = 'doc-warn'; w.textContent = '⚠ ' + userMsg.docWarning; box.insertBefore(w, anchor.closest('.msg')); }
     }
   });
   let rafPending = false; const t0 = Date.now(); let thinkStart = null, thinkEnd = null;
-  const paint = () => { rafPending = false; const el = msgEl(); if (!el) return;
-    if (reply.thought) { let d = el.querySelector('.think'); if (!d) { d = document.createElement('details'); d.className = 'think'; d.open = true; d.innerHTML = '<summary></summary><div class="think-body"></div>'; el.insertBefore(d, el.querySelector('.body')); }
+  // B173: mỗi lần vẽ hỏi lại nút .body còn trên tài liệu. Đổi sang AGENT gọi renderMessages() nên nút cũ bị gỡ;
+  // ghi vào nút đó thì chữ đứng im đến khi lượt xong. Khi đang xem cuộc khác thì không đụng DOM của cuộc đó.
+  const paint = () => {
+    rafPending = false;
+    if (state.generatingConv !== conv) return;
+    const body = liveBody(); if (!body) return;
+    const el = body.closest('.msg'); body.classList.add('cursor');
+    if (reply.thought) { let d = el.querySelector('.think'); if (!d) { d = document.createElement('details'); d.className = 'think'; d.open = true; d.innerHTML = '<summary></summary><div class="think-body"></div>'; el.insertBefore(d, body); }
       d.querySelector('summary').textContent = thinkEnd ? `Đã suy nghĩ ${fmtSec((thinkEnd - thinkStart) / 1000)}` : 'Đang suy nghĩ…'; d.querySelector('.think-body').textContent = reply.thought; }
-    bodyEl.innerHTML = md(reply.content); const box = $('#messages'); if (box.scrollHeight - box.scrollTop - box.clientHeight < 160) box.scrollTop = box.scrollHeight; };
+    body.innerHTML = md(reply.content); const box = $('#messages'); if (box.scrollHeight - box.scrollTop - box.clientHeight < 160) box.scrollTop = box.scrollHeight;
+  };
   const queue = () => { if (!rafPending) { rafPending = true; requestAnimationFrame(paint); } };
+  state.streamFlush = paint;
   const off = A.onToken(({ reqId: r, t }) => { if (r !== reqId) return; if (thinkStart && !thinkEnd) thinkEnd = Date.now(); reply.content += t; if (I18N.is($('#genStats').textContent, 'Đang suy nghĩ…')) $('#genStats').textContent = 'Đang trả lời…'; queue(); });
   const offThink = A.onThink(({ reqId: r, t }) => { if (r !== reqId) return; if (!thinkStart) thinkStart = Date.now(); reply.thought = (reply.thought || '') + t; queue(); });
-  const offRec = A.onChatRecover((x) => { if (x.reqId !== reqId) return; reply.content = ''; reply.thought = ''; bodyEl.innerHTML = ''; $('#genStats').textContent = x.grow ? `Ngữ cảnh chưa đủ — đang nạp lại mô hình với ngữ cảnh ${Number(x.ctx).toLocaleString(LOC())}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${x.ctx}) và thử lại…`; });
+  const offRec = A.onChatRecover((x) => { if (x.reqId !== reqId) return; reply.content = ''; reply.thought = ''; const body = liveBody(); if (body) body.innerHTML = ''; $('#genStats').textContent = x.grow ? `Ngữ cảnh chưa đủ — đang nạp lại mô hình với ngữ cảnh ${Number(x.ctx).toLocaleString(LOC())}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${x.ctx}) và thử lại…`; });
   try {
     const r = await A.generate({ reqId, convoId: conv.id, messages: history, temperature: cp.temperature, maxTokens: cp.maxTokens, params: cp,
       docs: docsToSend.filter(a => !(vision && a.kind === 'image' && a.vis)).map(a => ({ name: a.name, text: a.text, kind: a.kind, pages: a.pages })),
@@ -934,7 +948,8 @@ async function runTurn(conv, userMsg, reply, { docsToSend = [], directImgs = [] 
     if (reply.alts) { reply.alts.push(snapAlt(reply)); reply.alt = reply.alts.length - 1; }
     $('#genStats').textContent = '';
   } finally {
-    off(); offThink(); offInfo(); offRag(); offRec(); state.generating = null; $('#sendBtn').hidden = false; $('#stopBtn').hidden = true;
+    off(); offThink(); offInfo(); offRag(); offRec(); state.generating = null; state.generatingConv = null; state.streamFlush = null; delete reply.streaming;
+    $('#sendBtn').hidden = false; $('#stopBtn').hidden = true;
     conv.updatedAt = Date.now(); await A.saveConvo(conv); await loadConvos(); renderMessages();
   }
 }
