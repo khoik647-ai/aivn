@@ -7,6 +7,10 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const DEFAULT = { mcpServers: {} };
+const PROBE_TIMEOUT_RAW = 'Quá thời gian chạy thử.';
+const PROBE_SLOW_RAW = 'Quá 60 giây chưa kết nối được (lần đầu npx có thể phải tải gói).';
+const PROBE_EXIT_RAW = 'Máy chủ thoát ngay khi khởi động — xem nhật ký máy chủ bên dưới.';
+const PROBE_STOPPED_RAW = 'Máy chủ đã dừng.';
 const EXCEL_PKG = '@negokaz/excel-mcp-server';
 const safeName = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'may-chu';
 const toolName = (server, tool) => `mcp__${safeName(server)}__${String(tool).replace(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 64);
@@ -265,7 +269,7 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
 
   async function start(name, opts = {}) {
     const limit = Number(opts && opts.connectTimeout) > 0 ? Number(opts.connectTimeout) : 60000;
-    const timeoutMsg = limit === 60000 ? 'Quá 60 giây chưa kết nối được (lần đầu npx có thể phải tải gói).' : 'Quá thời gian chạy thử.';
+    const timeoutMsg = limit === 60000 ? PROBE_SLOW_RAW : PROBE_TIMEOUT_RAW;
     const deadline = Date.now() + limit;
     const failTimer = (rej) => setTimeout(() => rej(new Error(timeoutMsg)), Math.max(1, deadline - Date.now()));
     const loaded = load();
@@ -300,8 +304,8 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
         transport.stderr && transport.stderr.on('data', (d) => addLog(name, clean(String(d))));
       }
       client = new Client({ name: 'AIVN', version: '0.15.0' }, { capabilities: {} });
-      let earlyClose; const closed = new Promise((_, rej) => { earlyClose = () => rej(new Error('Máy chủ thoát ngay khi khởi động — xem nhật ký máy chủ bên dưới.')); });
-      transport.onclose = () => { if (e.state === 'starting') earlyClose(); const x = servers.get(name); if (x && x.client === client && x.state === 'on') { x.state = 'error'; x.error = 'Máy chủ đã dừng.'; addLog(name, 'Máy chủ đã dừng'); onChange(); } };
+      let earlyClose; const closed = new Promise((_, rej) => { earlyClose = () => rej(new Error(PROBE_EXIT_RAW)); });
+      transport.onclose = () => { if (e.state === 'starting') earlyClose(); const x = servers.get(name); if (x && x.client === client && x.state === 'on') { x.state = 'error'; x.error = PROBE_STOPPED_RAW; addLog(name, 'Máy chủ đã dừng'); onChange(); } };
       let tmo; closed.catch(() => {});
       await Promise.race([client.connect(transport), closed, new Promise((_, rej) => { tmo = failTimer(rej); })]).finally(() => clearTimeout(tmo));
       let tmoList; const lt = await Promise.race([client.listTools(), new Promise((_, rej) => { tmoList = failTimer(rej); })]).finally(() => clearTimeout(tmoList));
@@ -410,4 +414,4 @@ function presets({ folder = null } = {}) {
     memory: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] }
   };
 }
-module.exports = { createMcpManager, validate, resolveCommand, toolName, safeName, resultText, presets, classifyUrl, excelCallError, isExcelServer, claimCatalogId, normCatalogUrl, ADVANCED_CATALOG, secretIdOf, secretPlaceholder };
+module.exports = { createMcpManager, validate, resolveCommand, toolName, safeName, resultText, presets, classifyUrl, excelCallError, isExcelServer, claimCatalogId, normCatalogUrl, ADVANCED_CATALOG, secretIdOf, secretPlaceholder, PROBE_TIMEOUT_RAW, PROBE_SLOW_RAW, PROBE_EXIT_RAW, PROBE_STOPPED_RAW };

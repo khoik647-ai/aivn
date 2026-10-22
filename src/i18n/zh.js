@@ -2759,6 +2759,15 @@
     "AIVN Kinh doanh sẽ đọc dữ liệu trên máy này mà không hỏi lại.": "AIVN 业务会读取这台电脑上的数据，不再询问。",
     "Ghi tệp Excel trong thư mục của Excel sẽ chạy mà không hỏi lại. Ghi đè vẫn nên được xem trước.": "在 Excel 的文件夹里写 Excel 文件将不再询问。覆盖前仍应先看一眼。",
     "Kết nối cửa hàng không có tự chạy.": "商店里的连接不会自动启动。",
+    "Công tắc “Cho AIVN AGENT dùng các ứng dụng đã kết nối” đang tắt. AIVN sẽ kết nối khi bạn bật công tắc.": "“允许 AIVN AGENT 使用已连接的应用”开关已关闭。你打开开关后，AIVN 才会连接。",
+    "Đã lưu. Sẽ kết nối khi bạn bật “Cho AIVN AGENT dùng các ứng dụng đã kết nối”.": "已保存。你打开“允许 AIVN AGENT 使用已连接的应用”后才会连接。",
+    "Phát hiện {0} khoá bí mật trong tệp. Đưa vào kho bảo mật? Giá trị sẽ không ghi dạng chữ trong mcp.json.": "在文件里发现 {0} 个密钥。你要把它们放进安全库吗？这些值不会以明文写入 mcp.json。",
+    "Đưa vào kho bảo mật": "放进安全库",
+    "🧠 Sổ tay agent": "🧠 智能体笔记本",
+    "Quá thời gian chạy thử.": "试运行超时。",
+    "Quá 60 giây chưa kết nối được (lần đầu npx có thể phải tải gói).": "超过 60 秒仍未连上（第一次用 npx 时可能要下载包）。",
+    "Máy chủ thoát ngay khi khởi động — xem nhật ký máy chủ bên dưới.": "服务器一启动就退出了 — 请看下面的服务器日志。",
+    "Máy chủ đã dừng.": "服务器已停止。",
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

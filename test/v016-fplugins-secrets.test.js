@@ -449,6 +449,7 @@ test('khoá người dùng lưu, đổi hoặc xoá không qua thẻ; mcp.json c
   const old = await m2.start('hf');
   assert.equal(old.state, 'on', old.error);
   assert.equal(seen.headers.Authorization, 'hf_khoa-cu-12345678');
+  assert.equal(JSON.parse(fs.readFileSync(m2.file, 'utf8')).mcpServers.hf.headers.Authorization.$aivnSecret, 'mcp:hf:Authorization');
   const before = cards.length;
   await gate.saveJson(JSON.stringify({ mcpServers: { s: { command: 'node', args: ['a.js'] } } }));
   await gate.startServer('s');
@@ -502,4 +503,177 @@ test('đang chạy thì chỉ khởi động lại khi cấu hình hoặc khoá 
   assert.equal((mcp.status('nhap') || {}).state, 'off');
   const retry = await gate.startServer('nhap', { probe: true });
   assert.equal(retry.probed, true);
+});
+
+test('công tắc chủ tắt thì lưu không chạy: start, chạy thử, chạy trễ và tự chạy đều không gọi start', async () => {
+  let on = false;
+  const w = world({ agentEnabled: () => on });
+  let starts = 0;
+  const start = w.mcp.start.bind(w.mcp);
+  w.mcp.start = async (...a) => { starts++; return start(...a); };
+  const saved = await w.gate.saveJson(JSON.stringify({ mcpServers: { echo: { command: 'node', args: ['echo.js'] } } }));
+  assert.equal(saved.ok, true);
+  assert.equal(saved.paused, undefined);
+  w.gate.meta.setServer('echo', { catalogId: null, approvedAt: new Date().toISOString(), autoStart: true, fp: 'x' });
+  const cardsBefore = w.cards.length;
+  const started = await w.gate.startServer('echo');
+  assert.equal(started.paused, true);
+  assert.equal(started.error, PG.MASTER_OFF);
+  const probed = await w.gate.probeServer('echo');
+  assert.equal(probed.paused, true);
+  assert.equal(probed.error, PG.MASTER_OFF);
+  assert.deepEqual(await w.gate.ensureLazy(), []);
+  assert.deepEqual(await w.gate.startAuto(), []);
+  assert.equal(starts, 0);
+  assert.equal(w.cards.length, cardsBefore);
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/app.js'), 'utf8');
+  const save = app.slice(app.indexOf("$('#mcpSaveBtn')"), app.indexOf("$('#mcpBlock').addEventListener('click'"));
+  assert.ok(save.indexOf('mcpState.enabled === false || r.paused') < save.indexOf('A.mcpRestart'), 'Lưu phải dừng trước khi kết nối lại');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'src/main.js'), 'utf8');
+  assert.match(main, /ipcMain\.handle\('mcp:restart'[\s\S]{0,120}if \(masterOff\(\)\) return pausedReply\(\)/);
+  assert.match(main, /ipcMain\.handle\('plugins:probe'[\s\S]{0,80}if \(masterOff\(\)\) return pausedReply\(\)/);
+  assert.match(main, /ipcMain\.handle\('mcp:toggle'[\s\S]{0,120}if \(on && masterOff\(\)\) return pausedReply\(\)/);
+  on = true;
+  const ok = await w.gate.startServer('echo');
+  assert.equal(ok.paused, undefined);
+  assert.ok(starts > 0);
+});
+
+test('danh sách dùng câu chạy thử đã dịch; lỗi thô chỉ ở Chi tiết và bị che', async () => {
+  const dir = tmp();
+  const secrets = PG.createSecretStore({ dir, safeStorage: fakeSecure() });
+  const secret = 'hf_loira-chi-tiet-123456';
+  secrets.put('mcp:x:TOKEN', secret);
+  class Client {
+    async connect() { const e = new Error('spawn qa-echo ENOENT ' + secret); e.stack = 'Error: ' + secret; throw e; }
+    async listTools() { return { tools: [] }; }
+    async close() {}
+  }
+  class Stdio { constructor() { this.stderr = { on() {} }; } }
+  const mcp = M.createMcpManager({ dir, sdk: { Client, Stdio, Http: class {}, Sse: class {} }, log: () => {}, scrub: (s) => secrets.mask(s), resolveSecret: (id) => secrets.get(id) });
+  const gate = PG.createPluginGate({ dir, mcp, secrets, approve: async () => ({ ok: true, always: false }), agentEnabled: () => true, probeMs: 200 });
+  await gate.saveJson(JSON.stringify({ mcpServers: { x: { command: 'missing-bin', args: ['a'] } } }));
+  gate.meta.setServer('x', { approvedAt: new Date().toISOString(), autoStart: false, fp: null });
+  const r = await gate.probeServer('x');
+  assert.equal(r.error, 'Không thấy chương trình để chạy. Hãy kiểm tra lệnh trong Chi tiết.');
+  assert.equal(String(r.details).includes(secret), false);
+  assert.match(r.details, /ENOENT/);
+  assert.match(r.details, /••••/);
+  const row = gate.publicServers().find(s => s.name === 'x');
+  assert.equal(row.hint, r.error);
+  assert.equal(String(row.error).includes(secret), false);
+  assert.match(row.error, /spawn qa-echo ENOENT/);
+  assert.equal(PG.explainProbeError('Quá thời gian chạy thử.'), 'Chạy thử quá 15 giây nên đã tắt. Hãy kiểm tra lệnh trong Chi tiết, rồi chạy thử lại.');
+  assert.equal(PG.explainProbeError(M.PROBE_SLOW_RAW), 'Chạy thử quá 15 giây nên đã tắt. Hãy kiểm tra lệnh trong Chi tiết, rồi chạy thử lại.');
+  assert.equal(PG.explainProbeError(M.PROBE_EXIT_RAW), 'Chạy thử không xong. Hãy xem Chi tiết rồi chạy thử lại.');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/app.js'), 'utf8');
+  const paint = app.slice(app.indexOf('function paintMcp'), app.indexOf('async function refreshMcp'));
+  const hintAt = paint.indexOf('mcp-hint');
+  const detAt = paint.indexOf('<details>');
+  const rawAt = paint.indexOf('mcp-raw');
+  assert.ok(hintAt > 0 && hintAt < detAt && rawAt > detAt, 'câu dễ hiểu nằm ngoài Chi tiết, lỗi thô nằm trong');
+  const owned = [PG.MASTER_OFF, PG.SAVED_PAUSED, PG.KEYCHAIN_NO, PG.explainProbeError('spawn qa-echo ENOENT'), PG.explainProbeError('Quá thời gian chạy thử.'), PG.explainProbeError(M.PROBE_EXIT_RAW), M.PROBE_TIMEOUT_RAW, M.PROBE_SLOW_RAW, M.PROBE_EXIT_RAW, M.PROBE_STOPPED_RAW];
+  for (const s of owned) {
+    for (const lang of ['en', 'zh']) {
+      const t = T.tr(s, lang);
+      assert.notEqual(t, s, lang + ' thiếu ' + s);
+      assert.equal(CORE.VI.test(t), false, lang + ' còn tiếng Việt: ' + t);
+    }
+  }
+});
+
+test('cảnh báo npx chỉ cho npx, uvx hoặc docker pull', () => {
+  const secrets = PG.createSecretStore({ dir: tmp(), safeStorage: fakeSecure() });
+  const warn = (def) => JSON.stringify(PG.cardMcpConnect('s', def, secrets).fields).includes('npx có thể tải');
+  assert.equal(warn({ command: 'node', args: ['a.js'] }), false);
+  assert.equal(warn({ command: 'node.exe', args: ['a.js'] }), false);
+  assert.equal(warn({ command: 'npx', args: ['-y', 'mcp-fetch-server'] }), true);
+  assert.equal(warn({ command: 'uvx', args: ['some-tool'] }), true);
+  assert.equal(warn({ command: 'docker', args: ['pull', 'ghcr.io/example/app'] }), true);
+  assert.equal(warn({ command: 'docker', args: ['run', '-i', '--rm', 'ghcr.io/example/app'] }), false);
+  assert.equal(PG.cardMcpConnect('s', { command: 'node', args: ['a.js'] }, secrets).danger, true);
+});
+
+test('Sổ tay agent là tên hiển thị của mẫu memory', async () => {
+  const { gate, secrets } = world();
+  const card = PG.cardMcpConnect('memory', { command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory@2.0.0'] }, secrets);
+  assert.equal(card.sub, 'Sổ tay agent');
+  assert.match(card.title, /Sổ tay agent/);
+  assert.ok(card.fields.some((row) => row[0] === 'Việc' && String(row[1]).includes('Không phải tính năng Ghi nhớ')));
+  assert.ok(card.details.some((row) => row[0] === 'Tên gốc' && row[1] === 'memory'));
+  await gate.saveJson(JSON.stringify({ mcpServers: { memory: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory@2.0.0'] } } }));
+  assert.equal(gate.publicServers()[0].displayName, 'Sổ tay agent');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'src/renderer/index.html'), 'utf8');
+  assert.match(html, /data-mcp-preset="memory"[^>]*>🧠 Sổ tay agent</);
+  assert.equal(T.tr('Sổ tay agent', 'en'), 'Agent notebook');
+  assert.equal(T.tr('Sổ tay agent', 'zh'), '智能体笔记本');
+  assert.equal(T.tr('Ghi nhớ', 'en'), 'Memory');
+});
+
+test('seal viết lại $aivnSecret thành ${secret:id} dù không có giá trị mới', async () => {
+  const { mcp, gate } = world();
+  const legacy = { mcpServers: { hf: { url: 'https://huggingface.co/mcp', headers: { Authorization: { $aivnSecret: 'mcp:hf:Authorization' } } } } };
+  fs.writeFileSync(mcp.file, JSON.stringify(legacy));
+  const n = await gate.seal();
+  assert.equal(n, 0);
+  const disk = JSON.parse(fs.readFileSync(mcp.file, 'utf8'));
+  assert.equal(disk.mcpServers.hf.headers.Authorization, '${secret:mcp:hf:Authorization}');
+  assert.equal(JSON.stringify(disk).includes('$aivnSecret'), false);
+  const again = PG.extractSecrets(legacy, null);
+  assert.equal(again.count, 0);
+  assert.equal(again.rewritten, 1);
+});
+
+test('lưu phát hiện bí mật trong args và env tên thường, rồi che trong nhật ký', async () => {
+  const { mcp, gate, secrets } = world();
+  const token = 'aB3kLm9QpZx2W7nR4tY8uV6sD1fG5hJ';
+  const text = JSON.stringify({ mcpServers: { s: { command: 'node', args: ['a.js', token], env: { FOO: token, NODE_ENV: 'production', GITHUB: 'github_pat_11AAAABBBBCCCCDDDD', HF: 'hf_khoa-ngan', GH: 'ghp_abcdefghijklmnopqrst', SK: 'sk-abcdefghijklmnopqrst' } } } });
+  assert.equal(gate.peekSecrets(text).count, 6);
+  const saved = await gate.saveJson(text);
+  assert.equal(saved.ok, true);
+  const disk = JSON.parse(fs.readFileSync(mcp.file, 'utf8'));
+  assert.equal(disk.mcpServers.s.env.FOO, '${secret:mcp:s:FOO}');
+  assert.equal(disk.mcpServers.s.env.NODE_ENV, 'production');
+  assert.equal(disk.mcpServers.s.args[0], 'a.js');
+  assert.equal(disk.mcpServers.s.args[1], '${secret:mcp:s:arg1}');
+  assert.equal(disk.mcpServers.s.env.GITHUB, '${secret:mcp:s:GITHUB}');
+  assert.equal(disk.mcpServers.s.env.HF, '${secret:mcp:s:HF}');
+  assert.equal(disk.mcpServers.s.env.GH, '${secret:mcp:s:GH}');
+  assert.equal(disk.mcpServers.s.env.SK, '${secret:mcp:s:SK}');
+  assert.equal(JSON.stringify(disk).includes(token), false);
+  assert.equal(secrets.mask('log ' + token), 'log ••••');
+  assert.equal(secrets.mask('see sk-abcdefghijklmnopqrst'), 'see ••••');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'src/main.js'), 'utf8');
+  assert.match(main, /peek\.count > 0/);
+  assert.match(main, /Đưa vào kho bảo mật/);
+  assert.match(main, /ans\.response !== 1/);
+});
+
+test('không mã hoá được thì không ghi đĩa và nói khoá không giữ sau khi thoát', async () => {
+  let enc = 0;
+  const safe = { isEncryptionAvailable: () => false, getSelectedStorageBackend: () => 'unknown', encryptString: () => { enc++; return Buffer.from('x'); }, decryptString: () => '' };
+  const dir = tmp();
+  const secrets = PG.createSecretStore({ dir, safeStorage: safe });
+  const token = 'hf_khong-ma-hoa-123456';
+  assert.equal(secrets.secure(), false);
+  assert.equal(secrets.put('mcp:s:TOKEN', token).persisted, false);
+  assert.equal(enc, 0);
+  assert.equal(fs.existsSync(secrets.file), false);
+  assert.equal(secrets.sentence(), PG.KEYCHAIN_NO);
+  const mcp = M.createMcpManager({ dir, sdk: mockSdk(), resolveSecret: (id) => secrets.get(id) });
+  const gate = PG.createPluginGate({ dir, mcp, secrets, approve: async () => ({ ok: true, always: false }), agentEnabled: () => true });
+  const saved = await gate.saveJson(JSON.stringify({ mcpServers: { s: { command: 'node', args: ['a.js'], env: { TOKEN: token } } } }));
+  assert.equal(saved.ok, true);
+  assert.equal(saved.notice, PG.KEYCHAIN_NO);
+  const disk = fs.readFileSync(mcp.file, 'utf8');
+  assert.equal(disk.includes(token), false);
+  assert.match(disk, /\$\{secret:mcp:s:TOKEN\}/);
+  const user = await gate.setUserSecret('s', 'API_KEY', 'sk-khongluu-plaintext-99');
+  assert.equal(user.ok, true);
+  assert.equal(user.persisted, false);
+  assert.equal(user.notice, PG.KEYCHAIN_NO);
+  assert.equal(enc, 0);
+  assert.equal(fs.existsSync(path.join(dir, 'mcp-secrets.json')), false);
+  assert.equal(fs.readFileSync(mcp.file, 'utf8').includes('sk-khongluu-plaintext-99'), false);
+  for (const lang of ['en', 'zh']) assert.equal(CORE.VI.test(T.tr(PG.KEYCHAIN_NO, lang)), false);
 });

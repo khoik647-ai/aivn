@@ -428,7 +428,7 @@ LM Studio (từ 0.3.17, ghi chú của họ: cùng kiểu với Cursor) dùng g�
 | Khoá máy chủ | 1–64 ký tự sau khi cắt khoảng trắng hai đầu. Cho phép dấu cách (tệp LM Studio thực tế có). Khoá trùng sau `safeName` thì lỗi trên máy chủ thứ hai, không ghi đè. |
 | `command` | Chuỗi không rỗng. Đi cùng `url` thì lỗi máy chủ đó (“chỉ được có command hoặc url”). |
 | `args` | Mảng chuỗi. Thiếu thì coi là `[]`. Phần tử không phải chuỗi thì lỗi. |
-| `env` | Đối tượng. Giá trị là chuỗi, hoặc tham chiếu `{ "$aivnSecret": "<id>" }` do chính AIVN ghi. |
+| `env` | Đối tượng. Giá trị là chuỗi, hoặc tham chiếu chuỗi `${secret:<id>}` do chính AIVN ghi. Dạng cũ `{ "$aivnSecret": "<id>" }` vẫn đọc được và được viết lại thành `${secret:<id>}` khi lưu. |
 | `url` | `https://` mọi máy chủ. `http://` chỉ khi địa chỉ **viết trong url** là vòng lặp cục bộ (`localhost`, `127.0.0.0/8`, `::1`) hoặc mạng nội bộ `10.0.0.0/8`, `172.16.0.0/12` (172.16.0.0–172.31.255.255), `192.168.0.0/16`. Không phân giải DNS: `http://nas.local` và mọi tên máy khác `localhost` bị từ chối. `http` ra máy công cộng bị từ chối, câu lỗi bảo dùng https. `http` nội bộ được chạy nhưng thẻ xin phép có `danger: true`. Vòng lặp cục bộ không gắn cờ này. |
 | `headers` | Đối tượng chuỗi hoặc tham chiếu bí mật. Đưa vào `requestInit.headers` của `StreamableHTTPClientTransport` / `SSEClientTransport` (hôm nay constructor chỉ nhận mỗi `URL`). |
 | `type` | Không bắt buộc. `"sse"` hoặc đường dẫn kết thúc bằng `/sse` thì dùng SSE, như `start()` đang làm. LM Studio thường không ghi `type`; không có thì HTTP theo luồng. Giá trị khác `"sse"` thì lỗi. |
@@ -477,7 +477,7 @@ Siết `http` ra máy công cộng là thay đổi hành vi so với `validate` 
 Nút “Xuất mcp.json…” trong ngăn Nâng cao, hộp thoại lưu của hệ điều hành. Bản xuất:
 
 - chỉ máy chủ không `disabled`;
-- bỏ `disabled` và mọi `{ "$aivnSecret": … }` (cả biến `env` lẫn đầu `headers` đó bị bỏ khoá);
+- bỏ `disabled` và mọi tham chiếu bí mật (chuỗi `${secret:…}` và bí danh cũ `{ "$aivnSecret": … }`; cả biến `env` lẫn đầu `headers` đó bị bỏ khoá);
 - không kèm `plugins-meta.json`;
 - không kèm AIVN Kinh doanh hay Excel, vì chúng không phải máy chủ MCP.
 
@@ -675,7 +675,7 @@ Thêm `details`: mảng cặp nhãn/giá trị, vẽ trong khối “Chi tiết�
 - `sub`: tên máy chủ
 - `alwaysLabel`: `Luôn chạy sẵn`. Ô không được tick sẵn. Không chọn thì `autoStart` là false.
 - `fields`: tên biến bí mật (“không có” nếu không), câu “Dữ liệu rời khỏi máy này” chỉ khi `url` không phải vòng lặp cục bộ. Không đặt lệnh ở `fields`.
-- `details`: một dòng “Lệnh” (đã che bí mật) hoặc địa chỉ, và một dòng “Loại” (`stdio`, `http` hoặc `sse`). Người dùng mở “Chi tiết” mới thấy. `http` nội bộ thêm câu “Địa chỉ http này nằm trong mạng nội bộ của bạn.” vào `fields`, vì đó là cảnh báo chứ không phải lệnh. Lệnh không ghim thêm câu “Lệnh này không ghim phiên bản. npx có thể tải mã mới.” vào `fields`.
+- `details`: một dòng “Lệnh” (đã che bí mật) hoặc địa chỉ, và một dòng “Loại” (`stdio`, `http` hoặc `sse`). Người dùng mở “Chi tiết” mới thấy. `http` nội bộ thêm câu “Địa chỉ http này nằm trong mạng nội bộ của bạn.” vào `fields`, vì đó là cảnh báo chứ không phải lệnh. Câu “Lệnh này không ghim phiên bản. npx có thể tải mã mới.” chỉ vào `fields` khi lệnh là `npx`, `uvx`, hoặc `docker pull`. Lệnh `node` không ghim vẫn có `danger: true` nếu không thuộc danh mục, nhưng không hiện câu npx đó.
 - `warn`: đúng câu cảnh báo MCP đang có trong `#mcpBlock` (mục 11.1). Không viết câu thứ hai.
 - `danger: true` khi lệnh không thuộc danh mục Nâng cao, khi lệnh stdio không có `gói@phiên bản`, hoặc khi `url` là `http` trong ba dải nội bộ. Vòng lặp cục bộ không vì `http` mà thành `danger`. Năm mục danh mục đã đóng gói (kể cả Excel) không bị coi là không ghim.
 
@@ -720,11 +720,14 @@ Bản mã trên đĩa là `safeStorage.encryptString` của Electron (DPAPI trê
 Coi là bí mật khi giá trị chuỗi khác rỗng và:
 
 - tên biến hoặc tên đầu mục khớp `TOKEN`, `KEY`, `SECRET`, `PASSWORD`, `PASSWD`, `CREDENTIAL`, `AUTH` (không phân biệt hoa thường), hoặc đầu mục là `Authorization` / `Proxy-Authorization`; hoặc
-- giá trị bắt đầu bằng `sk-`, `ghp_`, `github_pat_`, `hf_`, hoặc `Bearer `.
+- giá trị bắt đầu bằng `sk-`, `ghp_`, `github_pat_`, `hf_`, hoặc `Bearer `; hoặc
+- giá trị trong `args`, hoặc trong `env`/`headers` dù tên biến không giống tên khoá, mà trông như bí mật: dài, lẫn chữ hoa, chữ thường và số, hoặc hex dài. Đường dẫn, cờ bắt đầu bằng `-`, và `gói@version` không tính.
 
 `NODE_ENV=production` không khớp, giữ nguyên chữ. Người dùng vẫn có thể gõ khoá vào ô mật khẩu của danh mục Nâng cao dù tên biến không khớp; ô đó luôn đi vào kho, không vào tệp.
 
-Không có kho khoá thật (`basic_text`, `unknown`, hoặc `isEncryptionAvailable() === false`): không ghi `mcp-secrets.json`, giữ bộ nhớ đến khi thoát, thẻ và dòng chú thích dùng đúng câu mục 3.4. Cùng hành vi với khoá API đám mây.
+Khi người dùng bấm Lưu và tệp còn giá trị dạng chữ như trên, AIVN hỏi đưa chúng vào kho. Từ chối thì không ghi tệp. Chấp nhận thì tách như trên. Nhật ký, stderr và “Chi tiết” luôn che các giá trị này bằng `••••`, kể cả khi chúng nằm trong đối số hoặc trong câu lỗi.
+
+Không có kho khoá thật (`basic_text`, `unknown`, hoặc `isEncryptionAvailable() === false`): không gọi `encryptString`, không ghi `mcp-secrets.json`, không ghi giá trị dạng chữ. Giữ bộ nhớ đến khi thoát. Thẻ, dòng chú thích, và câu trả lời khi lưu dùng đúng câu mục 3.4, bằng vi/en/zh: khoá không lưu an toàn được và không còn sau khi thoát. Cùng hành vi với khoá API đám mây.
 
 Gỡ máy chủ xoá mọi id của `safeName` đó. Xuất tệp bỏ các khoá đang là tham chiếu. Kết nối cửa hàng không có khoá bí mật trong beta.4.
 
@@ -750,6 +753,8 @@ Chạy thử (bản mẫu 4.6), sau khi đã có `approvedAt`:
 - Mục đã chạy thử được: kết nối thẳng, không chạy thử. Tiến trình được bật và để chạy.
 
 Kết nối lại khi tiến trình đang chạy: nếu cấu hình (`fingerprint`) và dấu vân tay khoá (`secretFp`, hash, không phải giá trị) không đổi thì để nguyên. Chỉ một trong hai đổi thì dừng rồi `start` lại. Lưu, đổi hoặc xoá giá trị khoá do người dùng tự bấm không hiện thẻ; lần kết nối lại sau đó mới khởi động lại nếu tiến trình đang chạy.
+
+Công tắc chủ tắt thì mọi đường chạy trong tiến trình chính đều không `start`: `start`, kết nối lại, chạy thử, chạy trễ ở lần dùng đầu, và tự chạy lúc mở. Lưu chỉ ghi cấu hình. Giao diện nói sẽ kết nối khi bật công tắc. Danh sách hiện câu lỗi chạy thử đã dịch (vi/en/zh). Câu thô của hệ điều hành chỉ nằm trong “Chi tiết”, và giá trị bí mật trong câu đó bị che.
 
 `plugins:connect` với `biz` hoặc `excel` không đi bước `start`. Nó chỉ qua `approveCard` rồi ghi `connectors`.
 

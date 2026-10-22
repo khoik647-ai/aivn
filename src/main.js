@@ -219,7 +219,7 @@ function initStores() {
     keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: (a, ctx) => deskWrap(getDesk().look, a, ctx), act: (a, ctx) => deskWrap(getDesk().act, a, ctx), ensureApp: (a, ctx) => deskWrap(getDesk().ensureApp, a, ctx), readText: (a, ctx) => deskWrap(getDesk().readText, a, ctx), pending: () => (desk && desk.active() ? desk.pending() : null), searchTodo: () => (desk && desk.active() ? desk.searchTodo() : null), searchFound: () => (desk && desk.active() ? desk.searchFound() : null), likely: (q) => (desk && desk.active() ? desk.likely(q) : null), cleanupDraft: (o) => (desk && desk.active() ? desk.cleanupDraft(o) : null), readBrowserPage: (o) => (desk && desk.active() ? desk.readBrowserPage(o) : null), openInBrowser: (b, u) => getDesk().openInBrowser(b, u), browserRead: (a, ctx) => deskWrap(getDesk().browserRead, a, ctx) } });
   pluginSecrets = require('./plugins').createSecretStore({ dir: ud, safeStorage: require('electron').safeStorage });
   const scrubText = (s) => pluginSecrets.mask(s == null ? '' : String(s));
-  mcp = require('./mcp').createMcpManager({ dir: ud, log: (sc, m) => LOG.log(sc, scrubText(m)), scrub: scrubText, resolveSecret: (id) => pluginSecrets.get(id), onChange: () => send('mcp:changed', pluginSecrets.maskDeep(mcp.status())), getExcelFolders: () => { try { const meta = JSON.parse(fs.readFileSync(path.join(ud, 'plugins-meta.json'), 'utf8')); const list = meta && meta.connectors && meta.connectors.excel && meta.connectors.excel.folders; return Array.isArray(list) ? list.filter(x => typeof x === 'string') : []; } catch { return []; } } });
+  mcp = require('./mcp').createMcpManager({ dir: ud, log: (sc, m) => LOG.log(sc, scrubText(m)), scrub: scrubText, resolveSecret: (id) => pluginSecrets.get(id), onChange: () => send('mcp:changed', plugins ? plugins.publicServers() : pluginSecrets.maskDeep(mcp.status())), getExcelFolders: () => { try { const meta = JSON.parse(fs.readFileSync(path.join(ud, 'plugins-meta.json'), 'utf8')); const list = meta && meta.connectors && meta.connectors.excel && meta.connectors.excel.folders; return Array.isArray(list) ? list.filter(x => typeof x === 'string') : []; } catch { return []; } } });
   plugins = require('./plugins').createPluginGate({ dir: ud, mcp, secrets: pluginSecrets, approve: (card) => approveCard(card), log: (sc, m) => LOG.log(sc, scrubText(m)), getAgentFolders: () => (settings.data.agentFolders || []).filter(x => typeof x === 'string'), agentEnabled: () => settings.data.agentMcp !== false });
   mcp.ensureLazy = () => plugins.ensureLazy();
   plugins.sealAndUpgrade().catch(() => {});
@@ -1342,9 +1342,26 @@ function registerIpc() {
   // ---- Kết nối (MCP) ----
   const scrubErr = (e) => pluginSecrets ? pluginSecrets.mask(e && e.message) : (e && e.message);
   ipcMain.handle('mcp:status', () => ({ ...plugins.publicPayload(), enabled: settings.data.agentMcp !== false }));
-  ipcMain.handle('mcp:save', async (_e, text) => { const r = await plugins.saveJson(String(text)); if (r.ok) LOG.log('mcp', 'Đã lưu mcp.json'); return r; });
-  ipcMain.handle('mcp:toggle', async (_e, { name, on }) => plugins.toggle(name, !!on));
-  ipcMain.handle('mcp:restart', async (_e, name) => plugins.startServer(name));
+  const masterOff = () => settings.data.agentMcp === false;
+  const pausedReply = () => ({ ok: false, paused: true, error: require('./plugins').MASTER_OFF });
+  ipcMain.handle('mcp:save', async (_e, text) => {
+    const body = String(text);
+    const peek = plugins.peekSecrets(body);
+    if (peek.count > 0) {
+      const ans = await dialog.showMessageBox(win, {
+        type: 'warning', buttons: ['Để sau', 'Đưa vào kho bảo mật'], defaultId: 1, cancelId: 0, title: 'Khoá bí mật',
+        message: `Phát hiện ${peek.count} khoá bí mật trong tệp. Đưa vào kho bảo mật? Giá trị sẽ không ghi dạng chữ trong mcp.json.`,
+        detail: pluginSecrets.secure() ? require('./plugins').KEYCHAIN_OK : require('./plugins').KEYCHAIN_NO,
+      });
+      if (ans.response !== 1) return { ok: false, canceled: true, offer: true, secretCount: peek.count, notice: pluginSecrets.secure() ? null : require('./plugins').KEYCHAIN_NO };
+    }
+    const r = await plugins.saveJson(body);
+    if (r.ok) LOG.log('mcp', 'Đã lưu mcp.json');
+    if (r.ok && masterOff()) r.paused = true;
+    return r;
+  });
+  ipcMain.handle('mcp:toggle', async (_e, { name, on }) => { if (on && masterOff()) return pausedReply(); return plugins.toggle(name, !!on); });
+  ipcMain.handle('mcp:restart', async (_e, name) => { if (masterOff()) return pausedReply(); return plugins.startServer(name); });
   ipcMain.handle('mcp:preset', async (_e, kind) => {
     let folder = null;
     if (kind === 'filesystem') { const r = await dialog.showOpenDialog(win, { buttonLabel: 'Chọn thư mục', title: 'Chọn thư mục cho máy chủ MCP filesystem', properties: ['openDirectory'] }); if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }; folder = r.filePaths[0]; }
@@ -1360,7 +1377,7 @@ function registerIpc() {
   ipcMain.handle('plugins:disconnect', async (_e, { id, remove } = {}) => plugins.disconnectConnector(id, { remove: !!remove }));
   ipcMain.handle('plugins:autostart', async (_e, { name, on } = {}) => plugins.setAutostart(name, !!on));
   ipcMain.handle('plugins:list', () => ({ connectors: plugins.connectorView(), servers: plugins.publicServers(), secretsSecure: pluginSecrets.secure() }));
-  ipcMain.handle('plugins:probe', async (_e, name) => plugins.probeServer(String(name || '')));
+  ipcMain.handle('plugins:probe', async (_e, name) => { if (masterOff()) return pausedReply(); return plugins.probeServer(String(name || '')); });
   ipcMain.handle('plugins:rename', async (_e, { name, label } = {}) => plugins.setDisplayName(name, label));
   ipcMain.handle('plugins:secret', async (_e, { name, key, value, bag } = {}) => plugins.setUserSecret(name, key, value, bag));
   ipcMain.handle('plugins:excelFolders', async (_e, folders) => plugins.changeExcelFolders(Array.isArray(folders) ? folders : []));

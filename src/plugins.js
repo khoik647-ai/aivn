@@ -19,6 +19,10 @@ const QA_DENY = ['connector_connect', 'mcp_connect', 'mcp_import', 'mcp_replace'
 
 const KEYCHAIN_OK = 'Khoá được mã hoá bằng kho khoá của hệ điều hành và không bao giờ hiện lại hay ghi vào nhật ký.';
 const KEYCHAIN_NO = 'Máy này không có kho khoá an toàn của hệ điều hành: khoá chỉ giữ trong bộ nhớ đến khi thoát AIVN (không ghi ra đĩa).';
+const MASTER_OFF = 'Công tắc “Cho AIVN AGENT dùng các ứng dụng đã kết nối” đang tắt. AIVN sẽ kết nối khi bạn bật công tắc.';
+const SAVED_PAUSED = 'Đã lưu. Sẽ kết nối khi bạn bật “Cho AIVN AGENT dùng các ứng dụng đã kết nối”.';
+const MEMORY_TITLE = 'Sổ tay agent';
+const MEMORY_DESC = 'Sổ tay riêng của AIVN AGENT, nằm trong ứng dụng này. Không phải tính năng Ghi nhớ của AIVN và không ghi vào đó.';
 const MCP_WARN = '⚠ Máy chủ MCP là chương trình chạy trên máy bạn (stdio) hoặc dịch vụ bên ngoài (http/SSE) và có thể đọc/ghi dữ liệu. Chỉ thêm máy chủ bạn tin tưởng. AIVN luôn xin phép trước mỗi lần gọi công cụ MCP (trừ khi bạn chọn “Luôn cho phép”).';
 const BIZ_WARN = 'AIVN Kinh doanh đọc và sửa dữ liệu kinh doanh trên máy này. Xoá, huỷ và ghi nhận thanh toán vẫn hỏi bạn từng lần.';
 const EXCEL_WARN = 'Ghi tệp Excel trong thư mục của Excel. Ghi đè vẫn hỏi bạn trước.';
@@ -95,13 +99,48 @@ const CARD_STRINGS = [
   'Đang chạy thử…',
   'Chạy thử lại',
   'Hãy cho phép kết nối trước khi chạy thử.',
+  MASTER_OFF,
+  SAVED_PAUSED,
 ];
 
 function isSecretName(name) { return SECRET_NAME.test(String(name || '')); }
 function looksLikeSecretValue(v) { return typeof v === 'string' && v !== '' && SECRET_VALUE.test(v); }
+function likelySecretValue(v) {
+  if (looksLikeSecretValue(v)) return true;
+  if (typeof v !== 'string' || secretIdOf(v)) return false;
+  if (v.length < 20 || v.length > 500) return false;
+  if (/[\s"'\\]/.test(v) || v.includes('/') || v.startsWith('-') || v.startsWith('.')) return false;
+  if (/@\d+\.\d+\.\d+/.test(v)) return false;
+  const core = v.replace(/[-_.=+]/g, '');
+  if (core.length < 20 || new Set(core).size < 8) return false;
+  if (/^[0-9a-f]+$/i.test(core) && core.length >= 32) return true;
+  return /[a-z]/.test(core) && /[A-Z]/.test(core) && /\d/.test(core);
+}
 function isSecret(name, value) {
   if (typeof value !== 'string' || value === '') return false;
-  return isSecretName(name) || looksLikeSecretValue(value);
+  return isSecretName(name) || likelySecretValue(value);
+}
+function pullsCode(def) {
+  if (!def || def.url) return false;
+  const base = String(def.command || '').toLowerCase().replace(/\.(cmd|exe)$/, '');
+  const args = (Array.isArray(def.args) ? def.args : []).map(a => String(a).toLowerCase());
+  if (base === 'npx' || base === 'uvx' || args.includes('npx') || args.includes('uvx')) return true;
+  const docker = base === 'docker' || args[0] === 'docker';
+  return docker && args.includes('pull');
+}
+function catalogTitle(name, def) {
+  if (name === 'memory' || claimCatalogId(def) === 'memory') return MEMORY_TITLE;
+  return '';
+}
+function explainProbeError(message) {
+  const raw = String(message || '');
+  if (!raw) return '';
+  if (raw === PROBE_TIMEOUT || raw === PROBE_MISSING || raw === PROBE_KEY || raw === PROBE_NET || raw === PROBE_OTHER) return raw;
+  if (/thời gian chạy thử|Quá 60 giây|timeout/i.test(raw)) return PROBE_TIMEOUT;
+  if (/Không giải được khoá|khoá bí mật/i.test(raw)) return PROBE_KEY;
+  if (/ENOENT|not found|không tìm thấy|spawn |không có lệnh/i.test(raw)) return PROBE_MISSING;
+  if (/ENOTFOUND|ECONNREFUSED|EAI_AGAIN|fetch failed|không tới|network|getaddrinfo/i.test(raw)) return PROBE_NET;
+  return PROBE_OTHER;
 }
 function secretRef(v) { return secretIdOf(v) != null; }
 function blankSecure() {
@@ -129,6 +168,7 @@ function createSecretStore({ dir, safeStorage = null } = {}) {
     let s = text == null ? '' : String(text);
     const list = [...noted].sort((a, b) => b.length - a.length);
     for (const v of list) if (v && s.includes(v)) s = s.split(v).join('••••');
+    s = s.replace(/(?:sk-|ghp_|github_pat_|hf_|Bearer )[A-Za-z0-9._~+/-]{8,}/g, '••••');
     return s;
   }
   function maskDeep(value, seen = new WeakSet()) {
@@ -141,7 +181,7 @@ function createSecretStore({ dir, safeStorage = null } = {}) {
     const out = {};
     for (const [k, v] of Object.entries(value)) {
       if (k === 'env' || k === 'headers' || k === 'enc') continue;
-      if (typeof v === 'string' && v && (isSecretName(k) || looksLikeSecretValue(v))) { out[k] = '••••'; continue; }
+      if (typeof v === 'string' && v && (isSecretName(k) || likelySecretValue(v))) { out[k] = '••••'; continue; }
       out[k] = maskDeep(v, seen);
     }
     return out;
@@ -294,10 +334,13 @@ function cardMcpConnect(name, def, secrets, { displayName = '' } = {}) {
   const fields = [['Khoá bí mật', names.length ? names.join(', ') : NO_SECRET]];
   if (def && def.url && !isLoopback(def.url)) fields.push(['Dữ liệu', LEAVES]);
   if (def && def.url && classifyUrl(def.url).lan) fields.push(['Mạng', LAN_HTTP]);
-  if (unpinned(def)) fields.push(['Phiên bản', UNPINNED]);
+  if (pullsCode(def)) fields.push(['Phiên bản', UNPINNED]);
   if (names.length && secrets && !secrets.secure()) fields.push(['Khoá', secrets.sentence()]);
   const shown = secrets ? secrets.mask(commandRaw(def)) : commandRaw(def);
-  const label = typeof displayName === 'string' && displayName.trim() && displayName.trim() !== name ? displayName.trim() : name;
+  const auto = catalogTitle(name, def);
+  const custom = typeof displayName === 'string' && displayName.trim() && displayName.trim() !== name ? displayName.trim() : '';
+  const label = custom || auto || name;
+  if (auto && !custom) fields.push(['Việc', MEMORY_DESC]);
   const details = [];
   if (label !== name) details.push(['Tên gốc', name]);
   details.push(['Lệnh', shown], ['Loại', kindOf(def)]);
@@ -363,6 +406,7 @@ function cardReplace(name, oldDef, newDef, secrets) {
 function extractSecrets(cfg, store) {
   const next = JSON.parse(JSON.stringify(cfg || {}));
   let count = 0;
+  let rewritten = 0;
   const servers = next.mcpServers && typeof next.mcpServers === 'object' ? next.mcpServers : {};
   for (const [name, def] of Object.entries(servers)) {
     if (!def || typeof def !== 'object') continue;
@@ -370,7 +414,7 @@ function extractSecrets(cfg, store) {
       if (!def[bag] || typeof def[bag] !== 'object' || Array.isArray(def[bag])) continue;
       for (const [k, v] of Object.entries(def[bag])) {
         const old = secretIdOf(v);
-        if (old && typeof v === 'object') { def[bag][k] = secretPlaceholder(old); continue; }
+        if (old && typeof v === 'object') { def[bag][k] = secretPlaceholder(old); rewritten++; continue; }
         if (typeof v === 'string' && old) continue;
         if (typeof v !== 'string' || !isSecret(k, v)) continue;
         const id = `mcp:${safeName(name)}:${k}`;
@@ -383,7 +427,7 @@ function extractSecrets(cfg, store) {
       def.args = def.args.map((a, i) => {
         if (typeof a !== 'string' || secretIdOf(a)) return a;
         const known = !!(store && store.mask(a) !== a);
-        if (!looksLikeSecretValue(a) && !known) return a;
+        if (!likelySecretValue(a) && !known) return a;
         const id = `mcp:${safeName(name)}:arg${i}`;
         if (store) store.put(id, a);
         count++;
@@ -391,7 +435,7 @@ function extractSecrets(cfg, store) {
       });
     }
   }
-  return { cfg: next, count };
+  return { cfg: next, count, rewritten };
 }
 function secretStamp(def, secrets) {
   const parts = [];
@@ -412,7 +456,7 @@ function observeSecrets(cfg, store) {
     for (const bag of ['env', 'headers']) {
       for (const [k, v] of Object.entries(def[bag] || {})) if (typeof v === 'string' && isSecret(k, v)) store.note(v);
     }
-    for (const a of Array.isArray(def.args) ? def.args : []) if (typeof a === 'string' && looksLikeSecretValue(a)) store.note(a);
+    for (const a of Array.isArray(def.args) ? def.args : []) if (typeof a === 'string' && likelySecretValue(a)) store.note(a);
   }
 }
 
@@ -485,7 +529,15 @@ function createPluginGate({ dir, mcp, secrets, meta = null, approve = async () =
   const say = (m) => { try { log('mcp', secrets.mask(String(m))); } catch { /* nhật ký không được làm hỏng lối đi */ } };
   function publicServers() {
     const list = mcp.status() || [];
-    return (Array.isArray(list) ? list : []).map(s => secrets.maskDeep(s));
+    const cfg = (mcp.config() && mcp.config().mcpServers) || {};
+    return (Array.isArray(list) ? list : []).map(s => {
+      const masked = secrets.maskDeep(s);
+      if (masked && masked.error) masked.hint = explainProbeError(masked.error);
+      const rec = meta.server(s.name);
+      const auto = catalogTitle(s.name, cfg[s.name]);
+      masked.displayName = (rec && rec.displayName) || auto || s.name;
+      return masked;
+    });
   }
   function publicPayload() {
     return { servers: publicServers(), text: secrets.mask(mcp.readText()), file: mcp.file, secretsSecure: secrets.secure() };
@@ -496,7 +548,7 @@ function createPluginGate({ dir, mcp, secrets, meta = null, approve = async () =
     observeSecrets(cfg, secrets);
     let extracted;
     try { extracted = extractSecrets(cfg, secrets); } catch { return 0; }
-    if (!extracted.count) return 0;
+    if (!extracted.count && !extracted.rewritten) return 0;
     try { validate(extracted.cfg); } catch { return 0; }
     try { await mcp.saveText(JSON.stringify(extracted.cfg)); } catch { return 0; }
     return extracted.count;
@@ -542,7 +594,7 @@ function createPluginGate({ dir, mcp, secrets, meta = null, approve = async () =
     try {
       await mcp.saveText(JSON.stringify(extracted.cfg));
       reconcile(extracted.cfg.mcpServers || {});
-      return { ok: true, servers: publicServers(), secretCount: extracted.count, secretsSecure: secrets.secure() };
+      return { ok: true, servers: publicServers(), secretCount: extracted.count, secretsSecure: secrets.secure(), notice: extracted.count && !secrets.secure() ? KEYCHAIN_NO : null };
     } catch (e) {
       say(`Lưu mcp.json lỗi\n${e && e.stack || e}`);
       return { ok: false, error: secrets.mask(e && e.message) };
@@ -573,14 +625,10 @@ function createPluginGate({ dir, mcp, secrets, meta = null, approve = async () =
   function probePlain(message, logs) {
     const raw = secrets.mask(String(message || ''));
     const detail = secrets.mask([raw, ...(Array.isArray(logs) ? logs : [])].filter(Boolean).join('\n'));
-    let error = PROBE_OTHER;
-    if (/thời gian chạy thử|Quá 60 giây|timeout/i.test(raw)) error = PROBE_TIMEOUT;
-    else if (/Không giải được khoá|khoá bí mật/i.test(raw)) error = PROBE_KEY;
-    else if (/ENOENT|not found|không tìm thấy|spawn |không có lệnh/i.test(raw)) error = PROBE_MISSING;
-    else if (/ENOTFOUND|ECONNREFUSED|EAI_AGAIN|fetch failed|không tới|network|getaddrinfo/i.test(raw)) error = PROBE_NET;
-    return { ok: false, error, details: detail };
+    return { ok: false, error: explainProbeError(raw), details: detail };
   }
   async function probeServer(name) {
+    if (!agentEnabled()) return { ok: false, paused: true, error: MASTER_OFF, details: '' };
     const def = (mcp.config().mcpServers || {})[name];
     if (!def) return { ok: false, error: 'Không có máy chủ này.', details: '' };
     if (!(meta.server(name) || {}).approvedAt) return { ok: false, error: 'Hãy cho phép kết nối trước khi chạy thử.', details: '' };
@@ -603,6 +651,7 @@ function createPluginGate({ dir, mcp, secrets, meta = null, approve = async () =
     return { ok: true, probed: true, tools, message: PROBE_OK.replace('{0}', String(tools)) };
   }
   async function openServer(name, { probe = false } = {}) {
+    if (!agentEnabled()) return { ok: false, paused: true, error: MASTER_OFF };
     const gate = await approveServer(name, 'start');
     if (!gate.ok) return gate;
     const def = (mcp.config().mcpServers || {})[name];
@@ -656,8 +705,10 @@ function createPluginGate({ dir, mcp, secrets, meta = null, approve = async () =
     cfg.mcpServers[name] = def;
     try { await mcp.saveText(JSON.stringify(cfg)); } catch (e) { return { ok: false, error: secrets.mask(e && e.message) }; }
     meta.setServer(name, { catalogId: claimCatalogId(def), approvedAt: now(), autoStart: ans.always === true, fp: fingerprint(def) });
+    const label = catalogTitle(name, def) || name;
     const probed = await probeServer(name);
-    return probed.ok ? { ...probed, name } : { ...probed, name };
+    if (probed.paused) return { ok: true, paused: true, name, label, message: MASTER_OFF };
+    return probed.ok ? { ...probed, name, label } : { ...probed, name, label };
   }
   async function setAutostart(name, on) {
     if (name === 'biz' || name === 'excel') return { ok: false, error: 'Kết nối cửa hàng không có tự chạy.' };
@@ -733,7 +784,7 @@ function createPluginGate({ dir, mcp, secrets, meta = null, approve = async () =
       const cur = meta.server(name) || {};
       meta.setServer(name, { ...cur, catalogId: before.catalogId, approvedAt: before.approvedAt, autoStart: !!before.autoStart, probedAt: before.probedAt || null, displayName: before.displayName, fp: fingerprint(nowDef), secretFp: before.secretFp || null });
     }
-    return { ok: true, id, removed: !text };
+    return { ok: true, id, removed: !text, persisted: !text || secrets.secure(), notice: text && !secrets.secure() ? KEYCHAIN_NO : null };
   }
   function setDisplayName(name, label) {
     const rec = meta.server(name);
@@ -806,9 +857,14 @@ function createPluginGate({ dir, mcp, secrets, meta = null, approve = async () =
     }
     return out;
   }
+  function peekSecrets(text) {
+    let parsed;
+    try { parsed = JSON.parse(String(text)); } catch { return { count: 0 }; }
+    try { return { count: extractSecrets(parsed, null).count }; } catch { return { count: 0 }; }
+  }
   return {
     secrets, meta, seal, upgradeOnce, saveJson, startServer, toggle, addPreset, setAutostart,
-    connectConnector, disconnectConnector, setExcelFolders, changeExcelFolders, setDisplayName, setUserSecret, probeServer, probeImported, startAuto, ensureLazy, connectorsForAgent, publicPayload, publicServers, connectorView,
+    connectConnector, disconnectConnector, setExcelFolders, changeExcelFolders, setDisplayName, setUserSecret, probeServer, probeImported, startAuto, ensureLazy, connectorsForAgent, publicPayload, publicServers, connectorView, peekSecrets,
     sealAndUpgrade: async () => { await seal(); return upgradeOnce(); },
   };
 }
@@ -817,6 +873,7 @@ module.exports = {
   createSecretStore, createMetaStore, createPluginGate, extractSecrets, observeSecrets,
   cardMcpConnect, cardAutostart, cardConnector, cardImport, cardReplace, cardExcelFolders, cardVisibleText, checkboxLabel,
   connectDanger, unpinned, kindOf, fingerprint, isSecret, isSecretName, looksLikeSecretValue, secretKeyNames,
-  qaDenies, commandInDetails, CARD_STRINGS, KEYCHAIN_OK, KEYCHAIN_NO, MCP_WARN,
+  qaDenies, commandInDetails, CARD_STRINGS, KEYCHAIN_OK, KEYCHAIN_NO, MASTER_OFF, SAVED_PAUSED, MCP_WARN,
+  explainProbeError, likelySecretValue, pullsCode, catalogTitle,
   BIZ_READ, BIZ_WRITE, BIZ_DANGER, EXCEL_WRITE, SOON, storageSecure,
 };

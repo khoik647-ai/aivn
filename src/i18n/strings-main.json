@@ -23,6 +23,7 @@
  "Gỡ \"{0}\" khỏi danh sách? (Tệp gốc vẫn được giữ nguyên)",
  "Hiện tất cả",
  "Hoàn tác",
+ "Khoá bí mật",
  "Khoá quản trị AIVN",
  "Làm lại",
  "Lưu revoked.json (chưa có token GitHub để tự đăng)",
@@ -30,6 +31,7 @@
  "Mở AIVN",
  "Nhập cấu hình mẫu",
  "Nhập khách hàng từ CSV/Excel",
+ "Phát hiện {0} khoá bí mật trong tệp. Đưa vào kho bảo mật? Giá trị sẽ không ghi dạng chữ trong mcp.json.",
  "Phóng to",
  "Sao chép liên kết",
  "Thoát AIVN",
@@ -52,6 +54,7 @@
  "Xuất từ AIVN",
  "Đính kèm",
  "Đưa tất cả lên trước",
+ "Đưa vào kho bảo mật",
  "Ẩn AIVN",
  "Ẩn ứng dụng khác"
 ]
