@@ -321,3 +321,31 @@ $d = Get-Content C:\qa\diag.json -Raw -Encoding UTF8 | ConvertFrom-Json
 $d.summary; $d.clicks | Select target, delayMs, ok, pointIsOurWindow, @{n='wfp';e={$_.windowFromPoint.root.process}}
 $d.keys | ? combo -like 'win*' | % { $_.combo; $_.error; $_.hook | ft vk, scan, flags, flagNames }
 ```
+
+## Kiểm thử một bản beta trên máy thật (thay cho khối QA trong ghi chú phát hành)
+Từ beta.2.7, ghi chú phát hành công khai **chỉ** viết cho người dùng (vi/en/zh, có gì mới, yêu cầu hệ thống, SHA-256, “không tự cập nhật”).
+Lệnh QA, đường dẫn thư mục QA và mã lỗi nằm ở đây và trong ghi chú QA riêng của từng bản (không đăng lên GitHub).
+`fill-notes.sh` từ chối ghi chú công khai còn cờ QA, mã lỗi hay chữ “nháp”.
+
+Đường dẫn cài đặt:
+- Cài cho người dùng hiện tại (mặc định): `$env:LOCALAPPDATA\Programs\AIVN\AIVN.exe`
+- Cài cho mọi người dùng (`AIVN-Setup-<phiên bản>.exe /allusers`): `C:\Program Files\AIVN\AIVN.exe`
+
+```powershell
+$env:AIVN_QA_MODE = "1"
+$exe = "$env:LOCALAPPDATA\Programs\AIVN\AIVN.exe"
+if (-not (Test-Path $exe)) { $exe = "C:\Program Files\AIVN\AIVN.exe" }
+$q = "<thư mục QA của bản này>"
+$common = @('--model','8b','--profile',"$q\profile",'--agent-settings-from','main')
+# Tra cứu web: link đúng nguyên văn (href === chữ), số có trên trang, tìm bằng thẻ mới
+& $exe --agent-task 'mở Chrome tìm "giá vàng SJC hôm nay", mở kết quả đầu tiên rồi báo cho mình giá và đường dẫn trang' @common --out $q\scenario-a\result.json --shots $q\scenario-a\shots --timeout 420
+$r = Get-Content $q\scenario-a\result.json -Raw -Encoding UTF8 | ConvertFrom-Json; $r.finalAnswer; $r.sources | Format-Table kind, url; $r.grounding
+# Mở chat (Zalo đang ở chat khác): ô tìm kiếm trống sau khi mở; nhật ký ghi thời gian open_chat
+& $exe --agent-task 'mở cuộc trò chuyện Cloud của tôi trên Zalo' @common --out $q\open-chat\result.json --shots $q\open-chat\shots --timeout 300
+# Zalo đã ở trước → ensure_app nhanh; soạn nhưng chưa gửi
+& $exe --agent-task 'soạn sẵn tin nhắn cho Cloud của tôi trên Zalo: "AIVN test - bỏ qua", chưa gửi' @common --out $q\draft\result.json --shots $q\draft\shots --timeout 300
+Get-Content "$q\profile\logs\aivn.log" -Tail 600 -Encoding UTF8 | Select-String "B121|B122|B124|ensure_app .*SẴN SÀNG"
+# Gửi THẬT vào chính mình (một lần, xem mục --approve-send-to ở trên)
+& $exe --agent-task 'gửi tin "AIVN test - bỏ qua" cho Cloud của tôi trên Zalo' --approve-send-to "My Documents" @common --out $q\self-send\result.json --shots $q\self-send\shots --timeout 300 --lang vi
+```
+Ngoài `--approve-send-to` (chỉ gửi vào chính mình, một lần), mọi bước cần xin phép vẫn bị TỪ CHỐI tự động.
