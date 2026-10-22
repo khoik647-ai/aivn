@@ -32,6 +32,8 @@ const S = {
   glm4: HF + 'zai-org/GLM-4-9B-0414', granite: HF + 'ibm-granite/granite-4.0-h-tiny', graniteM: HF + 'ibm-granite/granite-4.0-h-micro', lfm2: HF + 'LiquidAI/LFM2-1.2B',
   ivl3_2: HF + 'OpenGVLab/InternVL3-2B', ivl3_8: HF + 'OpenGVLab/InternVL3-8B',
   holo3: HF + 'Hcompany/Holo1.5-3B', holo7: HF + 'Hcompany/Holo1.5-7B', venus: HF + 'inclusionAI/UI-Venus-Ground-7B', uitars: HF + 'ByteDance-Seed/UI-TARS-1.5-7B',
+  q35_2: HF + 'Qwen/Qwen3.5-2B', q35_4: HF + 'Qwen/Qwen3.5-4B', q35_9: HF + 'Qwen/Qwen3.5-9B',
+  holo31_4: HF + 'Hcompany/Holo-3.1-4B', holo31_9: HF + 'Hcompany/Holo-3.1-9B', holo4_35: HF + 'Hcompany/Holo4-35B-A3B',
 };
 const v = (t, anchor, note) => ({ t, k: 'v', src: `${VER}#${anchor}`, note });
 const x = (t, anchor, note) => ({ t, k: 'x', src: `${VER}#${anchor}`, note });
@@ -39,7 +41,17 @@ const d = (t, src, q) => ({ t, k: 'd', src, q });
 const QWEN3_LANG = (src) => [d('multilingual', src, 'Support of 100+ languages and dialects'), d('vi', S.qwen3blog, '119 languages and dialects … Vietnamese')];
 const QWEN25_LANG = [d('multilingual', S.qwen25, 'Multilingual support for over 29 languages'), d('vi', S.qwen25, 'including Chinese, English, … Vietnamese, Thai, Arabic, and more')];
 
+const QWEN35 = (src) => [d('vision', src, 'Unified Vision-Language Foundation'), d('tools', src, 'Qwen3.5 excels in tool calling capabilities.'),
+  d('gui', src, 'outperforms Qwen3-VL models across reasoning, coding, agents, and visual understanding'), d('multilingual', src, 'Expanded support to 201 languages and dialects'), d('long', src, 'Context Length: 262,144 natively')];
+const HOLO31 = (src) => [d('vision', src, 'Vision-Language Models for Navigation and Computer Use Agents'), d('screen', src, 'Vision-Language Models for Navigation and Computer Use Agents'),
+  d('gui', src, 'computer use, mobile automation, enterprise workflows, and UI grounding'), d('tools', src, 'native function-calling support')];
 const CLAIMS = {
+  'qwen3.5-2b-q4_k_m': QWEN35(S.q35_2),
+  'qwen3.5-4b-q4_k_m': QWEN35(S.q35_4),
+  'qwen3.5-9b-q4_k_m': QWEN35(S.q35_9),
+  'holo-3.1-4b.iq4_xs': HOLO31(S.holo31_4),
+  'holo-3.1-9b.q4_k_m': HOLO31(S.holo31_9),
+  'holo4-35b-a3b-q4_k_m': [d('vision', S.holo4_35, 'is a vision-language model (VLM) for Computer Use'), d('screen', S.holo4_35, 'is a vision-language model (VLM) for Computer Use'), d('tools', S.holo4_35, 'Function calling'), d('moe', S.holo4_35, 'built on [Qwen3.6-35B-A3B]')],
   'qwen2.5-0.5b-instruct-q4_k_m': [v('tools', 'v0143-cong-cu', 'Mở được ứng dụng Máy tính (1 lần thử).'), ...QWEN25_LANG],
   'qwen2.5-1.5b-instruct-q4_k_m': [...QWEN25_LANG],
   'qwen2.5-3b-instruct-q4_k_m': [...QWEN25_LANG],

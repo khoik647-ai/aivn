@@ -78,6 +78,8 @@ const EFF_GPU = 0.75, EFF_CPU = 0.7, TOK_OVH_GPU = 0.0025, TOK_OVH_CPU = 0.001;
 function machineFit(m, hw, o = {}) {
   if (!hw || !hw.ram) return null;
   const ctx = o.ctx || 8192;
+  // B78: tệp quá nhỏ (GGUF giả/hỏng 2 KB từng được ước “Chạy mượt ~1000 token/giây”) — mô hình thật nhỏ nhất cũng ~100 MB
+  if ((m.size || 0) < 16 * MiB) return { group: 'no', label: LABEL.no, level: 'big', hint: 'Tệp quá nhỏ, không phải mô hình dùng được (có thể tải lỗi hoặc tệp hỏng)', ctx, need: m.size || 0, vram: 0, ram: 0, tps: 0, measured: false, invalid: true };
   const weights = (m.size || 0) + (m.mmprojSize || 0);
   const kv = kvPerToken(m) * ctx;
   let need = weights + kv + computeBuf(ctx) + (m.mmprojSize ? VISION_BUF : 0) + RUNTIME;
@@ -91,6 +93,27 @@ function machineFit(m, hw, o = {}) {
   const readFrac = p.active && p.total ? Math.min(1, p.active / p.total) : 1; // MoE: mỗi token chỉ đọc phần hoạt động
   const perTok = (m.size || 0) * readFrac;
   let group, vramUse = 0, ramUse = 0, hint, tps;
+  // B163 (laptop thật Ryzen + RTX 3050 Ti 4 GB, beta.2.8): mô hình nhìn ảnh chạy bằng llama-server --fit trên GPU RỜI. Tính theo đúng cách
+  // llama.cpp chia lớp: VRAM TRỐNG thật của GPU rời − lề --fit-target − bộ đệm tính toán, chia cho trọng số + K/V (có thể q8_0).
+  // Phần lớp không vừa chạy bằng CPU. ≥ 90 % số lớp trên GPU → “Chạy mượt” (vd. Qwen3-VL 2B @8K, K/V q8_0: ~100 %).
+  // Cách tính cũ (tổng nhu cầu + bộ đệm cố định so với 94 % VRAM) cho 2B cần 4,9 GB → “Chạy chậm”, 2B biến khỏi nhóm chạy mượt.
+  if (o.server && hw.gpu && hw.gpu !== 'metal' && vramTotal && !meas) {
+    const kvS = kv * (o.kvScale || 1); const free = Math.min(hw.vram.free || vramTotal, vramTotal);
+    const avail = free - Math.max(1024 * MiB, (m.mmprojSize || 0) + 512 * MiB) - computeBuf(ctx);
+    const frac = Math.max(0, Math.min(1, avail / Math.max(1, (m.size || 0) + kvS)));
+    const off = ((m.size || 0) + kvS) * (1 - frac); need = (m.size || 0) + (m.mmprojSize || 0) + kvS + computeBuf(ctx) + RUNTIME;
+    if (off > ramBudget) { group = 'no'; hint = 'Lớn hơn VRAM + RAM của máy'; tps = 0; ramUse = need; }
+    else {
+      group = frac >= 0.9 ? 'smooth' : 'slow'; vramUse = Math.min(need, free); ramUse = Math.round(off);
+      const t = perTok * frac / (gpuBandwidth(hw) * EFF_GPU * GB) + perTok * (1 - frac) / (cpuBandwidth(hw) * EFF_CPU * GB) + TOK_OVH_GPU; tps = t ? 1 / t : 0;
+      hint = frac >= 0.999 ? 'Nằm trọn trong VRAM' : `Khoảng ${Math.round(frac * 100)} % mô hình nằm trên GPU, phần còn lại chạy bằng CPU`;
+    }
+    const r = { group, label: LABEL[group], level: group === 'smooth' ? 'fit' : group === 'slow' ? 'slow' : 'big', hint, ctx, need: Math.round(need), vram: Math.round(vramUse), ram: Math.round(ramUse),
+      tps: tps ? Math.max(0.5, Math.round(tps * 10) / 10) : 0, measured: false, gpuFrac: Math.round(frac * 100) / 100, server: true, kv: o.kvScale && o.kvScale < 1 ? 'q8_0' : 'f16',
+      parts: { weights: Math.round(m.size || 0), mmproj: Math.round(m.mmprojSize || 0), kv: Math.round(kvS), compute: Math.round(computeBuf(ctx) + RUNTIME) } };
+    if (m.measuredTps > 0 && group !== 'no') { r.tps = Math.round(m.measuredTps * 10) / 10; r.tpsMeasured = true; }
+    return r;
+  }
   if (hw.gpu === 'metal') {
     ramUse = need; const ok = need <= hw.ram * 0.65;
     group = ok ? 'smooth' : need <= hw.ram * 0.8 ? 'slow' : 'no';
@@ -114,6 +137,8 @@ function machineFit(m, hw, o = {}) {
     need: Math.round(need), vram: Math.round(vramUse), ram: Math.round(ramUse), tps: tps ? Math.max(0.5, Math.round(tps * 10) / 10) : 0, measured: !!meas,
     parts: { weights: Math.round(m.size || 0), mmproj: Math.round(m.mmprojSize || 0), kv: Math.round(kv), compute: Math.round(computeBuf(ctx) + (m.mmprojSize ? VISION_BUF : 0) + RUNTIME) } };
   if (m.measuredTps > 0 && group !== 'no') { r.tps = Math.round(m.measuredTps * 10) / 10; r.tpsMeasured = true; }
+  // B78: số đo thật quá chậm (“Đo được 0,1 token/giây”) mà nhãn vẫn “Chạy mượt” → theo số đo: Chạy chậm
+  if (r.tpsMeasured && r.tps < 5 && r.group === 'smooth') Object.assign(r, { group: 'slow', label: LABEL.slow, level: 'slow', hint: `Đo được chỉ ~${String(r.tps).replace('.', ',')} token/giây trên máy này` });
   r.text = fmtFit(r); r.detail = fitDetail(r); return r;
 }
 const ORDER = { smooth: 0, slow: 1, no: 2 };
@@ -128,7 +153,7 @@ function groupByFit(list, fitOf) {
 }
 // “Khoảng 55 token/giây · 7,4 GB VRAM” / “~3 token/giây · 12 GB VRAM + 9,8 GB RAM”
 function fmtFit(f) {
-  if (!f) return '';
+  if (!f || f.invalid) return ''; // B78: tệp hỏng — không ghi số ước tính vô nghĩa (chú thích nằm ở hint)
   const gb = (b) => (b / 1024 ** 3).toFixed(1).replace('.', ',') + ' GB'; // GiB, khớp cách Windows/NVIDIA ghi dung lượng
   const mem = f.group === 'no' ? `cần ~${gb(f.need)}` : [f.vram ? gb(f.vram) + ' VRAM' : '', f.ram ? gb(f.ram) + ' RAM' : ''].filter(Boolean).join(' + ');
   const sp = f.tps ? `~${f.tps >= 10 ? Math.round(f.tps) : String(f.tps).replace('.', ',')} token/giây` : '';

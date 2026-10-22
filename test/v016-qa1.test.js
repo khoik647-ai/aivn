@@ -21,7 +21,11 @@ test('B1: system_action lock không được yêu cầu → hiện thẻ hỏi; 
   const orig = C.systemAction; C.systemAction = async (a) => { locked++; return C.SYS[a].label; };
   try {
     const ct = createComputerTools({ getSettings: () => ({ agentComputer: true }), openPath: async () => '', openExternal: async () => {} });
-    const r = await ct.exec('system_action', { action: 'lock' }, { userQuery: 'tôi nên chọn mô hình nào?', confirm: async (req) => { asked.push(req); return false; } });
+    // B157: không liên quan tới việc được giao → chặn ngay, KHÔNG hiện thẻ (thẻ có thể bị “Tự làm không hỏi” tự đồng ý)
+    const r0 = await ct.exec('system_action', { action: 'lock' }, { userQuery: 'tôi nên chọn mô hình nào?', confirm: async (req) => { asked.push(req); return true; } });
+    assert.strictEqual(asked.length, 0); assert.ok(r0.refused); assert.match(r0.forModel, /KHÔNG liên quan/); assert.strictEqual(locked, 0);
+    // liên quan nhưng chưa yêu cầu đúng thao tác (câu hỏi về khoá máy) → vẫn hỏi; từ chối thì không khoá
+    const r = await ct.exec('system_action', { action: 'lock' }, { userQuery: 'vì sao máy hay tự khoá màn hình?', confirm: async (req) => { asked.push(req); return false; } });
     assert.strictEqual(asked.length, 1); assert.match(asked[0].message, /CHƯA yêu cầu/); assert.ok(r.refused); assert.strictEqual(locked, 0);
     const r2 = await ct.exec('system_action', { action: 'lock' }, { userQuery: 'khoá màn hình giúp tôi', confirm: async (req) => { asked.push(req); return false; } });
     assert.strictEqual(asked.length, 1, 'người dùng đã yêu cầu khoá: không hỏi lại'); assert.strictEqual(locked, 1); assert.ok(!r2.refused);

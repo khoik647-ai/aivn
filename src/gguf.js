@@ -104,8 +104,21 @@ function gpuFit({ fileSize, layers, kvPerToken }, { ctx = 8192, kvScale = 1, vra
   const kvPerLayer = kvPerToken && layers ? kvPerToken * ctx * kvScale / layers : 400 * MB * kvScale / L;
   return Math.max(0, Math.min(L, Math.floor(avail / (perLayer + kvPerLayer))));
 }
-function autoLayers(g, { ctx = 8192, kvType = 'f16', vram = null } = {}) {
-  const n = gpuFit(g, { ctx, kvScale: kvType === 'q8_0' ? 0.55 : 1, vram });
+// B170: mô hình nhìn ảnh chạy bằng llama-server; số lớp GPU do --fit của llama-server chọn: VRAM TRỐNG của đúng thiết bị đó
+// trừ lề --fit-target (AIVN đặt rõ = serverMarginMiB) trừ bộ đệm tính toán; mmproj nạp SAU nên nằm trong lề.
+// Hộp nạp dùng đúng công thức này (trước đây dùng 92 % VRAM, không trừ lề 1 GiB của llama.cpp → báo 23/37 trong khi thật là 16/37).
+const serverMarginMiB = (mmprojBytes = 0) => Math.max(1024, Math.round((mmprojBytes || 0) / MB) + 512);
+function serverFit({ fileSize, layers, kvPerToken }, { ctx = 8192, kvScale = 1, vram = null, mmprojBytes = 0 } = {}) {
+  const L = (layers || 32) + 1;
+  if (!vram || !(vram.total > 0)) return null;
+  const avail = Math.min(vram.free || vram.total, vram.total) - serverMarginMiB(mmprojBytes) * MB - computeBuf(ctx);
+  const perLayer = fileSize / L;
+  const kvPerLayer = kvPerToken && layers ? kvPerToken * ctx * kvScale / layers : 400 * MB * kvScale / L;
+  return Math.max(0, Math.min(L, Math.floor(avail / (perLayer + kvPerLayer))));
+}
+function autoLayers(g, { ctx = 8192, kvType = 'f16', vram = null, server = null } = {}) {
+  const kvScale = kvType === 'q8_0' ? 0.55 : 1;
+  const n = server ? serverFit(g, { ctx, kvScale, vram, mmprojBytes: server.mmprojBytes || 0 }) : gpuFit(g, { ctx, kvScale, vram });
   return n == null ? (g.layers || 32) + 1 : n;
 }
 function estimate(g, o = {}) {
@@ -119,7 +132,8 @@ function estimate(g, o = {}) {
   const kv = (kvPerToken || 0) * ctx * kvScale;
   const kvGpuFrac = layers ? Math.min(1, n / layers) : frac;
   const compute = computeBuf(ctx); // bộ đệm tính toán (ước chừng)
-  const vram = n ? fileSize * frac + kv * kvGpuFrac + compute : 0;
+  const mmGpu = o.server && n ? (o.server.mmprojBytes || 0) : 0; // phần nhìn ảnh (mmproj) cũng nằm trên GPU
+  const vram = n ? fileSize * frac + kv * kvGpuFrac + compute + mmGpu : 0;
   const ram = fileSize * (1 - frac) + kv * (1 - kvGpuFrac) + (n ? 150 * 1024 * 1024 : compute);
   return { vram: Math.round(vram), ram: Math.round(ram), kv: Math.round(kv), gpuLayers: n, totalLayers: L, auto };
 }
@@ -133,4 +147,4 @@ function cachedSummary(file) {
   cache.set(key, v); return v;
 }
 
-module.exports = { readMeta, summarize, estimate, autoLayers, gpuFit, computeBuf, cachedSummary, FILE_TYPES };
+module.exports = { serverMarginMiB, serverFit, readMeta, summarize, estimate, autoLayers, gpuFit, computeBuf, cachedSummary, FILE_TYPES };

@@ -45,29 +45,47 @@ $max = [int]$env:AIVN_MAX; if ($max -le 0) { $max = 300 }
 $h = [int64]$env:AIVN_HWND
 if ($h -eq 0) { $h = [AivnW]::GetForegroundWindow().ToInt64() }
 $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$h)
-$walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 $VP = [System.Windows.Automation.ValuePattern]::Pattern
-$out = New-Object System.Collections.ArrayList
-$q = New-Object System.Collections.Queue
-$q.Enqueue(@($root, 0)); $seen = 0; $t0 = [DateTime]::UtcNow
-while ($q.Count -gt 0 -and $out.Count -lt $max -and $seen -lt 2500 -and ([DateTime]::UtcNow - $t0).TotalSeconds -lt 12) {
-  $it = $q.Dequeue(); $el = $it[0]; $d = $it[1]; $seen++
-  try { $c = $el.Current } catch { continue }
-  $r = $c.BoundingRectangle
-  $vis = (-not $c.IsOffscreen) -and (-not $r.IsEmpty) -and $r.Width -gt 1 -and $r.Height -gt 1
-  if ($vis -and $d -gt 0) {
-    $ct = $c.ControlType.ProgrammaticName -replace '^ControlType\.', ''
-    $v = $null
-    if (($ct -eq 'Edit' -or $ct -eq 'ComboBox' -or $ct -eq 'Document') -and -not $c.IsPassword) { try { $v = $el.GetCurrentPattern($VP).Current.Value; if ($v.Length -gt 200) { $v = $v.Substring(0, 200) } } catch {} }
-    [void]$out.Add([ordered]@{ r = $ct; n = $c.Name; a = $c.AutomationId; b = @([int]$r.X, [int]$r.Y, [int]$r.Width, [int]$r.Height); e = $c.IsEnabled; p = $c.IsPassword; f = $c.HasKeyboardFocus; v = $v; d = $d })
+$script:seen = 0
+# B124: duyệt theo một bộ duyệt (ControlView mặc định; RawView khi ControlView gần như rỗng — Chromium/Electron như Zalo, Chrome)
+function Walk($walker, $secs) {
+  $out = New-Object System.Collections.ArrayList
+  $q = New-Object System.Collections.Queue
+  $q.Enqueue(@($root, 0)); $script:seen = 0; $t0 = [DateTime]::UtcNow
+  while ($q.Count -gt 0 -and $out.Count -lt $max -and $script:seen -lt 2500 -and ([DateTime]::UtcNow - $t0).TotalSeconds -lt $secs) {
+    $it = $q.Dequeue(); $el = $it[0]; $d = $it[1]; $script:seen++
+    try { $c = $el.Current } catch { continue }
+    $r = $c.BoundingRectangle
+    $vis = (-not $c.IsOffscreen) -and (-not $r.IsEmpty) -and $r.Width -gt 1 -and $r.Height -gt 1
+    if ($vis -and $d -gt 0) {
+      $ct = $c.ControlType.ProgrammaticName -replace '^ControlType\.', ''
+      $v = $null
+      if (($ct -eq 'Edit' -or $ct -eq 'ComboBox' -or $ct -eq 'Document') -and -not $c.IsPassword) { try { $v = $el.GetCurrentPattern($VP).Current.Value; if ($v.Length -gt 200) { $v = $v.Substring(0, 200) } } catch {} }
+      [void]$out.Add([ordered]@{ r = $ct; n = $c.Name; a = $c.AutomationId; b = @([int]$r.X, [int]$r.Y, [int]$r.Width, [int]$r.Height); e = $c.IsEnabled; p = $c.IsPassword; f = $c.HasKeyboardFocus; v = $v; d = $d })
+    }
+    if ($d -lt 40 -and ($vis -or $d -eq 0)) {
+      try { $ch = $walker.GetFirstChild($el); while ($ch -ne $null) { $q.Enqueue(@($ch, $d + 1)); $ch = $walker.GetNextSibling($ch) } } catch {}
+    }
   }
-  if ($d -lt 40 -and ($vis -or $d -eq 0)) {
-    try { $ch = $walker.GetFirstChild($el); while ($ch -ne $null) { $q.Enqueue(@($ch, $d + 1)); $ch = $walker.GetNextSibling($ch) } } catch {}
-  }
+  return ,$out
+}
+$out = Walk ([System.Windows.Automation.TreeWalker]::ControlViewWalker) 10; $via = 'control'; $seen0 = $script:seen
+$named = @($out | Where-Object { $_.n }).Count
+if ($named -lt 3) {
+  try { $o2 = Walk ([System.Windows.Automation.TreeWalker]::RawViewWalker) 6; $n2 = @($o2 | Where-Object { $_.n }).Count; if ($n2 -gt $named) { $out = $o2; $via = 'raw'; $named = $n2 } } catch {}
+}
+$seen = $script:seen
+# chẩn đoán khi cây nghèo: lớp/framework của gốc + các con cấp 1 (RawView)
+$diag = $null
+if ($named -lt 3) {
+  $kids = New-Object System.Collections.ArrayList
+  try { $rw = [System.Windows.Automation.TreeWalker]::RawViewWalker; $ch = $rw.GetFirstChild($root); $k = 0; while ($ch -ne $null -and $k -lt 8) { $cc = $ch.Current; [void]$kids.Add(('{0}|{1}|{2}' -f ($cc.ControlType.ProgrammaticName -replace '^ControlType\.', ''), $cc.ClassName, $cc.Name)); $k++; $ch = $rw.GetNextSibling($ch) } } catch {}
+  $rc0 = $root.Current
+  $diag = [ordered]@{ via = $via; seenControl = $seen0; seen = $seen; named = $named; cls = $rc0.ClassName; fw = $rc0.FrameworkId; kids = $kids }
 }
 $rc = $root.Current; $rb = $rc.BoundingRectangle
 $pn = ''; try { $pn = (Get-Process -Id $rc.ProcessId).ProcessName } catch {}
-[ordered]@{ win = [ordered]@{ title = $rc.Name; pid = $rc.ProcessId; proc = $pn; hwnd = $h; b = @([int]$rb.X, [int]$rb.Y, [int]$rb.Width, [int]$rb.Height) }; els = $out; seen = $seen; dpi = @{ cx = [AivnW]::GetSystemMetrics(0); cy = [AivnW]::GetSystemMetrics(1) } } | ConvertTo-Json -Depth 6 -Compress
+[ordered]@{ win = [ordered]@{ title = $rc.Name; pid = $rc.ProcessId; proc = $pn; hwnd = $h; b = @([int]$rb.X, [int]$rb.Y, [int]$rb.Width, [int]$rb.Height) }; els = $out; seen = $seen; via = $via; diag = $diag; dpi = @{ cx = [AivnW]::GetSystemMetrics(0); cy = [AivnW]::GetSystemMetrics(1) } } | ConvertTo-Json -Depth 6 -Compress
 `;
 const PS_WINDOWS = PS_PRELUDE + String.raw`
 $fg = [AivnW]::GetForegroundWindow().ToInt64()
@@ -409,6 +427,14 @@ function searchVariants(text) {
 }
 // Chữ OCR trông như ô nhập (chữ gợi ý "Tìm kiếm", "Nhập tin nhắn…"): ở ứng dụng không đọc được qua Trợ năng (Zalo…), đó là ô nhập thật
 const INPUT_HINT = /(^|\s)(tìm|tim|search|find|nhập|nhap|soạn|soan|gõ|type|write|enter)(\s|$|…|\.)|tìm kiếm|tim kiem|tin nhắn|tin nhan|message|aa$/i;
+// B76: OCR đọc sai dấu/ký tự (“Lich hop nhém” cho “Lịch họp nhóm”) — needle (đã fold) gần đúng nằm trong hay: khoảng cách sửa ≤ 25% độ dài trên một cửa sổ trượt
+function fuzzyHas(hay, needle) {
+  const h = String(hay || ''), n = String(needle || ''); if (!n) return true; if (h.includes(n)) return true; if (n.length < 5) return false;
+  const L = n.length, lim = Math.floor(L * 0.25);
+  const lev = (a, b) => { let prev = Array.from({ length: b.length + 1 }, (_, j) => j); for (let i = 1; i <= a.length; i++) { const cur = [i]; for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; } return prev[b.length]; };
+  for (let i = 0; i <= Math.max(0, h.length - L + lim); i++) for (const w of [L - lim, L, L + lim]) { if (w <= 0 || i + w > h.length + 0) continue; if (lev(h.slice(i, i + w), n) <= lim) return true; }
+  return h.length < L && h.length >= L - lim && lev(h, n) <= lim;
+}
 const inputLike = (el) => !!(el && !el.editable && el.ocr && String(el.name || '').trim().length <= 40 && INPUT_HINT.test(String(el.name || '').trim()));
 // B60 (QA lượt 7): tham chiếu id phần tử do mô hình viết: “e10”, “[e12]”, “e10 Trần Quỳnh Anh”, “e3: "Send"”, “e11 (Tiêu đề)”.
 // (?!\d) chặn quay lui: “e10” KHÔNG được hiểu thành e1 + nhãn “0”, “e22” không thành e2 + “2”; nhãn không bắt buộc.
@@ -436,4 +462,4 @@ function newTexts(beforeEls, afterEls, max = 4) {
   return out.slice(0, max);
 }
 const isIdRef = (q) => { const r = parseIdRef(q); return !!(r && !r.label); };
-module.exports = { windowAt, PS_WINAT, parseIdRef, isIdRef, resolveIdRef, newTexts, ID_REF, queryVariants, findElementAny, stabilizeIds, isButtonish, taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };
+module.exports = { ps, PS_PRELUDE, fuzzyHas, windowAt, PS_WINAT, parseIdRef, isIdRef, resolveIdRef, newTexts, ID_REF, queryVariants, findElementAny, stabilizeIds, isButtonish, taskTargets, rankForTask, likelyTarget, appKeys, APP_KEYS, setCursor, uiaScale, rescaleTree, inputLike, poorTreeApp, POOR_TREE_APPS, noDiacritics, searchVariants, activeDialogOf, shortcutFor, restoreQuoted, tree, windows, focus, matchWindow, normalize, formatForModel, findElement, fold, PASSWORD_NAME, ROLE_VI, INTERACTIVE, PS_TREE, PS_WINDOWS, PS_FOCUS, JXA_TREE, JXA_WINDOWS, linuxWindows };

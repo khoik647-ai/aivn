@@ -67,6 +67,7 @@ function screenSetup(list, vramBytes = 0, scores = {}, agentOpts = null) {
   const GB = 1024 ** 3, v = (vramBytes || 0) / GB; const by = (id) => list.find(c => c.id === id);
   const measured = list.some(c => c.fit || c.agentFit);
   let solo = measured ? agentPick(list, scores, agentOpts) : null;
+  if (!solo && !measured && v > 0 && v < AE.LOW_VRAM_GB && by('qwen3-vl-2b-instruct-q8_0')) solo = by('qwen3-vl-2b-instruct-q8_0'); // B158: GPU dưới 6 GB → 2B
   if (!solo && !measured) { const soloC = VISION_SOLO.filter(x => v >= x.vram && by(x.id)); solo = soloC[0] ? by(soloC[0].id) : by(VISION_SOLO[VISION_SOLO.length - 1].id) || null; }
   return { solo: solo ? solo.id : null, pair: null, vramGB: Math.round(v * 10) / 10 };
 }

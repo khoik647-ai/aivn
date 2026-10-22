@@ -1,0 +1,3 @@
+{ "steps": [ {"goto":"chat"}, {"waitFor":["ob-skip",4000],"optional":true}, {"click":"ob-skip","optional":true}, {"goto":"settings/about"},
+  {"click":"upd-check"}, {"expectVisible":["update-beta"],"timeout":20000}, {"readText":["update-beta","vi"]}, {"readText":["update-text","status"]}, {"screenshot":"about-vi"},
+  {"setLang":"en"}, {"wait":600}, {"readText":["update-beta","en"]}, {"setLang":"zh"}, {"wait":600}, {"readText":["update-beta","zh"]}, {"screenshot":"about-zh"}, {"setLang":"vi"} ] }

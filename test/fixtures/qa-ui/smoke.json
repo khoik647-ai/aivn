@@ -1,0 +1,114 @@
+{
+ "name": "smoke: điều hướng, nhập chữ, ngôn ngữ, giao diện, hộp thoại",
+ "size": [
+  1280,
+  820
+ ],
+ "optional": true,
+ "steps": [
+  {
+   "goto": "chat"
+  },
+  {
+   "waitFor": [
+    "ob-skip",
+    4000
+   ],
+   "optional": true
+  },
+  {
+   "click": "ob-skip",
+   "optional": true
+  },
+  {
+   "expectHidden": "onboard"
+  },
+  {
+   "expectVisible": "nav-chat"
+  },
+  {
+   "expectCount": [
+    "nav-*",
+    9
+   ]
+  },
+  {
+   "type": [
+    "input",
+    "xin chào từ QA"
+   ]
+  },
+  {
+   "expectText": [
+    "input",
+    "xin chào từ QA"
+   ]
+  },
+  {
+   "readValue": [
+    "input",
+    "chatInput"
+   ]
+  },
+  {
+   "goto": "settings/about"
+  },
+  {
+   "expectVisible": "settings-pane-about"
+  },
+  {
+   "click": "settings-tab-general"
+  },
+  {
+   "expectVisible": "ui-lang-sel"
+  },
+  {
+   "setLang": "en"
+  },
+  {
+   "goto": "models"
+  },
+  {
+   "screenshot": "models-en"
+  },
+  {
+   "setLang": "vi"
+  },
+  {
+   "setTheme": "dark"
+  },
+  {
+   "resize": [
+    900,
+    700
+   ]
+  },
+  {
+   "goto": "discover"
+  },
+  {
+   "hover": "nav-models"
+  },
+  {
+   "press": "Escape"
+  },
+  {
+   "seed": "seed.json"
+  },
+  {
+   "goto": "memory"
+  },
+  {
+   "expectText": [
+    "view-memory",
+    "QA ghi nhớ thử"
+   ]
+  },
+  {
+   "setTheme": "light"
+  },
+  {
+   "screenshot": "end"
+  }
+ ]
+}

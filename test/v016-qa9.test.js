@@ -26,7 +26,7 @@ test('B66c: “Invalid key flag specified.” — cờ “command” không có 
       if (names && names.has('control') && names.has('alt')) for (const n of [...k.mods, k.key]) assert.ok(n.length === 1 || names.has(n), `${pf} ${c}: libnut-${pf} không có tên “${n}”`);
     }
   }
-  assert.deepStrictEqual(K.parse('win + s', 'win32'), { key: 's', mods: ['meta'], combo: 'meta+s', hidesAll: false });
+  assert.deepStrictEqual(K.parse('win + s', 'win32'), { key: 's', mods: ['meta'], combo: 'meta+s', hidesAll: false, media: false });
   assert.deepStrictEqual(K.parse(' WIN+D ', 'win32').mods, ['meta']); assert.ok(K.parse('win+d', 'win32').hidesAll); assert.ok(K.parse('Win + M', 'win32').hidesAll);
   assert.deepStrictEqual(K.parse('cmd+f', 'win32').mods, ['control'], 'Cmd+F trên Windows = Ctrl+F');
   assert.deepStrictEqual(K.parse('cmd+v', 'darwin').mods, ['cmd']); assert.deepStrictEqual(K.parse('win+space', 'darwin').mods, ['cmd']);
@@ -180,4 +180,14 @@ test('B69/B70 (Telegram giả, KHÔNG có câu “không cần hỏi lại”): 
   assert.deepStrictEqual(d.final.sent, [{ to: 'Trần Quỳnh Anh', text: 'Gửi mình file slide nhé' }], 'gửi đúng MỘT lần');
   const log = fs.readFileSync(path.join(ud, 'logs', 'aivn.log'), 'utf8');
   assert.match(log, /Xin phép \(đã hỏi\) — bước GỬI: screen_act type_text .*người nhận “Trần Quỳnh Anh”/); assert.match(log, /Xin phép: người dùng CHO PHÉP/);
+});
+test('Nhật ký aivn.log/engine.log: UTF-8 CÓ BOM nhất quán (PowerShell 5.1 đọc đúng tiếng Việt), BOM đúng một lần, cả sau xoay vòng', () => {
+  const L = require('../src/logger'); const d = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-log-'));
+  L.init(d); L.log('app', 'Khởi động AIVN — tiếng Việt có dấu: ừ, ặ, Đ'); L.log('load', 'nạp mô hình');
+  for (const f of ['aivn.log', 'engine.log']) { const b = fs.readFileSync(path.join(d, f)); assert.deepStrictEqual([...b.slice(0, 3)], [0xef, 0xbb, 0xbf], f); assert.strictEqual(b.toString('utf8').split('\ufeff').length, 2, f + ': BOM một lần'); }
+  assert.match(fs.readFileSync(path.join(d, 'aivn.log'), 'utf8'), /tiếng Việt có dấu: ừ, ặ, Đ/);
+  assert.ok(!L.tail(5).startsWith('\ufeff'));
+  L.init(d); L.log('app', 'lần chạy thứ hai'); assert.strictEqual(fs.readFileSync(path.join(d, 'aivn.log'), 'utf8').split('\ufeff').length, 2, 'mở lại không thêm BOM');
+  fs.writeFileSync(path.join(d, 'aivn.log'), '\ufeff' + 'x'.repeat(5 * 1024 * 1024 + 10)); L.log('app', 'sau xoay vòng');
+  assert.deepStrictEqual([...fs.readFileSync(path.join(d, 'aivn.log')).slice(0, 3)], [0xef, 0xbb, 0xbf], 'tệp mới sau xoay vòng có BOM');
 });

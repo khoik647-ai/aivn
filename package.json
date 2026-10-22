@@ -82,9 +82,11 @@
       "src/engine-host.js",
       "src/vision-server.js",
       "src/orphans.js",
+      "src/model-launch.js",
       "src/agent/textproto.js",
       "src/agent/sampling.js",
       "src/gguf.js",
+      "src/gpu-pick.js",
       "src/schema.js",
       "src/ocr.js",
       "src/llama-archs.json",
@@ -233,7 +235,8 @@
         "repo": "aivn",
         "releaseType": "release"
       }
-    ]
+    ],
+    "beforePack": "build/build-info.cjs"
   },
   "desktopName": "aivn.desktop"
 }

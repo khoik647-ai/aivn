@@ -1,4 +1,5 @@
 'use strict';
+const { say, sys } = require('./say');
 // 0.16: lập kế hoạch → làm → chụp lại để kiểm tra → chưa được thì đổi cách → chỉ báo những gì đã kiểm chứng.
 // desktop-agent đã chụp lại sau mỗi thao tác và ghi "Kiểm tra: …". Mô-đun này đọc kết quả đó:
 //   • bước không có tác dụng (không thấy phần tử / màn hình không đổi / chưa thấy chữ vừa gõ / chưa kiểm chứng gửi) → đánh dấu
@@ -10,6 +11,7 @@ const BAD = [
   [/không thấy phần tử/i, 'không thấy phần tử'],
   [/Màn hình không thay đổi rõ ràng/i, 'màn hình không thay đổi'],
   [/CHƯA thấy chữ vừa gõ/i, 'chưa thấy chữ vừa gõ'],
+  [/vào NHẦM ô/i, 'chữ vào nhầm ô (không phải ô soạn tin)'],
   [/CHƯA kiểm chứng được là đã gửi/i, 'chưa kiểm chứng được là đã gửi'],
   [/Hộp thoại “[^”]*” VẪN đang mở/i, 'hộp thoại vẫn đang mở'],
   [/CHƯA thấy kết quả khớp/i, 'chưa thấy kết quả tìm kiếm'],
@@ -24,7 +26,7 @@ function outcome(out) {
   if (out.error) return String(out.error).slice(0, 60);
   return null;
 }
-// khoá "cùng một cách": thao tác + mục tiêu (+ chữ gõ)
+// khoá "cùng một cách": thao tác + mục tiêu (+ chữ gõ); B95: + ngữ cảnh (phần tử đang chọn + dấu màn hình) — bấm sang ô khác / màn hình đổi thì tính lại từ đầu
 function key(a = {}) {
   const tgt = a.element || a.target || (a.x != null && a.y != null ? `${Math.round(a.x / 25)},${Math.round(a.y / 25)}` : '') || '';
   return [String(a.action || '').toLowerCase(), fold(tgt), a.action === 'type_text' ? fold(a.text).slice(0, 40) : '', a.keys ? fold(a.keys) : ''].join('|');
@@ -36,14 +38,17 @@ function alternatives(a = {}) {
   if (act === 'hotkey') return ['bấm nút tương ứng trên giao diện thay cho phím tắt', 'focus_window đúng ứng dụng rồi bấm lại phím'];
   return ['screen_look để xem lại màn hình rồi chọn cách khác'];
 }
+// B166 (máy thật beta.2.8): phím tắt đã biết là không có tác dụng (màn hình không đổi) thì bấm lại y hệt trên cùng màn hình cũng vô ích
+// (agent bấm ctrl+t hai lần) → chặn ngay lần thứ 2. Bấm/gõ vẫn được thử lại một lần (phần tử có thể vừa hiện ra).
+const limitOf = (a = {}) => /^(?:hotkey|key|press)$/i.test(String(a.action || '')) ? 1 : 2;
 function createRetryTracker() {
   const tries = new Map(); const log = []; const blocked = new Map(); let blockedTotal = 0, badStreak = 0;
   return {
     // trước khi làm: cách này đã hỏng 2 lần → trả kết quả thay thế (không làm lại)
-    before(a) { const k = key(a); const t = tries.get(k); if (t && t.fails >= 2) { blocked.set(k, (blocked.get(k) || 0) + 1); blockedTotal++; } if (t && t.fails >= 2) return { error: 'cách này đã thử 2 lần không có tác dụng', forModel: `(Kiểm tra tự động của AIVN) KHÔNG làm lại: ${describe(a)} đã thử ${t.fails} lần và đều chưa có tác dụng (${t.why}). Hãy đổi cách: ${alternatives(a).join('; ')}. Nếu đã thử hết mà vẫn không được thì dừng và báo người dùng rõ là CHƯA làm được bước này.`, summary: 'bỏ qua — cách này đã hỏng 2 lần, cần đổi cách' }; return null; },
+    before(a, c = '') { const k = key(a) + '@' + c; const t = tries.get(k); const lim = limitOf(a); if (t && t.fails >= lim) { blocked.set(k, (blocked.get(k) || 0) + 1); blockedTotal++; } if (t && t.fails >= lim) return { error: t.fails < 2 ? 'phím này vừa bấm không có tác dụng' : 'cách này đã thử 2 lần không có tác dụng', forModel: `(Kiểm tra tự động của AIVN) KHÔNG làm lại: ${describe(a)} đã thử ${t.fails} lần và đều chưa có tác dụng (${t.why}). Hãy đổi cách: ${alternatives(a).join('; ')}. Nếu đã thử hết mà vẫn không được thì dừng và báo người dùng rõ là CHƯA làm được bước này.`, summary: t.fails < 2 ? 'bỏ qua — phím này vừa bấm không có tác dụng, cần đổi cách' : 'bỏ qua — cách này đã hỏng 2 lần, cần đổi cách' }; return null; },
     // sau khi làm: ghi nhận; hỏng lần đầu → thêm gợi ý đổi cách vào kết quả
-    after(a, out) {
-      const why = outcome(out); const k = key(a); const t = tries.get(k) || { fails: 0, why: '' };
+    after(a, out, c = '') {
+      const why = outcome(out); const k = key(a) + '@' + c; const t = tries.get(k) || { fails: 0, why: '' };
       if (!why) { t.fails = 0; badStreak = 0; tries.set(k, t); log.push({ a, ok: true }); return { bad: null }; }
       badStreak++; t.fails++; t.why = why; tries.set(k, t); log.push({ a, ok: false, why });
       const hint = t.fails === 1 ? `\n(Kiểm tra tự động của AIVN) Bước này CHƯA có tác dụng (${why}). Chụp lại/xem kết quả kiểm tra ở trên; nếu thử lại thì đổi cách: ${alternatives(a).slice(0, 3).join('; ')}.` : `\n(Kiểm tra tự động của AIVN) Đã hỏng ${t.fails} lần với cùng cách này (${why}) — BẮT BUỘC đổi cách: ${alternatives(a).join('; ')}.`;
@@ -64,10 +69,10 @@ function createRetryTracker() {
 function describe(a = {}) { const act = String(a.action || ''); const tgt = a.element || a.target || (a.x != null ? `(${a.x}, ${a.y})` : ''); return `${act}${tgt ? ' ' + JSON.stringify(String(tgt)) : ''}${act === 'type_text' && a.text ? ' “' + String(a.text).slice(0, 30) + '”' : ''}${a.keys ? ' ' + a.keys : ''}`; }
 // câu trả lời cuối khẳng định đã xong trong khi bước màn hình cuối cùng chưa có tác dụng
 const DONE_RE = /(đã\s+(xong|hoàn thành|làm xong|mở|bấm|nhấn|gõ|nhập|chọn|lưu|gửi|chuyển)|hoàn tất|thành công)/iu;
-function finalCheck(text, tracker) {
+function finalCheck(text, tracker, lang = 'vi') {
   const l = tracker && tracker.lastBad(); if (!l) return null;
   if (!DONE_RE.test(String(text || ''))) return null;
-  return `AIVN chưa kiểm chứng được bước cuối trên màn hình (${describe(l.a)}: ${l.why}). Hãy xem lại màn hình trước khi tin là đã xong.`;
+  return say(lang, 'AIVN chưa kiểm chứng được bước cuối trên màn hình ({0}: {1}). Hãy xem lại màn hình trước khi tin là đã xong.', describe(l.a), sys(lang, l.why));
 }
 // B39: câu trả lời cuối là LỜI HỨA ở thì tương lai (“Tôi sẽ thử bấm…”) — lượt đã kết thúc nên sẽ không có gì được làm tiếp
 const PROMISE_RE = /(?:^|[.!?\n:]\s*)(?:(?:bây giờ|tiếp theo|tiếp đến|sau đó|giờ|ok|được rồi|vâng)[, ]+)?(?:tôi|mình|em|aivn(?: agent)?)\s+(?:sẽ|xin phép|đang chuẩn bị|chuẩn bị|tiếp tục)\s+(?:thử|thực hiện|tiếp tục|bấm|nhấn|nhấp|gõ|nhập|mở|tìm|làm|gửi|chọn|chuyển|kiểm tra|quay lại|di chuyển|cuộn|dùng|sử dụng)|\b(?:i'll|i will|let me|i am going to|i'm going to|next,? i)\s+(?:now\s+)?(?:try|click|open|type|search|proceed|perform|do|send|select|use|check)|我(?:将|会|现在|接下来)(?:尝试|点击|打开|输入|执行|搜索|发送|选择)/iu;
@@ -77,15 +82,19 @@ function promiseEnding(text) {
   return PROMISE_RE.test(tail);
 }
 // B39: báo trung thực khi dừng sớm / khi mô hình kết thúc bằng lời hứa
-function honestStatus({ query = '', tracker = null, steps = [], reason = '', recipient = null, app = '' } = {}) {
+// B182: lang = ngôn ngữ trả lời (en/zh/vi) — câu do AIVN ghép được dịch theo mẫu {0}; lý do/kết quả bước là chữ hệ thống nên dịch khi có bản dịch trọn
+function honestStatus({ query = '', tracker = null, steps = [], reason = '', recipient = null, app = '', lang = 'vi' } = {}) {
   const fails = tracker ? tracker.failures() : [];
   const okN = steps.filter(x => x.status === 'ok' && !x.check).length;
-  const lines = [`Mình chưa làm xong việc này${reason ? ` (${reason})` : ''}, nên dừng lại thay vì thử mãi một cách đã hỏng.`];
-  if (fails.length) lines.push('Đã thử:\n' + fails.slice(-6).map(f => `- ${f.what}: ${f.n} lần, ${f.why}`).join('\n'));
-  else if (okN) lines.push(`Đã làm ${okN} bước nhưng chưa kiểm chứng được là xong.`);
+  const lines = [reason ? say(lang, 'Mình chưa làm xong việc này ({0}), nên dừng lại thay vì thử mãi một cách đã hỏng.', sys(lang, reason)) : say(lang, 'Mình chưa làm xong việc này, nên dừng lại thay vì thử mãi một cách đã hỏng.')];
+  if (fails.length) lines.push(say(lang, 'Đã thử:') + '\n' + fails.slice(-6).map(f => say(lang, '- {0}: {1} lần, {2}', f.what, f.n, sys(lang, f.why))).join('\n'));
+  else if (okN) lines.push(say(lang, 'Đã làm {0} bước nhưng chưa kiểm chứng được là xong.', okN));
   lines.push(recipient
-    ? `Bạn giúp mình mở sẵn cuộc trò chuyện “${recipient}”${app ? ` trong ${app}` : ''} rồi giao lại việc (hoặc tự gửi tin) nhé.`
-    : 'Bạn có thể mở sẵn đúng cửa sổ/màn hình cần dùng rồi giao lại việc, hoặc tự làm bước này.');
+    ? (app ? say(lang, 'Bạn giúp mình mở sẵn cuộc trò chuyện “{0}” trong {1} rồi giao lại việc (hoặc tự gửi tin) nhé.', recipient, app) : say(lang, 'Bạn giúp mình mở sẵn cuộc trò chuyện “{0}” rồi giao lại việc (hoặc tự gửi tin) nhé.', recipient))
+    : say(lang, 'Bạn có thể mở sẵn đúng cửa sổ/màn hình cần dùng rồi giao lại việc, hoặc tự làm bước này.'));
   return lines.join('\n\n');
 }
-module.exports = { PROMISE_RE, promiseEnding, honestStatus, createRetryTracker, outcome, key, alternatives, finalCheck, describe, DONE_RE };
+// B95 (máy thật beta.2.2): câu cuối đổ lỗi cho ứng dụng (“Zalo có thể đang gặp sự cố / giao diện bị lỗi”) trong khi chính các bước của AIVN chưa có tác dụng
+const BLAME_RE = /(?:gặp|bị|có)\s+(?:sự cố|trục trặc|lỗi)|giao diện\s+(?:bị|có|đang)\s+(?:lỗi|vấn đề)|(?:ứng dụng|app|phần mềm)\s+(?:\S+\s+){0,3}(?:không hoạt động|bị treo|đang lỗi)|\b(?:is|may be|might be|seems to be)\s+(?:having (?:issues|problems)|broken|malfunctioning|not working)|\b(?:app|application|interface)\s+(?:error|issue|problem)s?\b|(?:出现|遇到)(?:了)?(?:问题|故障)|界面(?:出错|有问题)/iu;
+function blamesApp(text) { return BLAME_RE.test(String(text || '')); }
+module.exports = { BLAME_RE, blamesApp, PROMISE_RE, promiseEnding, honestStatus, createRetryTracker, outcome, key, alternatives, finalCheck, describe, DONE_RE };

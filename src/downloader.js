@@ -2,6 +2,7 @@
 // Token Hugging Face chỉ gửi tới huggingface.co (tự xử lý chuyển hướng), không bao giờ ghi ra log.
 const fs = require('fs');
 const path = require('path');
+const NAMES = require('./model-names');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
 
@@ -33,16 +34,20 @@ async function fetchFollow(url, { headers = {}, token, signal, fetchImpl = fetch
   throw new Error('Quá nhiều lần chuyển hướng');
 }
 
-function createDownloader({ dir, send = () => {}, getToken = () => null, maxConcurrent = 2, fetchImpl = fetch, log = () => {} }) {
+function createDownloader({ dir, checkSpace = null, send = () => {}, getToken = () => null, maxConcurrent = 2, fetchImpl = fetch, log = () => {} }) {
   const jobs = new Map();
   const snap = (j) => ({ id: j.id, repo: j.repo, name: j.name, quant: j.quant, status: j.status, received: j.received, total: j.total, speed: j.speed || 0, eta: j.eta ?? null,
     error: j.error || null, parts: j.files.length, part: j.part || 0, dest: j.files[0].dest, catalogId: j.catalogId || null });
   const emit = (j, force) => { const now = Date.now(); if (!force && now - (j.lastEmit || 0) < 300) return; j.lastEmit = now; send('dl:update', snap(j)); };
 
-  function destFor(repo, file) {
+  // tên tệp chung (q4_k_m.gguf, mmproj.f16.gguf…) → lưu kèm tên repo (model-names.js); tệp cũ đã có dưới tên chung thì dùng tiếp, không tải lại
+  function destFor(repo, file, localName) {
     const [author, name] = repo.split('/');
     const safe = (s) => s.replace(/[^\w.\-]+/g, '_');
-    return path.join(dir, safe(author), safe(name), safe(file.split('/').pop()));
+    const d = path.join(typeof dir === 'function' ? dir() : dir, safe(author), safe(name));
+    const want = path.join(d, NAMES.localNameFor(repo, file, localName)); const legacy = path.join(d, safe(file.split('/').pop()));
+    if (want !== legacy && !fs.existsSync(want) && !fs.existsSync(want + '.part') && (fs.existsSync(legacy) || fs.existsSync(legacy + '.part'))) return legacy;
+    return want;
   }
   const fileSize = (p) => { try { return fs.statSync(p).size; } catch { return -1; } };
 
@@ -57,7 +62,7 @@ function createDownloader({ dir, send = () => {}, getToken = () => null, maxConc
     const id = spec.id || `${spec.repo}::${spec.files[0].path}`;
     let j = jobs.get(id);
     if (j && (j.status === 'queued' || j.status === 'downloading')) return snap(j);
-    const files = spec.files.map(f => ({ path: f.path, size: f.size || 0, url: spec.urlFor(spec.repo, f.path), dest: destFor(spec.repo, f.path) }));
+    const files = spec.files.map(f => ({ path: f.path, size: f.size || 0, url: spec.urlFor(spec.repo, f.path), localName: f.localName || null, dest: destFor(spec.repo, f.path, f.localName) }));
     j = { id, repo: spec.repo, name: spec.name || files[0].path.split('/').pop(), quant: spec.quant || null, catalogId: spec.catalogId || null, files,
       total: files.reduce((s, f) => s + f.size, 0), status: 'queued', error: null, samples: [] };
     j.received = receivedOnDisk(j);
@@ -117,12 +122,15 @@ function createDownloader({ dir, send = () => {}, getToken = () => null, maxConc
   async function run(j) {
     j.status = 'downloading'; j.error = null; j.ac = new AbortController(); j.samples = []; j.received = receivedOnDisk(j); emit(j, true);
     try {
+      // thư mục mô hình có thể vừa đổi: đặt lại đích cho tệp chưa có gì; kiểm tra dung lượng trống TRƯỚC khi tải (lỗi rõ ràng, không tải dở rồi hỏng)
+      for (const f of j.files) if (fileSize(f.dest) < 0 && fileSize(f.dest + '.part') < 0) f.dest = destFor(j.repo, f.path, f.localName);
+      if (checkSpace && j.total) checkSpace(path.dirname(j.files[0].dest), Math.max(0, j.total - receivedOnDisk(j)));
       for (let k = 0; k < j.files.length; k++) await downloadFile(j, j.files[k], k);
       j.status = 'done'; j.received = j.total; j.speed = 0; j.eta = 0; emit(j, true);
       send('dl:done', snap(j));
     } catch (e) {
       if (j.ac.signal.aborted) { j.status = j.removing ? 'removed' : 'paused'; }
-      else { j.status = 'error'; j.error = e.http ? e.message : (isTransient(e) ? 'Mất kết nối mạng khi tải. Bấm "Tiếp tục" để tải tiếp.' : 'Lỗi tải: ' + e.message); }
+      else { j.status = 'error'; j.error = e.http || e.code === 'ENOSPC_AIVN' ? e.message : e.code === 'ENOSPC' ? 'Ổ đĩa đã đầy khi đang tải. Giải phóng dung lượng hoặc đổi thư mục mô hình (Cài đặt → Chung) rồi bấm "Tiếp tục".' : (isTransient(e) ? 'Mất kết nối mạng khi tải. Bấm "Tiếp tục" để tải tiếp.' : 'Lỗi tải: ' + e.message); }
       j.speed = 0; j.eta = null; emit(j, true);
       if (j.status === 'removed') { for (const f of j.files) fs.rmSync(f.dest + '.part', { force: true }); jobs.delete(j.id); send('dl:removed', { id: j.id }); }
     } finally { pump(); }
@@ -143,7 +151,7 @@ function createDownloader({ dir, send = () => {}, getToken = () => null, maxConc
     destFor,
     partialFor(repo, files) { // byte đã có trên máy (để hiện "Tiếp tục")
       let r = 0, complete = true;
-      for (const f of files) { const d = destFor(repo, f.path); const s = fileSize(d); if (s >= 0 && (!f.size || s === f.size)) r += s; else { complete = false; const p = fileSize(d + '.part'); if (p > 0) r += p; } }
+      for (const f of files) { const d = destFor(repo, f.path, f.localName); const s = fileSize(d); if (s >= 0 && (!f.size || s === f.size)) r += s; else { complete = false; const p = fileSize(d + '.part'); if (p > 0) r += p; } }
       return { received: r, complete };
     },
   };

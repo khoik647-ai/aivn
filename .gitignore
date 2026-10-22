@@ -26,3 +26,6 @@ aivn-admin/
 
 # Bộ nghe: tạo bằng node build/media-bundle.cjs (tệp .wasm lớn)
 src/media/vendor/
+
+# commit đang đóng gói (build/build-info.cjs, beforePack)
+src/build-info.json

@@ -3,6 +3,7 @@
 // Đoạn = chữ nằm giữa các thẻ HTML; ${...} trong chuỗi mẫu thành {0},{1}…; thuộc tính title/placeholder/aria-label/data-tip/alt cũng là đoạn.
 const fs = require('fs'); const path = require('path');
 const ROOT = path.join(__dirname, '..');
+const VD = require('../src/i18n/vi-detect');
 const VI = /[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i;
 const ATTR = /\b(?:title|placeholder|aria-label|data-tip|alt|label|data-empty)\s*=\s*"([^"]*)"/g;
 // chữ Việt không dấu (regex VI không bắt được) mà giao diện có hiện
@@ -17,8 +18,9 @@ function fromHtml(html, out) {
   const text = html.replace(/<!--[\s\S]*?-->/g, '').replace(/<(script|style)[\s\S]*?<\/\1>/g, '').split(/<[^>]*>/);
   for (const t of text) add(t, out);
 }
+let HTML_LOOSE = false;
 function add(t, out) {
-  t = norm(ent(t)); if (!t || (!VI.test(t) && !ASCII_VI.has(t))) return;
+  t = norm(ent(t)); if (!t || (!VI.test(t) && !ASCII_VI.has(t) && !(HTML_LOOSE && VD.looksUnaccentedVi(t)))) return; // B105: chữ Việt không dấu trong HTML (“CUDA 12.4 cho GPU NVIDIA”); tệp dữ liệu/JS chỉ xét chữ có dấu (bí danh cột “nhan vien”… không phải chữ giao diện)
   // đánh số lại {n} cho đoạn
   let i = 0; const k = t.replace(/\{\d+\}/g, () => `{${i++}}`);
   if (k.replace(/\{\d+\}/g, '').trim().length === 0) return;
@@ -58,12 +60,12 @@ function extract(files) {
   const out = new Set();
   for (const f of files) {
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
-    if (f.endsWith('.html')) { fromHtml(src.replace(/<script[\s\S]*?<\/script>/g, ''), out); const m = src.match(/<title>([^<]*)<\/title>/); if (m) add(m[1], out); }
+    if (f.endsWith('.html')) { HTML_LOOSE = true; fromHtml(src.replace(/<script[\s\S]*?<\/script>/g, ''), out); const m = src.match(/<title>([^<]*)<\/title>/); if (m) add(m[1], out); HTML_LOOSE = false; }
     else jsStrings(src, out);
   }
   return [...out].sort();
 }
-const UI_FILES = ['src/renderer/index.html', 'src/renderer/app.js', 'src/renderer/biz.js', 'src/renderer/gate.html', 'src/renderer/gate.js', 'src/renderer/overlay.html', 'src/renderer/overlay.js', 'src/renderer/stop.html', 'src/renderer/stop.js'];
+const UI_FILES = ['src/renderer/index.html', 'src/renderer/app.js', 'src/renderer/error-view.js', 'src/renderer/biz.js', 'src/renderer/gate.html', 'src/renderer/gate.js', 'src/renderer/overlay.html', 'src/renderer/overlay.js', 'src/renderer/stop.html', 'src/renderer/stop.js'];
 // Tiến trình chính: chỉ chuỗi người dùng thấy trong menu, hộp thoại, khay, thông báo (khoá label/title/buttonLabel/message/detail/name/body/checkboxLabel, buttons: […])
 // và chuỗi bọc trong T('…'). Bỏ phần kiểm thử QA (từ “async function qaBench” trở đi).
 const MAIN_FILES = ['src/main.js', 'src/biz-pdf.js'];
@@ -84,16 +86,17 @@ function extractMain(files = MAIN_FILES) {
   return [...out].sort();
 }
 // mô-đun dữ liệu mà giao diện hiển thị nguyên văn (danh mục mô hình, cấu hình mẫu, mức máy, giấy phép, mức vừa máy, hỗ trợ công cụ…)
-const DATA_FILES = ['src/catalog.js', 'src/catalog-claims.js', 'src/presets.js', 'src/perf.js', 'src/license.js', 'src/fit.js', 'src/toolsupport.js', 'src/agent-eligibility.js', 'src/recommend.js', 'src/agent-bench.js', 'src/hf.js', 'src/applock.js', 'src/updater.js', 'src/gate.js', 'src/media.js', 'src/crm/crm.js', 'src/crm/biz.js', 'src/crm/purchase.js', 'src/crm/company.js', 'src/crm/tax.js', 'src/crm/print.js'];
+const DATA_FILES = ['src/catalog.js', 'src/runtimes.js', 'src/catalog-claims.js', 'src/presets.js', 'src/perf.js', 'src/license.js', 'src/fit.js', 'src/toolsupport.js', 'src/agent-eligibility.js', 'src/recommend.js', 'src/agent-bench.js', 'src/hf.js', 'src/applock.js', 'src/updater.js', 'src/gate.js', 'src/media.js', 'src/crm/crm.js', 'src/crm/biz.js', 'src/models-dir.js', 'src/load-notice.js', 'src/downloader.js', 'src/crm/purchase.js', 'src/crm/company.js', 'src/crm/tax.js', 'src/crm/print.js'];
 // 0.16 (QA lượt 5, B33): chữ động của AIVN AGENT mà người dùng THẤY (nhãn công cụ, tóm tắt bước, cảnh báo, thẻ duyệt, câu trả lời do mã tạo) —
 // không lấy forModel (lời dành cho mô hình). Khoá: label/summary/warning/title/desc/okLabel/noLabel/short/message/check/why/text và hằng *_WARN / *_NOTE.
-const AGENT_FILES = ['src/agent/agent.js', 'src/agent/approval.js', 'src/agent/computer-tools.js', 'src/agent/computer.js', 'src/desktop-agent.js', 'src/agent/retry.js', 'src/agent/repeat.js', 'src/agent/desk-policy.js', 'src/agent/autonomy.js', 'src/agent/send-verify.js', 'src/screen-control.js', 'src/agent/compact.js', 'src/agent/scheduler.js', 'src/agent/memory.js', 'src/agent-plan.js', 'src/cloud-brain.js'];
+// B182: và mẫu câu trong say(lang, '…{0}…') (src/agent/say.js — dịch theo ngôn ngữ trả lời trước khi chèn phần thay đổi).
+const AGENT_FILES = ['src/agent/agent.js', 'src/agent/ensure-app.js', 'src/agent/approval.js', 'src/agent/computer-tools.js', 'src/agent/computer.js', 'src/desktop-agent.js', 'src/agent/retry.js', 'src/agent/repeat.js', 'src/agent/desk-policy.js', 'src/agent/autonomy.js', 'src/agent/send-verify.js', 'src/screen-control.js', 'src/agent/compact.js', 'src/agent/scheduler.js', 'src/agent/memory.js', 'src/agent-plan.js', 'src/cloud-brain.js'];
 function extractAgent(files = AGENT_FILES) {
   const out = new Set();
   for (const f of files) {
     if (!fs.existsSync(path.join(ROOT, f))) continue;
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
-    const re = /\b(?:label|summary|warning|title|desc|okLabel|noLabel|short|message|why|reason|hint)\s*[:=]\s*|\b(?:const|let)\s+[A-Z][A-Z0-9_]*(?:WARN|NOTE|LABEL|ANSWER|MSG)\s*=\s*|\bsummary:\s*|\btext\s*=\s*(?=['`"])|\bACT_LABEL\s*=\s*|\bKIND\w*\s*=\s*/g; let m;
+    const re = /\b(?:label|summary|warning|title|desc|okLabel|noLabel|short|message|why|reason|hint)\s*[:=]\s*|\b(?:const|let)\s+[A-Z][A-Z0-9_]*(?:WARN|NOTE|LABEL|ANSWER|MSG)\s*=\s*|\bsummary:\s*|\btext\s*=\s*(?=['`"])|\bACT_LABEL\s*=\s*|\bKIND\w*\s*=\s*|\bsay\(\s*\w+\s*,\s*/g; let m;
     while ((m = re.exec(src))) {
       let i = m.index + m[0].length, d = 0, st = i;
       for (; i < src.length; i++) { const c = src[i];

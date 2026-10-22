@@ -1,6 +1,7 @@
 // Công cụ "máy tính" của AIVN AGENT (cấp 1: ứng dụng, tệp, web, lệnh, hệ thống; cấp 2 thử nghiệm: điều khiển màn hình).
 // Ghép vào vòng lặp công cụ của agent.js. Mọi thao tác có rủi ro đều đi qua thẻ xác nhận trong cửa sổ AIVN.
 const fs = require('fs');
+const BP = require('./browser-profile');
 const os = require('os');
 const path = require('path');
 const C = require('./computer');
@@ -19,9 +20,11 @@ const DEFS = {
   running_apps: { label: 'Ứng dụng đang mở', icon: '🪟', description: 'Liệt kê các ứng dụng đang mở cửa sổ trên máy.', parameters: { type: 'object', properties: {} } },
   close_app: { label: 'Đóng ứng dụng', icon: '✖', description: 'Đóng một ứng dụng đang mở (cần người dùng xác nhận; dữ liệu chưa lưu có thể mất).', parameters: O({ name: S('Tên ứng dụng hoặc tiến trình, vd. "Zalo", "chrome"') }) },
   run_command: { label: 'Chạy lệnh', icon: '⌨️', description: 'Chạy một lệnh terminal (Windows: PowerShell; macOS: zsh/sh). LUÔN hiện thẻ để người dùng duyệt trước khi chạy; lệnh nguy hiểm bị chặn. Tối đa 60 giây.', parameters: O({ command: S('Lệnh cần chạy, một dòng'), cwd: S('(Không bắt buộc) thư mục chạy lệnh; mặc định thư mục cá nhân') }, ['command']) },
-  system_action: { label: 'Thao tác hệ thống', icon: '🖥', description: 'lock: khoá màn hình; sleep: cho máy ngủ; shutdown/restart: tắt/khởi động lại (Windows chờ 30 giây); volume_up/volume_down/mute/volume_set (level 0–100): âm lượng; open_settings: mở Cài đặt; show_desktop: thu nhỏ mọi cửa sổ; empty_trash: dọn Thùng rác.', parameters: O({ action: { type: 'string', enum: Object.keys(C.SYS) }, level: { type: 'integer' } }, ['action']) },
+  system_action: { label: 'Thao tác hệ thống', icon: '🖥', description: 'lock: khoá màn hình; sleep: cho máy ngủ; shutdown/restart: tắt/khởi động lại (Windows chờ 30 giây); volume_up/volume_down/mute/volume_set (level 0–100): âm lượng; open_settings: mở Cài đặt; show_desktop: thu nhỏ mọi cửa sổ; empty_trash: dọn Thùng rác.', parameters: O({ action: { type: 'string', enum: Object.keys(C.SYS).filter(k => k !== 'volume_change') }, level: { type: 'integer' } }, ['action']) },
   screen_look: { label: 'Quan sát màn hình', icon: '👁', description: 'Quan sát cửa sổ đang dùng: trả danh sách phần tử giao diện có id [eN] (loại, tên, giá trị, vị trí x,y thang 0-1000) lấy từ cây giao diện của hệ điều hành và chữ đọc được (OCR). Gọi trước khi thao tác bằng screen_act. window: tên cửa sổ/ứng dụng cần chuyển tới trước khi quan sát; query: lọc phần tử theo chữ.', parameters: O({ window: S('(Không bắt buộc) tên cửa sổ hoặc ứng dụng, vd. "Zalo"'), query: S('(Không bắt buộc) chữ cần tìm, vd. "Trần Quỳnh Anh"'), question: S('(Không bắt buộc) câu hỏi cho mô hình nhìn ảnh, nếu có') }, []) },
   screen_act: { label: 'Thao tác màn hình', icon: '🖱', description: 'Làm một thao tác trên máy. open_chat: LUÔN dùng trước khi nhắn tin trong app chat (Zalo, Messenger, Telegram, Teams…), window = tên app; AIVN tự tìm đúng người nhận, mở và kiểm tra — rồi chỉ type_text nội dung. click/double_click/right_click: element = id [eN] hoặc tên; hoặc x,y (0-1000). type_text: dán cả đoạn một lần (có dấu); kèm element thì tự bấm ô trước; submit: true = bấm Enter luôn — bấm ô + gõ + Enter chỉ cần MỘT lần gọi. hotkey: keys, vd. "ctrl+f". scroll: amount âm = xuống. wait: seconds. focus_window: window. Gộp thao tác chắc chắn liên tiếp bằng then. Kết quả kèm kiểm tra và phần tử MỚI. AIVN tự hỏi trước bước quan trọng (gửi, thanh toán, xoá); không gõ mật khẩu.', parameters: O({ action: { type: 'string', enum: ['open_chat', 'click', 'double_click', 'right_click', 'type_text', 'hotkey', 'scroll', 'wait', 'focus_window'] }, element: S('id phần tử, vd. "e12", hoặc tên, vd. "nút Gửi"'), x: { type: 'integer', description: 'Toạ độ ngang 0-1000 (khi không có element)' }, y: { type: 'integer', description: 'Toạ độ dọc 0-1000' }, text: S('Chữ cần gõ (type_text)'), submit: { type: 'boolean', description: 'type_text: true = gõ xong bấm Enter luôn (gửi tin, tìm kiếm)' }, replace: { type: 'boolean', description: 'type_text: true = xoá nội dung cũ của ô một dòng rồi mới gõ' }, keys: S('Phím (hotkey), vd. "ctrl+s"'), amount: { type: 'integer', description: 'Số nấc cuộn, âm = xuống' }, seconds: { type: 'number', description: 'Số giây chờ (wait)' }, window: S('Tên cửa sổ (focus_window)'), then: { type: 'array', maxItems: 4, description: '(Không bắt buộc) tối đa 4 thao tác làm TIẾP ngay sau thao tác này trong cùng bước (cùng dạng tham số: action, element theo TÊN — không dùng id [eN], text, submit, keys…). Dừng ngay khi một thao tác chưa có tác dụng.', items: { type: 'object' } } }, ['action']) },
+  // ensure_app: bước NỘI BỘ do mã gọi trước khi thao tác (không đưa cho mô hình — không nằm trong LEVEL1/LEVEL2)
+  ensure_app: { label: 'Chuẩn bị ứng dụng', icon: '🧭', internal: true, description: 'Mở/khôi phục/đưa lên trước ứng dụng và chờ sẵn sàng.', parameters: O({ app: S('Tên ứng dụng') }) },
   read_screen_text: { label: 'Đọc chữ trên màn hình', icon: '🔤', description: 'Đọc toàn bộ chữ đang hiển thị trên màn hình bằng OCR (tiếng Việt + tiếng Anh). Dùng khi cần đọc nội dung (tin nhắn, bài viết) chứ không phải để bấm.', parameters: O({}, []) },
 };
 const LEVEL1 = ['list_apps', 'open_app', 'open_path', 'open_url', 'running_apps', 'close_app', 'run_command', 'system_action'];
@@ -88,6 +91,11 @@ function createComputerTools(deps) {
     }
     return { w: null };
   }
+  // ensure_app: nhớ cách mở THÀNH CÔNG theo từng ứng dụng (đường dẫn .exe / AUMID), lần sau thử cách đó trước — lưu ra tệp nếu có deps.launchCacheFile
+  let launchCache = null;
+  const lcLoad = () => { if (launchCache) return launchCache; launchCache = {}; try { if (deps.launchCacheFile) launchCache = JSON.parse(fs.readFileSync(deps.launchCacheFile, 'utf8')) || {}; } catch {} return launchCache; };
+  const lcKey = (q) => C.fold(q).replace(/[^a-z0-9]/g, '');
+  const lcSave = (q, c, w) => { const m = lcLoad(); m[lcKey(q)] = { name: c.name, path: c.path || null, appId: c.appId || null, source: c.source || null, proc: w && w.proc ? String(w.proc) : (m[lcKey(q)] || {}).proc || null, at: Date.now() }; try { if (deps.launchCacheFile) fs.writeFileSync(deps.launchCacheFile, JSON.stringify(m, null, 1)); } catch {} };
   async function launchChain(q, hit) {
     const names = [...new Set([q, hit && hit.name].filter(Boolean))];
     const tried = [];
@@ -99,14 +107,15 @@ function createComputerTools(deps) {
     const cands = [...(hit ? [hit] : []), ...raw].filter(x => x.path || x.appId)
       .sort((x, y) => (y === hit) - (x === hit) || y.s - x.s || SRC_ORDER.indexOf(x.source) - SRC_ORDER.indexOf(y.source));
     const seen = new Set(); const steps = [];
-    for (const c of cands) { const k = (c.appId || c.path || '').toLowerCase(); if (!k || seen.has(k)) continue; seen.add(k); steps.push({ how: SRC_LABEL[c.source] || 'lối tắt', name: c.name, run: () => (deps.openAppOverride ? deps.openAppOverride(c) : openApp(c)) }); }
+    { const k = lcLoad()[lcKey(q)]; if (k && (k.appId || (k.path && (!path.isAbsolute(k.path) || fs.existsSync(k.path))))) cands.unshift({ ...k, source: 'cache', s: 100 }); }
+    for (const c of cands) { const k = (c.appId || c.path || '').toLowerCase(); if (!k || seen.has(k)) continue; seen.add(k); steps.push({ how: c.source === 'cache' ? 'cách mở đã nhớ' : SRC_LABEL[c.source] || 'lối tắt', name: c.name, cand: c, run: () => (deps.openAppOverride ? deps.openAppOverride(c) : openApp(c)) }); }
     steps.push({ how: 'shell:AppsFolder (Get-StartApps)', name: q, run: async () => { const got = await winLaunchByName(q); if (!got) throw new Error('không có trong danh sách ứng dụng của Windows'); } });
     for (const [i, st_] of steps.slice(0, 6).entries()) {
       try { await st_.run(); } catch (e) { tried.push(`${st_.how}: ${String(e.message || e).slice(0, 80)}`); deps.log && deps.log(`[ứng dụng] mở "${q}" qua ${st_.how} lỗi: ${e.message}`); continue; }
       if (!canCheck) return { ok: true, name: st_.name, how: st_.how, window: null, tried };
       const r = await waitWindow([...names, st_.name], before, i === 0 ? 9000 : 6000);
       if (r.unknown) return { ok: true, name: st_.name, how: st_.how, window: null, tried };
-      if (r.w) { try { await (deps.focusWindow ? deps.focusWindow(r.w) : require('./uitree').focus(r.w)); } catch {} return { ok: true, name: st_.name, how: st_.how, window: r.w, tried }; }
+      if (r.w) { try { await (deps.focusWindow ? deps.focusWindow(r.w) : require('./uitree').focus(r.w)); } catch {} if (st_.cand) lcSave(q, st_.cand, r.w); return { ok: true, name: st_.name, how: st_.how, window: r.w, tried }; }
       tried.push(`${st_.how}: đã chạy nhưng chưa thấy cửa sổ`);
       deps.log && deps.log(`[ứng dụng] mở "${q}" qua ${st_.how}: chưa thấy cửa sổ — thử cách khác`);
     }
@@ -119,6 +128,12 @@ function createComputerTools(deps) {
     if (s.agentComputer !== false) out.push(...LEVEL1);
     if (s.agentScreen) out.push(...LEVEL2); // không cần mô hình nhìn ảnh: thao tác theo cây giao diện + OCR
     return out;
+  }
+  // B154: mở địa chỉ trong ĐÚNG trình duyệt người dùng nêu tên (hồ sơ đang dùng) — không bao giờ qua trình duyệt mặc định
+  async function openNamed(b, href, via) {
+    let r = null; try { r = deps.screen && deps.screen.openInBrowser ? await deps.screen.openInBrowser(b, href) : null; } catch (e) { r = { ok: false, tried: [String(e.message || e)] }; }
+    if (r && r.ok) return { forModel: `Đã mở ${href} trong ${b.name}${r.profile && r.profile.dir ? ` (hồ sơ ${r.profile.dir})` : ''} — đúng trình duyệt người dùng yêu cầu${via === 'run_command' ? ' (AIVN không chạy lệnh mở trang vì lệnh đó dùng trình duyệt mặc định)' : ''}. Dùng screen_look với window = "${b.name}" để xem trang.`, summary: `Đã mở ${href} trong ${b.name}`, urls: [{ url: href, kind: 'opened' }] };
+    return { refused: true, forModel: `Chưa mở được ${href} trong ${b.name}${r && r.tried ? ' (' + r.tried.join('; ').slice(0, 120) + ')' : ''}. KHÔNG mở bằng trình duyệt mặc định. Hãy dùng ensure_app "${b.name}", rồi screen_act: phím Ctrl+L, gõ địa chỉ, Enter.`, summary: `Chưa mở được trong ${b.name}` };
   }
   async function confirmOrRefuse(ctx, req, refusedMsg) {
     // “Tự làm không hỏi”: chỉ bỏ hỏi khi đóng đúng ứng dụng người dùng nêu tên; lệnh/tệp chạy được/thao tác hệ thống vẫn hỏi
@@ -263,6 +278,7 @@ function createComputerTools(deps) {
         { const g = await unrelated(ctx, wk || url.hostname.replace(/^www\./, '')); if (g) return g; }
         // B29 (quyết định của Khôi): “Truy cập mạng” TẮT → không mở trang web (mailto: vẫn mở được — đó là ứng dụng thư trên máy)
         if (url.protocol !== 'mailto:' && s.agentWeb !== true) return { refused: true, forModel: `Không mở ${url.hostname}: “Cho phép truy cập mạng” đang TẮT, nên AIVN AGENT không mở trang web. Nếu trang này đã mở trong một cửa sổ trình duyệt, dùng screen_look với window = tên trang. Nếu không, báo người dùng: cần bật “Cho phép truy cập mạng” trong Cài đặt AIVN AGENT, hoặc tự mở trang rồi giao lại việc.`, summary: `không mở ${url.hostname}: truy cập mạng đang tắt` };
+        { const b = url.protocol !== 'mailto:' ? BP.browserOf(ctx.userQuery) : null; if (b) return openNamed(b, url.href, 'open_url'); }
         await deps.openExternal(url.href);
         return { forModel: `Đã mở ${url.href} trong trình duyệt của người dùng. (Bạn không đọc được nội dung trang qua công cụ này.)`, summary: `Đã mở ${url.href}`, urls: [{ url: url.href, kind: 'opened' }] };
       }
@@ -283,6 +299,12 @@ function createComputerTools(deps) {
       }
       case 'run_command': {
         const cmd = String(a.command || '').trim();
+        // B154: việc nêu tên trình duyệt (Chrome…) mà mô hình mở địa chỉ bằng lệnh (“start <url>”, Start-Process…) → KHÔNG chạy lệnh
+        // (sẽ mở trình duyệt mặc định); mở đúng địa chỉ đó trong trình duyệt người dùng nêu tên
+        { const u = BP.urlOpenOf(cmd); const b = u ? BP.browserOf(ctx.userQuery) : null;
+          if (b) { if (s.agentWeb !== true) return { refused: true, forModel: `Không mở ${u}: “Cho phép truy cập mạng” đang TẮT.`, summary: 'Truy cập mạng đang tắt' };
+            deps.log && deps.log(`[aivn agent] B154: không chạy lệnh mở địa chỉ “${cmd.slice(0, 80)}” (trình duyệt mặc định) — mở ${u} trong ${b.name}`);
+            return openNamed(b, u, 'run_command'); } }
         const chk = C.checkCommand(cmd);
         if (!chk.ok) return { refused: true, forModel: `${chk.reason} Không chạy. Đừng tìm cách chạy lệnh tương tự; hãy giải thích cho người dùng.`, summary: chk.reason };
         let cwd = os.homedir(); if (a.cwd) { const c = C.expandPath(a.cwd); if (!fs.existsSync(c) || !fs.statSync(c).isDirectory()) throw new CompError('Thư mục chạy lệnh không tồn tại: ' + c); cwd = c; }
@@ -299,17 +321,21 @@ function createComputerTools(deps) {
         let act = String(a.action || '');
         // B44: mô hình nhỏ hay gọi volume_up kèm level=100 cho “tăng âm lượng lên 100” → hiểu là đặt đúng mức
         if (/^volume_(up|down)$/.test(act) && a.level != null && Number.isFinite(Number(a.level))) act = 'volume_set';
-        if (/^volume_(up|down)$/.test(act) && require('./sys-intent').volumeLevel(ctx.userQuery) != null) { act = 'volume_set'; a = { ...a, level: require('./sys-intent').volumeLevel(ctx.userQuery) }; }
+        if (/^volume_(up|down|set)$/.test(act) && require('./sys-intent').volumeDelta(ctx.userQuery) != null) { act = 'volume_change'; a = { ...a, level: require('./sys-intent').volumeDelta(ctx.userQuery) }; }
+        else if (/^volume_(up|down)$/.test(act) && require('./sys-intent').volumeLevel(ctx.userQuery) != null) { act = 'volume_set'; a = { ...a, level: require('./sys-intent').volumeLevel(ctx.userQuery) }; }
         const d = C.SYS[act]; if (!d) throw new CompError('Thao tác không hỗ trợ: ' + act);
         // chưa được yêu cầu đúng thao tác này → luôn hỏi (kể cả khi đã bật “Luôn cho phép” hay “Tự làm không hỏi”); thao tác nguy hiểm luôn hỏi
         const asked = C.sysAsked(act, ctx.userQuery);
         // B66d: thu nhỏ MỌI cửa sổ chỉ khi người dùng xin — mô hình hay dùng nó như “mẹo” rồi lạc vào màn hình nền (Program Manager)
         if (act === 'show_desktop' && !asked) throw new CompError('Không hiện màn hình chính: người dùng không yêu cầu. Thao tác này thu nhỏ mọi cửa sổ và không giúp làm việc được giao — hãy làm trực tiếp trong cửa sổ ứng dụng (focus_window / open_app).');
+        // B157: thao tác hệ thống KHÔNG liên quan tới việc được giao → từ chối ngay, không hỏi (thẻ hỏi có thể bị “Tự làm không hỏi” tự đồng ý)
+        if (!asked && !require('./sys-intent').sysRelated(act, ctx.userQuery)) { deps.log && deps.log(`[aivn agent] B157: chặn system_action ${act} — không liên quan tới việc được giao`); return { refused: true, forModel: `Không làm “${d.label}”: thao tác này KHÔNG liên quan tới việc người dùng giao. Đừng gọi system_action nữa; hãy làm đúng việc được giao (ví dụ trong cửa sổ ứng dụng/trình duyệt).`, summary: `Bỏ qua “${d.label}” (không liên quan tới việc được giao)` }; }
         if (d.confirm || !asked) { const r = await confirmOrRefuse(ctx, { kind: 'system', icon: d.danger ? '⚠️' : '🖥', title: d.label + '?', short: d.label.toLowerCase(), message: `AIVN AGENT muốn: ${d.label}.${asked ? '' : ' Bạn CHƯA yêu cầu thao tác này trong tin nhắn.'}${act === 'shutdown' || act === 'restart' ? ' Hãy lưu công việc đang làm trước.' : ''}`, okLabel: d.label, noLabel: 'Không', unrequested: !asked }, `Người dùng KHÔNG đồng ý (${d.label})${asked ? '' : ' — người dùng không hề yêu cầu thao tác này'}. Đừng thử lại; quay lại đúng việc người dùng hỏi.`); if (r) return r; }
-        const lbl = await C.systemAction(act, { keyTap: deps.keyTap, openExternal: deps.openExternal, level: a.level != null ? a.level : act === 'volume_set' ? require('./sys-intent').volumeLevel(ctx.userQuery) : null });
+        const lbl = await C.systemAction(act, { keyTap: deps.keyTap, openExternal: deps.openExternal, level: a.level != null ? a.level : act === 'volume_set' ? require('./sys-intent').volumeLevel(ctx.userQuery) : act === 'volume_change' ? require('./sys-intent').volumeDelta(ctx.userQuery) : null });
         return { forModel: `Đã thực hiện: ${lbl}.`, summary: lbl };
       }
       case 'screen_look': return deps.screen.look(a, ctx);
+      case 'ensure_app': if (!deps.screen || !deps.screen.ensureApp) throw new CompError('ensure_app cần bật điều khiển màn hình'); return deps.screen.ensureApp(a, ctx);
       case 'screen_act': { // xin phép + bước quan trọng (gửi/thanh toán/xoá) do desktop-agent xử lý
         let then_ = a.then; if (typeof then_ === 'string') { try { then_ = JSON.parse(then_); } catch { then_ = null; } } // mô hình nhỏ hay gửi mảng dạng chuỗi JSON
         const more = Array.isArray(then_) ? then_.filter(x => x && typeof x === 'object').slice(0, MAX_THEN) : [];
@@ -345,7 +371,14 @@ function createComputerTools(deps) {
     const best = C.findApp(query, all);
     return { platform: process.platform, total: all.length, ms: Date.now() - t, sources: lastDiag ? lastDiag.sources : {}, errors: lastDiag ? lastDiag.errors : [], dirs: lastDiag ? lastDiag.dirs : null, deepMs: lastDiag ? lastDiag.ms : null, query, best: best ? { name: best.name, path: best.path || null, target: best.target || null, appId: best.appId || null } : null, matches };
   }
-  return { likelyTarget: (q) => (deps.screen && deps.screen.likely ? deps.screen.likely(q) : null), relevantWindows, defs: DEFS, names, exec, has: (n) => n in DEFS, CompError, scanReport, pending: async () => (deps.screen && deps.screen.pending ? deps.screen.pending() : null), searchTodo: () => (deps.screen && deps.screen.searchTodo ? deps.screen.searchTodo() : null), searchFound: () => (deps.screen && deps.screen.searchFound ? deps.screen.searchFound() : null) };
+  // ensure_app: mở ứng dụng cài trên máy bằng đúng chuỗi tìm của open_app (lối tắt Start Menu, AppsFolder/AUMID, App Paths, thư mục cài, đã nhớ)
+  async function launch(q) {
+    const all = await apps(); const hit = C.findApp(q, all);
+    if (isWin()) return launchChain(q, hit);
+    if (!hit) return { ok: false, tried: [`không thấy “${q}” trong ${SOURCES}`] };
+    await openApp(hit); return { ok: true, name: hit.name, how: 'mở theo danh sách ứng dụng', window: null, tried: [] };
+  }
+  return { launch, launchProcOf: (q) => (lcLoad()[lcKey(q)] || {}).proc || null, likelyTarget: (q) => (deps.screen && deps.screen.likely ? deps.screen.likely(q) : null), actContext: () => { try { return deps.screen && deps.screen.actKey ? deps.screen.actKey() : ''; } catch { return ''; } }, relevantWindows, defs: DEFS, names, exec, has: (n) => n in DEFS && (n !== 'ensure_app' || !!(deps.screen && deps.screen.ensureApp)), CompError, scanReport, pending: async () => (deps.screen && deps.screen.pending ? deps.screen.pending() : null), searchTodo: () => (deps.screen && deps.screen.searchTodo ? deps.screen.searchTodo() : null), searchFound: () => (deps.screen && deps.screen.searchFound ? deps.screen.searchFound() : null), cleanupDraft: async (o) => (deps.screen && deps.screen.cleanupDraft ? deps.screen.cleanupDraft(o) : null), readBrowserPage: async (o) => (deps.screen && deps.screen.readBrowserPage ? deps.screen.readBrowserPage(o) : null), browserRead: deps.screen && deps.screen.browserRead ? (a, ctx) => deps.screen.browserRead(a, ctx) : null };
 }
 
 module.exports = { createComputerTools, DEFS: DEFS, LEVEL1, LEVEL2, CompError, isSendAction };

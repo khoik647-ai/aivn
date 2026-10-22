@@ -9,6 +9,10 @@
 #   SKIP_BUILD=1  dùng lại tệp đã có trong dist/ (không build lại)
 #   RCODESIGN=... đường dẫn tới rcodesign (apple-codesign) để ký ad-hoc bản macOS
 #   REPO=aivn     tên repo (mặc định aivn)
+#   AIVN_VERSION=0.16.0-beta.3  BẢN BETA (B174): ghi phiên bản này vào gói (package.json trong git không đổi), build Windows + macOS arm64/x64,
+#                 đăng PRERELEASE (không bao giờ Latest), KHÔNG đính latest*.yml (máy bản ổn định không tự cập nhật lên beta),
+#                 TỪ CHỐI nếu thiếu tệp Mac. Cần BETA_NOTES=<ghi chú công khai .md> (đủ vi/en/zh + cách mở lần đầu trên Mac).
+#                 Sau khi đăng: tools/publish-beta-site.sh đưa link (Windows + Mac theo hệ điều hành) lên trang web.
 #
 # Cần: node/npm (đã npm install), wine (để electron-builder ghi icon/metadata vào .exe), zip,
 #      rcodesign, git, gh (đã chạy "gh auth login" với quyền repo + pages).
@@ -28,7 +32,12 @@ step() { echo; echo "==> $*"; }
 [[ "$OWNER" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?$ ]] || die "tên tài khoản GitHub không hợp lệ: $OWNER"
 [[ "$OWNER" != "GITHUB_OWNER_PLACEHOLDER" ]] || die "hãy truyền tên tài khoản GitHub thật"
 
-VERSION="$(node -p "require('./package.json').version")"
+VERSION="${AIVN_VERSION:-$(node -p "require('./package.json').version")}"
+BETA=0; [[ "$VERSION" == *-* ]] && BETA=1   # có hậu tố -… (0.16.0-beta.3) = bản thử nghiệm
+if [[ "$BETA" == 1 ]]; then
+  [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta[0-9.]*$ ]] || die "phiên bản beta không hợp lệ: $VERSION"
+  [[ "$DRY_RUN" == 1 || -f "${BETA_NOTES:-}" ]] || die "bản beta cần BETA_NOTES=<ghi chú công khai .md>"
+fi
 TAG="v$VERSION"
 BASE_URL="https://github.com/$OWNER/$REPO/releases/latest/download"
 OUT="$ROOT/dist/release"
@@ -64,11 +73,11 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
 
   step "Build Windows (NSIS) → dist/AIVN-Setup-$VERSION.exe + latest.yml + blockmap"
   rm -rf dist
-  npx electron-builder --win nsis --x64 --publish never
+  npx electron-builder --win nsis --x64 --publish never ${AIVN_VERSION:+-c.extraMetadata.version=$AIVN_VERSION}
   [[ -f dist/win-unpacked/resources/llama/llama-server.exe ]] || die "bản Windows thiếu llama-server.exe"
 
   step "Build macOS arm64 + x64 (.app)"
-  MAC_TARGET=dir node build/mac-build.cjs
+  MAC_TARGET=dir AIVN_VERSION="$VERSION" node build/mac-build.cjs
 
   step "Ký ad-hoc bản macOS bằng rcodesign và nén .zip (giữ symlink)"
   for pair in "mac-arm64:arm64" "mac:x64"; do
@@ -79,7 +88,8 @@ if [[ "$SKIP_BUILD" != "1" ]]; then
     "$RCODESIGN" sign "$app"
     (cd "dist/$dir" && rm -f "../AIVN-$VERSION-$arch-mac.zip" && zip -qry "../AIVN-$VERSION-$arch-mac.zip" AIVN.app)
   done
-  node build/gen-latest-mac.cjs "$VERSION" "dist/AIVN-$VERSION-arm64-mac.zip" "dist/AIVN-$VERSION-x64-mac.zip"
+  # bản beta: không tạo latest-mac.yml (blockmap vẫn tạo được nhưng không đính kèm)
+  [[ "$BETA" == 1 ]] || node build/gen-latest-mac.cjs "$VERSION" "dist/AIVN-$VERSION-arm64-mac.zip" "dist/AIVN-$VERSION-x64-mac.zip"
 fi
 
 step "Tự kiểm tra bản đóng gói: bộ máy AI (engine-host) khởi động được từ app.asar.unpacked"
@@ -93,6 +103,43 @@ for H in dist/win-unpacked/resources/app.asar.unpacked/src/engine-host.js $(ls -
     c.on("exit", code => { clearTimeout(t); console.error("engine-host thoát mã " + code + "\n" + err.slice(-1500)); process.exit(1); });
   ' "$H" || die "bản đóng gói hỏng: bộ máy AI không khởi động ($H)"
 done
+# ───────────────────────── BẢN BETA (B174): Windows + macOS arm64/x64, prerelease, không latest*.yml ─────────────────────────
+if [[ "$BETA" == 1 ]]; then
+  step "Bản beta $VERSION: kiểm đủ tệp Windows + Mac, không có latest*.yml"
+  rm -rf "$OUT"; mkdir -p "$OUT"
+  BNEED=( "dist/AIVN-Setup-$VERSION.exe" "dist/AIVN-$VERSION-arm64-mac.zip" "dist/AIVN-$VERSION-x64-mac.zip" )
+  for f in "${BNEED[@]}"; do [[ -s "$f" ]] || die "bản beta thiếu $f — mọi bản beta phải có đủ Windows và Mac (arm64 + x64)"; cp "$f" "$OUT/"; done
+  for pair in "mac-arm64:arm64" "mac:x64"; do   # gói Mac đúng phiên bản và có bộ máy llama.cpp
+    app="dist/${pair%%:*}/AIVN.app"; [[ -x "$app/Contents/Resources/llama/llama-server" ]] || die "$app thiếu llama-server"
+    python3 -c 'import plistlib,sys;v=plistlib.load(open(sys.argv[1],"rb"))["CFBundleShortVersionString"];sys.exit(0 if v==sys.argv[2] else "Info.plist "+v)' "$app/Contents/Info.plist" "$VERSION" || die "$app: Info.plist không phải $VERSION"
+  done
+  ls "$OUT" | grep -E '^latest.*\.yml$' && die "bản beta không được có latest*.yml"
+  ( cd "$OUT" && sha256sum * ) | tee "$ROOT/dist/SHA256SUMS-beta.txt"
+  [[ $DRY_RUN != 1 ]] || { echo; echo "DRY_RUN=1: dừng trước GitHub. Tệp beta: $OUT"; exit 0; }
+  grep -q 'AIVN-[0-9.a-z-]*-arm64-mac.zip' "$BETA_NOTES" && grep -q 'Vẫn mở' "$BETA_NOTES" && grep -q 'Open Anyway' "$BETA_NOTES" && grep -q '仍要打开' "$BETA_NOTES" \
+    || die "BETA_NOTES thiếu tệp Mac hoặc cách mở lần đầu trên Mac (Vẫn mở / Open Anyway / 仍要打开) — xem docs/mac-gatekeeper.md"
+  SCAN="${SECRET_SCAN:-/workspace/aivn-evidence/secret-scan.sh}"
+  if [[ -x "$SCAN" ]]; then "$SCAN" "$ROOT" || die "quét bí mật không đạt"; fi
+  LATEST_BEFORE=$(gh api "repos/$OWNER/$REPO/releases/latest" --jq .tag_name)
+  [[ "$LATEST_BEFORE" != "$TAG" ]] || die "$TAG đang là Latest"
+  step "Đăng prerelease $TAG (KHÔNG Latest)"
+  if gh release view "$TAG" -R "$OWNER/$REPO" >/dev/null 2>&1; then
+    [[ $(gh release view "$TAG" -R "$OWNER/$REPO" --json isPrerelease -q .isPrerelease) == true ]] || die "$TAG đã có nhưng không phải prerelease"
+    gh release upload "$TAG" "$OUT"/* -R "$OWNER/$REPO" --clobber
+  else
+    gh release create "$TAG" "$OUT"/* -R "$OWNER/$REPO" --prerelease --latest=false --target "$(git rev-parse HEAD)" \
+      --title "AIVN $VERSION (bản thử nghiệm)" --notes-file "$BETA_NOTES"
+  fi
+  J=$(gh release view "$TAG" -R "$OWNER/$REPO" --json isPrerelease,isDraft,assets)
+  [[ $(jq -r .isPrerelease <<<"$J") == true && $(jq -r .isDraft <<<"$J") == false ]] || die "$TAG không phải prerelease đã đăng"
+  jq -e '[.assets[].name | select(test("^latest.*\\.yml$"))] | length == 0' <<<"$J" >/dev/null || die "$TAG có latest*.yml"
+  for f in "${BNEED[@]}"; do jq -e --arg n "$(basename "$f")" '[.assets[] | select(.name==$n)] | length == 1' <<<"$J" >/dev/null || die "$TAG thiếu $(basename "$f")"; done
+  [[ $(gh api "repos/$OWNER/$REPO/releases/latest" --jq .tag_name) == "$LATEST_BEFORE" ]] || die "Latest đã đổi khỏi $LATEST_BEFORE"
+  step "Đưa link bản beta (Windows + Mac theo hệ điều hành) lên trang web"
+  tools/publish-beta-site.sh "$OWNER" "$TAG"
+  echo; echo "XONG (beta): https://github.com/$OWNER/$REPO/releases/tag/$TAG · Latest vẫn là $LATEST_BEFORE"
+  exit 0
+fi
 step "Chuẩn bị tệp phát hành trong dist/release/"
 rm -rf "$OUT"; mkdir -p "$OUT"
 need=( "dist/AIVN-Setup-$VERSION.exe" "dist/AIVN-Setup-$VERSION.exe.blockmap" "dist/latest.yml"
@@ -122,12 +169,30 @@ echo "Dung lượng trên trang: Windows ~$MB_WIN MB · Mac ARM ~$MB_ARM MB · M
 # trang kết quả tự kiểm chứng (nhãn ✓ trong Khám phá trỏ tới đây; QA B8)
 node build/md-page.cjs docs/verified.md "$SITE/verified.html" || die "không tạo được verified.html"
 grep -q 'id="v0143-nhin-anh"' "$SITE/verified.html" || die "verified.html thiếu mục kiểm chứng"
+# trang kiểm chứng ba thứ tiếng như trang chủ (vi/en/zh, nút đổi ngôn ngữ): đủ bản dịch, đủ khối, mỗi khối đủ mỏ neo của bản tiếng Việt
+for L in en zh; do
+  [[ -f docs/verified.$L.md ]] || die "thiếu docs/verified.$L.md (bản dịch trang kiểm chứng)"
+  grep -q "data-lang-block=\"$L\"" "$SITE/verified.html" || die "verified.html thiếu khối ngôn ngữ $L"
+done
+node -e 'const fs=require("fs"),h=fs.readFileSync(process.argv[1],"utf8"),ids=[...fs.readFileSync("docs/verified.md","utf8").matchAll(/<a id="([\w-]+)"><\/a>/g)].map(m=>m[1]);for(const L of ["en","zh"]){const b=(h.split(`data-lang-block="${L}"`)[1]||"").split("</main>")[0];const miss=ids.filter(i=>!b.includes(`data-aid="${i}"`));if(miss.length){console.error(L+": thiếu mỏ neo "+miss.join(", "));process.exit(1)}}' "$SITE/verified.html" || die "verified.html: bản dịch thiếu mỏ neo kiểm chứng"
 
 [[ -f "$SITE/favicon.svg" ]] || die "thiếu site/favicon.svg (logo)"
 node build/merge-revoked.cjs site/revoked.json "$SITE/revoked.json" || die "thiếu revoked.json hợp lệ (chạy /workspace/aivn-admin/admin.cjs publish)"
 touch "$SITE/.nojekyll"
 grep -q "$BASE_URL/AIVN-Setup.exe" "$SITE/index.html" || die "không thay được link tải Windows trong trang web"
 ls -la "$OUT" "$SITE"
+
+# Bảo vệ trang thật: gh-pages bị ghi đè hoàn toàn khi phát hành — sửa nóng trên gh-pages (vd. B68) chưa chép vào site/ sẽ mất.
+# So 3 chiều với lần triển khai gần nhất (tools/site_drift.py); khối beta do tools/site_beta.py quản lý không tính. Mất nội dung → DỪNG.
+step "Kiểm tra trang dựng từ site/ không làm mất nội dung chỉ có trên gh-pages"
+if git ls-remote --exit-code --heads "https://github.com/$OWNER/$REPO.git" gh-pages >/dev/null 2>&1; then
+  LIVE="$(mktemp -d)"
+  git clone -q --branch gh-pages "https://github.com/$OWNER/$REPO.git" "$LIVE" || die "không clone được gh-pages để kiểm tra"
+  python3 tools/site_drift.py --rendered "$SITE" --live "$LIVE" || { rm -rf "$LIVE"; die "trang thật có nội dung chưa có trong site/ — chép vào site/index.html (site/i18n) trước khi phát hành"; }
+  rm -rf "$LIVE"
+else
+  echo "Chưa có nhánh gh-pages — bỏ qua kiểm tra."
+fi
 
 if [[ "$DRY_RUN" == "1" ]]; then
   echo; echo "DRY_RUN=1: dừng trước các bước GitHub. Tệp phát hành: $OUT · Trang web: $SITE"
@@ -175,7 +240,7 @@ Vẫn có: nhìn ảnh bằng mô hình thị giác; hỏi đáp tài liệu dà
 Tải về:
 - Windows 10/11: AIVN-Setup.exe
 - macOS Apple Silicon: AIVN-mac-arm64.zip · macOS Intel: AIVN-mac-x64.zip
-Bản cài chưa có chữ ký số: Windows SmartScreen chọn More info → Run anyway; macOS nhấp phải → Mở."
+Bản cài chưa có chữ ký số: Windows SmartScreen chọn More info → Run anyway. macOS (bản chưa được Apple công chứng): mở AIVN một lần, bấm Xong, rồi vào Cài đặt hệ thống › Quyền riêng tư & Bảo mật › Vẫn mở (macOS 13–14 cũng có thể nhấp phải → Mở). Chi tiết: docs/mac-gatekeeper.md"
 fi
 if gh release view "$TAG" -R "$OWNER/$REPO" >/dev/null 2>&1; then
   gh release upload "$TAG" "$OUT"/* -R "$OWNER/$REPO" --clobber

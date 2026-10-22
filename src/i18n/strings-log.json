@@ -48,5 +48,10 @@
  "các tệp .desktop",
  "lối tắt Start Menu (của bạn và mọi người dùng), Desktop, %LOCALAPPDATA%\\Programs, sổ đăng ký (Uninstall, App Paths) và ứng dụng Store (Get-StartApps)",
  "/Applications, ~/Applications, /System/Applications, Spotlight và \"open -a\"",
- "{0} ứng dụng đã cài"
+ "{0} ứng dụng đã cài",
+ "Đã tạo khoá API mới",
+ "Đã xoá khoá API",
+ "[lịch] chạy \"{0}\"",
+ "[lịch] chạy \"{0}\" (trễ)",
+ "Đã xuất cuộc trò chuyện: {0}"
 ]

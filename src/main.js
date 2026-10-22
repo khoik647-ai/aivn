@@ -10,8 +10,6 @@ for (const k of ['showOpenDialog', 'showSaveDialog', 'showMessageBox', 'showOpen
 }
 { const ebox = dialog.showErrorBox.bind(dialog); dialog.showErrorBox = (t, c) => ebox(T(t), T(c)); }
 { const bft = Menu.buildFromTemplate.bind(Menu); Menu.buildFromTemplate = (tpl) => bft(TO(tpl)); }
-// Giao diện tiếng Việt: ô ngày/giờ và hộp thoại mặc định của Chromium theo vi-VN
-app.commandLine.appendSwitch('lang', 'vi');
 const path = require('path');
 const fs = require('fs');
 const catalog = require('./catalog');
@@ -45,9 +43,21 @@ const isTest = process.env.AIVN_TEST === '1';
 // Giới hạn bộ nhớ JS của giao diện trên máy yếu (đọc mức đã tính ở lần chạy trước; phải đặt trước khi app sẵn sàng)
 try { const ud0 = process.env.AIVN_USER_DATA || app.getPath('userData'); const pc = JSON.parse(fs.readFileSync(path.join(ud0, 'perf-cache.json'), 'utf8')); if (pc.rendererHeapMB > 0) app.commandLine.appendSwitch('js-flags', `--max-old-space-size=${pc.rendererHeapMB}`); } catch {}
 if (process.env.AIVN_USER_DATA) app.setPath('userData', process.env.AIVN_USER_DATA);
+// QA runner --profile <thư mục>: hồ sơ RIÊNG (đặt TRƯỚC khoá một-phiên-bản → là một bản AIVN riêng, không đụng AIVN đang mở của người dùng
+// cùng trò chuyện/kinh doanh/ghi nhớ/lịch của họ). Chỉ dùng chung thư mục mô hình (chỉ đọc, trừ khi tải thêm) và chép bản sao giấy phép (chỉ đọc).
+const QA_PROFILE = (() => { try { const q = require('./qa-runner').fromArgv(process.argv, process.env); if (!q.enabled || !q.args.profile) return null;
+  const real = app.getPath('userData'); const dir = q.args.profile; if (path.resolve(dir) === path.resolve(real)) return null;
+  fs.mkdirSync(dir, { recursive: true }); app.setPath('userData', dir);
+  try { const lf = path.join(real, 'license.json'); if (fs.existsSync(lf)) { fs.copyFileSync(lf, path.join(dir, 'license.json')); } } catch {}
+  return { dir, real, models: path.join(real, 'models'), agentFrom: q.args.agentFrom || null }; } catch { return null; } })();
+// B81: ô ngày/giờ và hộp thoại mặc định của Chromium theo NGÔN NGỮ GIAO DIỆN đã lưu (trước: luôn ép vi → ngày zh/en vẫn dd/mm/yyyy).
+// Phải đặt trước khi app sẵn sàng nên đọc thẳng settings.json; đổi ngôn ngữ giữa chừng thì ô ngày theo từ lần mở sau
+const CHROMIUM_LANG = { vi: 'vi', en: 'en-US', zh: 'zh-CN' };
+const startLang = (() => { try { const l = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'settings.json'), 'utf8')).uiLang; return CHROMIUM_LANG[l] ? l : 'vi'; } catch { return 'vi'; } })();
+app.commandLine.appendSwitch('lang', CHROMIUM_LANG[startLang]);
 const LOG = require('./logger');
-LOG.init(path.join(app.getPath('userData'), 'logs'));
-{ const os_ = require('os'); LOG.block('app', `Khởi động AIVN ${app.getVersion()}${app.isPackaged ? '' : ' (mã nguồn)'}`, [`Hệ điều hành: ${process.platform} ${process.arch} ${os_.release()}${process.getSystemVersion ? ' (' + process.getSystemVersion() + ')' : ''}`, `CPU: ${(os_.cpus()[0] || {}).model || '?'} · ${os_.cpus().length} luồng`, `RAM: ${(os_.totalmem() / 1024 ** 3).toFixed(1)} GB (trống ${(os_.freemem() / 1024 ** 3).toFixed(1)} GB)`, `Electron ${process.versions.electron} · thư mục dữ liệu: ${app.getPath('userData')}`]); }
+LOG.init(path.join(app.getPath('userData'), 'logs'), app.getVersion()); // B88: nâng cấp → tệp nhật ký mới có BOM
+{ const os_ = require('os'); const bi_ = (() => { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'build-info.json'), 'utf8')); } catch { return null; } })(); LOG.block('app', `Khởi động AIVN ${app.getVersion()}${bi_ && bi_.commit ? ` · commit ${bi_.commit}${bi_.dirty ? '+' : ''}` : ''}${app.isPackaged ? '' : ' (mã nguồn)'}`, [`Hệ điều hành: ${process.platform} ${process.arch} ${os_.release()}${process.getSystemVersion ? ' (' + process.getSystemVersion() + ')' : ''}`, `CPU: ${(os_.cpus()[0] || {}).model || '?'} · ${os_.cpus().length} luồng`, `RAM: ${(os_.totalmem() / 1024 ** 3).toFixed(1)} GB (trống ${(os_.freemem() / 1024 ** 3).toFixed(1)} GB)`, `Electron ${process.versions.electron} · thư mục dữ liệu: ${app.getPath('userData')}`]); }
 process.on('uncaughtException', (e) => { LOG.block('crash', 'Lỗi không bắt được (tiến trình chính): ' + (e && e.message), [e && e.stack]); });
 process.on('unhandledRejection', (e) => { LOG.log('app', 'Promise bị từ chối không xử lý: ' + (e && e.message || e)); });
 
@@ -129,7 +139,9 @@ async function withCtxGrow(fn, { minCtx = MIN_CTX_CHAT, maxCtx = 0, onGrow } = {
     const train = (st.meta && st.meta.trainCtx) || 32768;
     const need = Number(e.need) || 0;
     // B17: máy yếu dùng ngữ cảnh AIVN AGENT 12K để mô hình nằm trọn VRAM — không tự nới quá mức đó (lịch sử được thu gọn thay vào)
-    const want = Math.min(train, maxCtx > 0 ? Math.max(maxCtx, have) : Infinity, Math.max(minCtx, Math.ceil(Math.max(need * 1.3, have * 2) / 4096) * 4096));
+    // B165: không bao giờ tự nới quá mức VRAM của máy chịu được (GPU rời 4 GB: 16384) — beta.2.8 nới tới 32K–64K làm 4B chỉ còn 6/37 lớp trên GPU
+    const vcap = await ctxCapByVram().catch(() => Infinity);
+    const want = Math.min(train, vcap, maxCtx > 0 ? Math.max(maxCtx, have) : Infinity, Math.max(minCtx, Math.ceil(Math.max(need * 1.3, have * 2) / 4096) * 4096));
     if (!settings.data.lastModel || !st.loaded || want <= have) { engineLog('Ngữ cảnh không đủ, không tăng được', e, { have, need, train }); throw ctxSmallError(have, null); }
     engineLog(`Ngữ cảnh ${have} không đủ (cần ~${need || '?'} token): tự nạp lại mô hình với ngữ cảnh ${want}`, e, { have, need, want });
     onGrow && onGrow(want);
@@ -140,6 +152,10 @@ async function withCtxGrow(fn, { minCtx = MIN_CTX_CHAT, maxCtx = 0, onGrow } = {
     catch (e3) { if (isCtxErr(e3)) throw ctxSmallError(now, null); throw e3; }
   }
 }
+// B165: trần ngữ cảnh theo VRAM của GPU rời (bộ đệm K/V f16 của mô hình 4B ≈ 144 KB/token: 16K ≈ 2,3 GB, 64K ≈ 9 GB).
+// Áp cho MỌI nguồn ngữ cảnh không do người dùng vừa chọn trong hộp nạp: giá trị lưu riêng của mô hình, tự tăng ngữ cảnh, tự phục hồi.
+const ctxCapFor = (h, o) => require('./gpu-pick').ctxCapFor(h, o);
+const ctxCapByVram = async () => ctxCapFor(await hw());
 // Bộ máy AI dừng giữa lượt (sập/thiếu bộ nhớ): nạp lại mô hình với ngữ cảnh nhỏ hơn rồi thử lại MỘT lần
 async function withEngineRecovery(fn, { onRetry, minCtx = MIN_CTX_CHAT } = {}) {
   try { return await fn(); }
@@ -164,31 +180,45 @@ function engineEnv() {
   const lim = Number(d.vramLimitGB) > 0 ? String(Math.round(Number(d.vramLimitGB) * 1024 ** 3)) : '';
   return { AIVN_GPU: d.gpu === false ? 'off' : '', GGML_VK_VISIBLE_DEVICES: dev, AIVN_VRAM_LIMIT: lim };
 }
-const hw = async () => (hwCache ||= await engine.hardwareInfo().catch(() => ({ ram: require('os').totalmem() })).then(h => (process.env.AIVN_QA_FAKEHW && !app.isPackaged ? { ...h, ...JSON.parse(process.env.AIVN_QA_FAKEHW) } : h)));
+const hw = async () => (hwCache ||= await engine.hardwareInfo().catch(() => ({ ram: require('os').totalmem() })).then(h => (process.env.AIVN_QA_FAKEHW && !app.isPackaged ? { ...h, ...JSON.parse(process.env.AIVN_QA_FAKEHW) } : h)).then(withGpuName));
+// B168: tên GPU dùng thật (GPU rời trước GPU tích hợp) — cũng áp cho phần cứng giả của QA
+function withGpuName(h) { if (!h || !Array.isArray(h.devices) || !h.devices.length) return h; const GP = require('./gpu-pick'); const raw = h.devicesRaw || h.devices; const pk = GP.pick(raw, Number.isInteger(settings.data.gpuDevice) ? settings.data.gpuDevice : null); return { ...h, devicesRaw: raw, devices: GP.order(raw), gpuName: (pk && pk.name) || h.gpuName || null, gpuMixed: GP.mixed(raw) }; }
+// B168: thiết bị llama-server sẽ dùng (cùng cách chọn với vision-server: GPU rời lớn nhất hoặc thiết bị người dùng chọn) — VRAM trống của ĐÚNG thiết bị đó
+async function serverDevice() {
+  try { const exe = await serverExeFor() || require('./vision-server').findServer(); if (!exe) return null;
+    const d = await require('./vision-server').listDevices(exe, { timeoutMs: 10000 }); const gpus = d && d.ok ? d.all.filter(x => !/^cpu/i.test(x.id)) : [];
+    const pk = require('./gpu-pick').pick(gpus); return pk && pk.totalMiB ? { ...pk, all: gpus } : null; } catch { return null; }
+}
 const generations = new Map(); // reqId -> AbortController
 const stopReasons = new Map(); // reqId -> lý do dừng (ghi nhật ký + hiện cho người dùng)
 function abortGen(reqId, ac, reason) { if (!ac || ac.signal.aborted) return; stopReasons.set(reqId, reason); LOG.log('app', `Dừng lượt ${reqId}: ${reason}`); try { ac.abort(); } catch {} }
 const serverLog = [];
 
+let modelsDirProblem = null;
 function initStores() {
   const ud = app.getPath('userData');
-  paths = { userData: ud, models: path.join(ud, 'models') };
+  paths = { userData: ud, models: QA_PROFILE ? QA_PROFILE.models : path.join(ud, 'models') }; // hồ sơ QA: dùng chung mô hình của hồ sơ thật
   fs.mkdirSync(paths.models, { recursive: true });
   settings = new JsonStore(path.join(ud, 'settings.json'), {
     systemPrompt: 'Bạn là AIVN, một trợ lý AI thân thiện. Hãy trả lời bằng tiếng Việt, rõ ràng và chính xác.',
     temperature: 0.7, maxTokens: 1024, contextSize: 0, perfMode: 'auto', apiPort: 1234, apiAutoStart: false, apiLan: false, apiCors: false, apiKey: '', apiTtlMin: 0, imported: [], lastModel: null, hfToken: '', uiLang: 'vi', theme: 'light', themeFx: 'full', rag: true, vision: true,
     agentFolders: [], agentWeb: false, agentPython: false, agentMemory: true, agentTemperature: 0.2, agentComputer: true, agentScreen: false, agentScreenMode: 'each', agentAutonomy: false, agentScreenBudget: 40, agentAutoReadOnly: false, keepInTray: false, openAtLogin: false,
   });
+  // thư mục mô hình do người dùng chọn (Cài đặt → Chung / Mô hình của tôi → Đổi thư mục); ổ đã rút / không ghi được → về mặc định, báo trong nhật ký
+  if (!QA_PROFILE && settings.data.modelsDir) { const v = require('./models-dir').validateTarget(settings.data.modelsDir); if (v.ok) paths.models = v.dir; else { modelsDirProblem = `${settings.data.modelsDir}: ${v.error}`; LOG.log('app', 'Thư mục mô hình đã chọn không dùng được, tạm dùng thư mục mặc định: ' + modelsDirProblem); } }
+  // B84: --agent-settings-from main — chép cài đặt AIVN AGENT (agent*) từ hồ sơ thật sang hồ sơ QA; hồ sơ thật chỉ ĐỌC
+  if (QA_PROFILE && QA_PROFILE.agentFrom === 'main') { try { const real = JSON.parse(fs.readFileSync(path.join(QA_PROFILE.real, 'settings.json'), 'utf8')); const ks = Object.keys(real).filter(k => /^agent/.test(k));
+    for (const k of ks) settings.data[k] = real[k]; settings.save(); LOG.log('qa', `Hồ sơ QA: đã chép ${ks.length} cài đặt AIVN AGENT từ hồ sơ thật (chỉ đọc): ${ks.join(', ')}`); } catch (e) { LOG.log('qa', 'Hồ sơ QA: không chép được cài đặt AIVN AGENT từ hồ sơ thật: ' + e.message); } }
   if (!settings.data.perfMigrated) { if (settings.data.contextSize === 4096) settings.data.contextSize = 0; settings.data.perfMigrated = 1; settings.save(); } // 4096 là mặc định cũ → chuyển sang Tự động theo mức máy
   Object.assign(process.env, Object.fromEntries(Object.entries(engineEnv()).filter(([k, v]) => v && !process.env[k]))); // bộ máy (tiến trình riêng) kế thừa các biến này khi khởi động
   convos = new JsonStore(path.join(ud, 'conversations.json'), { list: [] });
   rag = createRagStore(path.join(ud, 'rag'));
   memory = createMemoryStore(path.join(ud, 'memory.json'));
   scheduler = createScheduler({ file: path.join(ud, 'schedules.json'), onFire: onScheduleFire, log: (m) => { console.log(m); log(m); } });
-  computerTools = createComputerTools({ sandbox: () => benchSandbox, getSettings: () => settings.data, listWindows: () => require('./agent/uitree').windows(), openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => LOG.block('apps', 'Quét ứng dụng đã cài (AIVN AGENT)', [`nguồn: ${JSON.stringify(d.sources)}`, `lỗi: ${d.errors.length ? d.errors.join('; ') : 'không'}`, `thư mục Desktop: ${d.dirs ? d.dirs.desktop.join(' | ') : '—'}`, `thư mục Start Menu: ${d.dirs ? d.dirs.start.join(' | ') : '—'}`, `thời gian tìm sâu: ${d.ms ?? '?'} ms`]),
-    keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: (a, ctx) => deskWrap(getDesk().look, a, ctx), act: (a, ctx) => deskWrap(getDesk().act, a, ctx), readText: (a, ctx) => deskWrap(getDesk().readText, a, ctx), pending: () => (desk && desk.active() ? desk.pending() : null), searchTodo: () => (desk && desk.active() ? desk.searchTodo() : null), searchFound: () => (desk && desk.active() ? desk.searchFound() : null), likely: (q) => (desk && desk.active() ? desk.likely(q) : null) } });
-  mcp = require('./mcp').createMcpManager({ dir: app.getPath('userData'), log: (sc, m) => LOG.log(sc, m), onChange: () => send('mcp:changed', mcp.status()) });
-  agent = createAgent({ engine: agentEngine, mcp, getSettings: () => settings.data, gateOk: () => lastGateOk, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: extractAny, embedForMemory, log, computer: computerTools,
+  computerTools = createComputerTools({ launchCacheFile: path.join(app.getPath('userData'), 'app-launch-cache.json'), sandbox: () => benchSandbox, getSettings: () => settings.data, listWindows: () => require('./agent/uitree').windows(), openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => LOG.block('apps', 'Quét ứng dụng đã cài (AIVN AGENT)', [`nguồn: ${JSON.stringify(d.sources)}`, `lỗi: ${d.errors.length ? d.errors.join('; ') : 'không'}`, `thư mục Desktop: ${d.dirs ? d.dirs.desktop.join(' | ') : '—'}`, `thư mục Start Menu: ${d.dirs ? d.dirs.start.join(' | ') : '—'}`, `thời gian tìm sâu: ${d.ms ?? '?'} ms`]),
+    keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: (a, ctx) => deskWrap(getDesk().look, a, ctx), act: (a, ctx) => deskWrap(getDesk().act, a, ctx), ensureApp: (a, ctx) => deskWrap(getDesk().ensureApp, a, ctx), readText: (a, ctx) => deskWrap(getDesk().readText, a, ctx), pending: () => (desk && desk.active() ? desk.pending() : null), searchTodo: () => (desk && desk.active() ? desk.searchTodo() : null), searchFound: () => (desk && desk.active() ? desk.searchFound() : null), likely: (q) => (desk && desk.active() ? desk.likely(q) : null), cleanupDraft: (o) => (desk && desk.active() ? desk.cleanupDraft(o) : null), readBrowserPage: (o) => (desk && desk.active() ? desk.readBrowserPage(o) : null), openInBrowser: (b, u) => getDesk().openInBrowser(b, u), browserRead: (a, ctx) => deskWrap(getDesk().browserRead, a, ctx) } });
+  mcp = require('./mcp').createMcpManager({ dir: app.getPath('userData'), log: (sc, m) => LOG.log(sc, m), onChange: () => send('mcp:changed', mcp.status()), getExcelFolders: () => { try { const meta = JSON.parse(fs.readFileSync(path.join(ud, 'plugins-meta.json'), 'utf8')); const list = meta && meta.connectors && meta.connectors.excel && meta.connectors.excel.folders; return Array.isArray(list) ? list.filter(x => typeof x === 'string') : []; } catch { return []; } } });
+  agent = createAgent({ engine: agentEngine, mcp, recipes: require('./agent/recipes').createRecipeStore(path.join(app.getPath('userData'), 'agent-recipes.json')), getSettings: () => settings.data, gateOk: () => lastGateOk, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: extractAny, embedForMemory, log, computer: computerTools,
     logTool: (x) => LOG.log('tool', `${x.auto ? '(tự động) ' : ''}${x.name} → ${x.status} sau ${x.ms ?? '?'} ms`, { args: Object.fromEntries(Object.entries(x.args || {}).map(([k, v]) => [k, typeof v === 'string' && v.length > 200 ? v.slice(0, 200) + '…' : v])), ketQua: String(x.summary || '').slice(0, 300) }),
     trash: async (p) => { try { await shell.trashItem(p); } catch (e) { throw new Error('Không chuyển được tệp vào Thùng rác (' + e.message + '). Tệp vẫn còn nguyên.'); } } });
   lic = createLicenseState({ file: path.join(ud, 'license.json'), isPackaged: app.isPackaged, log: (m) => { log(m); if (isTest) console.log(m); }, fetchJson });
@@ -196,7 +226,7 @@ function initStores() {
   admin = createAdmin({ dir: ud, fetchJson, fetchRaw: (u, o) => net.fetch(u, { cache: 'no-store', ...o }), log,
     publicX: !app.isPackaged && process.env.AIVN_TEST_PUBKEY ? process.env.AIVN_TEST_PUBKEY : LIC.PUBLIC_KEY_X });
   media = MEDIA.createMedia({ app, protocol, BrowserWindow, ipcMain, modelsDir: () => paths.models, isTest, log: (k, m, d) => LOG.log(k, m, d), threads: () => Math.max(2, Math.min(8, require('os').cpus().length - 2)) });
-  downloader = createDownloader({ dir: paths.models, send: (ch, d) => { send(ch, d); if (ch === 'dl:done' && d && d.catalogId && d.catalogId === settings.data.pendingEyes) setTimeout(() => { const c = catalog.find(x => x.id === d.catalogId); const m = c && listModels().find(x => x.file.toLowerCase() === c.file.toLowerCase() && x.mmproj); if (m) { settings.data.agentGrounder = m.id; settings.data.pendingEyes = null; settings.save(); LOG.log('desk', 'Đã tải xong mắt nhìn ' + m.file + ' — dùng làm mô hình định vị'); send('settings:changed', { agentGrounder: m.id }); send('app:notice', { text: `Đã có mắt nhìn: ${c.name}. AIVN AGENT sẽ tự dùng mô hình này để nhìn màn hình.`, kind: 'ok' }); } }, 300); }, getToken: () => settings.data.hfToken || null, maxConcurrent: 2, log: (m) => isTest && console.log(m) });
+  downloader = createDownloader({ dir: () => paths.models, checkSpace: (d, need) => require('./models-dir').checkSpace(d, need), send: (ch, d) => { send(ch, d); if (ch === 'dl:done' && d && d.catalogId && d.catalogId === settings.data.pendingEyes) setTimeout(() => { const c = catalog.find(x => x.id === d.catalogId); const m = c && listModels().find(x => x.catalog && x.catalog.id === c.id && x.mmproj); if (m) { settings.data.agentGrounder = m.id; settings.data.pendingEyes = null; settings.save(); LOG.log('desk', 'Đã tải xong mắt nhìn ' + m.file + ' — dùng làm mô hình định vị'); send('settings:changed', { agentGrounder: m.id }); send('app:notice', { text: `Đã có mắt nhìn: ${c.name}. AIVN AGENT sẽ tự dùng mô hình này để nhìn màn hình.`, kind: 'ok' }); } }, 300); }, getToken: () => settings.data.hfToken || null, maxConcurrent: 2, log: (m) => isTest && console.log(m) });
 }
 // ---------- Cổng vào: kích hoạt (bắt buộc) + Khoá ứng dụng (tuỳ chọn) ----------
 let computerTools = null, admin = null;
@@ -257,7 +287,9 @@ function startGateTimers() {
   powerMonitor.on('resume', () => licenseCheck().catch(() => {}));
 }
 function registerGateIpc(handle) {
-  handle('gate:state', () => ({ mode: gateMode(), license: lic.publicInfo(), lock: appLock.info() }));
+  handle('gate:state', () => ({ mode: gateMode(), license: lic.publicInfo(), lock: appLock.info(), lang: uiLang() })); // B77: màn kích hoạt theo ngôn ngữ trong cài đặt
+  // B77: chọn ngôn ngữ ngay trên màn kích hoạt/khoá — chỉ đổi uiLang (không mở rộng quyền ghi cài đặt cho màn cổng)
+  handle('gate:lang', (_e, l) => { if (I18N_CORE.LANGS.includes(l) && settings.data.uiLang !== l) { settings.data.uiLang = l; settings.save(); try { buildMenus(); paintTray(); } catch {} } return uiLang(); });
   handle('gate:activate', async (_e, code) => { lic.activate(code); licenseCheck().catch(() => {}); if (activated()) startServices(); loadUi(); return lic.publicInfo(); });
   handle('gate:retry', async () => { const r = await licenseCheck(); return { ok: !!(r && r.ok), error: r && r.error }; });
   handle('gate:unlock', async (_e, pw) => { if (!isLocked()) return { ok: true }; const r = await appLock.unlock(String(pw || '')); if (r.ok) { unlocked = true; loadUi(); } return r; });
@@ -288,10 +320,11 @@ const log = (msg) => { LOG.log('app', msg); const e = { t: Date.now(), msg }; se
 const SPLIT_RE = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i;
 // Mô hình nhúng (dùng cho tìm kiếm tài liệu), không phải mô hình trò chuyện
 const EMBED_RE = /(^|[-_.])(embed|embedding|bge-m3|bge-small|bge-base|bge-large|multilingual-e5|e5-(small|base|large)|nomic-embed|gte-)/i;
-function modelIdFromFile(f) { const b = path.basename(f); const m = b.match(SPLIT_RE); return (m ? m[1] : b.replace(/\.gguf$/i, '')).toLowerCase(); }
+const NAMES = require('./model-names'); // mục 5: tên tệp chung (q4_k_m.gguf) → id/khớp danh mục kèm tên repo
+function modelIdFromFile(f) { return NAMES.idFor(f, SPLIT_RE); }
 
 // Quét thư mục mô hình (models/<tác giả>/<repo>/<tệp>.gguf và tệp ở gốc). Mô hình chia phần chỉ hiện một dòng.
-function scanDir(dir, depth, out) {
+function scanDir(dir, depth, out, root = paths.models) {
   let ents = [];
   try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
   const files = ents.filter(e => e.isFile() && /\.gguf$/i.test(e.name) && !/mmproj/i.test(e.name) && !EMBED_RE.test(e.name));
@@ -310,16 +343,18 @@ function scanDir(dir, depth, out) {
           try { size += fs.statSync(pf).size; } catch { missing++; }
         }
       }
-      const rel = path.relative(paths.models, dir);
-      out.push({ id: modelIdFromFile(e.name), file: e.name, path: full, size, mtime: fs.statSync(full).mtimeMs, source: 'downloaded', parts, incomplete: missing > 0, mmproj, vision: !!mmproj, repo: rel && rel.split(path.sep).length === 2 ? rel.split(path.sep).join('/') : null });
+      const rel = path.relative(root, dir);
+      out.push({ id: modelIdFromFile(full), file: e.name, path: full, size, mtime: fs.statSync(full).mtimeMs, source: 'downloaded', parts, incomplete: missing > 0, mmproj, vision: !!mmproj, repo: rel && rel.split(path.sep).length === 2 ? rel.split(path.sep).join('/') : null });
     } catch {}
   }
-  if (depth > 0) for (const e of ents) if (e.isDirectory()) scanDir(path.join(dir, e.name), depth - 1, out);
+  if (depth > 0) for (const e of ents) if (e.isDirectory()) scanDir(path.join(dir, e.name), depth - 1, out, root);
 }
 
 function listModels() {
   const out = [];
   scanDir(paths.models, 3, out);
+  // “chỉ trỏ sang thư mục mới”: thư mục mô hình cũ vẫn được quét (mô hình cũ vẫn hiện, vẫn nạp được)
+  for (const d of settings.data.modelDirsExtra || []) if (d && path.resolve(d) !== path.resolve(paths.models) && fs.existsSync(d)) scanDir(d, 3, out, d);
   for (const full of settings.data.imported) {
     try { const s = fs.statSync(full); let mm = null; try { const n = hf.pickMmprojFile(fs.readdirSync(path.dirname(full))); if (n) mm = path.join(path.dirname(full), n); } catch {}
       out.push({ id: modelIdFromFile(full), file: path.basename(full), path: full, size: s.size, mtime: s.mtimeMs, source: 'imported', parts: 1, mmproj: mm, vision: !!mm }); } catch {}
@@ -327,11 +362,31 @@ function listModels() {
   const st = engine.status();
   const seen = new Set();
   return out.filter(m => !m.incomplete && !seen.has(m.id) && seen.add(m.id))
-    .map(m => ({ ...m, loaded: st.loaded && st.path === m.path, catalog: catalog.find(c => c.file.toLowerCase() === m.file.toLowerCase()) || null }));
+    .map(m => ({ ...m, loaded: st.loaded && st.path === m.path, catalog: NAMES.catalogFor(m, catalog) }));
 }
-const isInstalled = (file) => listModels().some(m => m.file.toLowerCase() === path.basename(file).toLowerCase());
+const isInstalled = (x) => (x && typeof x === 'object' ? listModels().some(m => m.catalog && m.catalog.id === x.id) : listModels().some(m => m.file.toLowerCase() === path.basename(x).toLowerCase()));
 
 // Nhật ký lỗi bộ máy (để chẩn đoán): userData/logs/engine.log, tối đa ~1 MB
+// Runtime llama-server (runtimes.js): CUDA tải riêng cho máy NVIDIA; mặc định là bản Vulkan đi kèm. CUDA lỗi → tự quay về Vulkan.
+let RT = null;
+function runtimes() { if (!RT) RT = require('./runtimes').createRuntimes({ dir: () => path.join(app.getPath('userData'), 'runtimes'), log: (m) => LOG.log('runtime', m) }); return RT; }
+// phiên bản node-llama-cpp: gói chặn require('node-llama-cpp/package.json') bằng "exports" → đi ngược từ tệp chính tới package.json của gói
+let nodeLlamaVer;
+function nodeLlamaVersion() {
+  if (nodeLlamaVer !== undefined) return nodeLlamaVer; nodeLlamaVer = null;
+  try { let d = path.dirname(require.resolve('node-llama-cpp'));
+    for (let i = 0; i < 6; i++) { const f = path.join(d, 'package.json'); if (fs.existsSync(f)) { const j = JSON.parse(fs.readFileSync(f, 'utf8')); if (j.name === 'node-llama-cpp') { nodeLlamaVer = j.version || null; break; } } d = path.dirname(d); } } catch {}
+  return nodeLlamaVer;
+}
+async function serverExeFor() {
+  try { const p = await runtimes().pick(settings.data.runtime || 'auto'); if (p.exe || p.why) LOG.log('runtime', `llama-server: ${p.runtime === 'cuda' ? 'CUDA' : 'bản đi kèm'}${p.why ? ' (' + p.why + ')' : ''}`); return p.exe; } catch { return null; }
+}
+function noteRuntime(st, what) {
+  if (!st || !st.runtimeFallback) return;
+  runtimes().markFailed(st.runtimeFallback);
+  const text = `Runtime CUDA không chạy được nên AIVN đã dùng bản Vulkan đi kèm cho ${what}. Lý do: ${st.runtimeFallback}`;
+  LOG.log('runtime', text); send('app:notice', { text, kind: 'warn' });
+}
 function engineLog(title, e, extra = {}) {
   const lines = Object.entries(extra).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(LOG.redact(v))}`);
   if (e) { lines.push('Lỗi: ' + (e.message || e)); if (e.code) lines.push('Mã: ' + e.code); if (Array.isArray(e.attempts)) for (const a of e.attempts) lines.push(`- Thử ${a.mode}: ${a.message}${a.stack ? '\n' + a.stack : ''}`); if (e.hostStack) lines.push('Stack (engine): ' + e.hostStack); if (e.stack) lines.push('Stack: ' + e.stack); }
@@ -375,7 +430,7 @@ function startIdleUnload() {
 const cleanChatParams = (p) => require('./chatfit').cleanChatParams(p);
 function fitOverflow(messages, policy, maxTokens) { return require('./chatfit').fitOverflow(messages, policy, maxTokens, engine.status().contextSize || 0, (t) => engine.countTokens(t)); }
 // 0.16: tham số nạp theo từng mô hình (hộp nạp kiểu LM Studio). Lưu ở settings.modelLoad[id].
-const LOAD_KEYS = ['contextSize', 'gpuLayers', 'flashAttention', 'kvCache', 'threads', 'batchSize', 'mmap', 'mlock'];
+const LOAD_KEYS = ['contextSize', 'gpuLayers', 'flashAttention', 'kvCache', 'threads', 'batchSize', 'mmap', 'mlock', 'cpuMoe'];
 function cleanLoad(o) {
   const r = {}; if (!o || typeof o !== 'object') return r;
   const int = (v, lo, hi) => { const n = Math.round(Number(v)); return Number.isFinite(n) && n >= lo && n <= hi ? n : undefined; };
@@ -386,6 +441,7 @@ function cleanLoad(o) {
   if (o.threads != null && o.threads !== 0) r.threads = int(o.threads, 1, 256);
   if (o.batchSize != null) r.batchSize = int(o.batchSize, 32, 8192);
   if (typeof o.mmap === 'boolean') r.mmap = o.mmap; if (typeof o.mlock === 'boolean') r.mlock = o.mlock;
+  if (o.cpuMoe != null && o.cpuMoe !== '') r.cpuMoe = int(o.cpuMoe, 0, 999); // mục 6: --n-cpu-moe N (mô hình MoE), trống = llama-server tự vừa VRAM (--fit)
   for (const k of Object.keys(r)) if (r[k] === undefined) delete r[k];
   return r;
 }
@@ -399,6 +455,12 @@ async function measureVram(id, st) {
   const u = settings.data.modelUsage || (settings.data.modelUsage = {}); const e = u[id] || (u[id] = { uses: 0 });
   e.vram = { bytes: Math.round(used), ctx: st.contextSize || null, at: Date.now() }; settings.save();
   LOG.log('load', `Đo VRAM thật: ${id} dùng ${(used / 1024 ** 3).toFixed(2)} GB ở ngữ cảnh ${st.contextSize}`);
+}
+// B170: số lớp GPU THẬT của lần nạp gần nhất (theo ngữ cảnh + thiết bị) — hộp nạp hiện số này thay cho ước lượng khi cùng điều kiện
+function noteLayers(id, st, kvUsed) {
+  if (!st || !Number.isInteger(st.gpuLayers) || !st.totalLayers) return;
+  const u = settings.data.modelUsage || (settings.data.modelUsage = {}); const e = u[id] || (u[id] = { uses: 0 });
+  e.layers = { ctx: st.contextSize || null, gpu: st.gpuLayers, total: st.totalLayers, device: st.device || null, kv: kvUsed || (st.loadParams && st.loadParams.kvCache) || null, at: Date.now() }; settings.save();
 }
 async function loadById(id, { force = false, ctx = null, reason = null, minCtx = null, load = null } = {}) {
   const m = listModels().find(x => x.id === id);
@@ -431,13 +493,22 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       const h = await hw(); const vt = h.gpu && h.gpu !== 'metal' && h.vram && !h.vram.integratedOnly ? h.vram.total : 0;
       if (vt > 0 && vt < 6 * 1024 ** 3) { ctxNote = `Đã giới hạn độ dài ngữ cảnh ở 8192 (bạn chọn ${ctxWant}) vì GPU chỉ có ${(vt / 1024 ** 3).toFixed(1)} GB VRAM.`; ctxWant = 8192; }
     }
-    const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj } : {}), ...(ml.mmap === false ? { useMmap: false } : {}), ...(ml.mlock ? { useMlock: true } : {}), ...(load ? { reload: true } : {}) };
-    LOG.log('load', `Bắt đầu nạp ${m.file}`, { size: m.size, ctx: opts.contextSize, gpuLayers: opts.gpuLayers ?? 'tự động', vision: !!opts.mmproj });
+    { // B165: ngữ cảnh lưu riêng / tự tăng vượt trần VRAM → hạ về trần (chỉ giữ nguyên khi người dùng VỪA chọn trong hộp nạp)
+      const picked = load && cleanLoad(load).contextSize; const cap = ctxCapFor(await hw(), { vision: !!(m.mmproj && settings.data.vision !== false) });
+      if (!picked && ctxWant > cap) { ctxNote = [ctxNote, `Đã giới hạn độ dài ngữ cảnh ở ${cap} (giá trị cũ ${ctxWant}) để mô hình nằm trên GPU nhiều nhất có thể. Muốn dùng ngữ cảnh lớn hơn, hãy chọn trong hộp nạp (Ctrl+L).`].filter(Boolean).join(' '); ctxWant = cap; }
+    }
+    const lowVramVision = await (async () => { if (!(m.mmproj && settings.data.vision !== false)) return false; const h = await hw(); return !!(h && h.gpu && h.gpu !== 'metal' && h.vram && !h.vram.integratedOnly && h.vram.total > 0 && h.vram.total < 6 * 1024 ** 3); })().catch(() => false); // B163
+    const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj, serverArgs: require('./model-launch').launchArgs({ id: m.id, family: SC.groundingFamily(NAMES.isGeneric(m.file) ? m.id : (m.file || m.id)), catalog: m.catalog, load: ml }) } : {}), ...(ml.mmap === false ? { useMmap: false } : {}), ...(ml.mlock ? { useMlock: true } : {}), ...(load ? { reload: true } : {}),
+      // B170: llama-server (mô hình nhìn ảnh) nay cũng theo Bộ đệm K/V / Flash attention của hộp nạp (trước đây bị bỏ qua)
+      ...(ml.kvCache ? { kvCache: ml.kvCache } : lowVramVision ? { kvCache: 'q8_0' } : {}), ...(ml.flashAttention != null ? { flashAttention: ml.flashAttention } : {}) };
+    if (lowVramVision && !ml.kvCache) LOG.log('load', 'B163: GPU rời dưới 6 GB → bộ đệm K/V q8_0 cho mô hình nhìn ảnh (đổi trong hộp nạp Ctrl+L)');
+    if (opts.mmproj) opts.serverExe = await serverExeFor();
+    LOG.log('load', `Bắt đầu nạp ${m.file}`, { size: m.size, ctx: opts.contextSize, gpuLayers: opts.gpuLayers ?? 'tự động', vision: !!opts.mmproj, ...(opts.serverArgs && opts.serverArgs.length ? { args: opts.serverArgs.join(' ') } : {}) });
     const tLoad = Date.now();
     // B38: số đo VRAM thật — VRAM đã dùng lúc chưa nạp mô hình (màn hình, ứng dụng khác) làm mốc
     try { if (!engine.status().loaded) { const h0 = await engine.hardwareInfo(); if (h0 && h0.vram && h0.vram.total > 0 && !h0.vram.integratedOnly) idleVramUsed = h0.vram.total - h0.vram.free; } } catch {}
     try {
-      try { st = await engine.loadModel(m.id, m.path, opts); }
+      try { st = await engine.loadModel(m.id, m.path, opts); noteRuntime(st, 'mô hình ' + m.file); }
       catch (e) {
         // GPU (Vulkan/CUDA/Metal) không nạp được: ghi nhật ký, khởi động lại bộ máy ở chế độ chỉ CPU rồi thử lại một lần
         if (e.code === 'ENGINE_EXIT' && !e.startup && !e.killReason && engine.restart) {
@@ -468,12 +539,13 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       const x = new Error(`Không nạp được ${m.catalog ? m.catalog.name : m.file}${n ? ` (đã thử ${n} cách: GPU, GPU một phần, CPU)` : ''}. Lỗi: ${e.message}. Chi tiết đã ghi vào nhật ký (Mô hình của tôi → Mở thư mục nhật ký).`);
       x.code = 'LOAD_FAILED'; throw x;
     }
-    if (st.fallbackFrom && st.fallbackFrom.length) { engineLog('Nạp ' + m.file + ' bằng chế độ dự phòng: ' + st.mode, null, { attempts: st.fallbackFrom }); st.notice = `GPU không nạp được mô hình này, AIVN đã chuyển sang chế độ ${MODE_VI[st.mode] || st.mode} (chậm hơn nhưng vẫn dùng được).`; }
+    if (st.fallbackFrom && st.fallbackFrom.length) { engineLog('Nạp ' + m.file + ' bằng chế độ dự phòng: ' + st.mode, null, { attempts: st.fallbackFrom, final: { mode: st.mode, ctx: st.contextSize, gpuLayers: st.gpuLayers, totalLayers: st.totalLayers } }); st.notice = require('./load-notice').loadNotice(st); }
     st = { ...st, loadParams: ml }; lastCtx = st.contextSize || lastCtx; engineDied = false;
     if (ctxNote) { st = { ...st, notice: [st.notice, ctxNote].filter(Boolean).join(' ') }; LOG.log('load', ctxNote); }
     if (reason) LOG.log('load', 'Lý do nạp lại: ' + reason);
     measureVram(m.id, st).catch(() => {});
-    LOG.log('load', `Đã nạp ${m.file} sau ${Date.now() - tLoad} ms`, { mode: st.mode, ctx: st.contextSize, gpu: st.gpu, gpuLayers: st.gpuLayers, totalLayers: st.totalLayers, toolMode: st.toolMode, fallbackFrom: st.fallbackFrom });
+    noteLayers(m.id, st, opts.kvCache);
+    LOG.log('load', `Đã nạp ${m.file} sau ${Date.now() - tLoad} ms`, { mode: st.mode, ctx: st.contextSize, gpu: st.backend || st.gpu, runtime: st.vision ? (st.runtime || 'bundled') : 'node-llama-cpp', ...(st.vision && st.gpu && st.backend !== st.gpu ? { chatGpu: st.gpu } : {}), gpuLayers: st.gpuLayers, totalLayers: st.totalLayers, toolMode: st.toolMode, fallbackFrom: st.fallbackFrom });
     noteUsage(null, m.id);
     settings.data.lastModel = m.id; settings.save(); lastUse = Date.now();
     send('model:status', st);
@@ -548,13 +620,13 @@ async function embedForMemory() {
 // Mô hình chỉ đọc chữ KHÔNG nhìn được màn hình. Khi bật Điều khiển màn hình mà mô hình chính không nhìn được ảnh:
 // dùng mô hình định vị đã chọn, không có thì tự dùng mô hình nhìn ảnh đã cài phù hợp nhất (eyesFor), không có thì cảnh báo + nút "Nạp thêm mắt nhìn".
 const vramTotal = () => (hwCache && hwCache.gpu && hwCache.gpu !== 'metal' && hwCache.vram && !hwCache.vram.integratedOnly ? hwCache.vram.total || 0 : 0);
-function catalogLite() { return catalog.map(c => ({ ...c, installed: isInstalled(c.file) })); }
+function catalogLite() { return catalog.map(c => ({ ...c, installed: isInstalled(c) })); }
 function eyesModel() { // mô hình nhìn ảnh đã cài sẽ làm mắt nhìn (id trong listModels) hoặc null
   const ms = listModels().filter(m => m.mmproj);
   if (settings.data.agentGrounder) { const m = ms.find(x => x.id === settings.data.agentGrounder); if (m) return { model: m, auto: false }; }
   if (!ms.length) return null;
   const R = require('./recommend'); const order = [R.eyesFor(catalogLite(), vramTotal())].concat(R.PAIR_GROUNDER.map(x => catalog.find(c => c.id === x.id)), R.VISION_SOLO.map(x => catalog.find(c => c.id === x.id))).filter(Boolean);
-  for (const c of order) { const m = ms.find(x => x.file.toLowerCase() === c.file.toLowerCase()); if (m) return { model: m, auto: true }; }
+  for (const c of order) { const m = ms.find(x => x.catalog && x.catalog.id === c.id); if (m) return { model: m, auto: true }; }
   return { model: ms[0], auto: true };
 }
 function eyesAdvice() {
@@ -570,7 +642,7 @@ function agentAdvice() {
   const m = listModels().find(x => x.path === st.path) || null;
   const p = m && m.catalog && m.catalog.params ? parseFloat(String(m.catalog.params).replace(',', '.')) : null;
   const small = p != null ? p < 3.5 : m ? m.size < 2.2e9 : false;
-  const recommended = catalog.filter(c => require('./recommend').PLANNERS.includes(c.id)).map(c => ({ id: c.id, name: c.name, size: c.size + (c.mmproj ? c.mmproj.size : 0), installed: isInstalled(c.file) }));
+  const recommended = catalog.filter(c => require('./recommend').PLANNERS.includes(c.id)).map(c => ({ id: c.id, name: c.name, size: c.size + (c.mmproj ? c.mmproj.size : 0), installed: isInstalled(c) }));
   const tools = toolSupport({ claims: m && m.catalog ? m.catalog.claims : null, mmproj: m ? m.mmproj || (m.catalog && m.catalog.mmproj) || null : null, toolLevel: m && m.catalog ? m.catalog.toolLevel : null, id: m && m.catalog ? m.catalog.id : '', name: m && m.catalog ? m.catalog.name : (m && m.name) || '', file: m ? m.file : st.id, params: m && m.catalog ? m.catalog.params : null, meta: st.meta, toolMode: st.toolMode, wrapper: st.chatWrapper, size: m ? m.size : 0 });
   return { model: m ? (m.catalog ? m.catalog.name : m.file) : st.id, params: p, small, good: !!(m && m.catalog && m.catalog.agent), planner: !!(m && m.catalog && require('./recommend').PLANNERS.includes(m.catalog.id)), recommended, tools, toolMode: st.toolMode || null, vision: !!st.vision, eyes: eyesAdvice() };
 }
@@ -607,8 +679,8 @@ function askApproval(card) {
     if (!app.isPackaged && process.env.AIVN_APPROVE_AUTO) setTimeout(async () => { if (process.env.AIVN_QACU && confirmSeq <= 3) { await sleep(500); try { fs.writeFileSync(path.join(process.env.AIVN_QACU, `approve-card-${confirmSeq}.png`), (await win.webContents.capturePage()).toPNG()); } catch {} } const f = confirms.get(id); if (f) f(process.env.AIVN_APPROVE_AUTO === 'allow' ? { ok: true } : { ok: false, reason: process.env.AIVN_APPROVE_AUTO.replace(/^deny:?/, '') }); }, 200);
   });
 }
-const slimStep = (x) => ({ id: x.id, name: x.name, label: x.label, icon: x.icon, args: x.args, status: x.status, summary: x.summary, detail: typeof x.detail === 'string' ? x.detail.slice(0, 4000) : x.detail, urls: x.urls, ms: x.ms, pre: x.pre, thumb: x.thumb && typeof x.thumb.src === 'string' && x.thumb.src.length < 120000 ? x.thumb : undefined });
-async function runAgentTurn({ reqId, convoId, messages, headless = false, signal, attachments = [], gate = true }) {
+const slimStep = (x) => ({ id: x.id, name: x.name, label: x.label, icon: x.icon, args: x.args, status: x.status, summary: x.summary, detail: typeof x.detail === 'string' ? x.detail.slice(0, 4000) : x.detail, urls: x.urls, ms: x.ms, pre: x.pre, thumb: x.thumb && typeof x.thumb.src === 'string' && x.thumb.src.length < 120000 ? x.thumb : undefined, check: x.check || undefined, error: x.error ? String(x.error).slice(0, 400) : undefined }); // B171: chuyển tiếp lỗi sẵn có (check/error) để thẻ bước hiện đủ, không đổi vòng lặp
+async function runAgentTurn({ reqId, convoId, messages, headless = false, signal, attachments = [], gate = true, qa = null }) {
   if (!engine.status().loaded && !cloudBrainOn()) {
     if (headless && settings.data.lastModel) await loadById(settings.data.lastModel);
     else throw new Error('Chưa nạp mô hình nào. Hãy chọn mô hình ở thanh phía trên (trong chế độ AIVN AGENT, bộ chọn chỉ cho chọn mô hình dùng được cho AIVN AGENT).');
@@ -621,15 +693,37 @@ async function runAgentTurn({ reqId, convoId, messages, headless = false, signal
       e.code = 'AGENT_GATE'; e.gate = g; throw e;
     }
   }
+  // B165: chưa tới một nửa số lớp của mô hình nằm trên GPU → mỗi bước AIVN AGENT rất chậm (laptop 4 GB, beta.2.8: 6/37 lớp, 40–83 s mỗi bước).
+  // Báo TRƯỚC khi chạy (một lần cho mỗi lần nạp), kèm cách sửa: giảm ngữ cảnh / mô hình nhỏ hơn đã có trên máy.
+  if (!headless && reqId && !cloudBrainOn()) { try { const w = await slowAgentWarning(); if (w) { send('agent:status', { reqId, stage: 'slow', text: w }); send('app:notice', { text: w, kind: 'warn' }); } } catch {} }
   const comp = !headless && agent.activeTools({ headless }).some(n => n === 'screen_act' || n === 'screen_look'); // phím dừng khẩn cấp toàn cục chỉ khi điều khiển màn hình (Ctrl+Alt+Q trùng AltGr+Q trên một số bàn phím)
   if (comp) computerSessionStart();
   const files = (Array.isArray(attachments) ? attachments : []).filter(f => f && typeof f.path === 'string' && path.isAbsolute(f.path) && fs.existsSync(f.path) && fs.statSync(f.path).isFile()).slice(0, 10);
   const tb = tokenBatcher(reqId);
-  try { return await agent.run({ messages, convoId, signal, headless, attachments: files, confirm: (...a) => { tb.flush(); return askConfirm(...a); }, confirmScreen: (...a) => { tb.flush(); return askScreen(...a); }, approve: (card) => { tb.flush(); return askApproval(card); },
+  try { return await agent.run({ messages, convoId, signal, headless, qa: !!qa, attachments: files, confirm: qa ? qa.confirm : (...a) => { tb.flush(); return askConfirm(...a); }, confirmScreen: qa ? qa.confirmScreen : (...a) => { tb.flush(); return askScreen(...a); }, approve: qa ? qa.approve : (card) => { tb.flush(); return askApproval(card); }, // QA runner: thẻ xin phép luôn bị TỪ CHỐI tự động (qa-runner.js)
     onToken: (t) => reqId && tb.push(t),
-    onStep: (st) => { tb.flush(); reqId && send('agent:step', { reqId, step: slimStep(st) }); },
+    onStep: (st) => { tb.flush(); if (qa && qa.onStep) qa.onStep(st); reqId && send('agent:step', { reqId, step: slimStep(st) }); },
     onStatus: (st) => { tb.flush(); reqId && send('agent:status', { reqId, ...st }); } }); }
-  finally { tb.flush(); if (comp) computerSessionEnd(); if (desk && desk.active()) desk.end(signal && signal.aborted ? 'đã dừng' : 'xong lượt'); }
+  finally {
+    tb.flush();
+    // B104: lượt kết thúc bất thường (hết giờ QA / lỗi) mà ô soạn còn chữ AIVN gõ chưa gửi → xoá; người dùng bấm Dừng → không thao tác thêm, chỉ ghi lại
+    if (desk && desk.active() && desk.hasDraft && desk.hasDraft()) { try { await desk.cleanupDraft({ clear: !(signal && signal.aborted && signal.reason !== 'timeout') }); } catch {} }
+    if (comp) computerSessionEnd(); if (desk && desk.active()) desk.end(signal && signal.aborted ? 'đã dừng' : 'xong lượt');
+  }
+}
+let slowWarnKey = null;
+async function slowAgentWarning() {
+  const st = engine.status(); if (!st || !st.loaded || !Number.isInteger(st.gpuLayers) || !(st.totalLayers > 0) || !st.gpu) return null;
+  if (st.gpuLayers >= st.totalLayers / 2) return null;
+  const key = `${st.id}|${st.gpuLayers}|${st.contextSize}`; if (slowWarnKey === key) return null; slowWarnKey = key;
+  const cur = listModels().find(x => x.id === st.id); const h = await hw();
+  const smaller = listModels().filter(x => x.mmproj && cur && x.size < cur.size * 0.8 && x.id !== st.id).sort((a, b) => b.size - a.size)[0];
+  const lowV = h && h.vram && h.vram.total > 0 && h.vram.total < 6 * 1024 ** 3;
+  const tips = [];
+  if ((st.contextSize || 0) > 8192) tips.push(`giảm độ dài ngữ cảnh xuống 8192 trong hộp nạp (Ctrl+L)`);
+  if (smaller) tips.push(`chuyển sang ${smaller.catalog ? smaller.catalog.name : smaller.file} (đã có trên máy)`);
+  else if (lowV) tips.push('tải Qwen3-VL 2B trong Khám phá (gợi ý ⭐ cho GPU dưới 6 GB)');
+  return `Chỉ ${st.gpuLayers}/${st.totalLayers} lớp của mô hình nằm trên GPU${st.device ? ` (${st.device})` : ''}, nên mỗi bước của AIVN AGENT sẽ chậm.${tips.length ? ' Để nhanh hơn: ' + tips.join(', hoặc ') + '.' : ''}`;
 }
 // ---------- Điều khiển máy tính kiểu desktop agent (quan sát → thao tác → kiểm tra) ----------
 let desk = null;
@@ -639,9 +733,9 @@ let agentStepScale = 1; // ×3 khi mô hình đang nạp là “Rất chậm” 
 function getDesk() {
   if (desk) return desk;
   const { createDesktopAgent } = require('./desktop-agent');
-  desk = createDesktopAgent({ engine, stepScale: () => agentStepScale, getSettings: () => settings.data, setSettings: (p) => { Object.assign(settings.data, p); settings.save(); send('settings:changed', p); },
+  desk = createDesktopAgent({ engine, launchApp: (q) => computerTools.launch(q), openExternal: (u) => shell.openExternal(u), stepScale: () => agentStepScale, getSettings: () => settings.data, setSettings: (p) => { Object.assign(settings.data, p); settings.save(); send('settings:changed', p); },
     log: (scope, m) => LOG.log(scope, m), getMainWindow: () => win, preload: path.join(__dirname, 'preload.js'), isTest: isTest && process.env.AIVN_DESK_KEEPWIN === '1', autoTest: !app.isPackaged && !!process.env.AIVN_DESK_AUTO,
-    autoAnswer: !app.isPackaged && process.env.AIVN_DESK_AUTO ? (req) => (qaAsks.push({ risk: req.risk || null, desc: req.desc || '', text: req.text || null }), { ok: process.env.AIVN_DESK_AUTO !== 'deny' && !(req.risk && process.env.AIVN_DESK_AUTO === 'safe'), reason: req.risk && process.env.AIVN_DESK_AUTO === 'safe' ? 'Đừng gửi, chỉ soạn sẵn' : '' }) : null,
+    autoAnswer: !app.isPackaged && process.env.AIVN_DESK_AUTO ? (req) => (qaAsks.push({ risk: req.risk || null, desc: req.desc || '', text: req.text || null, send: !!req.send, recipient: req.recipient || null, shown: req.shown || null }), { ok: process.env.AIVN_DESK_AUTO !== 'deny' && !(req.risk && process.env.AIVN_DESK_AUTO === 'safe'), reason: req.risk && process.env.AIVN_DESK_AUTO === 'safe' ? 'Đừng gửi, chỉ soạn sẵn' : '' }) : null,
     onStop: (reason) => stopComputer(reason), grounder: (process.env.AIVN_QA_DESK016 || process.env.AIVN_QA_B21 || process.env.AIVN_QA_ZALO_DPI) && !app.isPackaged ? async () => null : getGrounder }); // QA phím/gõ: không cần mắt nhìn (CPU chậm)
   return desk;
 }
@@ -662,7 +756,9 @@ async function getGrounder(force) {
       if (!plan.ok) { gpu = false; LOG.log('load', 'Cảnh báo bộ nhớ GPU: ' + plan.message); send('app:notice', { text: plan.message, kind: 'warn' }); }
     } catch {}
     const gml = modelLoadFor(m.id); const gpf = await perfProfile().catch(() => ({})); const gth = gml.threads || gpf.threads; const gbs = gml.batchSize || gpf.batchSize; // B26
-    await engine.groundLoad(m.id, m.path, m.mmproj, { contextSize: 4096, gpu, ...(gth ? { threads: gth } : {}), ...(gbs ? { batchSize: gbs } : {}) });
+    const gexe = gpu ? await serverExeFor() : null;
+    const gres = await engine.groundLoad(m.id, m.path, m.mmproj, { contextSize: 4096, gpu, serverExe: gexe, serverArgs: require('./model-launch').launchArgs({ id: m.id, family: SC.groundingFamily(NAMES.isGeneric(m.file) ? m.id : (m.file || m.id)), catalog: m.catalog, load: gml }), ...(gth ? { threads: gth } : {}), ...(gbs ? { batchSize: gbs } : {}) });
+    noteRuntime(gres, 'mô hình định vị ' + m.file);
     LOG.log('load', `Đã nạp mô hình định vị sau ${Date.now() - t} ms`);
   }
   return { id: m.path, engine: { generate: (msgs, o) => engine.groundGenerate(msgs, o) } };
@@ -900,8 +996,10 @@ function withParts(orig, text) {
 const api = createApiServer({ engine, models: listModels, ensureModel: (m) => ensureModel(m, { api: true }), log, getOpts: () => ({ cors: !!settings.data.apiCors, apiKey: settings.data.apiKey || null }), isBlocked: () => !activated() ? 'AIVN chưa được kích hoạt trên máy này.' : isLocked() ? 'AIVN đang khoá. Hãy mở khoá ứng dụng để dùng máy chủ API.' : null, embeddings: {
   info: () => embedInfo(),
   async ensure(model) {
-    if (model && !String(model).toLowerCase().includes('bge') && String(model).toLowerCase() !== EMBED.id && !/embed/i.test(model)) {
-      const e = new Error(`Mô hình nhúng "${model}" không có. AIVN dùng "${EMBED.id}".`); e.status = 404; throw e;
+    // B80: tên mô hình nhúng kiểu OpenAI/LangChain (text-embedding-3-small, nomic-embed…) → dùng mô hình nhúng đã cài (như LM Studio);
+    // chỉ báo lỗi khi tên là một mô hình TRÒ CHUYỆN đã cài (gọi nhầm endpoint).
+    if (model && String(model).toLowerCase() !== EMBED.id && listModels().some(m => m.id === model)) {
+      const e = new Error(`"${model}" là mô hình trò chuyện, không tạo embeddings được. Dùng "${EMBED.id}" (hoặc bỏ trường "model").`); e.status = 400; throw e;
     }
     if (!embedInfo().installed) { const e = new Error(`Chưa tải mô hình nhúng "${EMBED.id}". Hãy mở AIVN → Cài đặt → Tìm kiếm tài liệu để tải.`); e.status = 400; throw e; }
     await ensureEmbedder();
@@ -918,21 +1016,21 @@ const safeFile = (f) => typeof f === 'string' && /\.gguf$/i.test(f) && !f.split(
 function annotateGroup(repo, g) {
   const job = downloader.get(`${repo}::${g.files[0].path}`);
   const part = downloader.partialFor(repo, g.files);
-  return { ...g, installed: part.complete || isInstalled(g.files[0].path), partial: part.complete ? 0 : part.received, job };
+  return { ...g, installed: part.complete || isInstalled(NAMES.localNameFor(repo, g.files[0].path)), partial: part.complete ? 0 : part.received, job };
 }
 function catalogList() {
   let H = null;
   return hw().then(h => (H = h, catalog.map(c => {
     const job = downloader.get(`${c.repo}::${c.file}`);
-    const part = downloader.partialFor(c.repo, [{ path: c.file, size: c.size }, ...(c.mmproj ? [{ path: c.mmproj.file, size: c.mmproj.size }] : [])]);
-    return { ...c, installed: part.complete || isInstalled(c.file), partial: part.complete ? 0 : part.received, job, fit: hf.fitFor(c.size, h, fitMetaCat(c)), tools: toolSupport(c) };
+    const part = downloader.partialFor(c.repo, [{ path: c.file, size: c.size, localName: c.localName }, ...(c.mmproj ? [{ path: c.mmproj.file, size: c.mmproj.size, localName: c.mmproj.localName }] : [])]);
+    return { ...c, installed: part.complete || isInstalled(c), partial: part.complete ? 0 : part.received, job, fit: hf.fitFor(c.size, h, fitMetaCat(c)), tools: toolSupport(c) };
   }))).then(list => {
     // B17: một cách tính duy nhất (agent-plan.js) cho ngữ cảnh AIVN AGENT, độ vừa máy của thẻ trong mục Điều khiển máy tính,
     // gợi ý ⭐ điều khiển máy và cổng AIVN AGENT
     const sc = benchScores(); const P = agentPlanFor(H, sc);
-    list = list.map(c => ({ ...c, agentFit: catAgentFit(c, H, P.ctx) }));
+    list = list.map(c => ({ ...c, agentFit: catAgentFit(c, H, P.ctx, AP.fitOpts(P)) }));
     return require('./recommend').annotate(list, sc, vramTotal(), AP.elOpts(P)).list.map(c => ({ ...c, strength: require('./fit').strength(c), agentCtx: P.ctx,
-      agentCheck: AE.eligibility({ vision: !!c.mmproj, catalog: c, fit: c.agentFit }, { shipped: sc.shipped[c.id], ...AP.elOpts(P) }) }));
+      agentCheck: AE.eligibility({ vision: !!c.mmproj, catalog: c, fit: c.agentFit }, { shipped: sc.shipped[c.id], local: (sc.local || {})[c.id], ...AP.elOpts(P) }) }));
   });
 }
 
@@ -1032,10 +1130,10 @@ function registerIpc() {
   ipcMain.handle('agent:eyes', async (_e, catalogId) => {
     await hw(); const R = require('./recommend');
     const c = catalog.find(x => x.id === catalogId) || R.eyesFor(catalogLite(), vramTotal()); if (!c || !c.mmproj) throw new Error('Không có mô hình nhìn ảnh phù hợp');
-    const m = listModels().find(x => x.file.toLowerCase() === c.file.toLowerCase() && x.mmproj);
+    const m = listModels().find(x => x.catalog && x.catalog.id === c.id && x.mmproj);
     if (m) { settings.data.agentGrounder = m.id; settings.data.pendingEyes = null; settings.save(); LOG.log('desk', 'Người dùng chọn mắt nhìn ' + m.file); return { ok: true, installed: true, name: c.name }; }
     settings.data.pendingEyes = c.id; settings.save();
-    const files = [{ path: c.file, size: c.size }, { path: c.mmproj.file, size: c.mmproj.size }];
+    const files = [{ path: c.file, size: c.size, localName: c.localName }, { path: c.mmproj.file, size: c.mmproj.size, localName: c.mmproj.localName }];
     const j = downloader.enqueue({ repo: c.repo, files, name: c.name, quant: c.quant, catalogId: c.id, urlFor: hf.resolveUrl });
     return { ok: true, installed: false, job: j, name: c.name };
   });
@@ -1051,8 +1149,8 @@ function registerIpc() {
   ipcMain.handle('dl:start', (_e, spec) => {
     if (spec && spec.catalogId) {
       const c = catalog.find(x => x.id === spec.catalogId); if (!c) throw new Error('Mô hình không có trong danh mục');
-      const files = [{ path: c.file, size: c.size }];
-      if (c.mmproj) files.push({ path: c.mmproj.file, size: c.mmproj.size });
+      const files = [{ path: c.file, size: c.size, localName: c.localName }];
+      if (c.mmproj) files.push({ path: c.mmproj.file, size: c.mmproj.size, localName: c.mmproj.localName });
       return downloader.enqueue({ repo: c.repo, files, name: c.name, quant: c.quant, catalogId: c.id, urlFor: hf.resolveUrl });
     }
     if (!spec || !safeRepo(spec.repo) || !Array.isArray(spec.files) || !spec.files.length || !spec.files.every(f => safeFile(f.path))) throw new Error('Yêu cầu tải không hợp lệ');
@@ -1110,12 +1208,35 @@ function registerIpc() {
     try { const st = fs.statSync(r.filePaths[0]); if (st.size > 1e6) throw new Error('Tệp quá lớn'); return { ok: true, preset: require('./presets').parseImport(fs.readFileSync(r.filePaths[0], 'utf8')) }; }
     catch (e) { return { ok: false, error: e.message }; }
   });
+  // B168: bộ chọn GPU (Cài đặt › Nâng cao, hộp nạp, tab Runtime): tên thật của MỌI GPU Vulkan, GPU rời được AIVN chọn khi để Tự động
+  ipcMain.handle('gpu:devices', async () => {
+    const exe = require('./vision-server').findServer(); const GP = require('./gpu-pick');
+    let gpus = [];
+    if (process.env.AIVN_QA_FAKEDEVICES && !app.isPackaged) gpus = JSON.parse(process.env.AIVN_QA_FAKEDEVICES);
+    else if (exe) { const d = await require('./vision-server').listDevices(exe, { timeoutMs: 10000, allDevices: true }).catch(() => null); gpus = d && d.ok ? d.all.filter(x => /^vulkan\d+$/i.test(x.id)) : []; }
+    const list = gpus.map((d, i) => ({ index: Number((/(\d+)$/.exec(d.id) || [])[1] ?? i), id: d.id, name: d.name, totalMiB: d.totalMiB || null, integrated: GP.isIntegrated(d.name) }));
+    const auto = GP.pick(gpus);
+    return { devices: list, auto: auto ? { id: auto.id, name: auto.name } : null, current: Number.isInteger(settings.data.gpuDevice) ? settings.data.gpuDevice : null };
+  });
   ipcMain.handle('models:meta', async (_e, id) => { const m = listModels().find(x => x.id === id); if (!m) return null; const g = require('./gguf').cachedSummary(m.path); return g ? { ...g, fileSize: m.size, file: m.file, id: m.id, vision: !!m.vision, saved: modelLoadFor(id), global: { contextSize: settings.data.contextSize || null, gpuLayers: Number.isInteger(settings.data.gpuLayers) ? settings.data.gpuLayers : null } } : null; });
-  ipcMain.handle('models:estimate', async (_e, id, o = {}) => { const m = listModels().find(x => x.id === id); if (!m) return null; const g = require('./gguf').cachedSummary(m.path); if (!g || g.error) return null; let h = await hw().catch(() => ({})); if (process.env.AIVN_QA_FAKEHW && !app.isPackaged) h = { ...h, ...JSON.parse(process.env.AIVN_QA_FAKEHW) }; const gpu = !!(h.gpu); const est = require('./gguf').estimate({ ...g, fileSize: m.size }, { ...o, gpu, vram: gpu && h.gpu !== 'metal' ? h.vram : null }); return { ...est, hw: { gpu: h.gpu || false, vram: h.vram || null, ram: h.ram || 0, freeRam: h.freeRam || 0, devices: h.devices || [], unified: h.gpu === 'metal' } }; });
+  ipcMain.handle('models:estimate', async (_e, id, o = {}) => { const m = listModels().find(x => x.id === id); if (!m) return null; const g = require('./gguf').cachedSummary(m.path); if (!g || g.error) return null; let h = await hw().catch(() => ({})); if (process.env.AIVN_QA_FAKEHW && !app.isPackaged) h = { ...h, ...JSON.parse(process.env.AIVN_QA_FAKEHW) }; const gpu = !!(h.gpu);
+    // B170: mô hình nhìn ảnh → ước lượng theo đúng cách llama-server --fit chọn số lớp, trên đúng thiết bị (B168)
+    const server = m.mmproj && settings.data.vision !== false ? { mmprojBytes: (() => { try { return fs.statSync(m.mmproj).size; } catch { return 0; } })() } : null;
+    let vram = gpu && h.gpu !== 'metal' ? h.vram : null; let device = h.gpuName || null;
+    if (server && gpu && h.gpu !== 'metal' && !(process.env.AIVN_QA_FAKEHW && !app.isPackaged)) { const d = await serverDevice(); if (d) { vram = { ...(vram || {}), total: d.totalMiB * 1024 ** 2, free: (d.freeMiB || d.totalMiB) * 1024 ** 2 }; device = d.name; } }
+    // B163: GPU rời dưới 6 GB + mô hình nhìn ảnh, K/V để Tự động → lúc nạp dùng q8_0 (loadById) → ước lượng cũng theo q8_0
+    if (server && gpu && h.gpu !== 'metal' && h.vram && h.vram.total > 0 && h.vram.total < 6 * 1024 ** 3 && !h.vram.integratedOnly && (o.kvType == null || o.kvType === 'auto')) o = { ...o, kvType: 'q8_0' };
+    const est = require('./gguf').estimate({ ...g, fileSize: m.size }, { ...o, gpu, vram, server });
+    // lần nạp thật gần nhất cùng ngữ cảnh + cùng chế độ tự động → hiện số THẬT (không để ước lượng lệch số thật)
+    const real = ((settings.data.modelUsage || {})[m.id] || {}).layers;
+    const same = real && est.auto && real.ctx === o.ctx && (real.kv || 'f16') === (o.kvType === 'q8_0' ? 'q8_0' : 'f16') && real.total === est.totalLayers;
+    const fin = same ? { ...require('./gguf').estimate({ ...g, fileSize: m.size }, { ...o, gpu, vram, server, gpuLayers: real.gpu }), auto: true, measured: true } : est;
+    return { ...fin, server: !!server, hw: { gpu: h.gpu || false, vram: vram || null, ram: h.ram || 0, freeRam: h.freeRam || 0, devices: h.devices || [], gpuName: device, unified: h.gpu === 'metal' } }; });
   ipcMain.handle('models:saveLoad', async (_e, id, o) => { settings.data.modelLoad = { ...(settings.data.modelLoad || {}) }; const c = cleanLoad(o); if (o === null || !Object.keys(c).length) delete settings.data.modelLoad[id]; else settings.data.modelLoad[id] = c; settings.save(); return modelLoadFor(id); });
   ipcMain.handle('models:load', async (_e, id, o = {}) => { try { if (o && o.remember && o.load) { settings.data.modelLoad = { ...(settings.data.modelLoad || {}), [id]: cleanLoad(o.load) }; settings.save(); } return { ok: true, status: await loadById(id, { force: !!(o && o.force), load: o && o.load || null }) }; } catch (e) { return { ok: false, error: e.message, code: e.code || null, modelId: e.modelId || id, catalogId: e.catalogId || null }; } });
   ipcMain.handle('models:unload', async () => { await engine.unloadModel(); const st = engine.status(); send('model:status', st); return st; });
   ipcMain.handle('models:delete', async (_e, id) => {
+    if (QA_PROFILE) throw new Error('Hồ sơ QA chỉ đọc thư mục mô hình dùng chung: không xoá mô hình.');
     const m = listModels().find(x => x.id === id);
     if (!m) return listModels();
     const ok = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Huỷ', 'Xoá'], defaultId: 0, cancelId: 0, title: 'Xoá mô hình',
@@ -1123,15 +1244,55 @@ function registerIpc() {
     if (ok.response !== 1) return listModels();
     if (m.loaded) { await engine.unloadModel(); send('model:status', engine.status()); }
     if (m.source === 'imported') settings.data.imported = settings.data.imported.filter(p => p !== m.path), settings.save();
-    else {
-      const sm = m.file.match(SPLIT_RE);
-      if (sm) for (let i = 1; i <= Number(sm[3]); i++) fs.rmSync(path.join(path.dirname(m.path), `${sm[1]}-${String(i).padStart(5, '0')}-of-${sm[3]}.gguf`), { force: true });
-      else fs.rmSync(m.path, { force: true });
-      // dọn thư mục repo/tác giả nếu đã trống
-      for (let d = path.dirname(m.path); d.startsWith(paths.models + path.sep); d = path.dirname(d)) { try { fs.rmdirSync(d); } catch { break; } }
-    }
+    else { const gone = require('./models-dir').deleteModelFiles(m, listModels(), paths.models); LOG.log('models', `Đã xoá mô hình ${m.file}`, { files: gone.map(f => path.basename(f)) }); }
     return listModels();
   });
+  // ---------- Đổi thư mục mô hình (beta.3) ----------
+  let dirMove = null; // { ac } khi đang chuyển
+  const defaultModelsDir = () => path.join(paths.userData, 'models');
+  const dirInfo = () => { const MD = require('./models-dir'); const files = MD.listFiles(paths.models); return { dir: paths.models, isDefault: path.resolve(paths.models) === path.resolve(defaultModelsDir()), default: defaultModelsDir(), free: MD.freeBytes(paths.models), drive: MD.driveOf(paths.models), bytes: files.reduce((s, f) => s + f.size, 0), files: files.length, extra: (settings.data.modelDirsExtra || []).filter(d => fs.existsSync(d)), problem: modelsDirProblem, moving: !!dirMove, qaProfile: !!QA_PROFILE }; };
+  // Runtime CUDA/Vulkan (tab Runtime trong Cài đặt)
+  const rtInfo = async () => { const st = engine.status() || {}; return { pref: settings.data.runtime || 'auto', cuda: await runtimes().status(),
+    versions: { llamaServer: require('./runtimes').BUILD, nodeLlamaCpp: nodeLlamaVersion(), electron: process.versions.electron },
+    platform: process.platform, arch: process.arch, active: st.loaded && st.vision ? { id: st.id, runtime: st.runtime || 'bundled', fallback: st.runtimeFallback || null } : null, chatGpu: st.gpu || null }; };
+  ipcMain.handle('runtime:status', () => rtInfo());
+  ipcMain.handle('runtime:set', (_e, pref) => { if (!require('./runtimes').PREFS.includes(pref)) return { ok: false }; settings.data.runtime = pref; settings.save(); LOG.log('runtime', 'Chọn runtime: ' + pref); return { ok: true, note: 'Áp dụng từ lần nạp mô hình nhìn ảnh / mắt nhìn tiếp theo.' }; });
+  let rtTick = 0;
+  ipcMain.handle('runtime:install', async () => { const r = await runtimes().install({ onProgress: () => { const n = Date.now(); if (n - rtTick > 300) { rtTick = n; runtimes().status().then(s => send('runtime:progress', s.job)).catch(() => {}); } } }); send('runtime:progress', null); return r; });
+  ipcMain.handle('runtime:cancel', () => runtimes().cancel());
+  ipcMain.handle('runtime:remove', () => { if (engine.status()?.runtime === 'cuda') return { ok: false, error: 'Runtime CUDA đang chạy mô hình — hãy dỡ mô hình trước khi gỡ.' }; return runtimes().remove(); });
+  ipcMain.handle('models:dir-info', () => dirInfo());
+  ipcMain.handle('models:dir-pick', async () => {
+    if (QA_PROFILE) return { ok: false, error: 'Hồ sơ QA dùng chung thư mục mô hình của hồ sơ thật: không đổi được.' };
+    const r = await dialog.showOpenDialog(win, { title: 'Chọn thư mục lưu mô hình', buttonLabel: 'Chọn thư mục này', properties: ['openDirectory', 'createDirectory'], defaultPath: paths.models });
+    if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true };
+    const v = require('./models-dir').validateTarget(r.filePaths[0], { from: paths.models }); if (!v.ok) return v;
+    const cur = dirInfo(); return { ok: true, dir: v.dir, free: v.free, drive: require('./models-dir').driveOf(v.dir), current: cur, fits: v.free == null || v.free >= cur.bytes + require('./models-dir').MARGIN };
+  });
+  ipcMain.handle('models:dir-apply', async (_e, { dir, mode } = {}) => {
+    const MD = require('./models-dir');
+    if (QA_PROFILE) return { ok: false, error: 'Hồ sơ QA: không đổi thư mục mô hình.' };
+    if (dirMove) return { ok: false, error: 'Đang chuyển mô hình, hãy đợi xong.' };
+    const v = MD.validateTarget(dir, { from: paths.models }); if (!v.ok) return v;
+    if (downloader.list().some(j => j.status === 'downloading' || j.status === 'queued')) return { ok: false, error: 'Đang tải mô hình: hãy tạm dừng hoặc đợi tải xong rồi đổi thư mục.' };
+    const old = paths.models;
+    if (mode === 'move') {
+      const st = engine.status(); if (st.loaded && st.path && path.resolve(st.path).startsWith(path.resolve(old) + path.sep)) { await engine.unloadModel(); send('model:status', engine.status()); }
+      dirMove = { ac: new AbortController() }; LOG.log('app', `Chuyển mô hình: ${old} → ${v.dir}`);
+      try { const r = await MD.moveModels(old, v.dir, { signal: dirMove.ac.signal, onProgress: (p) => send('models:dir-progress', p) });
+        paths.models = v.dir; settings.data.modelsDir = v.dir; settings.data.modelDirsExtra = (settings.data.modelDirsExtra || []).filter(d => path.resolve(d) !== path.resolve(v.dir)); settings.save();
+        LOG.log('app', `Đã chuyển ${r.moved} tệp (${(r.bytes / 1024 ** 3).toFixed(2)} GB)${r.sameDrive ? ' (cùng ổ, đổi tên)' : ''} → ${v.dir}`); send('models:dir-progress', { finished: true, ...r });
+        return { ok: true, ...r, info: dirInfo() };
+      } catch (e) { LOG.log('app', 'Chuyển mô hình dừng: ' + e.message); send('models:dir-progress', { finished: true, error: e.message }); return { ok: false, error: e.message, info: dirInfo() }; }
+      finally { dirMove = null; }
+    }
+    // chỉ trỏ sang thư mục mới: thư mục cũ vẫn được quét
+    const extra = new Set(settings.data.modelDirsExtra || []); if (MD.listFiles(old).length) extra.add(old); extra.delete(v.dir);
+    paths.models = v.dir; settings.data.modelsDir = v.dir; settings.data.modelDirsExtra = [...extra]; settings.save(); modelsDirProblem = null;
+    LOG.log('app', `Thư mục mô hình mới: ${v.dir} (mô hình ở ${old} vẫn dùng được)`); return { ok: true, moved: 0, info: dirInfo() };
+  });
+  ipcMain.handle('models:dir-cancel', () => { if (dirMove) dirMove.ac.abort(); return true; });
+  ipcMain.handle('models:dir-reset', () => { if (QA_PROFILE || dirMove) return { ok: false }; settings.data.modelsDir = null; paths.models = defaultModelsDir(); fs.mkdirSync(paths.models, { recursive: true }); settings.save(); return { ok: true, info: dirInfo() }; });
   ipcMain.handle('models:reveal', (_e, p) => { shell.showItemInFolder(p || paths.models); return true; });
   ipcMain.handle('model:status', () => engine.status());
   ipcMain.handle('bench:run', async (_e, { ids }) => { try { return { ok: true, results: await runAgentBench(Array.isArray(ids) ? ids.slice(0, 4) : []) }; } catch (e) { return { ok: false, error: e.message }; } });
@@ -1279,6 +1440,7 @@ function registerIpc() {
   ipcMain.handle('update:download', () => updater.download());
   ipcMain.handle('update:install', () => updater.install());
   ipcMain.handle('update:open', () => updater.openReleases());
+  ipcMain.handle('update:openbeta', () => updater.openBeta()); // B151: chỉ mở trang web (khối bản thử nghiệm), không tải/cài
   ipcMain.handle('update:state', () => updater.state());
   ipcMain.handle('chat:stop', (_e, reqId) => { abortGen(reqId, generations.get(reqId), 'người dùng bấm Dừng'); return true; });
 
@@ -1288,6 +1450,21 @@ function registerIpc() {
     if (i >= 0) convos.data.list[i] = c; else convos.data.list.unshift(c);
     convos.data.list.sort((a, b) => b.updatedAt - a.updatedAt);
     convos.save(); return true;
+  });
+  // B82: xuất cuộc trò chuyện ra tệp (.md/.txt/.json theo đuôi người dùng chọn trong hộp thoại Lưu)
+  ipcMain.handle('convos:export', async (_e, id, fmt0) => {
+    const c = convos.data.list.find(x => x.id === id); if (!c) throw new Error('Không tìm thấy cuộc trò chuyện');
+    const EX = require('./chat-export'); const fmt = EX.FORMATS.includes(fmt0) ? fmt0 : 'md';
+    const flt = { md: { name: T('Markdown'), extensions: ['md'] }, txt: { name: T('Văn bản'), extensions: ['txt'] }, json: { name: 'JSON', extensions: ['json'] } };
+    // chỉ kiểm thử (bản chưa đóng gói): AIVN_QA_SAVE_PATH thay hộp thoại Lưu
+    const r = !app.isPackaged && process.env.AIVN_QA_SAVE_PATH ? { filePath: process.env.AIVN_QA_SAVE_PATH } : await dialog.showSaveDialog(win, { title: T('Xuất cuộc trò chuyện'), buttonLabel: T('Lưu'), defaultPath: path.join(app.getPath('documents'), EX.fileName(c, fmt)), filters: [flt[fmt], ...EX.FORMATS.filter(f => f !== fmt).map(f => flt[f])] });
+    if (r.canceled || !r.filePath) return { canceled: true };
+    const labels = { you: T('Bạn'), assistant: 'AIVN', exported: T('Xuất từ AIVN'), attachments: T('Đính kèm'), tools: T('Công cụ đã dùng'), refused: T('bị từ chối'), failed: T('lỗi'), untitled: T('Cuộc trò chuyện') };
+    const loc = ({ en: 'en-US', zh: 'zh-CN' })[uiLang()] || 'vi-VN'; const tx = (s) => T(s);
+    const c2 = { ...c, messages: (c.messages || []).map(m => m.steps ? { ...m, steps: m.steps.map(s => ({ ...s, label: tx(s.label || ''), summary: s.summary && tx(s.summary) })) } : m) };
+    const out = EX.render(c2, EX.fmtOf(r.filePath), { labels, locale: loc, version: app.getVersion() });
+    await fs.promises.writeFile(r.filePath, out, 'utf8'); log(`Đã xuất cuộc trò chuyện: ${path.basename(r.filePath)}`);
+    return { ok: true, path: r.filePath, format: EX.fmtOf(r.filePath), bytes: Buffer.byteLength(out) };
   });
   ipcMain.handle('convos:delete', (_e, id) => { convos.data.list = convos.data.list.filter(x => x.id !== id); convos.save(); if (rag) rag.remove(id); return true; });
   ipcMain.handle('rag:info', () => embedInfo());
@@ -1420,9 +1597,11 @@ function createWindow({ hidden = false } = {}) {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true,
       additionalArguments: [`--aivn-theme=${windowBg() === '#ffffff' ? 'light' : 'dark'}`] }, // giao diện đã lưu, áp dụng trước lần vẽ đầu tiên
   });
+  if (typeof qaReq !== 'undefined' && qaReq.enabled && qaReq.kind === 'qa-ui') { const si = win.showInactive.bind(win); win.show = si; win.focus = () => {}; win.moveTop = () => {}; } // không có lệnh nào (thẻ xin phép, thông báo…) giành được tiêu điểm
   buildMenus();
   loadUi();
-  win.once('ready-to-show', () => { if (!hidden) win.show(); });
+  // QA giao diện (--qa-ui): mở cửa sổ KHÔNG giành tiêu điểm (showInactive) để không làm phiền người dùng đang làm việc
+  win.once('ready-to-show', () => { if (hidden) return; if (typeof qaReq !== 'undefined' && qaReq.enabled && qaReq.kind === 'qa-ui') { win.showInactive(); return; } win.show(); });
   // Chạy nền: đóng cửa sổ thì thu xuống khay để Lịch tự động tiếp tục chạy
   win.on('close', (e) => {
     if (settings.data.keepInTray && tray && !quitting) {
@@ -1534,13 +1713,13 @@ const AP = require('./agent-plan');
 // B38: MỘT cách tính cho Khám phá và Mô hình của tôi (fit.metaOf): cùng dung lượng (mô hình + mmproj), cùng KV/bộ đệm, và số đo thật nếu đã nạp trên máy này
 const usageOfCatalog = (cid) => { const inst = cid ? listModels().find(m => m.catalog && m.catalog.id === cid) : null; return inst ? (settings.data.modelUsage || {})[inst.id] || null : null; };
 const fitMetaCat = (c) => { const u = usageOfCatalog(c.id); return { ...require('./fit').metaOf({ catalog: c, measured: u && u.vram }), measuredTps: u && u.tps }; };
-const catAgentFit = (c, h, ctx = AGENT_CTX) => (h ? hf.fitFor(c.size || 0, h, { ...fitMetaCat(c), ctx }) : null);
+const catAgentFit = (c, h, ctx = AGENT_CTX, fo = {}) => (h ? hf.fitFor(c.size || 0, h, { ...fitMetaCat(c), ctx, ...fo }) : null); // fo: AP.fitOpts(P) — B163 GPU < 6 GB: llama-server + K/V q8_0
 // B17: kế hoạch AIVN AGENT cho máy này (ngữ cảnh 16K hoặc 12K, có cho “Chạy chậm” không) — xem agent-plan.js
 function agentPlanFor(h, sc, installed = []) {
   if (!h) return { ctx: AGENT_CTX, lowered: false, allowSlow: false, maxSpill: 0 };
-  const cat = catalog.map(c => ({ id: c.id, vision: !!c.mmproj, catalog: c, size: c.size, _fit: (ctx) => catAgentFit(c, h, ctx) }));
-  const inst = installed.map(m => ({ ...m, _fit: m._fit || ((ctx) => hf.fitFor(m.size || 0, h, { ...(m._meta || {}), ctx })) }));
-  return { ...AP.plan([...cat, ...inst], (e, ctx) => e._fit(ctx), sc), allowVerySlow: settings.data.agentVerySlow === true };
+  const cat = catalog.map(c => ({ id: c.id, vision: !!c.mmproj, catalog: c, size: c.size, _fit: (ctx, fo) => catAgentFit(c, h, ctx, fo) }));
+  const inst = installed.map(m => ({ ...m, _fit: m._fit || ((ctx, fo) => hf.fitFor(m.size || 0, h, { ...(m._meta || {}), ctx, ...(fo || {}) })) }));
+  return { ...AP.plan([...cat, ...inst], (e, ctx, fo) => e._fit(ctx, fo), sc, { vramBytes: vramTotal() }), allowVerySlow: settings.data.agentVerySlow === true };
 }
 async function withAgentCheck(list) {
   const h = await hw().catch(() => null); const sc = benchScores();
@@ -1552,7 +1731,7 @@ async function withAgentCheck(list) {
     return { ...m, fit, _meta: meta, strength: require('./fit').strength({ ...m, ...meta }), quant: hf.parseQuant(m.file) || null, params: m.catalog ? m.catalog.params : null, usage: u ? { lastUsed: u.lastUsed || null, uses: u.uses || 0, tps: u.tps || null, vram: u.vram || null } : null, mmprojSize: mm };
   });
   const P = agentPlanFor(h, sc, out);
-  const res = out.map(({ _meta, ...m }) => { const agentFit = h ? hf.fitFor(m.size || 0, h, { ..._meta, ctx: P.ctx }) : null;
+  const res = out.map(({ _meta, ...m }) => { const agentFit = h ? hf.fitFor(m.size || 0, h, { ..._meta, ctx: P.ctx, ...AP.fitOpts(P) }) : null;
     return { ...m, agentFit, agentCtx: P.ctx, agent: AE.eligibility({ ...m, fit: agentFit }, { shipped: m.catalog && sc.shipped[m.catalog.id], local: sc.local[m.id], ...AP.elOpts(P) }) }; });
   Object.defineProperty(res, 'plan', { value: P, enumerable: false });
   return res;
@@ -1565,7 +1744,7 @@ async function agentModelGate() {
   const P = list.plan || agentPlanFor(h, sc);
   const allowSlow = P.allowSlow; const eo = AP.elOpts(P);
   const best = AE.bestFor(list.map(m => ({ ...m, installed: true })), sc, eo);
-  const catE = catalog.map(c => ({ id: c.id, vision: !!c.mmproj, catalog: c, agentFit: catAgentFit(c, h, P.ctx), size: c.size, dlSize: (c.size || 0) + (c.mmproj && c.mmproj.size || 0) })); // B22: dung lượng tải = mô hình + tệp thị giác (khớp thẻ Khám phá)
+  const catE = catalog.map(c => ({ id: c.id, vision: !!c.mmproj, catalog: c, agentFit: catAgentFit(c, h, P.ctx, AP.fitOpts(P)), size: c.size, dlSize: (c.size || 0) + (c.mmproj && c.mmproj.size || 0) })); // B22: dung lượng tải = mô hình + tệp thị giác (khớp thẻ Khám phá)
   const recommended = [];
   for (let k = 0; k < 2; k++) { const r = AE.bestFor(catE.filter(x => !recommended.some(y => y.id === x.id)), sc, eo); if (r) recommended.push(r); }
   const recOut = recommended.map(x => ({ id: x.id, name: x.catalog.name, size: x.dlSize || x.size, installed: list.some(m => m.catalog && m.catalog.id === x.id), slow: !!(x.agentFit && x.agentFit.level === 'slow'), fitText: x.agentFit ? x.agentFit.text : '' }));
@@ -1777,7 +1956,8 @@ async function qaMedia() {
     await js(`localStorage.setItem('aivn.onboarded', '1'); document.querySelector('#onboard') && (document.querySelector('#onboard').hidden = true)`);
     const files = String(process.env.AIVN_QA_MEDIA_FILES || '').split(path.delimiter).filter(Boolean);
     if (process.env.AIVN_QA_MEDIA_NOASR === '1') {
-      await js(`addFiles(${JSON.stringify(files.slice(0, 1))})`);
+      // không chờ promise: addFiles chờ người dùng trả lời hộp hỏi tải → executeJavaScript sẽ treo tới khi bấm (treo test 900 s)
+      await js(`void addFiles(${JSON.stringify(files.slice(0, 1))}).catch(e => console.warn('addFiles', e && e.message)); 0`);
       out.modalShown = await until(`!document.querySelector('#confirmModal').hidden`, 20000);
       out.modal = await js(`({ title: document.querySelector('#cfTitle').textContent, msg: document.querySelector('#cfMsg').textContent, ok: document.querySelector('#cfYes').textContent, no: document.querySelector('#cfNo').textContent, chip: (document.querySelector('#chips .chip .sz') || {}).textContent || '' })`);
       fs.writeFileSync(path.join(dir, 'noasr-modal.png'), (await wc.capturePage()).toPNG());
@@ -1944,12 +2124,14 @@ async function qaUI() {
   }
   if (process.env.AIVN_QAUI_I18N) { // 0.16 i18n: duyệt mọi màn hình/thẻ cài đặt/hộp thoại ở en và zh, tìm chữ tiếng Việt còn sót; đổi về vi phải khôi phục y nguyên
     await js('document.querySelectorAll(".modal-back").forEach(m => m.hidden = true); 1');
-    const scan = (tag) => js(`(() => { const VI = /[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i; const SK = 'pre, code, textarea, script, style, [data-noi18n], .msg:not(.welcome) .body, .msg .think-body, [contenteditable="true"], #convoList';
+    // B105: cả chữ Việt KHÔNG DẤU (“CUDA 12.4 CHO GPU NVIDIA”) — lọc thô trong trang theo từ điển, lọc chặt ở đây bằng src/i18n/vi-detect
+    const VD = require('./i18n/vi-detect'); const UVRE = `\\b(?:${VD.WORDS.join('|')})\\b`;
+    const scan = (tag) => js(`(() => { const VI0 = /[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i; const UV = new RegExp(${JSON.stringify(UVRE)}, 'i'); const VI = { test: (t) => VI0.test(t) || UV.test(t) }; const SK = 'pre, code, textarea, script, style, [data-noi18n], .msg:not(.welcome) .body, .msg .think-body, [contenteditable="true"], #convoList';
       const vis = (e) => !!(e && (e.offsetWidth || e.offsetHeight || e.getClientRects().length)); const h = [];
       const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) { const p = n.parentElement; if (!p || p.closest(SK)) continue; const t = n.nodeValue.trim(); if (t && VI.test(t)) h.push({ at: ${JSON.stringify(tag)}, vis: vis(p), t: t.slice(0, 600) }); }
       const SKA = 'pre, code, script, style, [data-noi18n], .msg:not(.welcome) .body, .msg .think-body, #convoList';
       for (const e of document.querySelectorAll('[title],[aria-label],[data-tip],[placeholder],[alt]')) { if (e.closest(SKA)) continue; for (const k of ['title', 'aria-label', 'data-tip', 'placeholder', 'alt']) { const x = e.getAttribute(k); if (x && VI.test(x)) h.push({ at: ${JSON.stringify(tag)} + ' @' + k, vis: vis(e), t: x.slice(0, 600) }); } }
-      return h; })()`);
+      return h; })()`).then(h => (h || []).filter(x => VD.looksVi(x.t)));
     const snapshot = () => js('JSON.stringify([document.title, document.querySelector("#newChat") && document.querySelector("#newChat").textContent.trim(), ...[...document.querySelectorAll(".nav-item[data-view]")].map(b => [b.getAttribute("aria-label"), b.dataset.tip]), ...[...document.querySelectorAll("#setNav [data-stab]")].map(b => b.textContent.trim()), document.querySelector("#input") && document.querySelector("#input").placeholder])');
     const views = await js('[...document.querySelectorAll(".nav-item[data-view]")].map(b => b.dataset.view)');
     const stabs = await js('[...document.querySelectorAll("#setNav [data-stab]")].map(b => b.dataset.stab)');
@@ -2144,7 +2326,7 @@ async function qaB21() {
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const out = { steps: [] }; const save = () => fs.writeFileSync(path.join(dir, 'qab21.json'), JSON.stringify(out, null, 2));
   // B27 (QA lượt 4): AIVN_QA_B21_MODE=telegram — Telegram giả, “Trần Quỳnh Như” (bẫy) mở sẵn; tiêu đề cửa sổ “Telegram - <tên>”
-  const tg = ['telegram', 'openchat', 'b69'].includes(process.env.AIVN_QA_B21_MODE); const APP = tg ? 'Telegram' : 'Messenger';
+  const tg = ['telegram', 'openchat', 'b69', 'b122'].includes(process.env.AIVN_QA_B21_MODE); const APP = tg ? 'Telegram' : 'Messenger';
   const html0 = `<!doctype html><meta charset="utf-8"><title>Nhóm Lớp K27 | Messenger</title>
 <style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:340px 1fr;height:100vh}#left{border-right:1px solid #ccc;padding:10px}#search{width:300px;font-size:22px;padding:6px}
 .it{padding:14px 8px;cursor:pointer}#right{display:flex;flex-direction:column}#hdr{font-weight:bold;padding:16px;border-bottom:1px solid #ccc}#msgs{flex:1;padding:16px}#comp{font-size:22px;margin:12px;padding:8px}</style>
@@ -2160,9 +2342,13 @@ document.getElementById('search').addEventListener('input', e => list(e.target.v
 document.getElementById('search').addEventListener('keydown', e => { if (e.key === 'Enter') { S.searches.push(e.target.value); list(e.target.value); } });
 list(''); open('Nhóm Lớp K27');
 </script>`;
-  const html = process.env.AIVN_QA_B21_MODE === 'k1' ? html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm trên Messenger</label><input id="search"') : !tg ? html0 : html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm</label><input id="search"').replace('<title>Nhóm Lớp K27 | Messenger</title>', '<title>Telegram - Trần Quỳnh Như</title>').replace(/Tìm kiếm trên Messenger/g, 'Tìm kiếm')
+  let html = ['k1', 'b64slow'].includes(process.env.AIVN_QA_B21_MODE) ? html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm trên Messenger</label><input id="search"') : !tg ? html0 : html0.replace('<input id="search"', '<label for="search" style="display:block;font-weight:bold;padding:4px 0">Tìm kiếm</label><input id="search"').replace('<title>Nhóm Lớp K27 | Messenger</title>', '<title>Telegram - Trần Quỳnh Như</title>').replace(/Tìm kiếm trên Messenger/g, 'Tìm kiếm')
     .replace("const chats = ['Nhóm Lớp K27', 'Trần Quỳnh Anh', 'Lê Quỳnh Anh']", "const chats = ['Trần Quỳnh Như', 'Nhóm Lớp K27', 'Trần Quỳnh Anh']")
     .replace("document.title = c + ' | Messenger'", "document.title = 'Telegram - ' + c").replace("list(''); open('Nhóm Lớp K27');", "list(''); open('Trần Quỳnh Như');");
+  // B122: như Zalo thật — mở chat xong ô tìm kiếm VẪN còn chữ; nút “Đóng” hiện khi ô có chữ, bấm (hoặc Esc) mới xoá
+  if (process.env.AIVN_QA_B21_MODE === 'b122') html = html.replace("document.getElementById('search').value = ''; list(''); document.getElementById('comp').focus(); }", "document.getElementById('comp').focus(); }\nfunction clr() { const q = document.getElementById('search'); q.value = ''; S.q = ''; list(''); document.getElementById('cl').hidden = true; S.cleared = (S.cleared || 0) + 1; }")
+    .replace('<div id="list"></div>', '<button id="cl" hidden onclick="clr()" style="font-size:20px;border:0;background:none">Đóng</button><div id="list"></div>').replace('#search{width:300px;', '#search{width:220px;')
+    .replace("document.getElementById('search').addEventListener('input', e => list(e.target.value));", "document.getElementById('search').addEventListener('input', e => { list(e.target.value); S.q = e.target.value; document.getElementById('cl').hidden = !e.target.value; }); document.getElementById('search').addEventListener('keydown', e => { if (e.key === 'Escape') clr(); });");
   const t = new BrowserWindow({ x: 40, y: 40, width: 1000, height: 600, show: true, title: APP, webPreferences: { contextIsolation: true } });
   await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html)); t.focus(); t.webContents.focus(); await sleep(700);
   const st = () => t.webContents.executeJavaScript('JSON.parse(JSON.stringify(S))');
@@ -2183,6 +2369,11 @@ list(''); open('Nhóm Lớp K27');
       await step('k1-send', { action: 'type_text', text: 'Mai 8h họp nhóm nhé', submit: true });
       out.final = await st(); throw null;
     }
+    if (process.env.AIVN_QA_B21_MODE === 'b122') { // B122 (máy thật beta.2.6): open_chat bấm kết quả xong phải xoá ô tìm kiếm và kiểm đã trống
+      const t0 = Date.now(); const r = await step('b122-open', { action: 'open_chat', window: 'Telegram' }); out.openMs = Date.now() - t0; out.searchCleared = r.r && r.r.searchCleared;
+      out.domQ = await t.webContents.executeJavaScript("document.getElementById('search').value"); out.closeHidden = await t.webContents.executeJavaScript("document.getElementById('cl').hidden");
+      out.final = await st(); throw null;
+    }
     if (process.env.AIVN_QA_B21_MODE === 'b69') { // B69/B70: KHÔNG có câu “không cần hỏi lại” → bước gửi phải hỏi; gửi xong không bao giờ gửi lại
       await step('b69-open', { action: 'open_chat', window: 'Telegram' });
       await step('b69-send', { action: 'type_text', text: 'Gửi mình file slide nhé', submit: true });
@@ -2190,6 +2381,344 @@ list(''); open('Nhóm Lớp K27');
       await step('b70-enter', { action: 'hotkey', keys: 'enter' });
       await step('b70-click-send', { action: 'click', element: 'Gửi' });
       out.final = await st(); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'b85' || process.env.AIVN_QA_B21_MODE === 'b90') { const B90 = process.env.AIVN_QA_B21_MODE === 'b90'; // B85 (máy thật, Zalo 3 cột): “Cloud của tôi” nay là “My Documents” (kết quả ghi “Tên cũ: Cloud của tôi”), bảng “Thông tin hội thoại” bên phải
+      const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:210px 1fr 190px;height:100vh}
+#l{border-right:1px solid #ccc;padding:8px}#q{width:180px;font-size:20px;padding:5px}.it{padding:8px 4px;cursor:pointer}.it small{display:block;font-size:17px;color:#333}
+#c{display:flex;flex-direction:column;border-right:1px solid #ccc}#h{font-weight:bold;padding:12px 16px;border-bottom:1px solid #ccc}#m{flex:1;padding:16px}#comp{font-size:20px;margin:10px;padding:8px}#comp::placeholder{color:#222}
+#r{padding:10px;text-align:center}#r b{display:block;margin-bottom:40px}</style>
+<div id=l><input id=q placeholder="Tìm kiếm"><div id=list></div></div><div id=c><div id=h></div><div id=m></div><input id=comp></div><div id=r><b>Thông tin hội thoại</b><div id=rn></div></div>
+<script>const chats=[{n:'Nhóm Lớp K27'},{n:'My Documents',old:'Cloud của tôi'},{n:'Trần Văn Bình'}];window.S={cur:'',sent:[]};
+const fold=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').toLowerCase();
+function list(f){const el=document.getElementById('list');el.innerHTML='';for(const c of chats.filter(c=>!f||fold(c.n+' '+(c.old||'')).includes(fold(f)))){const d=document.createElement('div');d.className='it';d.innerHTML='<span></span>'+(f&&c.old?'<small></small>':'');d.firstChild.textContent=c.n;if(f&&c.old)d.lastChild.textContent='Tên cũ: '+c.old;d.onclick=()=>open(c.n);el.appendChild(d);}}
+function open(n){S.cur=n;h.textContent=n;rn.textContent=n;comp.placeholder='Nhập @, tin nhắn tới '+n;m.innerHTML='';q.value='';list('');comp.focus();}
+comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sent.push({to:S.cur,text:comp.value});const b=document.createElement('div');b.textContent=comp.value;m.appendChild(b);comp.value='';}});
+q.addEventListener('input',e=>list(q.value));list('');open(${B90 ? "'My Documents'" : "'Nhóm Lớp K27'"});</script>`;
+      await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(zh)); t.setTitle('Zalo'); t.focus(); t.webContents.focus(); await sleep(700);
+      const q5 = 'Mở Zalo và gửi tin "AIVN test - thử beta.3" cho Cloud của tôi. Không cần hỏi lại.';
+      const c5 = { ...ctx, userQuery: q5, auto: require('./agent/autonomy').forTurn({ setting: false, query: q5 }) };
+      const step5 = async (name, a) => { qaAsks.length = 0; let r; try { r = await d.act(a, c5); } catch (e) { r = { error: String(e.message || e) }; } await sleep(600);
+        out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 2500), asks: qaAsks.slice(), state: await st() }); save(); return r; };
+      await d.look({ window: 'Zalo' }, c5);
+      if (B90) { // B90 (máy thật beta.2.1, agent-send1): “My Documents” ĐÃ mở sẵn → gõ thẳng phải được (không cần tìm); sang chat khác thì chặn và bảo TÌM
+        const q9 = 'gửi tin "AIVN test beta.2.2 - bỏ qua" cho Cloud của tôi trên Zalo'; c5.userQuery = q9; c5.auto = require('./agent/autonomy').forTurn({ setting: false, query: q9 + ' Không cần hỏi lại.' });
+        await step5('b90-open-send', { action: 'type_text', text: 'AIVN test beta.2.2 - bỏ qua', submit: true });
+        await t.webContents.executeJavaScript("open('Nhóm Lớp K27')"); await sleep(400); await d.look({ window: 'Zalo' }, c5);
+        const d2 = c5; d2.userQuery = 'gửi tin "lần hai" cho Cloud của tôi trên Zalo';
+        await step5('b90-wrong-open', { action: 'type_text', text: 'lần hai', submit: true });
+        // beta.2.2: bộ chạy QA thật (qa-runner.run) + desktop-agent thật; “lượt AIVN AGENT” giả chỉ gọi d.act (không mô hình) — thẻ gửi phải mang recipient + tiêu đề khung
+        const QAR = require('./qa-runner');
+        const qaTurn = (text) => async () => { const c = { ...ctx, userQuery: `gửi tin "${text}" cho Cloud của tôi trên Zalo`, auto: { on: false } }; await d.look({ window: 'Zalo' }, c);
+          const r = await d.act({ action: 'type_text', text, submit: true }, c); out.qaActs = (out.qaActs || []).concat([{ text, summary: r.summary || r.error || '', refused: !!r.refused, stop: !!r.stop, sendRefused: r.sendRefused || null, sent: !!(r.verify && r.verify.sent) }]);
+          return { outcome: r.verify && r.verify.sent ? 'done' : 'blocked', text: r.sendRefused ? 'từ chối' : 'Đã gửi.', steps: [{ id: text, name: 'screen_act', status: r.refused ? 'refused' : 'ok', verify: r.verify || null }] }; };
+        await t.webContents.executeJavaScript("open('My Documents')"); await sleep(400);
+        const qd = { version: 't', engine: { status: () => ({ loaded: true, id: 'fake', path: '/fake.gguf' }) }, listModels: () => [], desk: d, LOG };
+        out.qaApprove = await QAR.run({ task: 'gửi tin "AIVN self 1" cho Cloud của tôi trên Zalo', out: path.join(dir, 'qa-approve.json'), timeout: 60, approveSendTo: 'My Documents' }, { ...qd, runAgentTurn: qaTurn('AIVN self 1') });
+        out.qaDeny = await QAR.run({ task: 'gửi tin "AIVN self 2" cho Cloud của tôi trên Zalo', out: path.join(dir, 'qa-deny.json'), timeout: 60 }, { ...qd, runAgentTurn: qaTurn('AIVN self 2') });
+        out.final = await st(); throw null;
+      }
+      await step5('b85-before-open', { action: 'type_text', text: 'AIVN test - thử beta.3', submit: true });
+      await step5('b85-click-search', { action: 'click', element: 'Tìm kiếm' });
+      await step5('b85-type-search', { action: 'type_text', text: 'Cloud của tôi' });
+      await step5('b85-click-result', { action: 'click', element: 'Tên cũ: Cloud của tôi' });
+      await step5('b85-send', { action: 'type_text', text: 'AIVN test - thử beta.3', submit: true });
+      out.final = await st(); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'b94') { // B94/B95/B96 (máy thật beta.2.2, self-send bước 3–9): Zalo giả, “My Documents” mở sẵn, ô TÌM KIẾM đang chọn còn chữ “Cloud”, danh sách File bên phải
+      const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:300px 1fr 260px;height:100vh}
+#l{border-right:1px solid #ccc;padding:8px}#sr{display:flex;gap:6px}#q{width:200px;font-size:20px;padding:5px}#cl{font-size:20px}.it{padding:8px 4px;cursor:pointer}
+#c{display:flex;flex-direction:column;border-right:1px solid #ccc}#h{font-weight:bold;padding:12px 16px;border-bottom:1px solid #ccc}#m{flex:1;padding:16px}#comp{font-size:20px;margin:10px;padding:8px}#comp::placeholder{color:#222}
+#r{padding:10px}#r b{display:block;margin-bottom:30px;text-align:center}.f{padding:10px 4px;cursor:pointer;font-size:19px}</style>
+<div id=l><div id=sr><input id=q placeholder="Tìm kiếm"><button id=cl hidden>Đóng</button></div><div id=list></div></div><div id=c><div id=h></div><div id=m></div><input id=comp></div>
+<div id=r><b>Thông tin hội thoại</b><div id=rn></div><div style="margin-top:40px;font-weight:bold">File</div><div class=f>marketing cleaned data.xlsx</div><div class=f>bao cao tuan.pdf</div></div>
+<script>const chats=[{n:'Nhóm Lớp K27'},{n:'My Documents',old:'Cloud của tôi'},{n:'Trần Văn Bình'}];window.S={cur:'',sent:[],opened:[]};window.TRAP=false;
+const fold=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').toLowerCase();
+function list(f){const el=document.getElementById('list');el.innerHTML='';for(const c of chats.filter(c=>!f||fold(c.n+' '+(c.old||'')).includes(fold(f)))){const d=document.createElement('div');d.className='it';d.textContent=c.n;d.onclick=()=>open(c.n);el.appendChild(d);}}
+function open(n){S.cur=n;h.textContent=n;rn.textContent=n;comp.placeholder='Nhập @, tin nhắn tới '+n;m.innerHTML='';q.value='';cl.hidden=true;list('');comp.focus();}
+function leftover(){q.value='Cloud';cl.hidden=false;comp.value='';q.focus();}
+comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sent.push({to:S.cur,text:comp.value});const b=document.createElement('div');b.textContent=comp.value;m.appendChild(b);comp.value='';}});
+comp.addEventListener('focus',()=>{if(TRAP)setTimeout(()=>q.focus(),0);});
+q.addEventListener('input',()=>{cl.hidden=!q.value;});cl.onclick=()=>{q.value='';cl.hidden=true;};
+for(const f of document.querySelectorAll('.f'))f.onclick=()=>S.opened.push(f.textContent);
+list('');open('My Documents');leftover();</script>`;
+      await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(zh)); t.setTitle('Zalo'); t.focus(); t.webContents.focus(); await sleep(700);
+      const st4 = () => t.webContents.executeJavaScript("({ ...JSON.parse(JSON.stringify(S)), comp: comp.value, q: q.value, focus: document.activeElement ? document.activeElement.id : '' })");
+      const MSG = 'AIVN test beta.2.3 - bỏ qua'; const q9 = `soạn sẵn tin nhắn cho Cloud của tôi trên Zalo: "${MSG}", chưa gửi`; // B101: việc GỬI nay tự bấm Enter → bài B94 (chữ vào đúng ô) dùng lệnh chỉ soạn; gửi thật thử ở chế độ b101
+      const c9 = { ...ctx, userQuery: q9, auto: require('./agent/autonomy').forTurn({ setting: false, query: q9 + ' Không cần hỏi lại.' }) };
+      const step9 = async (name, a, c = c9) => { qaAsks.length = 0; let r; try { r = await d.act(a, c); } catch (e) { r = { error: String(e.message || e) }; } await sleep(600);
+        out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 3000), asks: qaAsks.slice(), state: await st4() }); save(); return r; };
+      out.start = await st4();
+      await d.look({ window: 'Zalo' }, c9);
+      // bước 3 (máy thật): type_text không bấm ô soạn trước → nay AIVN tự xoá “Cloud” ở ô tìm kiếm, bấm ô soạn rồi mới gõ
+      await step9('b94-type-body', { action: 'type_text', text: MSG });
+      // bước 6: bấm tệp “marketing cleaned data.xlsx” ở danh sách File → chặn, không mở tệp
+      await d.look({ window: 'Zalo' }, c9);
+      await step9('b96-click-file', { action: 'click', element: 'marketing cleaned data.xlsx' });
+      // bước 8–9: con trỏ lại ở ô tìm kiếm còn chữ; bấm ô soạn rồi gõ → chữ vào ô soạn
+      await t.webContents.executeJavaScript('leftover()'); await sleep(300); await d.look({ window: 'Zalo' }, c9);
+      await step9('b94-click-composer', { action: 'click', element: 'Nhập @, tin nhắn tới My Documents' });
+      await step9('b94-type-after-click', { action: 'type_text', text: MSG });
+      // ô soạn “bẫy”: bấm vào thì con trỏ nhảy về ô tìm kiếm → chữ vào NHẦM ô: phải phát hiện, xoá, báo
+      await t.webContents.executeJavaScript("TRAP=true;leftover()"); await sleep(300); await d.look({ window: 'Zalo' }, c9);
+      { const q0 = c9.userQuery; c9.userQuery = 'soạn sẵn tin nhắn cho Cloud của tôi trên Zalo: "AIVN lần hai - bỏ qua", chưa gửi'; await step9('b94-wrong-field', { action: 'type_text', text: 'AIVN lần hai - bỏ qua' }); c9.userQuery = q0; } // B108: chữ gõ phải lấy từ yêu cầu; cùng ctx = cùng phiên
+      await t.webContents.executeJavaScript("TRAP=false;comp.value='';q.value='';cl.hidden=true;"); await sleep(300);
+      // việc CÓ nhắc tới tệp: bấm tệp vẫn phải hỏi (kể cả “không cần hỏi lại”)
+      const qf = 'mở file marketing cleaned data.xlsx trong cuộc trò chuyện Cloud của tôi trên Zalo rồi gửi tin "đã xem" cho Cloud của tôi. Không cần hỏi lại.';
+      await d.look({ window: 'Zalo' }, c9);
+      await step9('b96-file-task', { action: 'click', element: 'marketing cleaned data.xlsx' }, { ...ctx, userQuery: qf, auto: require('./agent/autonomy').forTurn({ setting: false, query: qf }) });
+      out.final = await st4(); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'b97') { // B97 (máy thật beta.2.3): tiêu đề Zalo đọc thành ["Q My Documents","Lưu và đồng bộ…","2158"] hoặc chỉ ["2158"] — thẻ GỬI phải mang tiêu đề đã làm sạch + kết quả cổng người nhận
+      const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:300px 1fr 260px;height:100vh}
+#l{border-right:1px solid #ccc;padding:8px}#q{width:200px;font-size:20px;padding:5px}.it{padding:8px 4px}
+#c{display:flex;flex-direction:column;border-right:1px solid #ccc}#h{padding:8px 16px;border-bottom:1px solid #ccc;display:flex;justify-content:space-between;height:70px}#hn{font-weight:bold}#hs{font-size:16px}#m{flex:1;padding:16px}#comp{font-size:20px;margin:10px;padding:8px}#comp::placeholder{color:#222}
+#r{padding:10px}#r b{display:block;text-align:center}</style>
+<div id=l><input id=q placeholder="Tìm kiếm"><div class=it>Nhóm Lớp K27</div><div class=it>My Documents</div><div class=it>Trần Văn Bình</div></div>
+<div id=c><div id=h><div><div id=hn>Q My Documents</div><div id=hs>Lưu và đồng bộ dữ liệu giữa các thiết bị</div></div><div id=ht>21:58</div></div><div id=m></div><input id=comp placeholder="Nhập @, tin nhắn tới My Documents"></div>
+<div id=r><b>Thông tin hội thoại</b></div>
+<script>window.S={sent:[]};comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sent.push({to:'My Documents',text:comp.value});const b=document.createElement('div');b.textContent=comp.value;m.appendChild(b);comp.value='';}});comp.focus();</script>`;
+      await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(zh)); t.setTitle('Zalo'); t.focus(); t.webContents.focus(); await sleep(700);
+      const st7 = () => t.webContents.executeJavaScript("({ sent: S.sent.slice(), comp: comp.value, focus: document.activeElement ? document.activeElement.id : '' })");
+      const step7 = async (name, a, c) => { qaAsks.length = 0; let r; try { r = await d.act(a, c); } catch (e) { r = { error: String(e.message || e) }; } await sleep(600);
+        out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 1500), asks: qaAsks.slice(), state: await st7() }); save(); return r; };
+      const mk = (q) => ({ ...ctx, userQuery: q, auto: require('./agent/autonomy').forTurn({ setting: false, query: q }) }); // như chế độ QA: bước GỬI luôn qua thẻ
+      // (1) như lượt QA “e”: tiêu đề có “Q ” + dòng phụ + giờ, gõ nội dung kèm Enter trong MỘT bước → thẻ GỬI
+      const qa1 = 'gửi tin "AIVN b97 một" cho Cloud của tôi trên Zalo'; const c1 = mk(qa1);
+      await d.look({ window: 'Zalo' }, c1);
+      await step7('b97-noisy-header', { action: 'type_text', text: 'AIVN b97 một', submit: true }, c1);
+      // (2) như lượt QA “e retry”/“b”: tiêu đề chỉ còn giờ “21:58”; gõ nội dung (chữ gợi ý ô soạn biến mất) rồi Enter riêng → thẻ GỬI không còn chữ gợi ý
+      await t.webContents.executeJavaScript("hn.textContent='';hs.textContent='';comp.value='';comp.focus()"); await sleep(300);
+      const qa2 = 'gửi tin "AIVN b97 hai" cho Cloud của tôi trên Zalo'; const c2 = mk(qa2);
+      await d.look({ window: 'Zalo' }, c2);
+      await step7('b97-time-only-type', { action: 'type_text', text: 'AIVN b97 hai' }, c2);
+      await d.look({ window: 'Zalo' }, c2);
+      await step7('b97-time-only-enter', { action: 'hotkey', keys: 'enter' }, c2);
+      out.final = await st7(); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'b101') { // B101–B104 (máy thật beta.2.4): gõ đúng ô soạn rồi mô hình KHÔNG bấm Enter → AIVN tự gửi qua thẻ, kiểm bong bóng + ô soạn trống, xong việc;
+      // giữ chốt người nhận khi chữ gợi ý ô soạn biến mất; xoá chữ đã gõ khi gõ lại / khi thất bại
+      const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:300px 1fr 260px;height:100vh}
+#l{border-right:1px solid #ccc;padding:8px}#q{width:200px;font-size:20px;padding:5px}.it{padding:8px 4px}
+#c{display:flex;flex-direction:column;border-right:1px solid #ccc}#h{padding:8px 16px;border-bottom:1px solid #ccc;display:flex;justify-content:space-between;height:70px}#hn{font-weight:bold}#hs{font-size:16px}#m{flex:1;padding:16px}#m div{margin:6px 0;padding:4px 10px;background:#dbeafe;width:fit-content}#comp{font-size:20px;margin:10px;padding:8px}#comp::placeholder{color:#222}
+#r{padding:10px}#r b{display:block;text-align:center}</style>
+<div id=l><input id=q placeholder="Tìm kiếm"><div class=it>Nhóm Lớp K27</div><div class=it>My Documents</div><div class=it>Trần Văn Bình</div></div>
+<div id=c><div id=h><div><div id=hn>Q My Documents</div><div id=hs>Lưu và đồng bộ dữ liệu giữa các thiết bị</div></div><div id=ht>21:58</div></div><div id=m><div>bỏ dòng zalo</div></div><input id=comp placeholder="Nhập @, tin nhắn tới My Documents"></div>
+<div id=r><b>Thông tin hội thoại</b></div>
+<script>window.S={sent:[]};window.TRAP=false;comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sent.push({to:'My Documents',text:comp.value});const b=document.createElement('div');b.textContent=comp.value;m.appendChild(b);comp.value='';}});
+comp.addEventListener('focus',()=>{if(TRAP)setTimeout(()=>q.focus(),0)});q.addEventListener('keydown',e=>{if(e.key==='Enter')S.searchEnter=(S.searchEnter||0)+1});comp.focus();</script>`;
+      await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(zh)); t.setTitle('Zalo'); t.focus(); t.webContents.focus(); await sleep(700);
+      const st1 = () => t.webContents.executeJavaScript("({ sent: S.sent.slice(), comp: comp.value, q: q.value, focus: document.activeElement ? document.activeElement.id : '', searchEnter: S.searchEnter || 0 })");
+      const reset = async () => { await t.webContents.executeJavaScript("TRAP=false;S.sent=[];comp.value='';q.value='';m.innerHTML='<div>bỏ dòng zalo</div>';comp.focus();1"); t.focus(); t.webContents.focus(); await sleep(300); };
+      const L101 = []; LOG.tap((line, scope) => { if (/B9[04]|B10[1-4]|Chốt người nhận|Chặn gõ|GỬI|kiểm chứng/i.test(String(line))) L101.push(`[${scope}] ${String(line).slice(0, 300)}`); }); const logAt = () => L101.length;
+      const stepB = async (name, fn) => { qaAsks.length = 0; let r; try { r = await fn(); } catch (e) { r = { error: String(e.message || e) }; } await sleep(600);
+        out.steps.push({ name, summary: r && (r.summary || r.error) || '', blocked: !!(r && (r.error || r.refused)), sentDone: r && r.sentDone || null, cleaned: r && r.cleared != null ? r : null, forModel: String((r && r.forModel) || '').slice(0, 1500), asks: qaAsks.slice(), state: await st1() }); save(); return r; };
+      const mk = (q) => ({ ...ctx, userQuery: q, auto: require('./agent/autonomy').forTurn({ setting: false, query: q }) });
+      // (1) LUỒNG ĐẦY ĐỦ qua vòng lặp AIVN AGENT thật, mô hình KỊCH BẢN: nhìn → gõ nội dung (KHÔNG submit, như mô hình thật trên máy QA) → (mô hình không được gọi tiếp)
+      { const AG = require('./agent/agent'); const CT = require('./agent/computer-tools'); const { createMemoryStore } = require('./agent/memory');
+        const q1 = 'gửi tin "AIVN b101 một" cho Cloud của tôi trên Zalo'; const script = [{ name: 'screen_look', arguments: { window: 'Zalo' } }, { name: 'screen_act', arguments: { action: 'type_text', text: 'AIVN b101 một' } },
+          { name: 'screen_act', arguments: { action: 'click', element: 'bỏ dòng zalo' } }, { name: 'screen_act', arguments: { action: 'click', element: 'bỏ dòng zalo' } }];
+        let mc = 0; const engine = { status: () => ({ loaded: true, contextSize: 8192, vision: true }), chatStep: async () => { const c = script[mc++]; return c ? { text: '', toolCalls: [{ id: 'k' + mc, ...c }], finishReason: 'tool_calls', usage: {} } : { text: 'Xong.', toolCalls: [], finishReason: 'stop', usage: {} }; } };
+        const names = ['screen_look', 'screen_act']; const defs = Object.fromEntries(names.map(n => [n, CT.DEFS[n]])); let cx = null;
+        const computer = { names: () => names, defs, has: (n) => n in defs, CompError: CT.CompError, cleanupDraft: (o) => d.cleanupDraft(o),
+          exec: async (n, a, c) => { cx = cx || { ...ctx, ...(c || {}), userQuery: q1, auto: (c && c.auto) || mk(q1).auto }; return n === 'screen_look' ? d.look(a, cx) : d.act(a, cx); } };
+        const r0 = fs.mkdtempSync(path.join(require('os').tmpdir(), 'aivn-b101-'));
+        const ag = AG.createAgent({ engine, computer, gateOk: () => true, getSettings: () => ({ agentFolders: [], agentMemory: false, uiLang: 'vi', agentScreen: true }), memory: createMemoryStore(path.join(r0, 'm.json')), scheduler: {}, trash: async () => {}, extractFile: async () => ({}), embedForMemory: async () => ({}), log: (x) => LOG.log('app', x) });
+        qaAsks.length = 0; const l0 = logAt();
+        let res; try { res = await ag.run({ messages: [{ role: 'user', content: q1 }], confirm: async () => false, qa: true }); } catch (e) { res = { error: String(e.message || e) }; }
+        out.full = { outcome: res.outcome || null, text: res.text || res.error || '', modelCalls: mc, steps: (res.steps || []).map(x => ({ name: x.name, args: x.args, status: x.status, summary: x.summary, sent: !!(x.verify && x.verify.sent) })), asks: qaAsks.slice(), state: await st1(), log: L101.slice(l0) };
+        try { d.end('qa'); } catch {} save(); }
+      // (2) GIỮ CHỐT (B102) + xoá chữ cũ khi gõ lại (B104): soạn sẵn (không gửi) → bấm bong bóng tin (bỏ chốt) → chữ gợi ý ô soạn đã mất → gửi: phải chốt lại theo tiêu đề, xoá chữ cũ, gửi MỘT lần đúng chữ
+      await reset();
+      const qd = 'soạn sẵn tin nhắn cho Cloud của tôi trên Zalo: "AIVN b101 hai", chưa gửi'; const qs = 'gửi tin "AIVN b101 hai" cho Cloud của tôi trên Zalo';
+      const c2 = mk(qd);
+      await d.look({ window: 'Zalo' }, c2);
+      await stepB('b102-draft-type', () => d.act({ action: 'type_text', text: 'AIVN b101 hai' }, c2));
+      await stepB('b102-click-bubble', () => d.act({ action: 'click', element: 'bỏ dòng zalo' }, c2));
+      c2.userQuery = qs; c2.auto = require('./agent/autonomy').forTurn({ setting: false, query: qs });
+      await d.look({ window: 'Zalo' }, c2);
+      await stepB('b102-send-after-lock-lost', () => d.act({ action: 'type_text', text: 'AIVN b101 hai' }, c2));
+      try { d.end('qa'); } catch {}
+      // (3) chữ vào NHẦM ô (bấm ô soạn thì con trỏ nhảy về ô tìm kiếm): KHÔNG bấm Enter, xoá chữ gõ nhầm, không gửi
+      await reset(); await t.webContents.executeJavaScript('TRAP=true;q.focus();1');
+      const c3 = mk('gửi tin "AIVN b101 ba" cho Cloud của tôi trên Zalo');
+      await d.look({ window: 'Zalo' }, c3);
+      await stepB('b101-wrong-field', () => d.act({ action: 'click', element: 'Nhập @, tin nhắn tới My Documents' }, c3).then(() => d.act({ action: 'type_text', text: 'AIVN b101 ba' }, c3)));
+      try { d.end('qa'); } catch {}
+      // (4) B104: soạn sẵn rồi việc thất bại → dọn chữ đã gõ (clear) / người dùng dừng → chỉ báo còn đó (không thao tác)
+      await reset();
+      const c4 = mk('soạn sẵn tin nhắn cho Cloud của tôi trên Zalo: "AIVN b101 bốn", chưa gửi');
+      await d.look({ window: 'Zalo' }, c4);
+      await stepB('b104-draft-type', () => d.act({ action: 'type_text', text: 'AIVN b101 bốn' }, c4));
+      await stepB('b104-keep', () => d.cleanupDraft({ clear: true })); // việc CHỈ SOẠN: bản nháp là kết quả → giữ nguyên, không xoá
+      c4.userQuery = 'gửi tin "AIVN b101 bốn" cho Cloud của tôi trên Zalo'; // cùng phiên, nay là việc GỬI chưa gửi được (vd. bị từ chối/hết giờ) → dọn chữ đã gõ
+      await stepB('b104-cleanup', () => d.cleanupDraft({ clear: true }));
+      c4.userQuery = 'soạn sẵn tin nhắn cho Cloud của tôi trên Zalo: "AIVN b101 năm", chưa gửi'; // B108: chữ gõ phải có trong yêu cầu
+      await stepB('b104-draft-type2', () => d.act({ action: 'type_text', text: 'AIVN b101 năm' }, c4));
+      await stepB('b104-stopped', () => d.cleanupDraft({ clear: false }));
+      out.log101 = L101.slice(); out.final = await st1(); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'b108') { // B108 (máy thật beta.2.5, AN TOÀN): “mở chat X” không có nội dung → không gõ “@tên”, không gửi tin tự bịa, không thẻ gửi;
+      // B111: mở chat chỉ xong khi kiểm tiêu đề; B101/B97 giữ nguyên: gửi tin có nội dung trong yêu cầu vẫn tự gửi + kiểm chứng
+      const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:300px 1fr 260px;height:100vh}
+#l{border-right:1px solid #ccc;padding:8px}#q{width:200px;font-size:20px;padding:5px}.it{padding:8px 4px}
+#c{display:flex;flex-direction:column;border-right:1px solid #ccc}#h{padding:8px 16px;border-bottom:1px solid #ccc;display:flex;justify-content:space-between;height:70px}#hn{font-weight:bold}#hs{font-size:16px}#m{flex:1;padding:16px}#m div{margin:6px 0;padding:4px 10px;background:#dbeafe;width:fit-content}#comp{font-size:20px;margin:10px;padding:8px}#comp::placeholder{color:#222}
+#r{padding:10px}#r b{display:block;text-align:center}</style>
+<div id=l><input id=q placeholder="Tìm kiếm"><div class=it>Nhóm Lớp K27</div><div class=it>My Documents</div><div class=it>Trần Văn Bình</div></div>
+<div id=c><div id=h><div><div id=hn>Q My Documents</div><div id=hs>Lưu và đồng bộ dữ liệu giữa các thiết bị</div></div><div id=ht>21:58</div></div><div id=m><div>bỏ dòng zalo</div></div><input id=comp placeholder="Nhập @, tin nhắn tới My Documents"></div>
+<div id=r><b>Thông tin hội thoại</b></div>
+<script>window.S={sent:[]};window.TRAP=false;comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sent.push({to:'My Documents',text:comp.value});const b=document.createElement('div');b.textContent=comp.value;m.appendChild(b);comp.value='';}});
+comp.addEventListener('focus',()=>{if(TRAP)setTimeout(()=>q.focus(),0)});q.addEventListener('keydown',e=>{if(e.key==='Enter')S.searchEnter=(S.searchEnter||0)+1});comp.focus();</script>`;
+      await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(zh)); t.setTitle('Zalo'); t.focus(); t.webContents.focus(); await sleep(700);
+      const st1 = () => t.webContents.executeJavaScript("({ sent: S.sent.slice(), comp: comp.value, q: q.value, focus: document.activeElement ? document.activeElement.id : '' })");
+      const reset = async () => { await t.webContents.executeJavaScript("S.sent=[];comp.value='';q.value='';m.innerHTML='<div>bỏ dòng zalo</div>';comp.focus();1"); t.focus(); t.webContents.focus(); await sleep(300); };
+      const L = []; LOG.tap((line, scope) => { if (/B10[1-9]|B11\d|Chặn|GỬI|kiểm chứng|open_chat/i.test(String(line))) L.push(`[${scope}] ${String(line).slice(0, 300)}`); });
+      const mk = (q) => ({ ...ctx, userQuery: q, auto: require('./agent/autonomy').forTurn({ setting: false, query: q }) });
+      const AG = require('./agent/agent'); const CT = require('./agent/computer-tools'); const { createMemoryStore } = require('./agent/memory');
+      const runFull = async (q, script) => { let mc = 0; const engine = { status: () => ({ loaded: true, contextSize: 8192, vision: true }), chatStep: async () => { const c = script[mc++]; return c ? { text: '', toolCalls: [{ id: 'k' + mc, ...c }], finishReason: 'tool_calls', usage: {} } : { text: 'Đã mở cuộc trò chuyện.', toolCalls: [], finishReason: 'stop', usage: {} }; } };
+        const names = ['screen_look', 'screen_act']; const defs = Object.fromEntries(names.map(n => [n, CT.DEFS[n]])); let cx = null;
+        const computer = { names: () => names, defs, has: (n) => n in defs, CompError: CT.CompError, cleanupDraft: (o) => d.cleanupDraft(o),
+          exec: async (n, a, c) => { cx = cx || { ...ctx, ...(c || {}), userQuery: q, auto: (c && c.auto) || mk(q).auto }; return n === 'screen_look' ? d.look(a, cx) : d.act(a, cx); } };
+        const r0 = fs.mkdtempSync(path.join(require('os').tmpdir(), 'aivn-b108-'));
+        const ag = AG.createAgent({ engine, computer, gateOk: () => true, getSettings: () => ({ agentFolders: [], agentMemory: false, uiLang: 'vi', agentScreen: true }), memory: createMemoryStore(path.join(r0, 'm.json')), scheduler: {}, trash: async () => {}, extractFile: async () => ({}), embedForMemory: async () => ({}), log: (x) => LOG.log('app', x) });
+        qaAsks.length = 0; const l0 = L.length; let res; try { res = await ag.run({ messages: [{ role: 'user', content: q }], confirm: async () => false, qa: true }); } catch (e) { res = { error: String(e.message || e) }; }
+        const r = { outcome: res.outcome || null, text: res.text || res.error || '', modelCalls: mc, steps: (res.steps || []).map(x => ({ name: x.name, args: x.args, status: x.status, summary: x.summary, sent: !!(x.verify && x.verify.sent), draftIn: x.draftIn || null })), asks: qaAsks.slice(), state: await st1(), log: L.slice(l0) };
+        try { d.end('qa'); } catch {} return r; };
+      // (1) “mở chat Cloud của tôi” (đang mở sẵn My Documents = tên cũ Cloud của tôi): open_chat → kiểm tiêu đề; mô hình định gõ “@My Documents” rồi GỬI “Chào bạn!” → đều bị chặn, không thẻ
+      out.openOnly = await runFull('mở Zalo và mở chat Cloud của tôi', [{ name: 'screen_act', arguments: { action: 'open_chat', window: 'Zalo' } }, { name: 'screen_act', arguments: { action: 'type_text', text: '@My Documents' } }, { name: 'screen_act', arguments: { action: 'type_text', text: 'Chào bạn!', submit: true } }]); save();
+      // (2) không bước open_chat: mô hình chỉ gõ bậy → B111 không báo xong
+      await reset(); out.noVerify = await runFull('mở Zalo rồi mở cuộc trò chuyện Cloud của tôi, không gửi gì', [{ name: 'screen_act', arguments: { action: 'type_text', text: 'Chào bạn!', submit: true } }]); save();
+      // (3) B101/B97 giữ nguyên: gửi tin có nội dung trong yêu cầu → tự gửi qua thẻ (QA tự cho phép bằng AIVN_DESK_AUTO? không: thẻ bị từ chối ở đây → không gửi, nhưng thẻ PHẢI hiện)
+      await reset(); out.realSend = await runFull('gửi tin "AIVN b108 thật" cho Cloud của tôi trên Zalo', [{ name: 'screen_look', arguments: { window: 'Zalo' } }, { name: 'screen_act', arguments: { action: 'type_text', text: 'AIVN b108 thật' } }]); save();
+      // (4) gửi tin nhưng mô hình gõ chữ KHÁC yêu cầu → chặn trước khi gõ, không thẻ
+      await reset(); out.paraphrase = await runFull('gửi tin "AIVN b108 bốn" cho Cloud của tôi trên Zalo', [{ name: 'screen_look', arguments: { window: 'Zalo' } }, { name: 'screen_act', arguments: { action: 'type_text', text: 'Chào bạn, mình gửi bạn tin nhắn nhé', submit: true } }]); save();
+      out.final = await st1(); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'ensure') { // ensure_app: Zalo giả bị cửa sổ khác che → đưa lên + chờ sẵn sàng; open_chat dùng lại; cửa sổ ẩn → lỗi rõ, không treo
+      const zh = `<!doctype html><meta charset=utf-8><title>Zalo</title><style>body{margin:0;font:22px sans-serif;display:grid;grid-template-columns:240px 1fr;height:100vh}#l{border-right:1px solid #ccc;padding:8px}#q{width:200px;font-size:20px;padding:5px}.it{padding:10px 4px;cursor:pointer}#c{display:flex;flex-direction:column}#h{font-weight:bold;padding:12px 16px;border-bottom:1px solid #ccc}#m{flex:1;padding:16px}#comp{font-size:20px;margin:10px;padding:8px}</style>
+<div id=l><input id=q placeholder="Tìm kiếm" style="width:120px"><button id=cl hidden style="border:0;background:none;font-size:20px">Đóng</button><div id=list></div></div><div id=c><div id=h></div><div id=m></div><input id=comp placeholder="Nhập tin nhắn"></div>
+<script>const chats=['Nhóm Lớp K27','My Documents','Trần Văn Bình'];window.S={cur:'',sent:[]};const fold=x=>x.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').toLowerCase();
+function list(f){const el=document.getElementById('list');el.innerHTML='';for(const c of chats.filter(c=>!f||fold(c).includes(fold(f)))){const d=document.createElement('div');d.className='it';d.textContent=c;d.onclick=()=>open(c);el.appendChild(d);}}
+function open(n){S.cur=n;h.textContent=n;document.title='Zalo';m.innerHTML='';comp.focus();} /* B122: như Zalo thật — mở chat xong ô tìm kiếm VẪN còn chữ + nút Đóng */
+function clr(){q.value='';S.q='';list('');cl.hidden=true;}cl.onclick=clr;q.addEventListener('keydown',e=>{if(e.key==='Escape')clr();});
+comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sent.push({to:S.cur,text:comp.value});comp.value='';}});q.addEventListener('input',()=>{list(q.value);S.q=q.value;cl.hidden=!q.value;});document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.key.toLowerCase()==='f'){e.preventDefault();q.focus();}});list('');open('Nhóm Lớp K27');</script>`;
+      await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(zh)); t.setTitle('Zalo'); await sleep(500);
+      const cover = new BrowserWindow({ x: 20, y: 20, width: 1100, height: 700, show: true, title: 'Ghi chú - che Zalo', webPreferences: { contextIsolation: true } });
+      await cover.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<title>Ghi chú - che Zalo</title><body style="font:30px sans-serif">Cửa sổ khác đang che Zalo</body>')); cover.focus(); await sleep(600);
+      const qe = 'Nhắn Zalo cho My Documents: "AIVN ensure test". Không cần hỏi lại.';
+      const ce = { ...ctx, userQuery: qe, auto: require('./agent/autonomy').forTurn({ setting: false, query: qe }) };
+      const stepE = async (name, fn) => { let r; const t0 = Date.now(); try { r = await fn(); } catch (e) { r = { error: String(e.message || e) }; } await sleep(400);
+        out.steps.push({ name, summary: r.summary || r.error || '', ok: !r.error, code: r.code || null, how: r.how || null, steps: r.steps || null, ms: Date.now() - t0, forModel: String(r.forModel || '').slice(0, 1500), state: await st() }); save(); return r; };
+      await stepE('ensure-covered', () => d.ensureApp({ app: 'Zalo', timeout_ms: 20000 }, ce));
+      t.minimize(); cover.focus(); await sleep(800); out.minimizedBefore = t.isMinimized();
+      await stepE('ensure-minimized', () => d.ensureApp({ app: 'Zalo', timeout_ms: 20000 }, { ...ce, userQuery: qe + '  ' }));
+      out.minimizedAfter = t.isMinimized();
+      // B124: Zalo ĐÃ ở trước, hiện, không thu nhỏ → ensure_app phải xong < ~2 giây (không OCR/không khởi động)
+      t.focus(); await sleep(600); await stepE('ensure-already', () => d.ensureApp({ app: 'Zalo', timeout_ms: 20000 }, { ...ce, userQuery: qe + '    ' }));
+      cover.focus(); await sleep(600);
+      await stepE('ensure-openchat', () => d.act({ action: 'open_chat', window: 'Zalo' }, { ...ce, userQuery: qe + '   ' }));
+      await stepE('ensure-send', () => d.act({ action: 'type_text', text: 'AIVN ensure test', submit: true }, { ...ce, userQuery: qe + '   ' }));
+      t.hide(); await sleep(500);
+      await stepE('ensure-hidden', () => d.ensureApp({ app: 'Zalo', timeout_ms: 8000 }, { ...ce, userQuery: qe + ' ' }));
+      try { cover.destroy(); } catch {}
+      out.final = await st(); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'ab') { // kịch bản A/B trên trình duyệt GIẢ (renderer/bench-web.html, không mạng) — công cụ thật của desktop-agent, không mô hình
+      const AG = require('./agent/agent'); const rd = (w) => w.webContents.executeJavaScript('benchRead()');
+      const load = async (w, a) => { await w.loadFile(path.join(__dirname, 'renderer', 'bench-web.html'), { query: { app: a } }); w.focus(); w.webContents.focus(); await sleep(700); };
+      const stepX = async (name, ctxX, fn, w) => { qaAsks.length = 0; let r; const t0 = Date.now(); try { r = await fn(); } catch (e) { r = { error: String(e.message || e) }; } await sleep(600);
+        out.steps.push({ name, summary: r.summary || r.error || '', ok: !r.error, code: r.code || null, ask: r.ask || null, stop: !!r.stop, ms: Date.now() - t0, forModel: String(r.forModel || '').slice(0, 2500), asks: qaAsks.slice(), state: await rd(w) }); save(); return r; };
+      // A) Chrome: thanh địa chỉ → tìm → mở kết quả đầu → đọc giá + URL THẬT trên thanh địa chỉ
+      await load(t, 'chrome');
+      const qa = "Trên Chrome đang mở: tìm 'giá vàng SJC hôm nay', mở kết quả đầu tiên và cho mình biết giá mua vào, kèm đường dẫn nguồn.";
+      const ca = { ...ctx, userQuery: qa, auto: require('./agent/autonomy').forTurn({ setting: false, query: qa }) }; const msgs = [];
+      const lookA = async (name, a) => { const r = await stepX(name, ca, () => d.look(a, ca), t); msgs.push({ role: 'tool', content: String(r.forModel || '') }); return r; };
+      let lastFM = ''; const idOf = (re) => { for (const line of lastFM.split('\n')) { const m = /^\[(e\d+)\][^"]*"([^"]*)"/.exec(line); if (m && re.test(m[2])) return m[1]; } return null; };
+      const keep = (r) => { if (r && r.forModel) lastFM = String(r.forModel); return r; };
+      keep(await lookA('a-look', { window: 'Google Chrome' }));
+      keep(await stepX('a-ctrl-l', ca, () => d.act({ action: 'hotkey', keys: 'ctrl+l' }, ca), t));
+      { const r = keep(await stepX('a-type-query', ca, () => d.act({ action: 'type_text', text: 'giá vàng SJC hôm nay', submit: true }, ca), t)); msgs.push({ role: 'tool', content: String(r.forModel || '') }); }
+      keep(await lookA('a-look-results', {}));
+      out.firstId = idOf(/Giá vàng SJC hôm nay - Công ty/i);
+      { const r = keep(await stepX('a-click-first', ca, () => d.act({ action: 'click', element: out.firstId || 'Giá vàng SJC hôm nay - Công ty' }, ca), t)); msgs.push({ role: 'tool', content: String(r.forModel || '') }); }
+      keep(await lookA('a-look-page', {}));
+      // B118/B119: đọc nguyên văn thanh địa chỉ + chữ trang qua bộ nhớ tạm; bộ nhớ tạm của người dùng được trả lại
+      { const { clipboard } = require('electron'); clipboard.writeText('AIVN-clip-giu-nguyen'); out.pageRead = await d.readBrowserPage({ page: true }).catch(e => ({ error: e.message })); out.clipAfter = await Promise.resolve(clipboard.readText());
+        out.answerAgrounded = AG.withSource('Giá mua vào 118.500. Xem [https://sjc.com.vn/gia-vang-online](https://sjc.com.vn/gia-vangonline)', qa, [], { sources: out.pageRead && out.pageRead.url ? [{ url: out.pageRead.url, kind: 'address' }] : [] }); }
+      out.answerA = AG.withSource('Giá vàng SJC mua vào hôm nay là 118.500 nghìn đồng/lượng.', qa, msgs);
+      out.answerAwrong = AG.withSource('Giá mua vào 118.500, nguồn: https://giavang.example.vn/sjc', qa, msgs);
+      // B114: Chrome đang ở YouTube, con trỏ ở Ô TÌM KIẾM CỦA TRANG → AIVN mở thẻ mới (Ctrl+T), tìm trên thanh địa chỉ; ô YouTube không bị gõ
+      await load(t, 'youtube');
+      const qy = 'mở Chrome tìm "thời tiết TP.HCM hôm nay", mở kết quả đầu tiên rồi báo cho mình nhiệt độ và đường dẫn trang';
+      const cy = { ...ctx, userQuery: qy, auto: require('./agent/autonomy').forTurn({ setting: false, query: qy }) };
+      await stepX('y-look', cy, () => d.look({ window: 'Google Chrome' }, cy), t);
+      await stepX('y-click-page-box', cy, () => d.act({ action: 'click', element: 'Tìm kiếm' }, cy), t); // B120: không bấm ô của trang → Ctrl+T
+      await stepX('y-type-page-box', cy, () => d.act({ action: 'type_text', text: 'thời tiết TP.HCM hôm nay' }, cy), t);
+      // B') Google Docs đang ở màn hình đăng nhập → screen_look DỪNG và hỏi, không gõ gì
+      await load(t, 'docs_login');
+      const qb = "Trong Google Docs đang mở, mở tài liệu 'QA nháp' rồi thay tất cả 'ngày mai' bằng 'thứ Hai', không cần hỏi lại.";
+      const cb = { ...ctx, userQuery: qb, auto: require('./agent/autonomy').forTurn({ setting: false, query: qb }) };
+      await stepX('b-login-look', cb, () => d.look({ window: 'Google Chrome' }, cb), t);
+      // B) Google Docs: mở “QA nháp” → Ctrl+H (con trỏ ở ô Tìm) → gõ → Tab sang “Thay bằng” → gõ → Thay thế tất cả
+      await load(t, 'docs');
+      keep(await stepX('b-look', cb, () => d.look({ window: 'Google Chrome' }, cb), t));
+      out.docId = idOf(/QA ?nh/i);
+      await stepX('b-open-doc', cb, () => d.act({ action: 'click', element: out.docId || 'QA nháp' }, cb), t);
+      await stepX('b-ctrl-h', cb, () => d.act({ action: 'hotkey', keys: 'ctrl+h' }, cb), t);
+      await stepX('b-type-find', cb, () => d.act({ action: 'type_text', text: 'ngày mai' }, cb), t);
+      await stepX('b-tab', cb, () => d.act({ action: 'hotkey', keys: 'tab' }, cb), t);
+      await stepX('b-type-rep', cb, () => d.act({ action: 'type_text', text: 'thứ Hai' }, cb), t);
+      keep(await stepX('b-look2', cb, () => d.look({}, cb), t));
+      out.repId = idOf(/^Thay thế tất cả$/i);
+      await stepX('b-replace-all', cb, () => d.act({ action: 'click', element: out.repId || 'Thay thế tất cả' }, cb), t);
+      out.final = await rd(t); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'b76') { // B76 (QA lượt 8, Outlook o10): nội dung thư bị gõ vào ô Tiêu đề 3 lần (id đổi theo chữ trong ô)
+      const ol = `<!doctype html><meta charset=utf-8><title>Thư mới - Outlook</title><style>body{font:16px sans-serif;margin:20px}input,textarea{display:block;width:700px;font:26px sans-serif;margin:18px 0;padding:10px;border:1px solid #888}textarea{height:220px}::placeholder{color:#222;opacity:1}</style>
+<input id=to placeholder="Người nhận"><input id=subj placeholder="Thêm tiêu đề"><textarea id=body placeholder="Nhập nội dung thư tại đây"></textarea>
+<script>window.S={};function benchRead(){return {to:to.value,subj:subj.value,body:body.value}}</script>`;
+      await t.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(ol)); t.focus(); t.webContents.focus(); await sleep(600);
+      const st2 = () => t.webContents.executeJavaScript('benchRead()');
+      const q3 = 'Soạn thư Outlook gửi quynhanh.tran@truong.edu.vn, tiêu đề "Lịch họp nhóm", nội dung "Nhóm mình họp lúc 8h sáng thứ Năm nhé." Chỉ soạn, đừng gửi.';
+      const c3 = { ...ctx, userQuery: q3, auto: require('./agent/autonomy').forTurn({ setting: false, query: q3 }) };
+      const step3 = async (name, a) => { qaAsks.length = 0; let r; try { r = await d.act(a, c3); } catch (e) { r = { error: String(e.message || e) }; } await sleep(500);
+        out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 2500), state: await st2() }); save(); return r; };
+      await d.look({ window: 'Outlook' }, c3);
+      await step3('b76-click-subject', { action: 'click', element: 'Thêm tiêu đề' });
+      await step3('b76-type-subject', { action: 'type_text', text: 'Lịch họp nhóm' });
+      const l = String((await d.look({}, c3)).forModel || ''); out.look1 = l.slice(0, 1500);
+      const sid = (l.match(/\[(e\d+)\][^\n]*"L\S{1,2}ch h\S{1,2}p[^"\n]*"/u) || [])[1]; out.subjId = sid || null;
+      await step3('b76-type-body-into-subject', { action: 'type_text', element: sid || 'Lịch họp nhóm', text: 'Nhóm mình họp lúc 8h sáng thứ Năm nhé.' });
+      await step3('b76-type-subject-again', { action: 'type_text', text: 'Lịch họp nhóm' });
+      await step3('b76-click-body', { action: 'click', element: 'Nhập nội dung thư tại đây' });
+      await step3('b76-type-body', { action: 'type_text', text: 'Nhóm mình họp lúc 8h sáng thứ Năm nhé.' });
+      out.final = await st2(); throw null;
+    }
+    if (process.env.AIVN_QA_B21_MODE === 'b64slow') { // B64 (QA lượt 8, d10/zen): máy chậm — kiểm tra lại sau khi bấm mất > 60 giây; gõ tên KHÔNG kèm element ngay sau đó vẫn phải được coi là gõ vào ô tìm kiếm
+      const realNow = Date.now; let skew = 0; Date.now = () => realNow() + skew; out.skews = [];
+      const untap = LOG.tap((line, scope) => { if (scope === 'desk' && /Thao tác: bấm/.test(line) && out.skewNext) { out.skewNext = false; skew += 90000; out.skews.push(line.slice(0, 120)); } });
+      out.look0 = String((await d.look({ window: 'Messenger' }, ctx)).forModel || '').slice(0, 1500);
+      out.skewNext = true; await step('b64-click-search', { action: 'click', element: 'Tìm kiếm trên Messenger' });
+      await t.webContents.executeJavaScript('document.activeElement && document.activeElement.blur && 0'); // giữ nguyên tiêu điểm
+      await step('b64-type-name', { action: 'type_text', text: 'Trần Quỳnh Anh', submit: true });
+      out.skewNext = true; const hit = ((out.steps[out.steps.length - 1] || {}).forModel || '').match(/click element "(e\d+)"/);
+      await step('b64-click-result', { action: 'click', element: hit ? hit[1] : 'Trần Quỳnh Anh' });
+      await step('b64-send', { action: 'type_text', text: 'Mai 8h họp nhóm nhé', submit: true });
+      // đường Ctrl+F (dòng 625 cũ): ứng dụng mở ô tìm bằng phím tắt, máy chậm
+      await t.webContents.executeJavaScript(`document.addEventListener('keydown', e => { if (e.ctrlKey && e.key.toLowerCase() === 'f') { e.preventDefault(); document.getElementById('search').focus(); } }, true); 1`);
+      try { d.end('qa'); } catch {} const q2 = 'Nhắn tin cho Lê Quỳnh Anh trên Messenger: "Gửi mình file slide nhé". Không cần hỏi lại.';
+      const ctx2 = { ...ctx, userQuery: q2, auto: require('./agent/autonomy').forTurn({ setting: false, query: q2 }) };
+      const step2 = async (name, a) => { qaAsks.length = 0; let r; try { r = await d.act(a, ctx2); } catch (e) { r = { error: String(e.message || e) }; } await sleep(700);
+        const s = await st(); out.steps.push({ name, call: a, summary: r.summary || r.error || '', blocked: !!(r.error || r.refused), forModel: String(r.forModel || '').slice(0, 2500), asks: qaAsks.slice(), state: s }); save(); return { r, s }; };
+      t.focus(); t.webContents.focus(); await sleep(400); await d.look({ window: 'Messenger' }, ctx2);
+      out.skewKeyNext = true; const untap2 = LOG.tap((line, scope) => { if (scope === 'desk' && /Thao tác: bấm phím/.test(line) && out.skewKeyNext) { out.skewKeyNext = false; skew += 90000; out.skews.push(line.slice(0, 120)); } });
+      await step2('b64k-hotkey', { action: 'hotkey', keys: 'ctrl+f' });
+      out.afterKey = await t.webContents.executeJavaScript(`({ active: document.activeElement && document.activeElement.id, hasFocus: document.hasFocus(), search: document.getElementById('search').value, comp: document.getElementById('comp').value })`);
+      await step2('b64k-type-name', { action: 'type_text', text: 'Lê Quỳnh Anh', submit: true });
+      out.afterType = await t.webContents.executeJavaScript(`({ active: document.activeElement && document.activeElement.id, search: document.getElementById('search').value, comp: document.getElementById('comp').value })`);
+      const hit2 = ((out.steps[out.steps.length - 1] || {}).forModel || '').match(/click element "(e\d+)"/);
+      await step2('b64k-click-result', { action: 'click', element: hit2 ? hit2[1] : 'Lê Quỳnh Anh' });
+      await step2('b64k-send', { action: 'type_text', text: 'Gửi mình file slide nhé', submit: true });
+      try { untap && untap(); untap2 && untap2(); } catch {} Date.now = realNow; out.final = await st(); throw null;
     }
     if (process.env.AIVN_QA_B21_MODE === 'openchat') { // B65: open_chat bằng mã — mô hình đưa tên sai/nội dung, AIVN vẫn tìm đúng “Trần Quỳnh Anh”, rồi chỉ gõ nội dung
       await step('oc-open', { action: 'open_chat', window: 'Telegram', recipient: 'Gửi mình file slide nhé' });
@@ -2831,12 +3360,55 @@ async function selfTestV13() {
   out.finished = new Date().toISOString(); save(); app.quit();
 }
 
-const gotLock = isTest || app.requestSingleInstanceLock();
-if (!gotLock) app.quit();
+// ---------- QA runner (beta.3): chỉ khi AIVN_QA_MODE=1 VÀ có cờ — xem docs/qa-runner.md. KHÔNG mở cổng mạng/CDP nào ----------
+const QAR = require('./qa-runner');
+const qaReq = QAR.fromArgv(process.argv, process.env);
+let qaBusy = false;
+// B106: mọi result.json (kể cả thoát sớm mã 2) đều có version + commit + finalAnswer
+function qaStamp(o) { return { schema: 1, version: (() => { try { return app.getVersion(); } catch { return null; } })(), commit: qaCommit(), ...o, finalAnswer: o.finalAnswer != null ? o.finalAnswer : (o.reason ? `AIVN chưa chạy việc QA: ${o.reason}` : null) }; }
+function qaCommit() { try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'build-info.json'), 'utf8')).commit || null; } catch {} if (app.isPackaged) return null; try { return require('child_process').execSync('git rev-parse --short HEAD', { cwd: path.join(__dirname, '..'), stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); } catch { return null; } }
+function qaDisplays() { const { screen } = require('electron'); return { platform: process.platform, displays: screen.getAllDisplays().map(d => ({ id: d.id, primary: d.id === screen.getPrimaryDisplay().id, bounds: d.bounds, workArea: d.workArea, scaleFactor: d.scaleFactor, dpi: Math.round(96 * d.scaleFactor), size: { width: Math.round(d.size.width * d.scaleFactor), height: Math.round(d.size.height * d.scaleFactor) } })) }; }
+async function qaRun(req) {
+  const args = req.args; const runId = req.runId || String(Date.now());
+  if (qaBusy) { const r = qaStamp({ runId, status: 'failed', reason: 'AIVN đang chạy một việc QA khác', exitCode: 2 }); try { QAR.writeJson(args.out, r); } catch {} return r; }
+  qaBusy = true; LOG.log('qa', `QA runner bắt đầu (${req.kind || 'agent-task'}): ${String(args.task || args.script || args.out || '').slice(0, 200)}`);
+  try {
+    if (req.kind === 'input-diag') { const D = require('./qa-input-diag'); return await D.run(args, { LOG, version: app.getVersion(), commit: qaCommit(), helper: !app.isPackaged && process.env.AIVN_QA_DIAG_FAKEWFP ? D.fakeHelper(process.env.AIVN_QA_DIAG_FAKEWFP) : null }, { runId }); }
+    if (req.kind === 'qa-ui') { const U = require('./qa-ui'); return await U.run(args, { win: () => win, LOG, version: app.getVersion(), commit: qaCommit(), displays: qaDisplays, profile: QA_PROFILE, engine, listModels, loadById,
+      hookDialogs: (h) => U.hookDialogs(dialog, h), setMainClock: U.setMainClock, notifyModel: () => send('model:status', engine.status()), hw: () => engine.hardwareInfo(),
+      metrics: () => ({ appMemMB: Math.round(app.getAppMetrics().reduce((s, x) => s + (x.memory ? x.memory.workingSetSize : 0), 0) / 1024) }) }, { runId }); }
+    return await QAR.run(args, { version: app.getVersion(), commit: qaCommit(), engine, listModels, loadById, runAgentTurn, desk: getDesk(), displays: qaDisplays, LOG, activated,
+      screenControl: () => { const d = settings.data; const why = d.agentComputer === false ? 'agentComputer = tắt' : !d.agentScreen ? 'agentScreen = tắt' : ''; return { on: !why, why }; },
+      capture: (o) => require('./screen-control').capture(o),
+      setLang: (l) => { const old = settings.data.uiLang; settings.data.uiLang = l; send('settings:changed', { uiLang: l }); return () => { settings.data.uiLang = old; send('settings:changed', { uiLang: old }); }; } }, { runId });
+  } finally { qaBusy = false; }
+}
+// AIVN_QA_MODE=1 + cờ QA nhưng tham số sai: KHÔNG mở AIVN như thường (bot QA sẽ chờ mãi) → ghi result.json nếu biết --out, thoát mã 2
+if (qaReq.invalid && String(process.env.AIVN_QA_MODE || '') === '1') {
+  try { process.stderr.write('[AIVN QA] ' + qaReq.warn + '\n'); } catch {}
+  try { LOG.log('qa', qaReq.warn + ' → thoát mã 2'); } catch {}
+  try { const raw = QAR.parseArgs(process.argv); if (raw && raw.out) QAR.writeJson(path.resolve(raw.out), qaStamp({ status: 'failed', exitCode: 2, reason: qaReq.warn })); } catch {}
+  process.exit(2);
+}
+const gotLock = isTest || app.requestSingleInstanceLock(qaReq.enabled ? { aivnQa: { ...qaReq, runId: qaReq.runId = `${process.pid}-${Date.now()}` } } : undefined);
+if (!gotLock && qaReq.enabled && qaReq.kind === 'qa-ui') {
+  // QA giao diện KHÔNG bao giờ điều khiển cửa sổ AIVN người dùng đang mở (dữ liệu thật, giành tiêu điểm) → cần --profile riêng
+  try { QAR.writeJson(qaReq.args.out, qaStamp({ runId: qaReq.runId, kind: 'qa-ui', status: 'failed', exitCode: 2, reason: 'AIVN đang mở với hồ sơ thật: chạy --qa-ui kèm --profile <thư mục riêng> để có một phiên riêng không đụng dữ liệu người dùng' })) } catch {}
+  app.exit(2);
+} else if (!gotLock && qaReq.enabled) {
+  // AIVN đang mở: chuyển việc QA cho bản đang chạy rồi chờ result.json của đúng lượt này → thoát với mã của nó
+  const ms = ((qaReq.args.timeout || 600) + 180) * 1000;
+  QAR.waitResult(qaReq.args.out, qaReq.runId, ms).then(j => { const code = j ? (j.exitCode ?? QAR.exitCodeOf(j.status)) : 2; if (!j) { try { process.stderr.write('[AIVN QA] không nhận được result.json từ bản AIVN đang chạy\n'); } catch {} } app.exit(code); });
+} else if (!gotLock) app.quit();
 else {
   // chỉ bản đang giữ khoá một-phiên-bản mới dọn (bản mở thứ hai không được giết llama-server của bản đang chạy)
   try { const k = pidFile.cleanup({ log: (m) => { console.log(m); LOG.log('engine', m); } }); if (k.length) LOG.log('engine', `Đã dừng ${k.length} llama-server còn sót từ lần chạy trước`); } catch (e) { console.warn('[dọn] ' + e.message); }
-  app.on('second-instance', () => showWindow());
+  app.on('second-instance', (_e, _argv, _cwd, extra) => {
+    const q = extra && extra.aivnQa;
+    // việc QA chuyển từ bản thứ hai (bản đó đã tự kiểm AIVN_QA_MODE=1 + cờ); kiểm lại tham số ở đây, không tin dữ liệu chuyển sang
+    if (q && q.enabled && q.args && q.runId && q.kind !== 'qa-ui') { const v = q.kind === 'input-diag' ? { ok: true, args: q.args } : QAR.validate(q.args); if (v.ok) { LOG.log('qa', `Nhận việc QA chuyển từ bản mở thứ hai (lượt ${q.runId})`); qaRun({ ...q, args: v.args }).catch(e => LOG.log('qa', 'QA runner lỗi: ' + e.message)); return; } LOG.log('qa', 'Bỏ qua việc QA chuyển sang: ' + v.error); }
+    showWindow();
+  });
   app.on('before-quit', () => { quitting = true; });
   app.whenReady().then(async () => {
     initStores();
@@ -2846,7 +3418,15 @@ else {
     else LOG.log('app', 'Máy chưa kích hoạt: chờ nhập mã (bộ máy AI, lịch tự động, máy chủ API chưa chạy)');
     licenseCheck().catch(() => {});
     startGateTimers();
+    if (qaReq.warn) { LOG.log('qa', qaReq.warn); console.warn('[AIVN QA] ' + qaReq.warn); }
+    if (qaReq.enabled) win.webContents.once('did-finish-load', () => setTimeout(async () => { let r = null; try { r = await qaRun(qaReq); } catch (e) { LOG.log('qa', 'QA runner lỗi: ' + (e.stack || e.message)); } const code = r ? (r.exitCode ?? QAR.exitCodeOf(r.status)) : 2; try { process.stdout.write(`[AIVN QA] ${r ? r.status : 'failed'} → ${qaReq.args.out}\n`); } catch {} app.exit(code); }, 2500));
     if (app.isPackaged || process.env.AIVN_UPDATE_CHECK === '1') setTimeout(() => updater.check({ silent: true }), Number(process.env.AIVN_UPDATE_DELAY || 5000));
+    if (process.env.AIVN_QA_GATE && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(async () => { // B77: màn kích hoạt theo uiLang + ô chọn ngôn ngữ
+      const out = { mode: gateMode() }; const js = (c) => win.webContents.executeJavaScript(c, true);
+      const dump = () => js(`({ lang: document.documentElement.lang, sel: (document.getElementById('gLang') || {}).value || null, opts: [...document.querySelectorAll('#gLang option')].map(o => o.value), title: document.getElementById('gaTitle').textContent, steps: document.querySelector('.gate-steps').innerText, go: document.getElementById('gaGo').textContent })`);
+      try { out.first = await dump(); await js(`(() => { const s = document.getElementById('gLang'); s.value = 'zh'; s.dispatchEvent(new Event('change')); })()`); await new Promise(r => setTimeout(r, 800)); out.after = await dump(); out.saved = settings.data.uiLang; }
+      catch (e) { out.error = String(e && e.stack || e); }
+      fs.writeFileSync(path.join(process.env.AIVN_QA_GATE, 'gate.json'), JSON.stringify(out, null, 1)); app.exit(0); }, 1500));
     if (process.env.AIVN_SHOTS141) win.webContents.once('did-finish-load', () => setTimeout(() => shots141().catch(e => { console.error('SHOTS lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_FULLBENCH && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => runFullBench((process.env.AIVN_FULLBENCH_MODELS || '').split(',').filter(Boolean), { parts: process.env.AIVN_FULLBENCH_PARTS ? process.env.AIVN_FULLBENCH_PARTS.split(',') : null, apps: process.env.AIVN_FULLBENCH_APPS ? process.env.AIVN_FULLBENCH_APPS.split(',') : null, out: path.join(process.env.AIVN_FULLBENCH, 'result.json') }).then(r => { console.log('FULLBENCH', JSON.stringify(r)); app.quit(); }, e => { console.error('FULLBENCH lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_AGENTBENCH && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaBench().catch(e => { console.error('BENCH lỗi', e); app.exit(2); }), 2500));
@@ -2886,7 +3466,7 @@ else {
       const list = JSON.parse(fs.readFileSync(process.env.AIVN_SHOTSET_LIST, 'utf8'));
       for (const s of list) {
         try { win.setBounds({ x: 0, y: 0, width: s.w || 1280, height: s.h || 720 }); await new Promise(r => setTimeout(r, 300));
-          if (s.js) await win.webContents.executeJavaScript(s.js); await new Promise(r => setTimeout(r, s.wait || 900));
+          if (s.js) { const v = await win.webContents.executeJavaScript(s.js); if (s.save) fs.writeFileSync(path.join(dir, s.name + '.json'), JSON.stringify(v ?? null)); } await new Promise(r => setTimeout(r, s.wait || 900)); // save: ghi kết quả JS (kiểm thử)
           fs.writeFileSync(path.join(dir, s.name + '.png'), (await win.webContents.capturePage()).toPNG()); console.log('[shot] ' + s.name);
         } catch (e) { console.error('[shot] ' + s.name, e.message); }
       }

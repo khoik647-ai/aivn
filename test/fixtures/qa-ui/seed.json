@@ -1,0 +1,1 @@
+{ "memories": ["QA ghi nhớ thử: thích cà phê sữa đá"], "convos": [{ "id": "qa-c1", "title": "QA trò chuyện mẫu", "mode": "chat", "messages": [{ "role": "user", "content": "chào" }, { "role": "assistant", "content": "Chào bạn!" }] }] }

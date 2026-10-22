@@ -42,12 +42,42 @@ function cmpV(a, b) {
   return 0;
 }
 const isNewer = (next, cur) => cmpV(next, cur) > 0;
+
+// B151: chỉ BÁO có bản thử nghiệm (prerelease công khai) mới hơn — KHÔNG BAO GIỜ đưa vào electron-updater, không tải, không cài.
+// Bản thử phải: đã đăng (không nháp), là prerelease, có số phiên bản dạng x.y.z-…, có tệp cài cho máy này, mới hơn bản đang dùng
+// và mới hơn bản ổn định đang được mời cập nhật (nếu có). Người dùng tự tải ở trang web (khối #tai-beta).
+function pickBeta(list, { current, stable = null, platform = process.platform } = {}) {
+  let best = null;
+  for (const r of Array.isArray(list) ? list : []) {
+    if (!r || r.draft || !r.prerelease) continue;
+    const v = String(r.tag_name || '').trim().replace(/^v/i, ''); const pv = parseV(v); if (!pv || !pv.pre.length) continue;
+    const names = (Array.isArray(r.assets) ? r.assets : []).map(a => String((a && a.name) || ''));
+    const forMe = platform === 'win32' ? names.some(n => /^AIVN-Setup-.+\.exe$/i.test(n))
+      : platform === 'darwin' ? names.some(n => /mac.*\.(zip|dmg)$/i.test(n)) : names.some(n => /\.AppImage$/i.test(n));
+    if (!forMe || !isNewer(v, current) || (stable && !isNewer(v, stable))) continue;
+    if (!best || isNewer(v, best.version)) best = { version: v };
+  }
+  return best;
+}
+// đọc danh sách bản phát hành; lỗi mạng/hết giờ/HTTP lỗi/JSON hỏng → null (im lặng, không báo lỗi cho người dùng)
+async function fetchReleases(url, { fetchImpl = globalThis.fetch, timeoutMs = 6000 } = {}) {
+  if (!url || typeof fetchImpl !== 'function') return null;
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const res = await fetchImpl(url, { signal: ac.signal, headers: { accept: 'application/vnd.github+json', 'user-agent': 'AIVN-update-check' } });
+    if (!res || !res.ok) return null;
+    const j = await res.json(); return Array.isArray(j) ? j : null;
+  } catch { return null; } finally { clearTimeout(t); }
+}
 function createUpdater({ send, log }) {
   let autoUpdater = null;
   let state = { status: 'idle' };
   const canInstallInPlace = process.platform === 'win32' || (process.platform === 'linux' && !!process.env.APPIMAGE);
   const cfg = publishConfig();
   const releasesUrl = `https://github.com/${cfg.owner}/${cfg.repo}/releases/latest`;
+  // B151: nguồn đọc bản thử nghiệm (AIVN_BETA_FEED_URL chỉ dùng khi kiểm thử) và trang tải (khối beta trên trang web)
+  const betaFeed = process.env.AIVN_BETA_FEED_URL || (cfg.owner === PLACEHOLDER ? '' : `https://api.github.com/repos/${cfg.owner}/${cfg.repo}/releases?per_page=20`);
+  const betaPage = cfg.owner === PLACEHOLDER ? '' : `https://${cfg.owner.toLowerCase()}.github.io/${cfg.repo}/#tai-beta`;
 
   const set = (patch) => { state = { ...state, ...patch }; send('update:status', state); if (process.env.AIVN_TEST === '1') console.log('[update-state] ' + JSON.stringify(state)); };
 
@@ -81,8 +111,10 @@ function createUpdater({ send, log }) {
 
   async function check({ silent = false } = {}) {
     if (state.status === 'checking' || state.status === 'downloading') return state;
+    const betaP = fetchReleases(betaFeed); // chạy song song; không bao giờ ném lỗi
     if (cfg.owner === PLACEHOLDER && !process.env.AIVN_UPDATE_URL) {
       set({ status: 'error', error: friendly(null), silent });
+      await betaNote(betaP);
       return state;
     }
     try {
@@ -93,10 +125,23 @@ function createUpdater({ send, log }) {
     } catch (e) {
       set({ status: 'error', error: friendly(e), silent });
     }
+    await betaNote(betaP);
     return state;
   }
+  async function betaNote(p) {
+    try {
+      const list = await p; const stable = state.status === 'available' || state.status === 'downloaded' ? state.version : null;
+      const b = list && betaPage ? pickBeta(list, { current: app.getVersion(), stable }) : null;
+      if (b) b.page = betaPage;
+      if (JSON.stringify(b) !== JSON.stringify(state.beta || null)) set({ beta: b }); else state.beta = b;
+      if (b && log) log(`[cập nhật] có bản thử nghiệm ${b.version} (chỉ báo, không tự cập nhật)`);
+    } catch { state.beta = null; }
+  }
+  // mở trang web ở khối tải bản thử nghiệm — chỉ địa chỉ đã định sẵn, không nhận URL từ giao diện
+  function openBeta() { if (betaPage && state.beta) shell.openExternal(betaPage); return !!(betaPage && state.beta); }
 
   async function download() {
+    if (state.status !== 'available') return state; // B151: chỉ tải bản ỔN ĐỊNH đã được mời (status available) — bản thử nghiệm không bao giờ đi qua đây
     if (state.version && !isNewer(state.version, app.getVersion())) { set({ status: 'latest', checkedAt: Date.now() }); return state; } // không bao giờ tải bản cũ hơn
     if (!canInstallInPlace) { shell.openExternal(releasesUrl); return state; }
     try { set({ status: 'downloading', percent: 0 }); await get().downloadUpdate(); }
@@ -107,7 +152,7 @@ function createUpdater({ send, log }) {
   function install() { if (state.status === 'downloaded') setImmediate(() => get().quitAndInstall(false, true)); return true; }
   function openReleases() { shell.openExternal(releasesUrl); return true; }
 
-  return { check, download, install, openReleases, state: () => ({ ...state, canInstallInPlace, releasesUrl, current: app.getVersion() }), config: cfg };
+  return { check, download, install, openReleases, openBeta, state: () => ({ ...state, canInstallInPlace, releasesUrl, current: app.getVersion() }), config: cfg };
 }
 
-module.exports = { createUpdater, PLACEHOLDER, cmpV, isNewer };
+module.exports = { createUpdater, PLACEHOLDER, cmpV, isNewer, pickBeta, fetchReleases };

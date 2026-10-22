@@ -75,7 +75,7 @@ test('mức "Hỗ trợ công cụ" trong Kho không mâu thuẫn với kết qu
 
 test('mô hình định vị dùng đúng câu lệnh và cách đọc toạ độ của nhà phát triển (Holo1.5, UI-Venus)', () => {
   const SC = require('../src/screen-control');
-  for (const c of CATALOG.filter(x => x.grounding)) assert.strictEqual(SC.groundingFamily(c.file), c.grounding, c.id);
+  for (const c of CATALOG.filter(x => x.grounding)) assert.strictEqual(SC.groundingFamily(c.localName || c.file), c.grounding, c.id); // tên lưu trên máy (mục 5: q4_k_m.gguf → Holo4-35B-A3B-q4_k_m.gguf)
   assert.strictEqual(SC.groundingFamily('Holo1.5-7B.Q4_K_M.gguf'), 'holo');
   // UI-Venus: đo trên AIVN Bench, câu lệnh điểm kiểu Qwen2.5-VL (8/10) tốt hơn câu lệnh hộp của nhà phát triển (3/10)
   assert.strictEqual(SC.groundingFamily('UI-Venus-Ground-7B.Q4_K_M.gguf'), 'qwen25vl');

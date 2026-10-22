@@ -6,7 +6,7 @@
 //   3) thấy bong bóng tin vừa gửi trong khung tin nhắn (không tính ô soạn, tiêu đề, danh sách bên trái).
 const fold = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 const HONOR = /^(ban|anh|chi|em|co|chu|bac|ong|ba|me|bo|ma|thay|di|cau|mo|duong|thim|sep|giao su|ts|ths|pgs|mr|mrs|ms|mx|miss|dr|prof)$/;
-const STOP = String.raw`(?:trên|ở|qua|bằng|là|rằng|nội dung|với nội dung|tiêu đề|chủ đề|nói|bảo|hỏi|nhắc|chúc|mời|không cần|khỏi|đừng|và|rồi|nhé|nha|giúp|hộ|ngay|lúc|vào|on|via|in|saying|that|about|with|an email|an e-mail|a message|a text|a note)`;
+const STOP = String.raw`(?:nhưng|but|and don't|and do not|mà đừng|trên|ở|qua|bằng|là|rằng|nội dung|với nội dung|tiêu đề|chủ đề|nói|bảo|hỏi|nhắc|chúc|mời|không cần|khỏi|đừng|và|rồi|nhé|nha|giúp|hộ|ngay|lúc|vào|on|via|in|saying|that|about|with|an email|an e-mail|a message|a text|a note)`;
 const NOT_NAME = /^(tôi|mình|em|tao|tớ|me|ai|mọi người|tin|tin nhắn|lời|câu|một|email|thư|mail|cho|tới|đến|với|họ|nó|anh ấy|chị ấy|bạn ấy)$/iu;
 
 // tên người nhận trong yêu cầu: “nhắn Trần Quỳnh Anh là…”, “gửi email cho thầy Lê Văn Hùng tiêu đề…”, “Messenger: nhắn Quỳnh Anh "…"”,
@@ -17,9 +17,20 @@ const EN_HONOR_LEAD = /^(?:mr|mrs|ms|mx|dr|prof|miss)\.?\s+(?=\S)/iu;
 // B61 (máy thật, “nhắn giúp mình là mai 8h họp nhé”): “giúp/hộ/cho mình” là NGƯỜI DÙNG, không phải người nhận; cụm bắt đầu bằng từ mở đầu nội dung
 // (là/rằng/nội dung/saying/that…) hay “a message for me” không phải tên → không có người nhận → hỏi “Gửi cho ai?”
 const NOT_RECIPIENT = /^(?:(?:là|rằng|nội dung|với nội dung|tiêu đề|saying|that|about)(?:\s|$)|(?:a|an|the|my)\s+(?:message|email|e-mail|mail|text|note|dm)\b|(?:for|to)\s+(?:me|myself|us)\b|(?:giúp|hộ|giùm|dùm|cho)\s+(?:mình|tôi|em|tớ|tao)(?:\s|$)|(?:mình|tôi|tớ|tao|me|myself)(?:\s|$)|(?:nhắc|chúc|hỏi|báo|mời|xin|về|thông báo|lịch|nhờ)\s|(?:nhé|nha|nhá|đi|ngay|luôn|giúp|hộ|giùm|với|thầy|cô|anh|chị|em|bạn|sếp|mr|mrs|ms|dr)$)/iu;
+// B71b (QA lượt 8): đại từ (“text her…”, “message him: ok”, “nhắn anh ấy…”, “告诉她…”) và cụm bắt đầu bằng động từ nói/báo (“gửi email nói mai nghỉ”)
+// không phải tên → chưa có người nhận → hỏi “Gửi cho ai?”
+const PRONOUN = /^(?:ok|okay|yes|no|thanks|thank you|sure|đồng ý|được|her|him|them|he|she|they|it|us|you|everyone|everybody|someone|somebody|that person|this person|anh ấy|anh ta|chị ấy|chị ta|em ấy|bạn ấy|cô ấy|thầy ấy|ông ấy|bà ấy|cậu ấy|nó|họ|người đó|người ấy|người kia|ai đó|mọi người|tất cả|他|她|它|他们|她们|他們|她們|大家|对方|對方)$/iu;
+const SAY_LEAD = /^(?:nói|bảo|dặn|kể|báo|trả lời|hồi âm|xin|nhờ|rằng|là|say|says|saying|tell|telling|reply|replying|answer|that)(?:\s|$)/iu;
+function notAName(r) { const x = String(r || '').trim().replace(/[\s,.;:!?]+$/u, ''); return !x || PRONOUN.test(x) || SAY_LEAD.test(x) || /^(?:her|him|them)\b/iu.test(x); }
+// B110 (máy thật beta.2.5): “mở chat Cloud của tôi, không gửi gì” → AIVN gõ “gì” vào ô tìm kiếm Zalo. Từ hỏi/phủ định/đại từ chung
+// (gì, ai, nào, đâu, cả, hết, nothing, anyone, 什么…) KHÔNG BAO GIỜ là tên người nhận; mệnh đề “không/đừng gửi (gì)” bỏ trước khi tìm tên.
+const RCP_STOP = new Set(['gì', 'gi', 'cái gì', 'gì cả', 'gì hết', 'ai', 'ai cả', 'ai hết', 'nào', 'đâu', 'cả', 'hết', 'đi', 'luôn', 'không', 'chưa', 'tin', 'tin nhắn', 'gì đó', 'ai đó', 'nothing', 'anything', 'something', 'anyone', 'anybody', 'no one', 'nobody', 'none', 'what', 'who', 'whom', 'it', 'yet', 'now', '什么', '谁', '任何人', '什么都', '东西']);
+const NEG_SEND = /(?:^|[\s,;.])(?:(?:và|nhưng|mà|and|but)\s+)?(?:không|đừng|chưa|khỏi|ko|khoan|không cần|don't|do not|never|not)\s+(?:(?:cần|được|vội)\s+)?(?:gửi|nhắn|bấm gửi|send|text|message)(?:\s+(?:gì|gì cả|gì hết|cả|hết|ai|đi|tin|tin nhắn|nhé|nha|anything|it|yet|a message|now))*(?=[\s,.;!?]|$)|(?:不要|别|別|不)(?:发送|发|發送|發)(?:任何)?(?:消息|信息)?/giu;
+const rcpStop = (r) => { const f = String(r || '').trim().toLowerCase().replace(/[\s,.;:!?]+$/u, ''); const w = f.split(/\s+/); return RCP_STOP.has(f) || w.every(x => RCP_STOP.has(x)) || /^(?:gì|cái gì|what|什么|哪)$/u.test(w[0]); };
 function recipientOf(query) {
-  const r = recipientOf0(String(query || '').replace(EN_HONOR_DOT, '$1')); if (!r) return r;
-  if (NOT_RECIPIENT.test(String(r).trim())) return null;
+  const r = recipientOf0(String(query || '').replace(EN_HONOR_DOT, '$1').replace(NEG_SEND, ' ')); if (!r) return r;
+  if (NOT_RECIPIENT.test(String(r).trim()) || notAName(r) || rcpStop(r) || /^(?:hiện tại|đang mở|này|hiện giờ|current|this)$/iu.test(String(r).trim())) return null;
+  { const z = String(r).replace(/\s*的\s*(?:聊天|对话|對話|会话|會話|聊天窗口)$/u, '').trim(); if (z !== String(r).trim()) return z || null; }
   const x = stripHonorAfter(r) || r; const y = x.replace(EN_HONOR_LEAD, '').trim(); return y || x;
 }
 // B36/B47: “nói với X là…”, “bảo X là…”, “dặn/báo X là…”, “nhắn giúp/hộ/giùm X…”, “tell X (that) …”, “let X know …”, “inform/ask X to …”
@@ -50,10 +61,12 @@ function recipientOf0(query) {
   // B31 (QA lượt 5): câu tiếng Trung — 给 X 发消息/发信息/发微信 · 发(消息/信息)给 X · 告诉 X · 跟/和 X 说 · 私信 X
   const zh = /(?:给|向)\s*([^\s，。、：:"“”给向][^，。、：:"“”]{0,40}?)\s*(?:发|发送|傳|传)(?:一[条條]|个)?\s*(?:消息|信息|短信|讯息|訊息|微信|邮件|郵件|私信)/u.exec(q)
     || /(?:发|发送)(?:一[条條])?\s*(?:消息|信息|短信|邮件|私信)?\s*给\s*([^，。、：:"“”]{1,40}?)(?=\s*(?:[，。、：:"“”]|说|，|$))/u.exec(q)
-    || /(?:告诉|跟|和|私信)\s*([^，。、：:"“”]{1,40}?)\s*(?:说|讲|：|:|，)/u.exec(q);
+    || /(?:告诉|跟|和|私信)\s*([^，。、：:"“”]{1,40}?)\s*(?:说|讲|：|:|，)/u.exec(q)
+    || /给\s*([^\s，。、：:"“”给的][^，。、：:"“”给]{0,40}?)\s*的\s*(?:消息|信息|短信|讯息|訊息|邮件|郵件|私信|微信)/u.exec(q); // “起草一条给王老师的消息” (B: soạn sẵn)
   // “告诉 Trần Quỳnh Anh 明天…” (không có dấu câu): tên Latinh/tiếng Việt kết thúc ở chữ Hán đầu tiên
   const zhLatin = !zh && /(?:告诉|跟|和|私信|给|发给|通知|提醒)\s*((?:[A-Za-zÀ-ỹĐđ][A-Za-zÀ-ỹĐđ'’.-]*)(?:\s+[A-Za-zÀ-ỹĐđ][A-Za-zÀ-ỹĐđ'’.-]*){0,5})\s*(?=[\u3400-\u9fff，。：:！!？?]|$)/u.exec(q);
   if (zhLatin && !/^(?:messenger|zalo|telegram|teams|facebook|discord|gmail|outlook|email)$/i.test(zhLatin[1].trim())) return zhLatin[1].trim();
+  { const zt = /(?:告诉|告訴|通知|提醒|回复|回覆)\s*([\u3400-\u9fff]{1,3}(?:老师|老師|先生|女士|小姐|同学|同學|教授|博士|经理|經理|总|總|姐|哥))/u.exec(q); if (zt && !zh) return zt[1]; }
   if (zh) { const n = zh[1].replace(/^(?:在\s*\S+\s*上\s*)/u, '').replace(/\s*(?:在|用|通过)\s*\S+\s*上?$/u, '').trim(); if (n && n.split(' ').length <= 6) return n; }
   // T1a: “gửi 'AIVN test 1' vào nhóm 'AIVN test'” / “… vào nhóm Zalo "X"” / “send 'x' to the group 'Y'” — tên nhóm sau “vào/tới/cho nhóm”
   const grpQ = /(?:vào|tới|đến|cho|lên|trong|to|in|into)\s+(?:the\s+)?(?:nhóm|group|kênh|channel|cuộc trò chuyện|đoạn chat|chat)\s+(?:(?:zalo|messenger|telegram|teams|discord|slack|whatsapp|viber)\s+)?["“'‘«]([^"”'’»]{1,60})["”'’»]/iu.exec(q);
@@ -61,15 +74,24 @@ function recipientOf0(query) {
   const grp = /(?:vào|tới|đến|lên|trong|to|into)\s+(?:the\s+)?((?:nhóm|group)\s+[^,.!?:;"“”'‘’«»]{1,50}?)(?=\s+(?:trên|qua|bằng|ở|với nội dung|nội dung|là|rằng|on|via|saying)(?=[\s,.:!?]|$)|[,.!?:;"“”«»]|$)/iu.exec(q);
   if (grp && grp[1].trim().split(' ').length <= 7) return grp[1].trim().replace(/\s+(?:zalo|messenger|telegram)$/i, '');
   { const st = sayTo(q); if (st) { const n = String(st).replace(/^[\s,.;:!?]+|[\s,.;:!?]+$/g, '').replace(/\s+(?:trên|qua|ở|bằng|on|via|in)\s+(?:zalo|messenger|telegram|teams|microsoft teams|facebook|discord|slack|whatsapp|viber)$/iu, ''); if (n && !NOT_NAME.test(n) && n.split(' ').length <= 6 && !/^(?:tôi|mình|em|tao|tớ|me|i|họ|nó|mọi người|everyone)$/iu.test(n)) return n; } }
-  const verb = /(?:^|[\s:,.(])((?:soạn|viết|thảo)\s+(?:một\s+)?(?:email|e-mail|mail|thư điện tử|thư|tin nhắn|tin)(?:\s+mới)?|nhắn tin|nhắn|gửi tin nhắn|gửi tin|gửi email|gửi mail|gửi thư|gửi|chat với|chat|trò chuyện với|text|message|msg|send|email|dm)(?=\s)/iu.exec(q);
+  const clean = (n) => { n = String(n || '').replace(/^[\s,.;:!?]+|[\s,.;:!?]+$/g, ''); if (!n || NOT_NAME.test(n) || /^(tôi|mình|tao|tớ|me|ai|họ|nó|mọi|tin|email|thư|mail|file|tệp)$/iu.test(n.split(' ')[0]) || n.split(' ').length > 6) return null; return n; };
+  const stopRe = new RegExp(String.raw`\s+${STOP}(?=[\s,.!?:]|$)|[,.!?;]`, 'iu');
+  const take = (s) => { const i = s.search(stopRe); return clean(i >= 0 ? s.slice(0, i) : s); };
+  // B85: “gửi tin "AIVN test" cho Cloud của tôi” / “send "hi" to Lan” — nội dung trong ngoặc kép ĐỨNG TRƯỚC người nhận
+  // (cả việc chỉ soạn: “soạn sẵn tin "X" cho Y”, “draft a message "X" to Y”)
+  { const qm = /(?:^|[\s:,.(])(?:gửi|nhắn|send|text|message|(?:soạn|viết|thảo)(?:\s+(?:sẵn|nháp|trước|giúp|hộ|giùm)){0,2}|draft|compose|write|prepare)(?:\s+(?:một\s+|a\s+)?(?:(?:tin nhắn|tin|lời nhắn|email|mail|thư|message|text)|draft(?:\s+(?:message|email|text))?))?\s*[:：]?\s*["“«]([^"”»]{1,400})["”»]\s+(?:cho|tới|đến|to|for)\s+(.+)$/iu.exec(q);
+    if (qm) { const n = take(qm[2].replace(/\s+(?:trên|qua|bằng|on|via|in)\s+(?:zalo|messenger|telegram|teams|microsoft teams|facebook|discord|slack|whatsapp|viber)(?=[\s,.!?]|$).*$/iu, '')); if (n) return n; } }
+  // B110/B109: việc MỞ cuộc trò chuyện: “mở (cuộc) trò chuyện/chat X”, “open the chat with X”, “打开和X的聊天”
+  { const oc = /(?:^|[\s:,.(])(?:mở|vào|tìm và mở|chuyển sang|open|go to|switch to)\s+(?:(?:lại|sẵn)\s+)?(?:(?:the|a)\s+)?(?:(?:cuộc|đoạn|khung)\s+)?(?:trò chuyện|chat|hội thoại|nhóm chat|conversation|dm)(?:\s+(?:với|cùng|của|with|of))?\s+(.+)$/iu.exec(q);
+    if (oc && !CURRENT_CHAT.test(oc[0])) { const n = take(oc[1].replace(/\s+(?:trên|qua|bằng|on|via|in)\s+(?:zalo|messenger|telegram|teams|microsoft teams|facebook|discord|slack|whatsapp|viber)(?=[\s,.!?]|$).*$/iu, '')); if (n) return n; }
+    const zo = /(?:打开|打開|进入|進入|切换到)\s*(?:(?:和|与|與|跟)\s*)?([^\s，。、：:"“”的][^，。、：:"“”]{0,40}?)\s*的\s*(?:聊天|对话|對話|会话|會話|聊天窗口)/u.exec(q);
+    if (zo && !/^(?:zalo|messenger|telegram)$/i.test(zo[1].trim())) return zo[1].trim(); }
+  const verb = /(?:^|[\s:,.(])((?:soạn|viết|thảo)(?:\s+(?:sẵn|nháp|trước|giúp|hộ|giùm)){0,2}\s+(?:một\s+)?(?:email|e-mail|mail|thư điện tử|thư|tin nhắn|tin)(?:\s+mới)?|nhắn tin|nhắn|gửi tin nhắn|gửi tin|gửi email|gửi mail|gửi thư|gửi|chat với|chat|trò chuyện với|text|message|msg|send|email|dm|reply|respond)(?=\s)/iu.exec(q);
   if (!verb) return null;
   // phần đầu câu: từ động từ tới chỗ bắt đầu nội dung (là/rằng/:/ngoặc kép/tiêu đề…)
   let head = q.slice(verb.index + verb[0].length).replace(/^\s+(?:giúp|hộ|giùm|dùm)(?:\s+(?:mình|tôi|em))?(?=\s)/iu, '').replace(/^\s+(?:mới\s+)?gửi(?=\s+\S)/iu, ''); // “soạn email gửi thầy Nam” → “thầy Nam”
   const cut = head.search(/\s(?:là|rằng|nội dung|với nội dung|tiêu đề|chủ đề|saying|that)(?=[\s,.:!?]|$)|[:"“”«»]/iu);
   if (cut >= 0) head = head.slice(0, cut);
-  const clean = (n) => { n = String(n || '').replace(/^[\s,.;:!?]+|[\s,.;:!?]+$/g, ''); if (!n || NOT_NAME.test(n) || /^(tôi|mình|tao|tớ|me|ai|họ|nó|mọi|tin|email|thư|mail|file|tệp)$/iu.test(n.split(' ')[0]) || n.split(' ').length > 6) return null; return n; };
-  const stopRe = new RegExp(String.raw`\s+${STOP}(?=[\s,.!?:]|$)|[,.!?;]`, 'iu');
-  const take = (s) => { const i = s.search(stopRe); return clean(i >= 0 ? s.slice(0, i) : s); };
   // “… cho/tới/đến/với/to <tên>”
   const m = /(?:^|\s)(?:cho|tới|đến|với|to)\s+(.+)$/iu.exec(head);
   if (m) { const n = take(m[1]); if (n) return n; }
@@ -142,7 +164,17 @@ function parseSeen(seen) {
 const APP_TITLE = /^(aivn bench|zalo|messenger|facebook|telegram|microsoft teams|teams|discord|gmail|signal|whatsapp|skype|line|viber|google chrome|chrome|microsoft edge|firefox|mozilla firefox|outlook|microsoft outlook|trò chuyện|tro chuyen|chat|thư|thu|mail|inbox|hộp thư đến|hop thu den|tin nhắn|messages?)$/i;
 // B27 (QA lượt 4): màn hình (tiêu đề cửa sổ / đầu khung chat) cho thấy ĐÚNG cuộc trò chuyện với người nhận — đúng tên đầy đủ, không chú thích lạ,
 // và tiêu đề cửa sổ không nêu cuộc trò chuyện khác. Dùng để mở khoá chatGate theo màn hình thay vì chỉ theo cờ nội bộ.
-function chatShown(recipient, title = '', header = []) {
+// B85 (máy thật, Zalo): “Cloud của tôi” nay hiện là “My Documents” (kết quả tìm ghi “Tên cũ: Cloud của tôi”) — tên khác của CÙNG cuộc trò chuyện
+// ALIASES: nhóm tên cố định do ứng dụng đặt (không phải người); aliases thêm: tên hiện tại đọc từ dòng “Tên cũ: …/Former name: …” của kết quả vừa bấm
+const ALIASES = [['Cloud của tôi', 'My Documents', '我的文档', '我的文件', 'My Cloud', 'Cloud của bạn', 'Tài liệu của tôi']];
+const FORMER = /^\s*(?:tên cũ|ten cu|tên trước đây|former name|formerly|old name|previous name|曾用名|旧名|原名|舊名)\s*[:：]\s*(.+?)\s*$/iu;
+function namesFor(recipient, aliases = []) {
+  const k = nameKey(recipient); if (!k) return [recipient];
+  const fixed = ALIASES.find(g => g.some(x => nameKey(x) === k)) || [];
+  return [...new Set([recipient, ...fixed, ...(aliases || []).filter(Boolean)])];
+}
+function chatShown(recipient, title = '', header = [], aliases = []) { const h = [...(header || []), ...cleanHeader((header || []).filter(Boolean))]; return namesFor(recipient, aliases).some(n => chatShown1(n, title, h)); } // B111: dòng tiêu đề làm sạch (“Q My Documents” → “My Documents”)
+function chatShown1(recipient, title = '', header = []) {
   const k = nameKey(recipient); if (!k) return false;
   const parts = String(title || '').split(/\s+[-–|·]\s+/).map(x => x.trim()).filter(Boolean);
   const chatParts = parts.length > 1 ? parts.filter(x => !APP_TITLE.test(x)) : [];
@@ -151,7 +183,8 @@ function chatShown(recipient, title = '', header = []) {
   const lines = header.filter(Boolean).flatMap(h => String(h).split(/\s+[-–|·•]\s+|\n/)).map(x => x.trim()).filter(Boolean);
   return chatParts.some(exact) || lines.some(exact);
 }
-function verifySend({ msg, recipient, regions = null, seen = '', winTitle = '', screenText = '' }) {
+function verifySend({ msg, recipient, regions = null, seen = '', winTitle = '', screenText = '', aliases = [] }) {
+  const NAMES = recipient ? namesFor(recipient, aliases) : []; const hm = (h) => NAMES.some(n => headerMatches(n, h));
   const m = fold(String(msg || '').split('\n')[0]).slice(0, 40);
   const S = parseSeen(seen); const R = regions || {};
   const headerLines = [winTitle, S.header, ...(R.header || [])].filter(Boolean);
@@ -160,8 +193,8 @@ function verifySend({ msg, recipient, regions = null, seen = '', winTitle = '', 
   // 1) người nhận ở tiêu đề
   // tiêu đề cửa sổ dạng “Ứng dụng - Tên” là nguồn chắc nhất: nếu nó nêu một cuộc trò chuyện khác thì chắc chắn sai người
   const titleChat = String(winTitle || '').split(/\s+[-–|·]\s+/).map(x => x.trim()).filter(x => x && !APP_TITLE.test(x) && !/^\(?\d+\)?$/.test(x));
-  const titleWrong = !!(recipient && titleChat.length && !titleChat.some(x => headerMatches(recipient, x)) && String(winTitle).split(/\s+[-–|·]\s+/).length > 1);
-  const recipientSeen = !recipient || (!titleWrong && headerLines.some(h => headerMatches(recipient, h)));
+  const titleWrong = !!(recipient && titleChat.length && !titleChat.some(hm) && String(winTitle).split(/\s+[-–|·]\s+/).length > 1);
+  const recipientSeen = !recipient || (!titleWrong && headerLines.some(hm));
   const otherHeader = titleWrong ? titleChat[0] : (headerLines.find(h => fold(h) && !/^(messenger|zalo|telegram|teams|discord|gmail)$/.test(fold(h))) || '');
   // 2) ô soạn trống
   const plainComposer = !regions ? String(screenText || '').split('\n').filter(l => /\[(?:ô nhập|ô soạn|ô văn bản|edit|textbox|composer)\]|\bô (?:nhập|soạn)\b/iu.test(l)) : [];
@@ -191,6 +224,9 @@ function verifySend({ msg, recipient, regions = null, seen = '', winTitle = '', 
 // B27: thanh menu của cửa sổ (Tệp / Sửa / Xem / Cửa sổ / Trợ giúp…) không phải đầu khung trò chuyện (OCR hay đọc “Cửa sổ” thành “Cửa số”)
 const MENU_WORDS = new Set(['tep', 'sua', 'xem', 'cua', 'so', 'tro', 'giup', 'chinh', 'chen', 'dinh', 'dang', 'cong', 'cu', 'file', 'edit', 'view', 'window', 'help', 'tools', 'insert', 'format', 'history', 'bookmarks', 'go']);
 const MENU_BAR = (t) => { const w = fold(t).split(' ').filter(Boolean); return w.length > 0 && w.length <= 10 && w.every(x => MENU_WORDS.has(x)); };
+const INFO_PANEL = /^(?:thông tin hội thoại|thong tin hoi thoai|thông tin nhóm|thông tin cuộc trò chuyện|conversation info|chat info|group info|details|会话信息|聊天信息|群信息|對話資訊|会话资料)$/iu;
+const COMPOSER_HINT = /^(?:nhập|nhap|soạn tin|aa$|type a message|write a message|send a message|message\s|输入消息|发送消息|輸入訊息)/iu;
+const CUT_MEMO = new Map(); // B102: mép trái khung chat theo cửa sổ
 function regionsOf(obs) {
   const els = (obs && obs.elements || []).filter(e => Array.isArray(e.b) && e.b.length >= 4);
   if (!els.length) return null;
@@ -199,15 +235,42 @@ function regionsOf(obs) {
   const rel = (e) => ({ rx: (e.b[0] + e.b[2] / 2 - W[0]) / W[2], ry: (e.b[1] + e.b[3] / 2 - W[1]) / W[3], left: (e.b[0] - W[0]) / W[2] });
   const searchy = (e) => /tìm|tim kiem|search|find/iu.test(`${e.name || ''} ${e.autoId || ''}`);
   const hasRight = els.some(e => rel(e).left >= 0.3);
-  const out = { header: [], composer: [], messages: [], list: [] };
+  const out = { header: [], composer: [], messages: [], list: [], side: [] }; const hdr = [];
+  // B85 (Zalo thật, 3 cột): danh sách trái chỉ rộng ≈20 % → tiêu đề “My Documents” ở x≈0,24 bị coi là danh sách, còn “đầu khung” lại là bảng
+  // “Thông tin hội thoại” bên phải. Mép trái khung chat = mép trái ô soạn (“Nhập @, tin nhắn tới …”); bảng thông tin bên phải bị loại khỏi tiêu đề
+  const nm = (e) => String(e.name || e.value || '').trim();
+  const comp = els.filter(e => rel(e).ry > 0.8 && rel(e).left > 0.08 && rel(e).left < 0.33 && (e.editable || COMPOSER_HINT.test(nm(e)) || /tin nhắn|message|消息|訊息/iu.test(String(e.placeholder || '')))).sort((a, b) => a.b[0] - b.b[0])[0];
+  // B102 (máy thật beta.2.4): gõ nội dung xong thì chữ gợi ý “Nhập @, tin nhắn tới …” biến mất → mất mép khung chat → tiêu đề “My Documents”
+  // lại bị coi là danh sách → chốt người nhận (B90) mất. Nhớ mép đã thấy cho cùng cửa sổ (cùng ứng dụng + cùng khung) và dùng lại.
+  const wkey = `${String((obs.win && (obs.win.proc || obs.win.pid)) || '')}|${W.map(v => Math.round(v / 8)).join(',')}`;
+  let cut = comp ? Math.min(0.3, rel(comp).left - 0.03) : null;
+  if (cut != null) { CUT_MEMO.delete(wkey); CUT_MEMO.set(wkey, cut); if (CUT_MEMO.size > 32) CUT_MEMO.delete(CUT_MEMO.keys().next().value); }
+  else cut = CUT_MEMO.has(wkey) ? CUT_MEMO.get(wkey) : 0.3;
+  const ip = els.find(e => rel(e).ry < 0.16 && rel(e).left > 0.55 && INFO_PANEL.test(nm(e)));
+  const panelL = ip ? Math.max(0.5, (2 * (ip.b[0] + ip.b[2] / 2) - (W[0] + W[2]) - W[0]) / W[2] - 0.02) : 2;
+  // B124/B122 (ô tìm kiếm còn chữ “My Documents” sau lần tìm hụt, OCR chỉ thấy cột trái): chữ trong HÀNG Ô TÌM KIẾM (cạnh nút “Đóng”) không phải tiêu đề khung chat
+  const sClose = searchClose(obs); const sLeft = searchLeftover(obs);
+  const inSearchRow = (e) => (sLeft && e === sLeft) || (sClose && rel(e).left < 0.35 && Math.abs(e.b[1] + e.b[3] / 2 - sClose.y) <= Math.max(14, e.b[3]) && e.b[0] <= sClose.x + 5);
   for (const e of els) {
-    const { ry, left } = rel(e); const txt = [e.name, e.value].filter(Boolean).join(' ').trim();
+    const { ry, left, rx } = rel(e); const txt = [e.name, e.value].filter(Boolean).join(' ').trim();
     if (!txt) continue;
+    if (inSearchRow(e)) { out.list.push(txt); continue; }
+    if (sClose && !hasRight && left < 0.35) { out.list.push(txt); continue; } // ô tìm kiếm đang mở, OCR chỉ thấy cột trái → đó là danh sách kết quả, không phải tiêu đề
+    if (rx >= panelL && !(e.editable || e.focused)) { out.side.push(txt); continue; }
     if (e.editable || e.focused) { if (!searchy(e)) out.composer.push(e.value != null ? e.value : (e.ocr ? e.name : '')); continue; }
-    if (hasRight && left < 0.3) { out.list.push(txt); continue; }
-    if (ry < 0.16) { if (!MENU_BAR(txt)) out.header.push(txt); }
+    if (hasRight && left < cut) { out.list.push(txt); continue; }
+    if (ry < 0.16) { if (!MENU_BAR(txt)) hdr.push({ e, txt }); }
     else if (ry > 0.9 && e.ocr) out.composer.push(txt);
     else out.messages.push(txt);
+  }
+  // B116 (máy thật beta.2.5): dải 16 % đầu còn chứa bong bóng tin/khung xem trước đường dẫn ngay dưới tiêu đề (“https://…”, “AIVN - Chạy AI…”)
+  // → chỉ giữ CỤM dòng trên cùng (tên + dòng phụ); gặp khoảng trống dọc rõ rệt thì phần dưới là nội dung khung chat
+  hdr.sort((a, b) => a.e.b[1] - b.e.b[1]);
+  const gap = Math.max(18, W[3] * 0.025); let bottom = null, cutHdr = false;
+  for (const h of hdr) {
+    if (!cutHdr && bottom != null && h.e.b[1] > bottom + gap) cutHdr = true;
+    if (cutHdr || !headerLike(h.txt)) { out.messages.push(h.txt); continue; }
+    out.header.push(h.txt); bottom = Math.max(bottom == null ? -Infinity : bottom, h.e.b[1] + h.e.b[3]);
   }
   out.composer = out.composer.filter(x => x != null);
   return out;
@@ -251,21 +314,80 @@ function askWho(current = '') {
 }
 // B61: việc GỬI TIN/THƯ mà câu lệnh không nêu người nhận → hỏi “Gửi cho ai?” TRƯỚC mọi thao tác màn hình (không để mô hình tự chọn
 // người trong danh sách chat/bộ nhớ). Không áp dụng: đã nêu người nhận, “cuộc trò chuyện hiện tại”, việc không phải gửi tin (gửi tệp vào thư mục, trả lời câu hỏi…)
-const MSG_SEND = /(?:^|[^\p{L}])(?:nhắn(?:\s+tin)?|gửi\s+(?:tin(?:\s+nhắn)?|lời nhắn|email|e-mail|mail|thư)|soạn\s+(?:tin(?:\s+nhắn)?|email|mail|thư))(?![\p{L}])|(?:^|[^\p{L}])(?:send|write|draft)\s+(?:a\s+|an\s+)?(?:message|text|email|e-mail|mail|dm)\b|^\s*(?:please\s+)?(?:text|message|dm|email)\b|发(?:一[条條]|个|個)?\s*(?:消息|信息|短信|讯息|訊息|微信|邮件|郵件|私信)|傳(?:訊息|消息)|私信/iu;
+const MSG_SEND = /(?:^|[^\p{L}])(?:nhắn(?:\s+tin)?|gửi\s+(?:tin(?:\s+nhắn)?|lời nhắn|email|e-mail|mail|thư)|soạn\s+(?:tin(?:\s+nhắn)?|email|mail|thư))(?![\p{L}])|(?:^|[^\p{L}])(?:send|write|draft)\s+(?:a\s+|an\s+)?(?:message|text|email|e-mail|mail|dm)\b|^\s*(?:please\s+)?(?:text|message|dm|email)\b|(?:^|[^\p{L}])báo(?:\s+(?:giúp|hộ|giùm|dùm|cho|với|lại|tin))(?![\p{L}])|(?:^|[^\p{L}])trả lời(?:\s+(?:tin(?:\s+nhắn)?|email|mail|thư|lại|giúp|hộ|giùm|cho|với|là|rằng|ok|okay|được|đồng ý)|\s*[:"“])(?![\p{L}])|(?:^|[^\p{L}])(?:reply|respond)(?:\s+(?:to|with|back|saying|that|ok|okay|yes|no)\b|\s*[:"“]|\s*$)|回复|回覆|告诉|告訴|发(?:一[条條]|个|個)?\s*(?:消息|信息|短信|讯息|訊息|微信|邮件|郵件|私信)|傳(?:訊息|消息)|私信/iu;
+// “… rồi báo (lại) cho mình (biết) / báo lại nhé / report back to me / 告诉我” = báo KẾT QUẢ cho chính người dùng (trả lời trong AIVN), không phải gửi tin cho ai
+const SELF_REPORT = /(?:^|[^\p{L}])báo(?:\s+(?:lại|giúp|hộ|giùm|dùm))?(?:\s+(?:cho|với))?(?:\s+(?:mình|tôi|tớ|em|me))?(?:\s+(?:biết|nhé|nha|nhá|với|ạ|luôn|ngay))*(?=\s*[.!?…]*\s*$)|(?:^|[^\p{L}])(?:report|tell me|let me know)(?:\s+back)?(?:\s+to\s+me)?\s*[.!?]*\s*$|告诉我[。！!]*\s*$/iu;
+// B113 (máy thật beta.2.5, kịch bản A): “…rồi báo cho mình giá và đường dẫn trang” — “báo cho mình/tôi”, “cho mình biết”, “tell me”, “report back”,
+// “告诉我” ở BẤT KỲ đâu trong câu là trả lời người dùng NGAY TRONG AIVN, không phải gửi tin. Chỉ là gửi tin khi ngay sau đó nêu ứng dụng nhắn tin
+// (“báo cho mình qua Zalo”, “tell me on Telegram”).
+const MSG_APPS = String.raw`(?:zalo|messenger|facebook|telegram|teams|microsoft teams|discord|slack|whatsapp|viber|skype|gmail|outlook|email|e-mail|mail|thư|sms|tin nhắn|微信|邮件|短信|消息)`;
+const SELF_ANY = /(?:^|[^\p{L}])(?:báo(?:\s+(?:lại|giúp|hộ|giùm|dùm))?\s+(?:cho|với)\s+(?:mình|tôi|tớ|em|tao)(?:\s+biết)?|(?:nói|kể)\s+(?:cho|với)\s+(?:mình|tôi|tớ|em)(?:\s+(?:biết|nghe))?|cho\s+(?:mình|tôi|tớ|em)\s+biết|tell\s+me|let\s+me\s+know|report(?:\s+(?:it|them|that|this|the\s+\w+))?\s+back(?:\s+to\s+me)?|report\s+to\s+me|get\s+back\s+to\s+me)(?![\p{L}])|告诉我|告訴我|跟我说|跟我說|让我知道|讓我知道|回报给我|报告给我/giu;
+const VIA_APP = new RegExp(String.raw`^\s*(?:[^.!?;。！？]{0,40}?\s)?(?:qua|trên|bằng|on|via|by|through|in|用|通过|在)\s*${MSG_APPS}(?![\p{L}])`, 'iu');
+const selfReport = (q) => {
+  let r = String(q || '').replace(SELF_REPORT, ' ');
+  r = r.replace(SELF_ANY, (m, off, all) => VIA_APP.test(all.slice(off + m.length)) ? m : ' ');
+  return r;
+};
+// việc nhắn/gửi tin thật (đã bỏ phần “báo cho mình…” = trả lời trong AIVN)
+const msgSend = (q) => MSG_SEND.test(selfReport(q));
 function missingRecipient(query) {
-  const q = String(query || ''); if (!MSG_SEND.test(q)) return false;
+  const q = selfReport(query); if (!MSG_SEND.test(q)) return false;
   if (CURRENT_CHAT.test(q)) return false;
   return !recipientOf(q);
 }
 const ASKED_WHO = /^(?:⚠\s*)?(?:Gửi cho ai\?|Who should I send it to\?|发给谁？)/u;
 // câu trả lời cho “Gửi cho ai?”: “đúng/yes/对/cuộc trò chuyện đang mở” = chat đang mở; còn lại là tên người nhận
 const YES_CURRENT = /^\s*(?:đúng|đúng rồi|ừ|ok|okay|vâng|dạ|phải|yes|yep|right|correct|对|是|是的|好)\s*[.!]*\s*$/iu;
+// B75 (QA lượt 8): trả lời “không / thôi, huỷ đi / no / 取消 / đúng rồi nhưng thôi đừng gửi” = HUỶ việc, không phải tên người nhận
+const CANCEL_WHO = /^\s*(?:không|ko|khong|thôi|thoi|huỷ|hủy|huy|khỏi|no|nope|nah|cancel|stop|never ?mind|forget it)(?![\p{L}])|(?:^|[^\p{L}])(?:đừng gửi|không gửi|ko gửi|khỏi gửi|thôi khỏi|thôi đừng|huỷ đi|hủy đi|huỷ việc|hủy việc|don't send|do not send|cancel it|cancel that|never ?mind)(?![\p{L}])|^\s*(?:算了|取消|不要|不用|别|別|不发|不發|不了)|算了|取消|不要发|不要發|别发|別發/iu;
+function cancelWho(reply) { return CANCEL_WHO.test(String(reply || '').trim()); }
+// câu trả lời không giống một cái tên (dài, có động từ gửi/nhắn) → hỏi lại, không đoán
+function unclearWho(reply) { const r = String(reply || '').trim(); if (!r) return true; if (YES_CURRENT.test(r) || CURRENT_CHAT.test(r)) return false;
+  const words = r.split(/\s+/).length; return words > 6 || /(?:^|[^\p{L}])(?:gửi|nhắn|soạn|send|text|message|email|发送|发消息)(?![\p{L}])/iu.test(r) || notAName(r.replace(/^(?:cho|gửi cho|to|send to|给)\s+/iu, '')); }
+const CANCEL_WHO_MSG = 'Đã huỷ — mình không gửi gì cả.';
 function answerWho(prevTask, reply) {
   const r = String(reply || '').trim().replace(/^[“"']|[”"']$/g, '');
   if (YES_CURRENT.test(r) || CURRENT_CHAT.test(r)) return `${prevTask}\n(gửi vào cuộc trò chuyện hiện tại)`;
   return `${prevTask}\n(người nhận: ${r.replace(/^(?:cho|gửi cho|to|send to|给)\s+/iu, '').slice(0, 80)})`;
 }
-function chatGate({ query, text, searchField = false, submit = false, proc = '', title = '', state = {}, header = [], ocrHeader = null, seenHeader = null }) {
+// B90: chữ gợi ý của ô soạn nêu tên cuộc trò chuyện đang mở: Zalo “Nhập @, tin nhắn tới X”, en “Type @ to mention, message to X” / “Message X”, zh “输入 @，发送消息给 X”
+const COMPOSER_TO = [
+  /^[|\s]*(?:nhập|nhap)\s*@?\s*[,，]?\s*(?:để nhắc tên\s*[,，]?\s*)?tin nhắn (?:tới|đến|gửi tới|cho)\s+(.+?)[\s.…]*$/iu,
+  /^[|\s]*(?:type|enter|write|send)\b[^,]{0,30}[,，]?\s*(?:a\s+)?message (?:to|for)\s+(.+?)[\s.…]*$/iu,
+  /^[|\s]*message\s+@?(.+?)[\s.…]*$/iu,
+  /^[|\s]*(?:输入\s*@?\s*[^，,]{0,8}[，,]\s*)?(?:发送)?消息(?:发送)?(?:给|至|到)\s*(.+?)[\s。…]*$/u,
+  /^[|\s]*(?:发消息给|发送给|发给)\s*(.+?)[\s。…]*$/u,
+];
+function composerTarget(texts = []) { for (const t of texts) { const x = String(t || '').trim(); if (!x || x.length > 120) continue; for (const re of COMPOSER_TO) { const m = re.exec(x); if (m && m[1] && m[1].length <= 60) return m[1].trim(); } } return null; }
+// tên khớp CHẶT (cả cụm, không chỉ chứa từ) — dùng khi lượt này CHƯA tìm người nhận
+// B97 (máy thật beta.2.3): dòng đầu khung chat đọc bằng OCR có rác — biểu tượng ảnh đại diện thành một ký tự lẻ (“Q My Documents”, “| Lan”),
+// dòng phụ dưới tên (“Lưu và đồng bộ dữ liệu…”, “Vừa truy cập”, “Active now”), giờ (“2158”, “21:58”). Cổng người nhận (B90) và
+// kiểm tra --approve-send-to dùng CHUNG cách làm sạch này.
+const HEADER_SUB = /^(?:lưu và đồng bộ|luu va dong bo|vừa truy cập|vua truy cap|truy cập|truy cap|đang hoạt động|dang hoat dong|hoạt động|hoat dong|đang nhập|dang nhap|ngoại tuyến|trực tuyến|active|online|offline|last seen|seen|typing|sync|saved messages|在线|离线|刚刚|最近|上次|正在输入)/iu;
+const HEADER_TIME = /^(?:\d{1,2}\s?[:h.]\s?\d{2}(?:\s?(?:am|pm|sa|ch))?|\d{3,4}|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|hôm (?:nay|qua)|today|yesterday|今天|昨天)$/iu;
+// B116: dòng tiêu đề khung chat không bao giờ là đường dẫn hay một câu dài (đó là bong bóng tin / khung xem trước liên kết)
+const URLISH = /(?:https?:\/\/|www\.)\S|\b[\w-]+\.(?:com|net|org|io|vn|me|app|dev|ai|edu)(?:\.[a-z]{2})?\/\S*/iu;
+function headerLike(x) { const t = String(x == null ? '' : x).trim(); return !!t && !URLISH.test(t) && t.length <= 64 && t.split(/\s+/).length <= 9; }
+function cleanHeaderLine(x) {
+  let t = String(x == null ? '' : x).normalize('NFC').replace(/\s+/g, ' ').trim();
+  // ký tự lẻ đứng đầu (biểu tượng/ảnh đại diện OCR thành “Q”, “|”, “©”…) + phần sau còn ít nhất 2 chữ cái
+  const m = /^(\S)\s+(.+)$/u.exec(t); if (m && [...m[1]].length === 1 && !/\d/.test(m[1]) && /\p{L}.*\p{L}/u.test(m[2])) t = m[2].trim();
+  t = t.replace(/^[|•·©®@#*>»›\-–—:]+\s*/u, '').replace(/\s*[|•·]+$/u, '').trim();
+  // giờ dính ở cuối dòng tiêu đề (“My Documents 21:58”)
+  t = t.replace(/\s+\d{1,2}[:h.]\d{2}$/u, '').trim();
+  return t;
+}
+function cleanHeader(lines = []) {
+  const out = [];
+  for (const x of [].concat(lines || [])) {
+    const t = cleanHeaderLine(x); const f = fold(t);
+    if (!t || f.replace(/\s/g, '').length <= 1 || HEADER_TIME.test(t) || HEADER_SUB.test(t) || HEADER_SUB.test(f) || !headerLike(t)) continue;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+const exactName = (names, x) => { const kx = nameKey(x); return !!kx && names.some(n => nameKey(n) === kx); };
+function chatGate({ query, text, searchField = false, submit = false, proc = '', title = '', state = {}, header = [], ocrHeader = null, seenHeader = null, composer = [] }) {
   if (!isChatContext(query, proc, title)) return null;
   if (CURRENT_CHAT.test(String(query || ''))) {
     if (searchField) return null;
@@ -281,7 +403,7 @@ function chatGate({ query, text, searchField = false, submit = false, proc = '',
     // B31: việc GỬI TIN mà không đọc được tên người nhận (câu tiếng Trung lạ, viết tắt…) → không được cho qua; hỏi người dùng
     // B36 (QA lượt 6, đã gửi nhầm vào nhóm): trong ứng dụng chat, KHÔNG BAO GIỜ gõ vào ô soạn khi chưa xác định được người nhận — bất kể động từ (“nói với/bảo/tell/let … know”…)
     if (searchField) return null;
-    if (!submit && !/\n\s*$/.test(String(text || '')) && !SEND_INTENT.test(String(query || '')) && !SAY_INTENT.test(String(query || ''))) return null; // gõ chữ không kèm Enter, câu lệnh không phải gửi/nói với ai → không phải gửi tin
+    if (!submit && !/\n\s*$/.test(String(text || '')) && !SEND_INTENT.test(selfReport(query)) && !SAY_INTENT.test(selfReport(query))) return null; // gõ chữ không kèm Enter, câu lệnh không phải gửi/nói với ai → không phải gửi tin
     state.askWho = askWho(); // B59: hỏi người dùng “Gửi cho ai?” (desktop-agent dừng lượt và đưa câu hỏi này cho người dùng)
     return `CHƯA gõ tin: không xác định được NGƯỜI NHẬN trong yêu cầu, nên không kiểm chứng được cuộc trò chuyện đang mở${header.filter(Boolean).length ? ` (“${String(header.filter(Boolean)[0]).slice(0, 40)}”)` : ''} là đúng người. Dừng lại và HỎI người dùng tên đầy đủ của người nhận; khi họ trả lời thì tìm và mở đúng cuộc trò chuyện đó rồi mới gõ tin.`;
   }
@@ -292,17 +414,136 @@ function chatGate({ query, text, searchField = false, submit = false, proc = '',
   const nearName = !onlyName(text, recipient) && nameOnly; // gần giống tên (thêm vài ký tự): chỉ chặn khi CHƯA mở đúng cuộc trò chuyện
   if (onlyName(text, recipient)) return `KHÔNG gõ “${String(text).slice(0, 40)}”: ô đang nhận chữ CHƯA được xác nhận là ô Tìm kiếm (có thể là ô soạn tin của cuộc trò chuyện đang mở${header.filter(Boolean).length ? ` “${String(header.filter(Boolean)[0]).slice(0, 40)}”` : ''} — gõ tên + Enter ở đó sẽ GỬI tên thành tin nhắn). Làm lần lượt: 1) screen_act click vào ô/chữ “Tìm kiếm” của ứng dụng; 2) type_text "${recipient}" với element là CHÍNH ô tìm kiếm đó; 3) bấm vào kết quả đúng tên “${recipient}”. Nếu tên “${recipient}” đã hiện sẵn trong danh sách bên trái, bấm thẳng vào tên đó thay vì gõ.`;
   const k = nameKey(recipient);
-  const hdr = header.filter(Boolean).filter(h => !MENU_BAR(h));
+  const hdr0 = cleanHeader(header.filter(Boolean)).filter(h => !MENU_BAR(h)); // B97: cùng cách làm sạch với kiểm tra --approve-send-to
+  // B124: lần tìm gần nhất KHÔNG thấy người nhận → chữ “đầu khung” trùng đúng chữ vừa gõ tìm là chữ còn trong Ô TÌM KIẾM, không phải tiêu đề (chỉ chặt hơn, không bao giờ nới)
+  const lastS = Array.isArray(state.searches) && state.searches.length ? state.searches[state.searches.length - 1] : null;
+  const hdr = lastS && lastS.found === false ? hdr0.filter(h => fold(h).trim() !== fold(lastS.text).trim()) : hdr0;
   // B27: màn hình (tiêu đề cửa sổ “Ứng dụng - Tên”, hoặc đầu khung chat đúng tên) cho thấy ĐÚNG người nhận → cho gõ, không dựa vào cờ nội bộ
   // tiêu đề cửa sổ (do hệ điều hành báo) là bằng chứng chắc; chữ OCR ở đầu khung chỉ được tin khi lượt này ĐÃ tìm người nhận (có thể là chữ khác lọt vào vùng đầu khung)
-  if (chatShown(recipient, title, []) || (state.lastSearch && chatShown(recipient, title, hdr))) { state.chatOpen = k; return null; }
+  const al = state.aliases || [];
+  // B97: ghi lại chữ gợi ý ô soạn (“Nhập @, tin nhắn tới X”) KHỚP CHẶT người nhận trong lượt này — sau khi gõ nội dung, chữ gợi ý biến mất
+  { const ct0 = composerTarget(composer); if (ct0 && exactName(namesFor(recipient, al), ct0)) state.placeholderSeen = { key: k, name: ct0 }; }
+  if (chatShown(recipient, title, [], al) || (state.lastSearch && chatShown(recipient, title, hdr, al))) { state.chatOpen = k; return null; }
+  // B90 (máy thật beta.2.1): đúng cuộc trò chuyện ĐÃ mở sẵn (không tìm trong lượt này) — tiêu đề khung giữa hoặc chữ gợi ý ô soạn
+  // trùng KHỚP CHẶT với người nhận / tên khác (Cloud của tôi = My Documents = My Cloud…) → cho gõ
+  const names = namesFor(recipient, al); const ct = composerTarget(composer);
+  if (!ct || exactName(names, ct)) {
+    const hit = hdr.find(h => exactName(names, h)) || (ct && exactName(names, ct) ? ct : null);
+    if (hit) { state.chatOpen = k; state.openedBy = hdr.includes(hit) ? 'header' : 'composer'; state.gateNote = `cuộc trò chuyện “${hit}” đã mở sẵn (${state.openedBy === 'header' ? 'tiêu đề khung giữa' : 'chữ gợi ý ô soạn'}) = “${recipient}”`; return null; }
+  }
+  // ô soạn ghi rõ đang nhắn cho NGƯỜI KHÁC → nói thẳng, bảo TÌM (bấm ô soạn không đổi được người nhận)
+  if (ct && !exactName(names, ct) && !nearName) return `CHƯA gõ tin: ô soạn đang ghi “tin nhắn tới ${String(ct).slice(0, 40)}” — cuộc trò chuyện đang mở là “${String(ct).slice(0, 40)}”, KHÔNG phải “${recipient}”. ĐỪNG bấm vào ô soạn (bấm ô soạn không đổi người nhận). Làm lần lượt: 1) screen_act click vào ô Tìm kiếm của ứng dụng; 2) type_text "${recipient}"; 3) click vào kết quả đúng tên “${recipient}”; 4) rồi mới gõ tin.`;
   if (state.chatOpen === k) {
     // đã mở đúng người, nhưng nếu tiêu đề đọc được mà lại là người khác (vd. ứng dụng tự nhảy cuộc trò chuyện) thì vẫn chặn
-    if (hdr.length && !hdr.some(h => headerMatches(recipient, h))) return `Tiêu đề cuộc trò chuyện hiện là “${String(hdr[0]).slice(0, 40)}”, không phải “${recipient}”. Tìm lại “${recipient}” trong ô tìm kiếm của ứng dụng, bấm vào đúng kết quả rồi mới gõ tin.`;
+    if (hdr.length && !hdr.some(h => namesFor(recipient, al).some(n => headerMatches(n, h)))) return `Tiêu đề cuộc trò chuyện hiện là “${String(hdr[0]).slice(0, 40)}”, không phải “${recipient}”. Tìm lại “${recipient}” trong ô tìm kiếm của ứng dụng, bấm vào đúng kết quả rồi mới gõ tin.`;
     return null;
   }
   if (nearName) { return `KHÔNG gõ “${String(text).slice(0, 40)}”: ô đang nhận chữ CHƯA được xác nhận là ô Tìm kiếm (có thể là ô soạn tin của cuộc trò chuyện đang mở${header.filter(Boolean).length ? ` “${String(header.filter(Boolean)[0]).slice(0, 40)}”` : ''} — gõ tên + Enter ở đó sẽ GỬI tên thành tin nhắn). Làm lần lượt: 1) screen_act click vào ô/chữ “Tìm kiếm” của ứng dụng; 2) type_text "${recipient}" với element là CHÍNH ô tìm kiếm đó; 3) bấm vào kết quả đúng tên “${recipient}”. Nếu tên “${recipient}” đã hiện sẵn trong danh sách bên trái, bấm thẳng vào tên đó thay vì gõ.`; }
-  return `CHƯA gõ tin: AIVN AGENT phải TÌM và MỞ cuộc trò chuyện với “${recipient}” trước, không gõ vào cuộc trò chuyện đang mở sẵn${hdr.length ? ` (đang mở: “${String(hdr[0]).slice(0, 40)}”)` : ''}. Làm lần lượt: 1) screen_act click vào ô Tìm kiếm của ứng dụng; 2) type_text "${recipient}"; 3) click vào kết quả đúng tên “${recipient}”; 4) rồi mới gõ tin nhắn.`;
+  return `CHƯA gõ tin: AIVN AGENT phải TÌM và MỞ cuộc trò chuyện với “${recipient}” trước (bấm vào ô soạn tin KHÔNG đổi được người nhận — đừng bấm ô soạn), không gõ vào cuộc trò chuyện đang mở sẵn${hdr.length ? ` (đang mở: “${String(hdr[0]).slice(0, 40)}”)` : ''}. Làm lần lượt: 1) screen_act click vào ô Tìm kiếm của ứng dụng; 2) type_text "${recipient}"; 3) click vào kết quả đúng tên “${recipient}”; 4) rồi mới gõ tin nhắn.`;
 }
 const SEEN_QUESTION = 'Trả lời đúng định dạng, chép đúng chữ trên màn hình:\nTÊN: <tên người/nhóm ở đầu khung trò chuyện đang mở>\nÔ SOẠN: <chữ còn trong ô soạn tin, hoặc TRỐNG>\nTIN: <tin nhắn cuối cùng trong khung trò chuyện>\nTIN: <tin nhắn trước đó>';
-module.exports = { missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };
+// B94 (máy thật beta.2.2): ô SOẠN TIN — chữ gợi ý “Nhập @, tin nhắn tới X” / “Type a message” / “Message X” / “输入消息”, hoặc ô nhập ở đáy khung chat; không bao giờ là ô tìm kiếm
+const SEARCHY_EL = /tìm|tim kiem|search|find|搜索|查找/iu;
+function isComposerEl(e, win) {
+  if (!e) return false;
+  if (SEARCHY_EL.test(`${e.name || ''} ${e.autoId || ''} ${e.placeholder || ''}`)) return false;
+  const ts = [e.placeholder, e.name].filter(Boolean).map(x => String(x).trim());
+  if (ts.some(x => composerTarget([x]) || COMPOSER_HINT.test(x))) return true;
+  // ô nhập (không phải OCR) nằm ở đáy cửa sổ, bên phải danh sách hội thoại: ô soạn tin đã có chữ (chữ gợi ý không còn)
+  const W = win && Array.isArray(win.b) && win.b[3] > 50 ? win.b : null;
+  return !!(W && e.editable && !e.ocr && Array.isArray(e.b) && (e.b[1] + e.b[3] / 2 - W[1]) / W[3] > 0.8 && (e.b[0] - W[0]) / W[2] > 0.08);
+}
+function findComposer(obs) {
+  // chỉ trong cửa sổ đích: có khung cửa sổ → tâm phần tử phải nằm trong khung; không có khung (OCR cả màn hình) → chữ OCR phải nêu tên cuộc trò chuyện (“… tới X”),
+  // không nhận chữ gợi ý chung chung (“Nhập tin nhắn...” có thể là ô của cửa sổ khác, vd. chính AIVN)
+  const W = obs && obs.win && Array.isArray(obs.win.b) && obs.win.b[2] > 50 && obs.win.b[3] > 50 ? obs.win.b : null;
+  const inWin = (e) => W ? (e.b[0] + e.b[2] / 2 >= W[0] && e.b[0] + e.b[2] / 2 <= W[0] + W[2] && e.b[1] + e.b[3] / 2 >= W[1] && e.b[1] + e.b[3] / 2 <= W[1] + W[3]) : (!e.ocr || !!composerTarget([e.placeholder, e.name]));
+  const els = ((obs && obs.elements) || []).filter(e => Array.isArray(e.b) && inWin(e) && isComposerEl(e, obs.win));
+  return els.sort((a, b) => (b.editable ? 1 : 0) - (a.editable ? 1 : 0) || (composerTarget([b.placeholder, b.name]) ? 1 : 0) - (composerTarget([a.placeholder, a.name]) ? 1 : 0) || b.b[1] - a.b[1])[0] || null;
+}
+// B94: ô tìm kiếm còn chữ sót (Zalo: khi đang tìm, cạnh ô hiện nút “Đóng”) — trả phần tử chữ trong ô để bấm vào rồi xoá
+const CLOSE_TOK = /(?:^|[\s|│])(?:đóng|dong|close|关闭)(?=$|[\s|│])/iu;
+function searchRowOf(obs) {
+  let W = obs && obs.win && Array.isArray(obs.win.b) && obs.win.b[3] > 50 ? obs.win.b : null;
+  if (!W) { const els = ((obs && obs.elements) || []).filter(e => Array.isArray(e.b) && e.b.length >= 4); if (els.length < 3) return null; // giống regionsOf: khung theo các phần tử
+    const x0 = Math.min(...els.map(e => e.b[0])), y0 = Math.min(...els.map(e => e.b[1])), x1 = Math.max(...els.map(e => e.b[0] + e.b[2])), y1 = Math.max(...els.map(e => e.b[1] + e.b[3])); W = [x0, y0, Math.max(1, x1 - x0), Math.max(1, y1 - y0)]; }
+  const top = (e) => Array.isArray(e.b) && (e.b[1] + e.b[3] / 2 - W[1]) / W[3] < 0.16 && (e.b[0] - W[0]) / W[2] < 0.35;
+  return { W, top, els: ((obs && obs.elements) || []).filter(top) };
+}
+// chữ trong hàng ô tìm kiếm (để so trước/sau khi gõ)
+function searchRowText(obs) { const r = searchRowOf(obs); return r ? r.els.slice().sort((a, b) => a.b[0] - b.b[0]).map(e => String(e.name || e.value || '')).join(' ') : ''; }
+function searchLeftover(obs) {
+  const els = ((obs && obs.elements) || []).filter(e => Array.isArray(e.b));
+  const f = els.find(e => e.focused && !e.ocr && SEARCHY_EL.test(`${e.name || ''} ${e.autoId || ''} ${e.placeholder || ''}`));
+  if (f && String(f.value || '').trim()) return f;
+  const R = searchRowOf(obs); if (!R) return null;
+  const nf = (x) => String(x || '').normalize('NFC');
+  const close = R.els.find(e => CLOSE_TOK.test(nf(e.name)));
+  if (!close) return null;
+  const meaningful = (x) => String(x || '').replace(/(?:^|\s)[QqØø](?=\s|$)/g, ' ').replace(/[^\p{L}\p{N}]/gu, '').length >= 2;
+  // OCR gộp chữ trong ô với nút “Đóng” (“| Q AivN… Ø| Đóng”): phần đứng trước “Đóng”
+  const pre = nf(close.name).split(CLOSE_TOK)[0];
+  if (meaningful(pre) && !/^[|\s]*(?:tìm kiếm|tim kiem|search|搜索)[|\s…]*$/iu.test(pre)) return { ...close, name: pre.trim(), b: [close.b[0], close.b[1], Math.max(20, Math.round(close.b[2] * pre.length / Math.max(1, String(close.name).length))), close.b[3]] };
+  const cy = close.b[1] + close.b[3] / 2;
+  return R.els.filter(e => e !== close && Math.abs(e.b[1] + e.b[3] / 2 - cy) <= Math.max(14, close.b[3]) && e.b[0] < close.b[0] && !/^[|\s]*(?:tìm kiếm|tim kiem|search|搜索)[|\s…]*$/iu.test(String(e.name || '')) && meaningful(e.name))
+    .sort((a, b) => b.b[2] - a.b[2])[0] || null;
+}
+// B94: nút “Đóng” của ô tìm kiếm đang mở (Zalo) — bấm vào để thoát tìm kiếm + xoá chữ khi OCR không đọc được chữ trong ô. Trả điểm bấm (ước theo vị trí chữ trong cụm OCR)
+function searchClose(obs) {
+  const R = searchRowOf(obs); if (!R) return null;
+  for (const e of R.els) {
+    const n = String(e.name || '').normalize('NFC'); const m = /(^|[\s|│])(đóng|dong|close|关闭)(?=$|[\s|│])/iu.exec(n); if (!m) continue;
+    const i0 = m.index + m[1].length, i1 = i0 + m[2].length, L = Math.max(1, n.length);
+    return { x: Math.round(e.b[0] + e.b[2] * ((i0 + i1) / 2) / L), y: Math.round(e.b[1] + e.b[3] / 2), el: e };
+  }
+  return null;
+}
+// chữ gõ có phải TÊN người nhận (gõ vào ô tìm kiếm) hay là NỘI DUNG tin
+function nameLikeText(text, recipient) {
+  if (!recipient) return false;
+  const norm = (x) => fold(String(x || '')).replace(/[^\p{L}\p{N} ]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const ty = norm(text), nf = norm(recipient), nk = norm(nameKey(recipient));
+  return !!ty && (ty === nf || ty === nk || (ty.length >= 2 && (nf.includes(ty) || nk.includes(ty))) || namesFor(recipient).some(n => norm(n) === ty));
+}
+// B108 (máy thật beta.2.5, AN TOÀN): “mở Zalo và mở chat Cloud của tôi” (không có nội dung tin) → mô hình gõ “@My Documents” rồi xin GỬI “Chào bạn!” tự bịa.
+// Nội dung một bước GỬI (hoặc chữ gõ vào ô soạn tin) phải lấy từ YÊU CẦU của người dùng: trong ngoặc kép, hoặc nêu rõ (“nhắn Lan là mai 8h họp”).
+// Đo: các từ NỘI DUNG của chữ (bỏ lời chào/đại từ/từ đệm) phải có trong câu lệnh (không dấu) — ít nhất 1 từ và ≥ 70%.
+const FILLER = new Set(['chao', 'ban', 'nhe', 'nha', 'nhe', 'a', 'oi', 'hi', 'hello', 'hey', 'minh', 'toi', 'em', 'anh', 'chi', 'to', 'cau', 'nhá', 'ha', 'the', 'and', 'i', 'you', 'ok', 'okay', 'thanks', 'cam', 'on', 'vang', 'da', 'u', 'uh', 'nhi', 'nhe', '你好', '您好']);
+function quotedIn(query) { const out = []; const re = /["“«]([^"”»]{1,400})["”»]/gu; let m; while ((m = re.exec(String(query || '')))) out.push(m[1]); return out; }
+function textFromRequest(query, text) {
+  const q = String(query || ''); const tx = String(text || '').replace(/\n\s*$/, '').trim(); if (!tx) return false;
+  const norm = (x) => fold(x).replace(/[^\p{L}\p{N} ]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const nt = norm(tx), nq = norm(q); if (!nt) return false;
+  if (quotedIn(q).some(z => norm(z) === nt) || (` ${nq} `).includes(` ${nt} `)) return true;
+  const qset = new Set(nq.split(' ')); const words = nt.split(' ').filter(w => !FILLER.has(w));
+  // chữ Hán: so theo ký tự
+  if (/[\u3400-\u9fff]/u.test(tx)) { const cs = [...tx.replace(/[^\u3400-\u9fff]/gu, '')]; const hit = cs.filter(c => q.includes(c)).length; return cs.length > 0 && hit / cs.length >= 0.7; }
+  if (!words.length) return false;
+  const hit = words.filter(w => qset.has(w)).length; return hit >= 1 && hit / words.length >= 0.7;
+}
+// B96: phần tử là tệp / tệp đính kèm / ô xem trước (danh sách File, ảnh, video…) — bấm vào sẽ MỞ tệp bằng ứng dụng khác
+const FILE_NAME = /\.(xlsx?|xlsm|csv|docx?|rtf|odt|pptx?|pdf|zip|rar|7z|txt|png|jpe?g|gif|webp|heic|bmp|mp4|mov|avi|mkv|mp3|wav|m4a|exe|msi|apk|psd)\b/i;
+const FILE_UI = /^(?:ảnh\s*\/\s*video|ảnh|video|file|tệp|tệp tin|tệp đính kèm|photos?(?:\s*\/\s*videos?)?|files?|attachments?|media|图片|视频|文件|附件|图片\/视频)$/iu;
+function isFileTarget(name, el) {
+  const n = String(name || '').trim();
+  return FILE_NAME.test(n) || FILE_UI.test(n) || !!(el && /image|thumbnail|hình|ảnh/iu.test(String(el.kind || el.role || '')) && !/button|nút/iu.test(String(el.kind || '')));
+}
+// tên tệp OCR bị xuống dòng (“marketing cleaned” + dòng dưới “data.xlsx”): xét cả dòng ngay trên/dưới cùng cột
+function fileAt(el, obs) {
+  if (!el) return false; if (isFileTarget(el.name, el)) return true;
+  if (!Array.isArray(el.b)) return false; const E = el.b;
+  return ((obs && obs.elements) || []).some(e => e !== el && Array.isArray(e.b) && FILE_NAME.test(String(e.name || '')) && Math.abs((e.b[1] + e.b[3] / 2) - (E[1] + E[3] / 2)) <= Math.max(E[3], e.b[3]) * 1.9 + 4 && e.b[0] < E[0] + E[2] && e.b[0] + e.b[2] > E[0]);
+}
+// việc có nhắc tới tệp/đính kèm (bỏ phần nội dung tin trong ngoặc kép)
+const WANTS_FILE = /tệp|tep|file|đính kèm|dinh kem|attach|tài liệu|ảnh|hình|photo|picture|video|mở\s+(?:tệp|file)|文件|附件|图片|照片/iu;
+function wantsFiles(query) { return WANTS_FILE.test(String(query || '').replace(/[“"«][^”"»]*[”"»]/g, ' ')); }
+// Lệnh CHỈ SOẠN (không gửi) — một nguồn cho desktop-agent (B101 không tự bấm Enter), agent.js, qa-runner.
+// Gồm cả cách nói “soạn nháp / bản nháp / write a draft / draft a message / compose … / 起草 / 草拟 / 写一封 … 的消息”.
+const DRAFT_ONLY = /(chỉ soạn|soạn sẵn|soạn nháp|viết sẵn|viết nháp|bản nháp|không gửi|đừng gửi|chưa gửi|khoan gửi|don't send|do not send|without sending|not send|draft only|a draft|draft (?:a |an |the )?(?:message|email|mail|text|reply)|compose (?:a |an )?(?:message|email|draft)|只起草|起草|草拟|草稿|写一[封条]|不要发送|别发送|先不要发|不发送)/iu;
+// b64 (lỗi chập chờn): OCR đọc chữ gợi ý ô tìm kiếm kèm nhiễu viền/biểu tượng (“[Tim kiếm trên Messenger”, “Q Tìm kiếm”, “| Search”) và có khi mất dấu
+// → không nhận ra là chữ gợi ý → chữ vừa gõ ở đúng chỗ đó bị coi là KẾT QUẢ thứ hai → báo nhầm “nhiều người cùng tên”. Bỏ nhiễu đầu dòng, so cả không dấu.
+function placeholderLike(name) {
+  const t = String(name || '').replace(/^(?:[^\p{L}\p{N}]+|[QqO]\s+)+/u, '').trim();
+  return /^(?:tìm|search|find|nhập|enter|type|搜索|查找)/iu.test(t) || /^(?:tim kiem|nhap)\b/.test(fold(t));
+}
+module.exports = { headerLike, textFromRequest, quotedIn, selfReport, msgSend, placeholderLike, DRAFT_ONLY, cleanHeader, cleanHeaderLine, searchClose, searchRowText, fileAt, searchLeftover, isComposerEl, findComposer, nameLikeText, isFileTarget, wantsFiles, FILE_NAME, composerTarget, COMPOSER_TO, namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };

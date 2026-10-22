@@ -28,7 +28,7 @@ test('B27: desktop-agent — bấm kết quả sau khi gõ tìm + Enter (kể c�
   const d = rd('src/desktop-agent.js');
   assert.match(d, /s\.lastSearch = \{ q, at: Date\.now\(\) \}/);
   assert.match(d, /recentSearch && SV\.relates\(recentSearch\.q, rcp\)/);
-  assert.match(d, /SV\.chatShown\(rcp, o\.obs\.win \? o\.obs\.win\.title : '', R \? R\.header : \[\]\)/);
+  assert.match(d, /SV\.chatShown\(rcp, o\.obs\.win \? o\.obs\.win\.title : '', R \? R\.header : \[\], s\.aliases\)/);
   assert.match(d, /s\.gateBlocks >= 3/); assert.match(d, /DỪNG, không thử lại nữa/);
   assert.match(d, /else if \(strongOpen && \(v\.recipientSeen \|\| !readable\)\)/, 'không đọc được tiêu đề: chỉ tin cú bấm vào đúng kết quả đã ghi nhận');
 });

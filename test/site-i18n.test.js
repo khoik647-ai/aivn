@@ -40,10 +40,25 @@ test('tên tác giả và khối liên hệ giữ nguyên ở mọi ngôn ngữ'
     const m = html.match(new RegExp(`data-i18n="${k.replace('.', '\\.')}"[^>]*>([\\s\\S]*?)<\\/`)); if (m && m[1].includes(NAME)) assert.ok(D[l][k].includes(NAME), `${l} ${k} mất tên tác giả`);
   }
 });
-test('phiên bản trên trang khớp package.json ở cả 3 ngôn ngữ', () => {
-  const v = require(path.join(root, 'package.json')).version.replace(/-.*/, '');
-  const vi = html.match(/data-i18n="hero\.1"[^>]*>([\s\S]*?)<\/span>\s*\n?/); assert.ok(html.includes(`Phiên bản ${v} `), 'vi'); 
-  assert.ok(D.en['hero.1'].includes(`Version ${v} `), 'en'); assert.ok(D.zh['hero.1'].includes(`${v} 版`), 'zh');
+// Huy hiệu hero ghi bản ỔN ĐỊNH đang phát hành trên trang (QA box beta.2.8): khi package.json là bản thử nghiệm (0.16.0-beta.x) thì đó là
+// tag ổn định mới nhất (v0.15.3), không phải số của package; đến lúc phát hành bản ổn định (package không có “-”) thì phải khớp package.json.
+const cmpV = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
+function stableOnSite() {
+  const pv = require(path.join(root, 'package.json')).version;
+  if (!pv.includes('-')) return { v: pv, how: 'package.json (bản ổn định)' };
+  try {
+    const tags = require('child_process').execFileSync('git', ['tag', '-l', 'v*'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+      .split('\n').map(t => t.trim()).filter(t => /^v\d+\.\d+\.\d+$/.test(t)).map(t => t.slice(1)).sort(cmpV);
+    if (tags.length) return { v: tags[tags.length - 1], how: 'tag ổn định mới nhất' };
+  } catch {}
+  return { v: null, how: 'không có .git (bản git archive)' };
+}
+test('phiên bản trên trang là bản ổn định đang phát hành, khớp ở cả 3 ngôn ngữ', () => {
+  const vi = (html.match(/Phiên bản (\d+\.\d+\.\d+) /) || [])[1]; assert.ok(vi, 'vi: không thấy “Phiên bản x.y.z”');
+  assert.ok(D.en['hero.1'].includes(`Version ${vi} `), 'en'); assert.ok(D.zh['hero.1'].includes(`${vi} 版`), 'zh');
+  const pv = require(path.join(root, 'package.json')).version.replace(/-.*/, '');
+  assert.ok(cmpV(vi, pv) <= 0, `trang ghi ${vi} mới hơn package ${pv}`);
+  const { v, how } = stableOnSite(); if (v) assert.strictEqual(vi, v, how);
 });
 test('có nút chọn ngôn ngữ, đặt <html lang>, nhớ lựa chọn, tự chọn theo trình duyệt', () => {
   for (const l of ['vi', 'en', 'zh']) assert.ok(html.includes(`data-lang="${l}"`));

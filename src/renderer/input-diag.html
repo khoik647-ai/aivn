@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="vi"><head><meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'">
+<title>AIVN · Kiểm tra chuột & phím</title>
+<style>
+ body { font: 14px system-ui, sans-serif; margin: 0; padding: 16px; background: #fff; color: #111; user-select: none; }
+ h1 { font-size: 16px; margin: 0 0 8px; } .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin: 12px 0; }
+ button { height: 64px; font-size: 15px; border: 2px solid #c22; background: #fee; border-radius: 8px; } button.hit { background: #cfc; border-color: #2a2; }
+ input, textarea { width: 100%; box-sizing: border-box; font-size: 16px; padding: 8px; margin: 6px 0; } textarea { height: 90px; }
+ #st { color: #555; font-size: 12px; }
+</style></head><body>
+<h1>AIVN · Kiểm tra chuột &amp; phím — đừng dùng chuột/bàn phím trong lúc chạy (khoảng 30 giây)</h1>
+<div class="grid">
+ <button id="b1" data-testid="diag-b1">B1</button><button id="b2" data-testid="diag-b2">B2</button><button id="b3" data-testid="diag-b3">B3</button>
+ <button id="b4" data-testid="diag-b4">B4</button><button id="b5" data-testid="diag-b5">B5</button><button id="b6" data-testid="diag-b6">B6</button>
+</div>
+<input id="field" data-testid="diag-field" placeholder="ô nhập một dòng (phím tắt)">
+<textarea id="area" data-testid="diag-area" placeholder="ô nhiều dòng (gõ tiếng Việt / tiếng Trung)"></textarea>
+<div id="st">sẵn sàng</div>
+<script src="input-diag.js"></script>
+</body></html>

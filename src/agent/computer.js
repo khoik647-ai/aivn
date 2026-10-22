@@ -310,6 +310,7 @@ const SYS = {
   volume_up: { label: 'Tăng âm lượng', confirm: false, ask: /(tang|to len|lon len|vặn to|van to).{0,20}(am luong|tieng|loa)|(am luong|tieng|loa).{0,12}(to|lon) (len|hon)|volume up/ },
   volume_down: { label: 'Giảm âm lượng', confirm: false, ask: /(giam|nho lai|van nho|ha).{0,20}(am luong|tieng|loa)|(am luong|tieng|loa).{0,12}nho (lai|xuong|hon)|volume down/ },
   volume_set: { label: 'Đặt âm lượng', confirm: false, ask: /(am luong|volume|loa).{0,20}\d{1,3}/ },
+  volume_change: { label: 'Đổi âm lượng', confirm: false, ask: /(am luong|volume|loa).{0,20}\d{1,3}/ }, // B89: ±N% so với mức hiện tại (đặt mức tuyệt đối qua Core Audio)
   mute: { label: 'Tắt/bật tiếng', confirm: false, ask: /(tat|bat|mo) (tieng|am thanh|loa)|im lang|mute|unmute/ },
   open_settings: { label: 'Mở Cài đặt hệ thống', confirm: false, ask: /cai dat|settings|thiet lap/ },
   show_desktop: { label: 'Hiện màn hình chính (thu nhỏ mọi cửa sổ)', confirm: false, ask: /man hinh chinh|desktop|thu nho (het|tat ca|moi)/ },
@@ -317,9 +318,9 @@ const SYS = {
 };
 // người dùng có yêu cầu đúng thao tác hệ thống này trong câu của lượt hiện tại không
 // B16: nhận ý định theo cấu trúc từng mệnh đề (phủ định, câu hỏi, chuỗi lệnh, đối tượng hẹp) — xem sys-intent.js
-const sysAsked = (action, query) => !!SYS[action] && (action === 'volume_set' ? require('./sys-intent').volumeLevel(query) != null : require('./sys-intent').sysAsked(action, query));
+const sysAsked = (action, query) => !!SYS[action] && (action === 'volume_set' ? require('./sys-intent').volumeLevel(query) != null : action === 'volume_change' ? require('./sys-intent').volumeDelta(query) != null : require('./sys-intent').sysAsked(action, query));
 // B44: đặt âm lượng chính xác N% — Windows: Core Audio (IAudioEndpointVolume) qua PowerShell
-const PS_VOLUME = (level) => String.raw`$ErrorActionPreference = 'Stop'
+const PS_VOLUME = (level, delta = null) => String.raw`$ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @"
 using System; using System.Runtime.InteropServices;
 [Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -331,10 +332,11 @@ interface IMMDeviceEnumerator { int f(); int GetDefaultAudioEndpoint(int dataFlo
 [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")] class MMDeviceEnumeratorComObject { }
 public static class AivnVol {
   static IAudioEndpointVolume V() { var e = new MMDeviceEnumeratorComObject() as IMMDeviceEnumerator; IMMDevice d = null; Marshal.ThrowExceptionForHR(e.GetDefaultAudioEndpoint(0, 1, out d)); IAudioEndpointVolume v = null; var id = typeof(IAudioEndpointVolume).GUID; Marshal.ThrowExceptionForHR(d.Activate(ref id, 23, 0, out v)); return v; }
+  public static int Get() { var v = V(); float r; Marshal.ThrowExceptionForHR(v.GetMasterVolumeLevelScalar(out r)); return (int)Math.Round(r * 100); }
   public static int Set(int pct) { var v = V(); Marshal.ThrowExceptionForHR(v.SetMute(false, Guid.Empty)); Marshal.ThrowExceptionForHR(v.SetMasterVolumeLevelScalar(pct / 100f, Guid.Empty)); float r; v.GetMasterVolumeLevelScalar(out r); return (int)Math.Round(r * 100); }
 }
 "@
-[AivnVol]::Set(${Math.max(0, Math.min(100, Math.round(Number(level) || 0)))})
+${delta == null ? `[AivnVol]::Set(${Math.max(0, Math.min(100, Math.round(Number(level) || 0)))})` : `$b = [AivnVol]::Get(); $a = [AivnVol]::Set([Math]::Max(0, [Math]::Min(100, $b + (${Math.round(Number(delta) || 0)})))); "$b $a"`}
 `;
 async function systemAction(action, { platform = process.platform, keyTap = null, openExternal = null, level = null } = {}) {
   const win = platform === 'win32', mac = platform === 'darwin';
@@ -358,6 +360,16 @@ async function systemAction(action, { platform = process.platform, keyTap = null
       else if (mac) r = await osa(`set volume output volume ${n} without output muted`);
       else { r = await run('pactl', ['set-sink-volume', '@DEFAULT_SINK@', n + '%']); if (!r.ok) r = await run('amixer', ['-q', 'set', 'Master', n + '%', 'unmute']); }
       if (r.ok) return `Đặt âm lượng ${n}%`;
+      break;
+    }
+    case 'volume_change': { // B89: “thêm 10%” = đọc mức hiện tại rồi đặt mức tuyệt đối hiện tại ± N (không phải một nấc phím âm lượng)
+      const dl = Math.round(Number(level)); if (!Number.isFinite(dl) || !dl) throw new Error('Thiếu mức thay đổi âm lượng (±1–100).');
+      let b = null, a2 = null;
+      if (win) { r = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', psEncoded(PS_VOLUME(null, dl))]); const m = /(\d+)\s+(\d+)/.exec(r.out || ''); if (m) { b = +m[1]; a2 = +m[2]; } }
+      else if (mac) { const g = await osa('output volume of (get volume settings)'); b = parseInt(g.out, 10); if (Number.isFinite(b)) { a2 = Math.max(0, Math.min(100, b + dl)); r = await osa(`set volume output volume ${a2} without output muted`); } else r = g; }
+      else { const g = await run('pactl', ['get-sink-volume', '@DEFAULT_SINK@']); const m = /(\d+)%/.exec(g.out || ''); b = m ? +m[1] : null; if (b != null) { a2 = Math.max(0, Math.min(100, b + dl)); r = await run('pactl', ['set-sink-volume', '@DEFAULT_SINK@', a2 + '%']); } else r = g.ok ? { ok: false, err: 'không đọc được âm lượng hiện tại' } : g; }
+      if (r.ok && b != null && a2 != null) return `Âm lượng ${b}% → ${a2}% (${dl > 0 ? '+' : ''}${dl}%)`;
+      if (r.ok) r = { ok: false, err: 'không đọc được âm lượng sau khi đổi' };
       break;
     }
     case 'open_settings': if (openExternal && win) { await openExternal('ms-settings:'); r = { ok: true }; } else r = mac ? await run('open', ['x-apple.systempreferences:']) : await run('gnome-control-center', []); break;

@@ -5,8 +5,11 @@ const show = (el, on = true) => { el.hidden = !on; };
 const err = (el, msg) => { el.textContent = msg || ''; el.hidden = !msg; };
 let waitTimer = null;
 
+// B77: ngôn ngữ theo cài đặt (uiLang) — trước đây chỉ đọc localStorage nên người dùng en/zh mới cài thấy toàn tiếng Việt
+async function syncLang(l) { if (window.I18N && I18N.LANGS.includes(l) && l !== I18N.lang) I18N.setLang(l); const sel = $('#gLang'); if (sel && window.I18N) sel.value = I18N.lang; }
 async function render() {
   const s = await G.gateState();
+  await syncLang(s.lang);
   show($('#gActivate'), s.mode === 'activate'); show($('#gLock'), s.mode === 'lock');
   if (s.mode === 'activate') {
     const l = s.license;
@@ -64,3 +67,6 @@ $('#goGo').addEventListener('click', async () => {
 G.onGateChanged(() => render());
 const clean = (m) => String(m || '').replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 render();
+// ô chọn ngôn ngữ trên màn cổng: đổi ngay + lưu vào cài đặt (giao diện chính dùng cùng ngôn ngữ)
+{ const sel = $('#gLang'); if (sel && window.I18N) { for (const l of I18N.LANGS) { const o = document.createElement('option'); o.value = l; o.textContent = I18N.names[l]; sel.appendChild(o); } sel.value = I18N.lang;
+  sel.addEventListener('change', async () => { const l = I18N.LANGS.includes(sel.value) ? sel.value : 'vi'; I18N.setLang(l); try { await syncLang(await G.gateLang(l)); } catch {} }); } }

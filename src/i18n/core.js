@@ -29,9 +29,10 @@
       if (!VI.test(key)) return null;
       if (c.cache.has(key)) return c.cache.get(key);
       let out = null;
+      // B81: phần thay đổi {n} còn chứa “ · ” (“2 năm trước · 630M tham số”) → dịch từng đoạn trước
       for (const p of c.pats) {
         const m = p.re.exec(key); if (!m) continue;
-        out = p.val.replace(/\{(\d+)\}/g, (_, n) => { const i = p.order.indexOf(Number(n)); const g = i < 0 ? '' : m[i + 1]; if (!(depth < 2 && VI.test(g))) return g; const w = /^(\s*)([\s\S]*?)(\s*)$/.exec(g); const x = trCore(w[2], lang, depth + 1) ?? (depth < 1 ? trSeg(w[2], lang) : null); return x == null ? g : w[1] + x + w[3]; });
+        out = p.val.replace(/\{(\d+)\}/g, (_, n) => { const i = p.order.indexOf(Number(n)); const g = i < 0 ? '' : m[i + 1]; if (!(depth < 2 && VI.test(g))) return g; const w = /^(\s*)([\s\S]*?)(\s*)$/.exec(g); const x = (/\s·\s/.test(w[2]) ? trSeg(w[2], lang) : null) ?? trCore(w[2], lang, depth + 1) ?? (depth < 1 ? trSeg(w[2], lang) : null); return x == null ? g : w[1] + x + w[3]; });
         break;
       }
       // số nhiều tiếng Anh: bản dịch viết “{0} turn{s}” → “1 turn”, “2 turns” (B45: “đã huỷ 1 turns”)
@@ -46,7 +47,10 @@
       let t = trCore(m[2], lang, 0);
       if (t == null) { const lo = m[2][0].toUpperCase() + m[2].slice(1); if (lo !== m[2]) { const x = trCore(lo, lang, 0); if (x != null) t = lang === 'zh' ? x : x[0].toLowerCase() + x.slice(1); } } // “(chạy bằng CPU, khá chậm)” viết thường
       if (t == null) { const x = trCore('· ' + m[2], lang, 0); if (x != null) t = x.replace(/^·\s*/, ''); } // khoá có “· ” đứng đầu
+      // B74: khoá viết thường (“bấm nút “{0}””) nhưng câu hiện viết HOA chữ đầu (“Bấm nút “Nộp bài”…” trên thanh AGENT) → thử chữ thường rồi viết hoa lại
+      if (t == null) { const lo = m[2][0].toLowerCase() + m[2].slice(1); if (lo !== m[2]) { const x = trCore(lo, lang, 0); if (x != null) t = lang === 'zh' ? x : x[0].toUpperCase() + x.slice(1); } }
       if (t == null && depth < 2) { const c = /^([\s\S]*?[^.。])([.。])$/.exec(m[2]); if (c) { const x = trPiece(c[1], lang, depth + 1); if (x != null) t = x.trim() + (lang === 'zh' ? '。' : '.'); } } // dấu chấm cuối
+      if (t == null && depth < 2) { const c = /^([\s\S]*?[^.…])(…|\.\.\.)$/.exec(m[2]); if (c) { const x = trPiece(c[1], lang, depth + 1); if (x != null) t = x.trim() + '…'; } } // B74: “…” cuối (đang làm)
       if (t == null && depth < 2) { const c = /^\(([\s\S]+)\)$/.exec(m[2]); if (c) { const x = trPiece(c[1], lang, depth + 1); if (x != null) t = lang === 'zh' ? '（' + x.trim() + '）' : '(' + x.trim() + ')'; } } // “(tự chọn)”
       if (t == null && depth < 2) { const c = /^([\s\S]*?\S)\s*[:：]$/.exec(m[2]); if (c) { const x = trCore(c[1], lang, 0); if (x != null) t = x + (lang === 'zh' ? '：' : ':'); } } // “Bộ xử lý:”
       if (t == null && depth < 2) { const e = /^([^\p{L}\p{N}]+)(\p{L}[\s\S]*)$/u.exec(m[2]); if (e) { const x = trPiece(e[2], lang, depth + 1); if (x != null) t = e[1] + x; } } // “🕒 Ngày giờ”
@@ -77,13 +81,21 @@
       return r;
     }
     // giữ khoảng trắng đầu/cuối của nút chữ
+    // B92: số thập phân kiểu Việt (dấu phẩy) đứng trước đơn vị trong chuỗi ĐÃ dịch sang en/zh → dấu chấm (“9,2 GB VRAM” → “9.2 GB VRAM”, “~6,4 tokens/s”).
+    // Chỉ 1–2 chữ số sau dấu phẩy (không đụng “1,000 GB” kiểu nghìn của tiếng Anh)
+    const VI_DEC = /(\d),(\d{1,2})(?=\s?(?:[KMGT]i?B\b|%|tokens?\/|token\/|GHz|MHz))/g;
+    // B81: số gọn kiểu Việt của Khám phá (“307,0 N” = nghìn, “1,2 Tr” = triệu) → “307.0K”, “1.2M”; “7,6B tham số” → “7.6B …”
+    const NUM_VI = /(\d+),(\d) (N|Tr)(?=$|[\s·)])/g, NUM_BM = /(\d),(\d)(?=[BM]\s)/g;
+    const numFix = (x) => String(x).replace(NUM_VI, (_, a, b, u) => `${a}.${b}${u === 'N' ? 'K' : 'M'}`).replace(NUM_BM, '$1.$2');
+    const decFix = (x) => numFix(String(x).replace(VI_DEC, '$1.$2'));
     function tr(text, lang) {
       if (!lang || lang === 'vi' || text == null) return text;
       const s = String(text); const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(s);
       let t = /\n/.test(m[2]) ? null : trCore(m[2], lang, 0); // nhiều dòng → giữ ngắt dòng, dịch từng dòng
       if (t == null && /\n/.test(m[2])) { const c = C[lang]; const k = norm(m[2]); if (c && c.exact.has(k)) t = c.exact.get(k); } // nhiều dòng: chỉ nhận khoá trọn vẹn, không để mẫu {n} nuốt cả đoạn
       if (t == null) t = trSeg(m[2], lang);
-      return t == null ? s : m[1] + t + m[3];
+      if (t == null) { const u = numFix(m[2]); return u === m[2] ? s : m[1] + u + m[3]; } // “♥ 1,2 Tr” đứng riêng
+      return m[1] + decFix(t) + m[3];
     }
     // dịch đối tượng tuỳ chọn (menu, hộp thoại, thông báo): label/title/buttonLabel/message/detail/name/buttons/submenu
     function trOpts(o, lang) {

@@ -2,6 +2,8 @@
 Arcee
 Cmd
 Ctrl
+runtime
+xóa
 Fi
 Qwen
 Redistributable
@@ -92,3 +94,15 @@ seed
 ừm
 model
 video
+# trang kiểm chứng tiếng Anh (docs/verified.en.md): tên riêng, tên sản phẩm, từ tiếng Anh đúng mà en_US thiếu
+Anh
+Quynh
+Holo
+Xeon
+checkboxes
+app
+apple
+dr
+quarantine
+xattr
+zip

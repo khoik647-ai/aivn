@@ -5,7 +5,7 @@ import json, os, re, subprocess, sys
 from collections import defaultdict
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 VI_CH = re.compile(r'[ăâđêôơưàáạảãầấậẩẫằắặẳẵèéẹẻẽềếệểễìíịỉĩòóọỏõồốộổỗờớợởỡùúụủũừứựửữỳýỵỷỹ]', re.I)
-def strip_tags(s): return re.sub(r'<[^>]+>', ' ', s)
+def strip_tags(s): return re.sub(r'\b[0-9a-f]{64}\b', ' ', re.sub(r'<[^>]+>', ' ', s))  # bỏ thẻ và mã SHA-256
 def js_strings(src):
     out = []
     for m in re.finditer(r"'((?:[^'\\\n]|\\.)*)'|\"((?:[^\"\\\n]|\\.)*)\"|`((?:[^`\\]|\\.)*)`", src):
@@ -23,7 +23,7 @@ def collect():
             d = json.load(open(p, encoding='utf-8'))
             for v in list(d.get('text', {}).values()) + list(d.get('attr', {}).values()) + list(d.get('meta', {}).values()):
                 en['site/i18n/en.json'].add(strip_tags(str(v)))
-    files = ['src/renderer/index.html', 'src/renderer/app.js', 'src/main.js', 'src/preload.js', 'src/desktop-agent.js', 'src/agent/agent.js', 'src/recommend.js', 'src/catalog.js', 'src/catalog-claims.js', 'src/updater.js']
+    files = ['src/renderer/index.html', 'src/renderer/app.js', 'src/renderer/error-view.js', 'src/main.js', 'src/preload.js', 'src/desktop-agent.js', 'src/agent/agent.js', 'src/recommend.js', 'src/catalog.js', 'src/catalog-claims.js', 'src/updater.js']
     for f in files:
         p = os.path.join(ROOT, f)
         if not os.path.exists(p): continue
@@ -35,6 +35,12 @@ def collect():
     for f in ['docs/verified.md']:  # tài liệu tiếng Việt phát hành kèm (bỏ khối mã, đường dẫn, thẻ HTML)
         p = os.path.join(ROOT, f)
         if os.path.exists(p): vi[f + '.html'].add(strip_tags(re.sub(r'`[^`]*`|\]\([^)]*\)', ' ', open(p, encoding='utf-8').read())))
+    for f in ['docs/verified.en.md']:  # bản tiếng Anh của trang kiểm chứng (bỏ khối mã, đường dẫn, thẻ HTML và câu lệnh tiếng Việt trích nguyên văn)
+        p = os.path.join(ROOT, f)
+        if os.path.exists(p):
+            t = strip_tags(re.sub(r'`[^`]*`|\]\([^)]*\)', ' ', open(p, encoding='utf-8').read()))
+            t = re.sub(r'“[^”]*”', lambda m: ' ' if VI_CH.search(m.group(0)) else m.group(0), t)
+            en[f + '.html'].add(' '.join(w for w in t.split() if not VI_CH.search(w)))
     for p in ['src/i18n/en.json']:
         q = os.path.join(ROOT, p)
         if os.path.exists(q): en[p].update(map(str, json.load(open(q, encoding='utf-8')).values()))

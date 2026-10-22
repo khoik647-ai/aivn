@@ -18,7 +18,7 @@ test('submit = bước gửi: luôn hỏi người dùng (rủi ro) và được
   const src = rd('src/desktop-agent.js');
   assert.match(src, /text: action === 'type_text' && a\.submit \? a\.text \+ '\\n' : a\.text/, 'riskOf nhận chữ + Enter khi submit');
   assert.match(src, /const sendA = action === 'type_text' && a\.submit \? \{ \.\.\.a, text: a\.text \+ '\\n' \} : a;/);
-  assert.match(src, /if \(action === 'type_text' && a\.__submit\) \{ await sleep\(150\); n\.keyTap\('enter'\); \}/);
+  assert.match(src, /if \(action === 'type_text' && a\.__submit\) \{ if \(!a\.__beforeSubmit \|\| await a\.__beforeSubmit\(\)\) \{ await sleep\(150\); n\.keyTap\('enter'\); \} else a\.__submitSkipped = true; \}/ /* B101: kiểm chữ trong ô soạn trước Enter */);
   // chữ có xuống dòng cuối → bỏ "\n", bấm Enter thật (dán "\n" không gửi được ở nhiều ứng dụng chat)
   assert.match(src, /submit: a\.submit === true \|\| a\.submit === 'true' \|\| tail/);
 });
