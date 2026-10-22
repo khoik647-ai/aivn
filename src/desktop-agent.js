@@ -24,6 +24,9 @@ const OB = require('./agent/ocr-boost');
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const { riskOf, RISKY_NAME, ACT_LABEL, ALIASES } = require('./agent/desk-policy');
 const AU = require('./agent/autonomy');
+const FD = require('./agent/fresh-doc');
+// B191: việc “mở/tạo trình soạn thảo rồi gõ” mà không mở được tài liệu mới trống → không gõ (câu người dùng thấy, en/zh trong src/i18n)
+const FRESH_DOC_MSG = 'chưa mở được tài liệu mới trống — AIVN không gõ vào tài liệu đang có của bạn';
 
 const DRAFT_SEND = SV.DRAFT_ONLY; // lệnh chỉ soạn (một nguồn: send-verify)
 // B94/B101: chữ vừa gõ nằm ở đâu — 'composer' (ô soạn tin), 'wrong' (ô khác, vd. ô tìm kiếm) hoặc null (không đọc được)
@@ -573,6 +576,24 @@ function createDesktopAgent(deps) {
     deps.log && deps.log('desk', `B153: chạy ${exe} ${args.join(' ')}${prof && prof.missing ? ' (không đọc được Local State → hồ sơ Default)' : ''}`);
     return { ok: true, how: `${b.exe}${prof && prof.dir ? ' --profile-directory=' + prof.dir : ''}${url ? ' ' + url : ''}`, exe, profile: prof };
   }
+  // B191 (QA beta.3, Windows 11 Notepad khôi phục thẻ cũ có nội dung nhạy cảm): việc “mở/tạo X rồi gõ” trong trình soạn thảo →
+  // mở TÀI LIỆU MỚI (Ctrl+N / ⌘N) và KIỂM là tài liệu chưa đặt tên, trống trước khi gõ. Không chứng minh được → không gõ.
+  const freshDocWanted = (ctx, win) => !!(ctx && ctx.userQuery && FD.freshDocTask(ctx.userQuery) && FD.editorOf(win));
+  async function freshDoc(ctx) {
+    const s = session; let text = '';
+    const r = await FD.ensureFresh({
+      look: async ({ ocr }) => {
+        // Word/TextEdit mở tài liệu mới trong CỬA SỔ mới của cùng ứng dụng → theo cửa sổ đang ở trước
+        const fg = await fgWin(); if (fg && fg.hwnd && s.target && String(fg.hwnd) !== String(s.target.hwnd) && s.target.pid && fg.pid === s.target.pid) s.target = { ...s.target, hwnd: fg.hwnd, title: fg.title };
+        const o = await observe(ctx, { thumb: false, ocr }); text = o && o.text ? o.text : text;
+        return { win: s.obs && s.obs.win, elements: s.obs ? s.obs.elements : [], dialog: s.dialog };
+      },
+      hotkey: async (keys) => { const h = await act({ action: 'hotkey', keys }, ctx); if (h && (h.error || h.refused)) throw new Error(String(h.error || h.summary || 'phím tắt bị từ chối')); },
+      sleep, log: (m) => deps.log && deps.log('desk', 'B191: ' + m),
+    }).catch(e => ({ ok: false, why: 'error', title: '', steps: [String(e.message || e).split('\n')[0]] }));
+    if (r.ok) { const W = s.obs && s.obs.win; s.freshDoc = { hwnd: (W && W.hwnd) || (s.target && s.target.hwnd) || null, title: r.title, at: Date.now() }; if (s.target) s.target.title = r.title || s.target.title; }
+    return { ...r, text };
+  }
   async function ensureApp(a, ctx) {
     const app = String(a.app || a.window || a.name || '').trim(); if (!app) throw new Error('Cần tên ứng dụng (app).');
     const s = await begin(ctx); status(`Đang chuẩn bị ${app}…`);
@@ -581,9 +602,16 @@ function createDesktopAgent(deps) {
     deps.log && deps.log('desk', `ensure_app ${app}: ${r.ok ? 'SẴN SÀNG' : 'LỖI ' + r.code} sau ${Math.round(r.ms / 100) / 10} giây${r.fast ? ' (B124: đường nhanh, tổng ' + (Date.now() - tE) + ' ms)' : ''} — ${r.steps.join(' → ')}`);
     if (r.ok) {
       const w = r.window; s.target = { hwnd: w.hwnd, pid: w.pid, proc: w.proc, title: w.title }; s.ensured = { app, at: Date.now(), hwnd: w.hwnd, fast: !!r.fast };
+      let fd = null;
+      if (freshDocWanted(ctx, w)) {
+        fd = await freshDoc(ctx);
+        if (!fd.ok && !fd.skip) return { error: FRESH_DOC_MSG, code: 'fresh-doc', stop: true, forModel: `${FRESH_DOC_MSG}. Cửa sổ “${fd.title || w.title}” không phải tài liệu mới trống (${fd.why}). KHÔNG gõ gì; báo người dùng.`, summary: `${app}: chưa mở được tài liệu mới trống — không gõ`, detail: fd.steps.join('; '), steps: [...r.steps, ...fd.steps] };
+        if (fd.ok) r.steps.push(...fd.steps);
+      }
       const what = { already: 'đã ở trước', restored: 'đã khôi phục từ thu nhỏ', raised: 'đã đưa lên trước (đang bị che)', launched: 'đã khởi động', tray: 'đã mở lại từ khay hệ thống', web: 'đã mở trên trình duyệt' }[r.how] || r.how;
-      const o = s.ensureObsText || '';
-      return { fast: !!r.fast, forModel: `${app} sẵn sàng: cửa sổ “${w.title}” (${what}).${r.warn ? ' CẢNH BÁO: ' + r.warn + '.' : ''} Các bước: ${r.steps.join('; ')}.${o ? '\n' + o : ''}`, summary: r.how === 'already' ? `${app}: đã ở trước` : r.how === 'restored' ? `${app}: đã khôi phục từ thu nhỏ` : r.how === 'raised' ? `${app}: đã đưa lên trước (đang bị che)` : r.how === 'launched' ? `${app}: đã khởi động` : r.how === 'tray' ? `${app}: đã mở lại từ khay hệ thống` : r.how === 'web' ? `${app}: đã mở trên trình duyệt` : `${app}: sẵn sàng`, how: r.how, window: w, steps: r.steps };
+      const o = fd && fd.ok ? fd.text || '' : s.ensureObsText || '';
+      const fdNote = fd && fd.ok ? ` Đang ở TÀI LIỆU MỚI TRỐNG “${fd.title}” (${fd.how === 'new' ? 'AIVN vừa mở bằng Ctrl+N' : 'đã kiểm: trống'}) — gõ vào đây: type_text KHÔNG kèm element. KHÔNG chuyển sang thẻ/tài liệu khác.` : '';
+      return { fast: !!r.fast && !(fd && fd.how === 'new'), forModel: `${app} sẵn sàng: cửa sổ “${fd && fd.ok ? fd.title : w.title}” (${what}).${fdNote}${r.warn ? ' CẢNH BÁO: ' + r.warn + '.' : ''} Các bước: ${r.steps.join('; ')}.${o ? '\n' + o : ''}`, summary: fd && fd.ok ? `${app}: đã mở tài liệu mới trống` : r.how === 'already' ? `${app}: đã ở trước` : r.how === 'restored' ? `${app}: đã khôi phục từ thu nhỏ` : r.how === 'raised' ? `${app}: đã đưa lên trước (đang bị che)` : r.how === 'launched' ? `${app}: đã khởi động` : r.how === 'tray' ? `${app}: đã mở lại từ khay hệ thống` : r.how === 'web' ? `${app}: đã mở trên trình duyệt` : `${app}: sẵn sàng`, how: r.how, window: w, steps: r.steps };
     }
     return { error: r.error, code: r.code, ask: r.ask || null, stop: !!r.stop, forModel: r.error, summary: r.code === 'login' ? `${app}: màn hình đăng nhập — hỏi bạn` : r.code === 'not-found' ? `${app}: chưa mở được` : r.code === 'timeout' ? `${app}: chưa sẵn sàng (quá hạn)` : r.code === 'hung' ? `${app}: không phản hồi` : r.code === 'tray' ? `${app}: chưa mở được từ khay hệ thống` : `${app}: lỗi`, detail: r.error, steps: r.steps };
   }
@@ -698,6 +726,18 @@ function createDesktopAgent(deps) {
     if (action === 'type_text') { const raw = String(a.text); const tail = /\n\s*$/.test(raw); a = { ...a, text: tail ? raw.replace(/\s*\n\s*$/, '') : raw, submit: a.submit === true || a.submit === 'true' || tail }; if (!a.text.trim()) { if (a.submit) { action = 'hotkey'; a = { action: 'hotkey', keys: 'enter' }; } else throw new Error('Thiếu text cần gõ.'); } }
 
     if (!s.obs) await observe(ctx, { thumb: false });
+    // B191: gõ trong trình soạn thảo cho việc “mở/tạo X rồi gõ” → chỉ gõ vào tài liệu mới trống AIVN đã kiểm (không gõ vào thẻ/tệp cũ của người dùng)
+    if (action === 'type_text' && freshDocWanted(ctx, s.obs && s.obs.win)) {
+      const W = s.obs.win; const fd = s.freshDoc;
+      if (!fd) {
+        const r = await freshDoc(ctx);
+        if (!r.ok && !r.skip) return { refused: true, stop: true, error: FRESH_DOC_MSG, forModel: `KHÔNG gõ: ${FRESH_DOC_MSG}. Cửa sổ “${r.title || W.title || ''}” không phải tài liệu mới trống (${r.why}). DỪNG, báo người dùng.`, summary: 'chưa mở được tài liệu mới trống — không gõ', detail: r.steps.join('; ') };
+        if (r.ok && r.how === 'new') { a = { ...a }; for (const k of ['element', 'target', 'x', 'y']) delete a[k]; } // id/toạ độ cũ thuộc tài liệu cũ: gõ vào tài liệu mới đang chọn
+      } else if ((fd.hwnd && W.hwnd && String(fd.hwnd) !== String(W.hwnd)) || !FD.untitled(W.title)) {
+        deps.log && deps.log('desk', `B191: chặn gõ — cửa sổ “${W.title || ''}” không phải tài liệu mới “${fd.title}” AIVN đã mở`);
+        return { refused: true, error: 'không phải tài liệu mới', forModel: `KHÔNG gõ: cửa sổ đang là “${W.title || ''}”, không phải tài liệu mới “${fd.title}” AIVN đã mở cho việc này (đó có thể là tài liệu có sẵn của người dùng). Chuyển lại đúng tài liệu mới rồi type_text KHÔNG kèm element.`, summary: 'không phải tài liệu mới AIVN đã mở — không gõ' };
+      }
+    }
     let needPoint = ['click', 'double_click', 'right_click'].includes(action) || ((action === 'type_text' || action === 'scroll') && (a.element || a.target || (a.x != null && a.y != null && !(Number(a.x) === 0 && Number(a.y) === 0))));
     let t = needPoint ? resolveTarget(a) : null;
     // B120 (máy thật beta.2.6): việc tìm trên web trong trình duyệt — mô hình BẤM ô “Tìm kiếm” của trang đang mở (YouTube) trước khi gõ
