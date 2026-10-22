@@ -22,10 +22,12 @@ Tài liệu này chốt cách thêm hộp thoại **Kết nối ứng dụng**, 
 8. Danh mục beta.4 gắn trong ứng dụng (tám mục ở mục 5.4). Không tải danh mục từ mạng.
 9. Tệp `mcp.json` trên đĩa giữ dạng LM Studio đọc được, trừ giá trị bí mật đã được thay bằng tham chiếu. Siêu dữ liệu của AIVN (đã duyệt, tự chạy, id danh mục) nằm ở `plugins-meta.json`, không nhét thêm trường lạ vào `mcp.json`.
 10. Nâng cấp từ bản đã có `mcp.json`: máy chủ đang bật được coi là đã duyệt và được tự chạy, để không hỏi lại người đã cấu hình tay. Máy chủ thêm sau bản này thì phải qua thẻ.
+11. Tám câu ở mục 14 đã được duyệt. Đó là quyết định, không còn là câu hỏi. Chi tiết vận hành nằm ở mục được dẫn trong mục 14.
 
 ## 2. Ngoài phạm vi beta.4
 
-- Đăng nhập OAuth của LM Studio (trường `auth`, cổng `127.0.0.1:33389`). Tệp có trường này được giữ nguyên khi nhập, máy chủ không được chạy, ứng dụng nói rõ là chưa hỗ trợ.
+- Đăng nhập OAuth của LM Studio (trường `auth`, cổng `127.0.0.1:33389`). beta.4 không làm OAuth. Trường `auth` để dành: tệp có trường này được giữ nguyên khi nhập và khi xuất, máy chủ không được chạy, ứng dụng nói rõ là chưa hỗ trợ.
+- Playwright (`@playwright/mcp`) và Context7. Không có trong danh mục beta.4.
 - Cửa hàng tải danh mục, tài khoản AIVN, đồng bộ mẫu giữa các máy.
 - Sửa công cụ MCP thành công cụ gốc của AIVN (`read_file`, `web_search`, `screen_act`, …).
 - Cho Lịch tự động gọi MCP.
@@ -149,7 +151,7 @@ Thứ tự cố định. “Đã kết nối” không phải một tab; đó l�
 
 | id | vi | en | zh | Nội dung |
 |---|---|---|---|---|
-| `all` | Tất cả | All | 全部 | Danh mục, nhóm theo tab dưới, rồi tới “Của tôi” |
+| `all` | Tất cả | All | 全部 | Danh mục đang hiện, nhóm theo tab dưới, rồi tới “Của tôi”. Ba mục `filesystem`, `fetch`, `memory` không hiện ở tab này cho đến khi đã có trong `mcp.json` (mục 5.4). |
 | `files` | Tệp | Files | 文件 | Máy chủ đụng tệp trên máy |
 | `web` | Mạng | Web | 网络 | Đọc hoặc tìm trên mạng |
 | `dev` | Lập trình | Coding | 编程 | Kho mã, công cụ lập trình |
@@ -160,7 +162,9 @@ Tab “Của tôi” rỗng thì hiện: “Chưa có máy chủ riêng. Nhập 
 
 ### 5.4 Danh mục ban đầu
 
-Tám mục, gắn trong mã, không tải thêm. Lệnh stdio dùng `npx -y` với **đúng một phiên bản** đã ghi trong danh mục ở PR triển khai (không `@latest`, không để trống phiên bản). `resolveCommand` vẫn lo máy không có Node. Ba mục `filesystem` / `fetch` / `memory` thay cho `presets()`.
+Tám mục, gắn trong mã, không tải thêm. `resolveCommand` vẫn lo máy không có Node. Ba mục `filesystem` / `fetch` / `memory` thay cho `presets()`, nhưng **không hiện ở tab Tất cả** cho đến khi máy chủ cùng id đã có trong `mcp.json` của người dùng. Chúng vẫn hiện ở tab Tệp, Mạng, Tri thức, vẫn tìm được khi đang đứng ở những tab đó, và vẫn được mẫu AIVN AGENT gợi ý. Ô tìm khi đang ở tab Tất cả không kéo ba mục này ra nếu chúng chưa có trong tệp. Khi đã có trong `mcp.json` thì chúng hiện ở Tất cả như mọi máy chủ khác.
+
+Lệnh stdio trong danh mục là `npx -y` kèm **đúng một phiên bản** (`gói@x.y.z`). `npx -y gói` không ghim là rủi ro chuỗi cung ứng: danh mục không bao giờ ghi dạng đó, không dùng `@latest`, không để trống phiên bản. Nâng số phiên bản cùng một bản phát hành AIVN (kể cả beta), không tự tải gói mới lúc chạy. Tệp người dùng nhập vào vẫn được phép không ghim (LM Studio hay viết vậy); AIVN không sửa `args` để nhét phiên bản, và thẻ xin phép của lệnh đó có `danger: true` (mục 8.3).
 
 | id | Tab | vi | en | zh | Chạy | Cần trước khi thẻ |
 |---|---|---|---|---|---|---|
@@ -243,7 +247,25 @@ Màu viên trạng thái dùng lại `.mcp-srv .st`. `available` và `off` dùng
 
 ### 5.7 `data-testid`
 
-`connect-apps-btn`, `connect-apps-count`, `connect-apps-settings`, `connect-apps-modal`, `connect-apps-q`, `connect-apps-tab-<id>`, `connect-apps-card-<id>`, `connect-apps-connect-<id>`, `connect-apps-import`, `connect-apps-advanced`, `connect-apps-json`, `agent-tpl-btn`, `agent-tpl-modal`, `agent-tpl-apply-<id>`.
+`connect-apps-btn`, `connect-apps-count`, `connect-apps-settings`, `connect-apps-modal`, `connect-apps-q`, `connect-apps-tab-<id>`, `connect-apps-card-<id>`, `connect-apps-connect-<id>`, `connect-apps-import`, `connect-apps-advanced`, `connect-apps-json`, `connect-apps-tool-warn`, `agent-tpl-btn`, `agent-tpl-modal`, `agent-tpl-apply-<id>`.
+
+### 5.8 Số công cụ mỗi lượt
+
+Số công cụ đưa vào một lượt bị chặn theo cửa sổ ngữ cảnh của mô hình đang nạp, và với mô hình nhỏ thì được cảnh báo sớm. AIVN không tự bỏ bớt công cụ.
+
+Tổng công cụ của lượt = công cụ gốc đang bật + mọi công cụ MCP của máy chủ `state === "on"` và không `disabled`. Đo token mô tả công cụ bằng `countTokens` nếu bộ máy có, không thì bằng ước lượng đang dùng cho `toolTokOf`. `contextSize` là đúng số vòng AIVN AGENT đã dùng khi thu gọn lịch sử.
+
+| Điều kiện | Việc |
+|---|---|
+| Mô hình dưới 8 tỉ tham số (số đọc từ danh mục như `agentAdvice`; không đọc được thì coi là dưới 8 tỉ) và tổng công cụ > 20 | Cảnh báo một lần. Lượt vẫn gửi **đủ** công cụ nếu phần mô tả còn nằm trong ngân sách ngữ cảnh bên dưới. |
+| Token mô tả công cụ vượt ngân sách: quá 25% `contextSize`, sàn 1.500 token, trần 4.000 token | Không gọi mô hình với một danh sách đã cắt. Hiện cùng cảnh báo và không bắt đầu lượt cho đến khi tập máy chủ người dùng để bật vừa ngân sách. |
+| Cả hai | Một cảnh báo, không hai. |
+
+Cảnh báo nằm trên thanh AIVN AGENT (`connect-apps-tool-warn`), không phải thẻ xin phép: tắt máy chủ là thu hồi quyền. Chữ nêu tổng số công cụ và `contextSize`, liệt kê từng máy chủ với số công cụ, mỗi dòng một nút “Tắt” (cùng đường Ngắt kết nối, không thẻ), và một liên kết mở hộp thoại Kết nối ứng dụng. Người dùng chọn máy chủ nào còn bật. Những máy chủ họ tắt dùng `disabled` / `setEnabled(false)` như mục 5.6.
+
+“Một lần” nghĩa là không lặp trong cùng chữ ký `contextSize + tổng công cụ + tên từng máy chủ đang on + số công cụ của máy đó`. Chữ ký lưu ở `settings.mcpToolWarnSig`. Đổi tập máy chủ hoặc số công cụ thì cảnh báo lại.
+
+Nếu người dùng bỏ qua cảnh báo của ngưỡng 20 mà ngân sách ngữ cảnh vẫn đủ, lượt chạy với đủ công cụ. Nếu không đủ cửa sổ ngữ cảnh, lỗi `CTX_SMALL` như hôm nay khi lời nhắc đã không vừa; không có đường nào tự rút tên công cụ ra khỏi `specs` để ép vừa.
 
 ## 6. Nhập `mcp.json` kiểu LM Studio
 
@@ -275,13 +297,13 @@ LM Studio (từ 0.3.17, ghi chú của họ: cùng kiểu với Cursor) dùng g�
 | `command` | Chuỗi không rỗng. Đi cùng `url` thì lỗi máy chủ đó (“chỉ được có command hoặc url”). |
 | `args` | Mảng chuỗi. Thiếu thì coi là `[]`. Phần tử không phải chuỗi thì lỗi. |
 | `env` | Đối tượng. Giá trị là chuỗi, hoặc tham chiếu `{ "$aivnSecret": "<id>" }` do chính AIVN ghi. |
-| `url` | `https://` mọi máy; `http://` chỉ `localhost`, `127.0.0.1`, `::1`. `http` ra máy khác thì lỗi, bảo dùng https. Đây chặt hơn `validate` hôm nay (đang nhận mọi `http`). |
+| `url` | `https://` mọi máy chủ. `http://` chỉ khi địa chỉ **viết trong url** là vòng lặp cục bộ (`localhost`, `127.0.0.0/8`, `::1`) hoặc mạng nội bộ `10.0.0.0/8`, `172.16.0.0/12` (172.16.0.0–172.31.255.255), `192.168.0.0/16`. Không phân giải DNS: `http://nas.local` và mọi tên máy khác `localhost` bị từ chối. `http` ra máy công cộng bị từ chối, câu lỗi bảo dùng https. `http` nội bộ được chạy nhưng thẻ xin phép có `danger: true`. Vòng lặp cục bộ không gắn cờ này. |
 | `headers` | Đối tượng chuỗi hoặc tham chiếu bí mật. Đưa vào `requestInit.headers` của `StreamableHTTPClientTransport` / `SSEClientTransport` (hôm nay constructor chỉ nhận mỗi `URL`). |
 | `type` | Không bắt buộc. `"sse"` hoặc đường dẫn kết thúc bằng `/sse` thì dùng SSE, như `start()` đang làm. LM Studio thường không ghi `type`; không có thì HTTP theo luồng. Giá trị khác `"sse"` thì lỗi. |
 | `timeout` | Số nguyên mili giây, từ 1.000 đến 600.000, là thời gian chờ **từng lần gọi công cụ** (LM Studio 0.3.18). Thiếu thì 120.000 như `exec` hôm nay. Không đổi thời gian chờ kết nối 60 giây. |
 | `cwd` | Nếu có: chuỗi đường dẫn tuyệt đối, thư mục phải tồn tại lúc `start`. Không tự tạo. |
 | `disabled` | Boolean, chỉ AIVN. `true`: ghi vào cấu hình, không `start`, không hiện thẻ cho đến khi người dùng bấm Kết nối. Khi xuất tệp cho LM Studio thì bỏ trường này. |
-| `auth` | Giữ trong tệp để xuất lại không mất. Không chạy máy chủ. Không hiện thẻ. Dòng tóm tắt: chưa hỗ trợ đăng nhập OAuth. `CLIENT_SECRET` vẫn được tách khỏi bản rõ nếu nhận ra là bí mật. |
+| `auth` | Để dành. beta.4 không có luồng OAuth. Giữ trường khi nhập và khi xuất để không mất dữ liệu. Không chạy máy chủ. Không hiện thẻ. Dòng tóm tắt: chưa hỗ trợ đăng nhập OAuth. `CLIENT_SECRET` vẫn được tách khỏi bản rõ nếu nhận ra là bí mật. |
 | Trường khác | Giữ khi lưu (không cụt tệp người dùng), không gửi cho vận chuyển, không ghi nhật ký. |
 
 Cỡ tệp nhập tối đa 256 KiB. Quá cỡ, không phải JSON, hoặc gốc không phải đối tượng: từ chối cả tệp, chưa ghi gì.
@@ -312,7 +334,7 @@ Không có lựa chọn “ghi đè im lặng” và không tự đổi tên th�
 - Một máy chủ không hợp lệ: máy chủ đó hiện trạng thái Lỗi với câu `validate`, các máy chủ khác vẫn chạy.
 - `saveText` / nhập vẫn từ chối không ghi nếu phần sắp ghi không qua `validate`.
 
-Siết `http` không phải vòng lặp cục bộ là thay đổi hành vi. Máy chủ `http://` ra LAN đã lưu từ trước không bị xoá; chúng chuyển sang Lỗi với câu bảo dùng https, cho đến khi người dùng sửa. Không tự viết lại tệp lúc khởi động.
+Siết `http` ra máy công cộng là thay đổi hành vi so với `validate` hôm nay (đang nhận mọi `http`). Máy chủ đó không bị xoá khỏi đĩa; nó chuyển sang Lỗi với câu bảo dùng https, cho đến khi người dùng sửa. `http` vòng lặp cục bộ và `http` đúng ba dải nội bộ ở mục 6.1 vẫn hợp lệ. Không phân giải DNS và không tự viết lại tệp lúc khởi động.
 
 ### 6.4 Xuất
 
@@ -375,9 +397,9 @@ Không có trường bật `agentWeb`, Python, Điều khiển màn hình, hay `
 |---|---|
 | Mẫu gắn sẵn | `src/agent/templates.json` |
 | Mẫu người dùng | `userData/agent-templates.json`, dạng `{ "v": 1, "templates": [ … ] }`, tối đa 30 mẫu |
-| Id đang dùng | `settings.json`, khoá `agentTemplate`, chuỗi. Thiếu hoặc trỏ tới id không còn thì coi như `general` và không tự sửa tệp cho đến lần người dùng chọn lại |
+| Id đang dùng | `settings.json`, khoá `agentTemplate`, chuỗi, **một mẫu cho cả hồ sơ**. Thiếu hoặc trỏ tới id không còn thì coi như `general` và không tự sửa tệp cho đến lần người dùng chọn lại |
 
-Không nhét đoạn vai trò vào `settings.json` (tệp đó đã chứa cấu hình mẫu trò chuyện; tránh ghi đè chéo).
+Không nhét đoạn vai trò vào `settings.json` (tệp đó đã chứa cấu hình mẫu trò chuyện; tránh ghi đè chéo). beta.4 không lưu mẫu theo `convoId`. Đổi mẫu là đổi cho mọi cuộc trò chuyện của hồ sơ từ lượt sau, kể cả cuộc đang mở.
 
 ### 7.4 Chọn và áp dụng
 
@@ -412,6 +434,8 @@ Lịch tự động không đọc mẫu để bật MCP. Đoạn vai trò vẫn 
 | Bật “Tự kết nối khi mở AIVN” | Thẻ kết nối |
 | Gọi công cụ `mcp__…` | Thẻ đang có trong vòng AIVN AGENT |
 | Sửa JSON làm đổi lệnh, đối số, địa chỉ, đầu mục hoặc tên biến | Xoá duyệt; muốn chạy thì thẻ kết nối |
+| `http` trong `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` | Cùng thẻ kết nối hoặc thẻ nhập, thêm `danger: true` |
+| Lệnh stdio không ghim phiên bản, hoặc không thuộc danh mục | Cùng thẻ, `danger: true` |
 
 Không thẻ: tắt máy chủ, gỡ (có `modalAsk`), bỏ “Luôn cho phép” một công cụ (nút × sẵn có), tắt tự chạy, tắt công tắc chủ “Cho AIVN AGENT dùng công cụ MCP”.
 
@@ -419,10 +443,10 @@ Công tắc chủ tắt thì `stopAll` và không đưa tên MCP vào lượt (n
 
 ### 8.2 Cùng một thẻ, hai nhãn
 
-Renderer giữ `#approveCard`. Thêm hai trường không bắt buộc trên vật thể thẻ:
+Renderer giữ `#approveCard`. Đã chốt thêm hai trường không bắt buộc trên vật thể thẻ (mục 14.8):
 
 - `sub`: nếu có, thay dòng “Công cụ: …” ở `#apSub`.
-- `alwaysLabel`: nếu có, thay chữ “Luôn cho phép công cụ này”.
+- `alwaysLabel`: nếu có, thay chữ “Luôn cho phép công cụ này”. Thẻ kết nối và thẻ nhập bắt buộc gửi trường này. Thẻ công cụ không gửi, để giữ đúng câu cũ.
 
 Thiếu hai trường thì thẻ công cụ trông như hôm nay. Ô không bao giờ bật sẵn. Ctrl+Enter / Esc / lý do / hàng đợi / hết 10 phút giữ nguyên.
 
@@ -435,9 +459,9 @@ Thiếu hai trường thì thẻ công cụ trông như hôm nay. Ô không bao 
 - Tiêu đề: `Cho phép kết nối “{0}”?`
 - `sub`: tên máy chủ
 - `alwaysLabel`: `Tự kết nối lại máy chủ này khi mở AIVN`
-- Trường: loại (`stdio` hoặc `http`/`sse`), lệnh đã che bí mật hoặc địa chỉ, thư mục nếu có, tên biến bí mật (“không có” nếu không), câu “Dữ liệu rời khỏi máy này” chỉ khi `url` không phải vòng lặp cục bộ
+- Trường: loại (`stdio` hoặc `http`/`sse`), lệnh đã che bí mật hoặc địa chỉ, thư mục nếu có, tên biến bí mật (“không có” nếu không), câu “Dữ liệu rời khỏi máy này” chỉ khi `url` không phải vòng lặp cục bộ. `http` nội bộ thêm câu “Địa chỉ http này nằm trong mạng nội bộ của bạn.” Lệnh không ghim phiên bản thêm câu “Lệnh này không ghim phiên bản. npx có thể tải mã mới.”
 - `warn`: câu cảnh báo MCP đang có trong `#mcpBlock` (chương trình trên máy hoặc dịch vụ bên ngoài, có thể đọc/ghi, chỉ thêm máy chủ tin tưởng)
-- `danger: true` khi lệnh không thuộc danh mục (nhập tay, sửa JSON, gói khác gói đã gắn)
+- `danger: true` khi lệnh không thuộc danh mục (nhập tay, sửa JSON, gói khác gói đã gắn), khi lệnh stdio không có `gói@phiên bản`, hoặc khi `url` là `http` trong ba dải nội bộ ở mục 6.1. Vòng lặp cục bộ không vì `http` mà thành `danger`.
 
 **Nhập** — `tool: "mcp_import"`:
 
@@ -445,7 +469,7 @@ Thiếu hai trường thì thẻ công cụ trông như hôm nay. Ô không bao 
 - `preview`: mỗi dòng một máy chủ, lệnh đã che
 - Dòng: “Đã tách {0} khoá bí mật ra khỏi tệp. Chúng được mã hoá bằng kho khoá hệ điều hành và không ghi dạng chữ vào mcp.json.” Nếu không có kho khoá: dùng đúng ý câu bộ não đám mây — khoá chỉ giữ trong bộ nhớ đến khi thoát AIVN.
 - `alwaysLabel`: `Tự kết nối các máy chủ này khi mở AIVN`
-- `danger: true` nếu có ít nhất một lệnh ngoài danh mục
+- `danger: true` nếu có ít nhất một lệnh ngoài danh mục, một lệnh stdio không ghim phiên bản, hoặc một `url` `http` nội bộ
 - `allowAlways: true`
 
 **Thay thế** — `tool: "mcp_replace"`:
@@ -491,8 +515,8 @@ Renderer không được `start`. Mọi đường `start` (`plugins:connect`, `m
 
 1. Máy chủ không qua kiểm tra mục 6.1 → không chạy, trả lỗi.
 2. Chưa `approvedAt` → `approveCard`. Từ chối hoặc hết giờ → không chạy. Thẻ nhập và thẻ thay thế ghi `approvedAt` trước khi gọi `start`, nên bước này không hiện thêm một thẻ.
-3. `url` không phải https và không phải vòng lặp cục bộ → không chạy.
-4. Có `auth` → không chạy, lỗi “chưa hỗ trợ đăng nhập OAuth”.
+3. `url` là `http` nhưng không phải vòng lặp cục bộ và không thuộc `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` (xét đúng chữ trong url, không phân giải DNS) → không chạy. `http` nội bộ được chạy, và thẻ ở bước 2 phải có `danger: true`.
+4. Có `auth` → không chạy, lỗi “chưa hỗ trợ đăng nhập OAuth”. Trường được giữ trên đĩa. beta.4 không mở trình duyệt đăng nhập.
 5. Giải bí mật thất bại (tham chiếu cụt) → `error` trên máy chủ, không chạy với biến rỗng im lặng.
 
 `approveCard` là lối duy nhất tới thẻ: khi bộ chạy QA đang active thì gọi `qa.approve`, không thì `askApproval`. Bộ chạy QA phải trả `{ ok: false }` cho `mcp_connect`, `mcp_import`, `mcp_replace` và mọi thẻ có `tool` khớp `^mcp__`, kể cả khi chữ trên thẻ không khớp `RISK_RE`. Hôm nay `answerFor` có thể cho phép một thẻ MCP nếu chữ không rơi vào gửi/xoá/mua/khoá. beta.4 bịt riêng các thẻ MCP; các bước màn hình không rủi ro của QA giữ như cũ.
@@ -569,7 +593,11 @@ Như mục 8.4. Quyền tệp: chỉ người dùng hiện tại (cùng mức �
 
 ### 9.4 `userData/agent-templates.json` và `settings.agentTemplate`
 
-Mục 7.3. `settings.agentAlwaysAllow` và `settings.agentMcp` giữ nguyên nghĩa.
+Mục 7.3. Một khoá `agentTemplate` cho cả hồ sơ, không có bản theo cuộc trò chuyện. `settings.agentAlwaysAllow` và `settings.agentMcp` giữ nguyên nghĩa.
+
+`settings.mcpToolWarnSig` là chuỗi chữ ký cảnh báo mục 5.8 (cửa sổ ngữ cảnh, tổng công cụ, máy chủ đang bật). Không phải bí mật. Xoá chữ ký khi người dùng tắt hoặc bật một máy chủ làm đổi tập công cụ, để cảnh báo tính lại; không cần khoá riêng ngoài chữ ký.
+
+Danh mục gắn trong mã, không nằm ở `userData`. Ba mục `filesystem`, `fetch`, `memory` có `deferInAll: true`. `plugins:catalog` trả cờ này cùng `needs`.
 
 ### 9.5 Vật thể ra renderer
 
@@ -581,7 +609,7 @@ Renderer vẽ, dịch, lọc tab, gửi ý định. Tiến trình chính kiểm 
 
 | Kênh | Ai gọi | Việc | Trả về |
 |---|---|---|---|
-| `plugins:catalog` | renderer | Tám mục, không bí mật | tên, mô tả, tab, `needs`: `folder` \| `secret` \| `none`, tên biến nếu có |
+| `plugins:catalog` | renderer | Tám mục, không bí mật | tên, mô tả, tab, `needs`: `folder` \| `secret` \| `none`, tên biến nếu có, `deferInAll` |
 | `plugins:list` | renderer | `status()` + meta, đã che | mục 9.5, cộng `enabledMaster`, `file`, `countOn` |
 | `plugins:connect` | renderer | Thiết lập rồi thẻ rồi ghi rồi `start` | `{ ok, canceled?, timeout?, error?, server? }` |
 | `plugins:disconnect` | renderer | Tắt (`remove: false`) hoặc gỡ (`remove: true`) | `{ ok }` |
@@ -632,6 +660,8 @@ Khoá là câu tiếng Việt, như `src/i18n/core.js`. Thêm vào `src/i18n/str
 | Lỗi | Error | 出错 |
 | Cần thiết lập | Needs setup | 需要设置 |
 | Chưa có máy chủ riêng. Nhập mcp.json hoặc sửa ở phần Nâng cao. | No servers of your own yet. Import mcp.json or edit it under Advanced. | 还没有您自己的服务器。请导入 mcp.json，或在“高级”里修改。 |
+| Mô hình này đang thấy {0} công cụ, nhiều hơn mức hợp với ngữ cảnh {1}. Hãy tắt bớt máy chủ. AIVN không tự bỏ công cụ. | This model can see {0} tools, more than fits context {1}. Turn some servers off. AIVN does not drop tools on its own. | 此模型能看到 {0} 个工具，超过上下文 {1} 所能承受的。请关闭一些服务器。AIVN 不会自行丢掉工具。 |
+| Tắt | Turn off | 关闭 |
 | Tự kết nối khi mở AIVN | Connect automatically when AIVN opens | 打开 AIVN 时自动连接 |
 | Mẫu: {0} | Template: {0} | 模板：{0} |
 | Đang dùng | In use | 正在使用 |
@@ -654,6 +684,8 @@ Câu cảnh báo MCP đang có trong giao diện giữ nguyên, dùng lại, kh�
 | Thay thế máy chủ “{0}”? | Replace server “{0}”? | 替换服务器“{0}”？ |
 | Đã tách {0} khoá bí mật ra khỏi tệp. Chúng được mã hoá bằng kho khoá hệ điều hành và không ghi dạng chữ vào mcp.json. | Moved {0} secrets out of the file. They are encrypted with the operating system key store and are not written in mcp.json as plain text. | 已从文件中取出 {0} 个密钥。它们由操作系统密钥库加密，不会以明文写入 mcp.json。 |
 | Dữ liệu gửi tới máy chủ này rời khỏi máy bạn. | Data sent to this server leaves your computer. | 发给此服务器的数据会离开您的电脑。 |
+| Địa chỉ http này nằm trong mạng nội bộ của bạn. | This http address is on your local network. | 此 http 地址位于您的局域网内。 |
+| Lệnh này không ghim phiên bản. npx có thể tải mã mới. | This command does not pin a version. npx can download new code. | 此命令没有固定版本。npx 可能会下载新代码。 |
 | Gỡ máy chủ “{0}”? | Remove server “{0}”? | 移除服务器“{0}”？ |
 | Công cụ của máy chủ này sẽ biến mất. Các mục “Luôn cho phép” của nó cũng bị xoá. Khoá bí mật của máy chủ này bị xoá khỏi máy. | This server’s tools will disappear. Its “Always allow” entries are removed too. Its secrets are deleted from this computer. | 此服务器的工具会消失。“始终允许”也会一并移除。此服务器的密钥会从这台电脑删除。 |
 
@@ -666,7 +698,7 @@ Tiêu đề thẻ công cụ đang có (`Dùng công cụ MCP “{0}”{1}?`) gi
 | mcp.json phải là một đối tượng JSON. | mcp.json must be a JSON object. | mcp.json 必须是一个 JSON 对象。 |
 | Thiếu “mcpServers”. Nếu tệp dùng khoá “servers”, hãy đổi thành “mcpServers”. | Missing “mcpServers”. If the file uses the key “servers”, rename it to “mcpServers”. | 缺少“mcpServers”。如果文件用的是“servers”，请改成“mcpServers”。 |
 | Máy chủ “{0}” chỉ được có command hoặc url. | Server “{0}” must have either command or url, not both. | 服务器“{0}”只能有 command 或 url 其中之一。 |
-| “url” của “{0}” dùng http thì chỉ được trỏ tới máy này (localhost). Hãy dùng https. | An http “url” for “{0}” can only point at this computer (localhost). Use https. | “{0}”的 http“url”只能指向本机（localhost）。请改用 https。 |
+| “url” của “{0}” dùng http ra ngoài mạng nội bộ. Hãy dùng https, hoặc một địa chỉ trong mạng nội bộ. | The http “url” for “{0}” points outside the local network. Use https, or an address on the local network. | “{0}”的 http“url”指向局域网之外。请改用 https，或使用局域网内的地址。 |
 | Tên “{0}” và “{1}” trùng nhau sau khi chuẩn hoá. | The names “{0}” and “{1}” are the same once normalised. | 名称“{0}”和“{1}”规范化之后相同。 |
 | AIVN chưa hỗ trợ đăng nhập OAuth (trường auth) của máy chủ “{0}”. | AIVN does not support OAuth sign-in (the auth field) for server “{0}” yet. | AIVN 尚不支持服务器“{0}”的 OAuth 登录（auth 字段）。 |
 | Tệp mcp.json lớn hơn 256 KB. | The mcp.json file is larger than 256 KB. | mcp.json 文件超过 256 KB。 |
@@ -679,13 +711,20 @@ Dòng vai trò cố định trong `systemPrompt` (mục 7.4) là một khoá, v�
 
 ## 12. Kế hoạch kiểm thử
 
-Kho kiểm thử là `node --test test/…` như README. `package.json` không có script `npm test`. Không thêm khung mới.
+`package.json` không có script `npm test`. Kiểm thử chạy bằng `node --test test/*.test.js`. Bộ đầy đủ là `tools/regress.sh`. Không thêm khung kiểm thử mới.
+
+Mỗi PR triển khai (mục 15) phải thêm hoặc nối ít nhất một kiểm thử trong `test/`, và dán nguyên văn đầu ra lệnh `node --test` tương ứng vào mô tả PR.
 
 | Việc | Chỗ | Kỳ vọng |
 |---|---|---|
 | `validate` nhận ví dụ LM Studio ở mục 6.1 | `test/mcp.test.js` | filesystem + url có `headers` + `timeout` hợp lệ |
 | Cả `command` và `url` | cùng tệp | lỗi đúng máy chủ |
-| `http://192.168.1.2/mcp` | cùng tệp | lỗi; `http://127.0.0.1/mcp` và `https://…` thì qua |
+| `http://127.0.0.1/mcp`, `http://10.1.2.3/mcp`, `http://172.16.0.1/mcp`, `http://172.31.255.255/mcp`, `http://192.168.1.2/mcp` | cùng tệp | hợp lệ. 192.168 và 10 và 172.16/12 được đánh dấu nội bộ để thẻ `danger: true`. 127.0.0.1 không gắn cờ đó |
+| `http://172.15.0.1/mcp`, `http://172.32.0.1/mcp`, `http://8.8.8.8/mcp`, `http://nas.local/mcp` | cùng tệp | từ chối, không phân giải DNS |
+| `https://…` | cùng tệp | hợp lệ, không cờ nội bộ |
+| Danh mục stdio | cùng tệp | mọi `args` có `gói@phiên bản`; không có mục nào là `npx -y` trần. Playwright và Context7 không có trong danh mục |
+| `deferInAll` | hàm dựng tab | `filesystem` / `fetch` / `memory` vắng ở Tất cả khi chưa có trong `mcp.json`, vẫn có ở tab Tệp / Mạng / Tri thức; khi đã có trong tệp thì hiện ở Tất cả |
+| Ngưỡng công cụ | hàm thuần mục 5.8 | dưới 8 tỉ và 21 công cụ → cảnh báo, danh sách gửi đi không ngắn hơn đầu vào; đúng 20 công cụ → không cảnh báo ngưỡng 20; từ 8 tỉ và 21 công cụ nhưng token còn trong ngân sách → không cảnh báo ngưỡng 20; token vượt ngân sách → không cắt danh sách, cờ chặn lượt |
 | `auth` | cùng tệp | giữ được khi phân tích, `start` không được gọi |
 | Tệp 256 KiB + 1 | lớp nhập | từ chối, đĩa không đổi |
 | Hai khoá khác nhau, cùng `safeName` | `validate` | lỗi |
@@ -695,7 +734,8 @@ Kho kiểm thử là `node --test test/…` như README. `package.json` không c
 | Bí mật trong `env` và `Authorization` | nhập | tệp trên đĩa không chứa chuỗi gốc; `status()` không chứa; nhật ký không chứa |
 | Không có `safeStorage` | kho giống `createKeyStore` | không ghi `mcp-secrets.json` |
 | `skipAsk` với `mcp__` | `test/v016-autonomy.test.js` đã có | giữ `false` khi bật tự làm |
-| Thẻ công cụ MCP | `test/approval.test.js` | vẫn `needsApproval`, vẫn có `allowAlways` |
+| Thẻ công cụ MCP | `test/approval.test.js` | vẫn `needsApproval`, vẫn có `allowAlways`. Có `alwaysLabel` thì chữ ô là đúng chuỗi đó; không có thì vẫn “Luôn cho phép công cụ này” |
+| Một mẫu cho hồ sơ | đọc/ghi cài đặt | chỉ có `settings.agentTemplate`; không có khoá theo `convoId` |
 | QA | kiểm `answerFor` | `mcp_connect`, `mcp_import`, `mcp_replace`, `mcp__fs__echo` đều `{ ok: false }` |
 | Áp dụng mẫu | hàm `systemPrompt` | có đoạn vai trò, vẫn còn câu nguyên tắc về thẻ xin phép; không gọi `mcp.start` |
 | Mẫu `general` | cùng hàm | không thêm khối vai trò |
@@ -715,12 +755,13 @@ Chưa có kiểm thử Electron cho hộp thoại thì PR giao diện thêm mộ
 |---|---|
 | Ô JSON hoặc `mcp:preset` chạy mã không qua thẻ | Mọi `start` qua hàm kiểm tra mục 8.5, mất duyệt khi lệnh đổi |
 | `config()` nuốt lỗi, danh sách biến mất | Lỗi theo từng máy chủ |
-| Siết `http` làm hỏng cấu hình cũ | Không xoá tệp; máy chủ đó thành Lỗi, có câu sửa |
+| Siết `http` làm hỏng cấu hình cũ | Không xoá tệp. `http` ra máy công cộng thành Lỗi, có câu sửa. `http` nội bộ và vòng lặp cục bộ vẫn chạy |
 | Nâng cấp hỏi lại người đã cấu hình | Gán duyệt một lần cho máy chủ đang có |
 | Khoá nằm trong `mcp.json` rồi bị sao chép | Tách lúc nhập và lúc lưu, xuất không kèm khoá |
 | Máy không có kho khoá | Không ghi đĩa, câu cảnh báo như khoá đám mây |
-| Máy chủ từ xa gửi dữ liệu đi | Thẻ và mô tả nói rõ; `http` không phải máy này thì bị chặn |
-| Quá nhiều công cụ, hết ngữ cảnh | Giữ hành vi hiện tại (gửi hết công cụ đang `on`). Hộp thoại hiện “{0} công cụ” trên thẻ máy chủ. Chưa cắt danh sách ở beta.4 |
+| Máy chủ từ xa gửi dữ liệu đi | Thẻ và mô tả nói rõ. `http` công cộng bị chặn. `http` nội bộ chỉ qua thẻ `danger: true`, không phân giải DNS |
+| Quá nhiều công cụ, hết ngữ cảnh | Cảnh báo theo mục 5.8. Người dùng chọn máy chủ còn bật. Không tự bỏ công cụ khỏi lượt |
+| `npx -y` không ghim kéo mã mới lúc chạy | Danh mục ghim `gói@phiên bản`, nâng ghim cùng bản phát hành AIVN. Tệp người dùng không ghim vẫn nhập được, thẻ `danger: true`, `args` không bị viết lại |
 | `npx` lần đầu lâu, quá 60 giây | Giữ câu lỗi sẵn có, trạng thái Lỗi, nút Thử lại |
 | Tên công cụ cắt 64 ký tự, hai công cụ trùng tên đầy đủ | `safeName` trùng thì cấm từ lúc lưu; trùng tên công cụ sau khi cắt thì máy chủ vẫn chạy nhưng `defs` ghi đè — PR triển khai phải từ chối công cụ bị cắt trùng và hiện Lỗi, không im lặng |
 | QA tự cho phép thẻ MCP | `answerFor` từ chối mọi thẻ `mcp_connect` / `mcp_import` / `mcp_replace` / `mcp__` |
@@ -728,16 +769,18 @@ Chưa có kiểm thử Electron cho hộp thoại thì PR giao diện thêm mộ
 | Người dùng tưởng Ghi nhớ MCP là mục Ghi nhớ | Mô tả và thẻ nói hai kho khác nhau |
 | Người dùng tưởng “Thư mục” MCP mở rộng thư mục được phép | Thẻ ghi đường dẫn và nói khác thư mục được phép |
 
-## 14. Câu hỏi còn mở
+## 14. Quyết định sau khi duyệt
 
-1. **Cắt số công cụ mỗi máy chủ.** LM Studio cảnh báo máy chủ nhiều công cụ làm tràn ngữ cảnh mô hình nhỏ. beta.4 chưa cắt. Có nên dừng ở 20 công cụ và bắt người dùng tắt bớt máy chủ, hay gửi hết như hôm nay?
-2. **Ghim phiên bản npm.** Thiết kế yêu cầu ghim ở PR triển khai. Có chấp nhận `npx -y gói` không ghim cho đỡ phải phát hành AIVN mỗi lần gói MCP vá lỗi không?
-3. **`http` trong mạng LAN.** Đang cấm mọi `http` không phải vòng lặp cục bộ. Máy chủ người dùng tự chạy trên NAS trong nhà sẽ phải bật https. Có muốn nới cho dải địa chỉ nội bộ, với thẻ `danger: true`, không?
-4. **OAuth.** Trường `auth` để dành. Có cần trong 0.16 hay để sau beta.4?
-5. **Mẫu theo từng cuộc trò chuyện** thay vì một `agentTemplate` cho cả hồ sơ. beta.4 chọn một mẫu cho cả hồ sơ, cho khỏi lệch với Lịch tự động và với cách công tắc AIVN AGENT đang là cấu hình chung.
-6. **Có bỏ `filesystem` / `fetch` / `memory` khỏi danh mục** vì AIVN đã có thư mục được phép, mạng và Ghi nhớ? Thiết kế giữ chúng vì tệp LM Studio hay có, và vì phạm vi của chúng khác công cụ gốc. Có thể giấu khỏi tab Tất cả và chỉ hiện khi đã có trong `mcp.json`.
-7. **Playwright (`@playwright/mcp`) và Context7.** Chưa đưa vào tám mục: một cái nặng và trùng Điều khiển màn hình, một cái gửi câu hỏi ra ngoài. Có muốn thêm ở beta.4 không?
-8. **Nhãn ô Luôn cho phép** là trường mới `alwaysLabel` trên thẻ cũ. Nếu muốn zero thay đổi renderer ngoài việc đóng hộp thoại, ô kết nối sẽ mang chữ “Luôn cho phép công cụ này”, dễ hiểu nhầm. Thiết kế chọn thêm trường. Cần xác nhận trước PR giao diện.
+Các câu dưới đây đã được chốt. Không còn để mở cho beta.4.
+
+1. **Số công cụ theo cửa sổ ngữ cảnh** (mục 5.8, 9.4). Mỗi lượt lấy ngân sách từ `contextSize` của mô hình đang nạp. Mô hình dưới 8 tỉ tham số (không đọc được số thì coi như dưới 8 tỉ) được cảnh báo một lần khi tổng công cụ vượt 20, rồi người dùng chọn máy chủ nào còn bật. Không bao giờ tự bỏ công cụ. Quá ngân sách token thì không bắt đầu lượt bằng một danh sách đã cắt.
+2. **Ghim phiên bản npm** (mục 5.4, 8.3). `npx -y` không ghim là rủi ro chuỗi cung ứng. Danh mục chỉ ghi `gói@phiên bản`. Nâng các số này cùng bản phát hành AIVN. Tệp người dùng không ghim vẫn nhập được; thẻ có `danger: true`; AIVN không viết thêm phiên bản vào `args`.
+3. **`http` nội bộ** (mục 6.1, 6.3, 8.1, 8.5). Cho phép `http` với địa chỉ viết sẵn trong `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, thẻ `danger: true`. Vòng lặp cục bộ vẫn được phép và không vì `http` mà thành nguy hiểm. `http` ra máy công cộng vẫn bị từ chối. Không phân giải DNS để nới luật.
+4. **Không OAuth trong beta.4** (mục 2, 6.1). Trường `auth` để dành, giữ khi nhập và khi xuất, máy chủ không chạy.
+5. **Một mẫu cho cả hồ sơ** (mục 7.3). `settings.agentTemplate` là một chuỗi. Không có mẫu theo cuộc trò chuyện trong beta.4.
+6. **Giữ filesystem, fetch, memory** (mục 5.3, 5.4). Không bỏ khỏi danh mục. Ẩn khỏi tab Tất cả cho đến khi đã có trong `mcp.json`. Tab hạng mục của chúng vẫn hiện.
+7. **Không Playwright, không Context7** trong beta.4 (mục 2).
+8. **Có trường `alwaysLabel`** trên thẻ xin phép đang có (mục 8.2). Thẻ kết nối và thẻ nhập gửi nhãn riêng. Thẻ công cụ không gửi thì giữ câu “Luôn cho phép công cụ này”.
 
 ## 15. Chia PR triển khai
 
@@ -745,13 +788,15 @@ Mỗi PR vào `wip-0.16`, không gộp một lần. PR tài liệu này không n
 
 | PR | Việc | Không làm |
 |---|---|---|
-| 1. Lõi `mcp.json` | `validate` theo mục 6.1 và 6.3; `headers` vào transport; `timeout` vào `callTool`; tham chiếu `$aivnSecret` được giải qua một hàm tiêm vào (chưa có UI); từ chối `safeName` trùng và tên công cụ cắt trùng; kiểm thử `test/mcp.test.js` | Hộp thoại, mẫu, không đổi `startEnabled` |
-| 2. Bí mật và thẻ xin phép | `mcp-secrets.json` theo `createKeyStore`; `plugins-meta.json`; `approveCard`; bịt `mcp:save` / `mcp:preset` / `startEnabled`; nâng cấp meta một lần; QA từ chối thẻ MCP; che nhật ký | HTML mới |
-| 3. Hộp thoại | `index.html`, `styles.css`, `app.js`, preload, khoá i18n mục 11.1–11.2; dời `#mcpBlock` vào ngăn Nâng cao; nút trên `#agentBar` và lệnh Ctrl+K; kiểm tra tĩnh testid | `templates.json` |
-| 4. Mẫu | `src/agent/templates.json`, đọc/ghi `agent-templates.json`, cắm `systemPrompt`, hộp thoại mẫu, chip câu gợi ý, i18n mục 7 | Không kết nối MCP khi áp dụng mẫu |
-| 5. Nhập / xuất / đối soát | Luồng xung đột mục 6.2, xuất không bí mật, câu lỗi mục 11.3, `node --test` các tệp đã sửa, soát en/zh bằng kiểm thử i18n sẵn có | Không phát hành, không sửa `latest.yml` |
+| 1. Lõi `mcp.json` | `validate` theo mục 6.1 và 6.3, kể cả ba dải `http` nội bộ và từ chối `http` công cộng; `headers` vào transport; `timeout` vào `callTool`; tham chiếu `$aivnSecret` được giải qua một hàm tiêm vào (chưa có UI); từ chối `safeName` trùng và tên công cụ cắt trùng; kiểm thử `test/mcp.test.js` | Hộp thoại, mẫu, không đổi `startEnabled` |
+| 2. Bí mật và thẻ xin phép | `mcp-secrets.json` theo `createKeyStore`; `plugins-meta.json`; `approveCard` với `alwaysLabel` và `danger` cho `http` nội bộ cùng lệnh không ghim; bịt `mcp:save` / `mcp:preset` / `startEnabled`; nâng cấp meta một lần; QA từ chối thẻ MCP; che nhật ký | HTML mới |
+| 3. Hộp thoại | `index.html`, `styles.css`, `app.js`, preload, khoá i18n mục 11; dời `#mcpBlock` vào ngăn Nâng cao; nút trên `#agentBar` và lệnh Ctrl+K; ẩn `filesystem` / `fetch` / `memory` khỏi tab Tất cả khi chưa có trong `mcp.json`; cảnh báo mục 5.8; danh mục ghim `gói@phiên bản`; kiểm tra tĩnh testid | `templates.json` |
+| 4. Mẫu | `src/agent/templates.json`, đọc/ghi `agent-templates.json`, một `agentTemplate` cho cả hồ sơ, cắm `systemPrompt`, hộp thoại mẫu, chip câu gợi ý, i18n mục 7; ngưỡng công cụ mục 5.8 trong vòng lượt (không cắt danh sách) | Không kết nối MCP khi áp dụng mẫu |
+| 5. Nhập / xuất / đối soát | Luồng xung đột mục 6.2, xuất không bí mật, câu lỗi mục 11.3, soát en/zh bằng kiểm thử i18n sẵn có | Không phát hành, không sửa `latest.yml` |
 
 PR 2 phụ thuộc PR 1. PR 3 phụ thuộc PR 2 (nút Kết nối phải đã đi qua hàm kiểm tra trước khi chạy). PR 4 độc lập với PR 3 về dữ liệu, nhưng nên vào sau PR 3 để hai nút trên `#agentBar` không xung đột hàng. PR 5 sau PR 2 và PR 3.
+
+Thứ tự và các phụ thuộc này giữ nguyên. Chủ repo đang sửa `src/agent/*`, phần hiệu năng và bộ nạp mô hình (perf/loader), và danh mục mô hình (catalog). Xung đột ở những chỗ đó là điều đã biết, nhất là PR 4 vì nó cắm `systemPrompt` và ngưỡng công cụ vào `src/agent`. Mỗi PR trong bảng thêm hoặc nối kiểm thử dưới `test/` và dán đầu ra `node --test` vào mô tả PR (mục 12).
 
 ## 16. Thuật ngữ đề xuất
 
