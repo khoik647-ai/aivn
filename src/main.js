@@ -993,20 +993,52 @@ function withParts(orig, text) {
   return [{ type: 'text', text }, ...orig.filter(x => x && x.type === 'image_url')];
 }
 
+// /v1/embeddings: llama-server --embeddings riêng (src/embed-server.js). RAG vẫn dùng ensureEmbedder() trong tiến trình engine.
+const { createEmbedServer, gpuLayersFor } = require('./embed-server');
+let embedProc = null;
+function embeddingProc() {
+  if (embedProc) return embedProc;
+  embedProc = createEmbedServer({
+    log,
+    gpuLayers: async () => {
+      let h = null; try { h = await hw(); } catch {}
+      const v = h && h.vram;
+      let chatLoaded = false; try { chatLoaded = !!engine.status().loaded; } catch {}
+      const metal = !!(h && h.gpu === 'metal' && v && v.total > 0);
+      const discrete = !!(h && h.gpu && h.gpu !== 'metal' && v && !v.integratedOnly && v.total > 0);
+      return gpuLayersFor({
+        vramTotal: discrete || metal ? v.total : 0,
+        vramFree: v ? v.free : null,
+        chatLoaded,
+        integratedOnly: !!(v && v.integratedOnly),
+      });
+    },
+  });
+  return embedProc;
+}
+function embeddingDirs() {
+  const dirs = [];
+  try { if (paths && paths.models) dirs.push(paths.models); } catch {}
+  try { for (const d of (settings && settings.data && settings.data.modelDirsExtra) || []) if (d && !dirs.includes(d)) dirs.push(d); } catch {}
+  return dirs;
+}
 const api = createApiServer({ engine, models: listModels, ensureModel: (m) => ensureModel(m, { api: true }), log, getOpts: () => ({ cors: !!settings.data.apiCors, apiKey: settings.data.apiKey || null }), isBlocked: () => !activated() ? 'AIVN chưa được kích hoạt trên máy này.' : isLocked() ? 'AIVN đang khoá. Hãy mở khoá ứng dụng để dùng máy chủ API.' : null, embeddings: {
   info: () => embedInfo(),
+  list: () => embeddingProc().list(embeddingDirs()),
   async ensure(model) {
     // B80: tên mô hình nhúng kiểu OpenAI/LangChain (text-embedding-3-small, nomic-embed…) → dùng mô hình nhúng đã cài (như LM Studio);
     // chỉ báo lỗi khi tên là một mô hình TRÒ CHUYỆN đã cài (gọi nhầm endpoint).
-    if (model && String(model).toLowerCase() !== EMBED.id && listModels().some(m => m.id === model)) {
-      const e = new Error(`"${model}" là mô hình trò chuyện, không tạo embeddings được. Dùng "${EMBED.id}" (hoặc bỏ trường "model").`); e.status = 400; throw e;
-    }
-    if (!embedInfo().installed) { const e = new Error(`Chưa tải mô hình nhúng "${EMBED.id}". Hãy mở AIVN → Cài đặt → Tìm kiếm tài liệu để tải.`); e.status = 400; throw e; }
-    await ensureEmbedder();
-    return { id: EMBED.id };
+    const srv = embeddingProc();
+    const target = srv.resolve(model, {
+      models: srv.list(embeddingDirs()),
+      fallbackId: EMBED.id,
+      chatIds: listModels().map(m => m.id),
+      chatMessage: (m) => `"${m}" là mô hình trò chuyện, không tạo embeddings được. Dùng "${EMBED.id}" (hoặc bỏ trường "model").`,
+    });
+    return srv.open(target);
   },
-  embed: (texts) => engine.embed(texts, 'passage'),
-  count: (texts) => Promise.resolve(engine.embedCount(texts)).then(a => a.reduce((s, x) => s + x, 0)), // engine trong tiến trình trả mảng ngay, qua proxy trả Promise
+  embed: (texts) => embeddingProc().embed(texts),
+  count: (texts) => embeddingProc().count(texts),
 } });
 const updater = createUpdater({ send, log: (m) => console.log(m) });
 

@@ -75,8 +75,13 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
     if (req.method === 'GET' && (p === '/v1/models' || p === '/models')) {
       const st = engine.status();
       const data = models().map(m => ({ id: m.id, object: 'model', created: Math.floor(m.mtime / 1000), owned_by: 'aivn', loaded: st.loaded && st.id === m.id, ...(m.vision ? { vision: true } : {}) }));
-      const em = embeddings && embeddings.info();
-      if (em && em.installed) data.push({ id: em.id, object: 'model', created: Math.floor((em.mtime || Date.now()) / 1000), owned_by: 'aivn', type: 'embedding' });
+      if (embeddings && typeof embeddings.list === 'function') {
+        let rows = []; try { rows = embeddings.list() || []; } catch { rows = []; }
+        for (const em of rows) data.push({ id: em.id, object: 'model', created: Math.floor((em.mtime || Date.now()) / 1000), owned_by: 'aivn', type: 'embedding' });
+      } else {
+        const em = embeddings && embeddings.info();
+        if (em && em.installed) data.push({ id: em.id, object: 'model', created: Math.floor((em.mtime || Date.now()) / 1000), owned_by: 'aivn', type: 'embedding' });
+      }
       return send(res, 200, { object: 'list', data });
     }
     if (req.method === 'GET' && (p === '' || p === '/' || p === '/health')) return send(res, 200, { status: 'ok', app: 'AIVN', model: engine.status() });
@@ -217,7 +222,7 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
           data: vecs.map((v, index) => { const f = fit(v); return { object: 'embedding', index, embedding: fmt === 'base64' ? Buffer.from(f.buffer, f.byteOffset, f.byteLength).toString('base64') : Array.from(f) }; }),
           usage: { prompt_tokens: tokens, total_tokens: tokens },
         });
-      } catch (e) { return err(res, 500, e.message, 'server_error'); }
+      } catch (e) { return err(res, e.status || 500, e.message, e.status === 400 ? 'invalid_request_error' : 'server_error'); }
     }
     return err(res, 404, `Không tìm thấy ${req.method} ${p}`);
   }

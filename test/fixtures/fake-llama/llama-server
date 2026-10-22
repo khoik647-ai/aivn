@@ -1,5 +1,46 @@
 #!/usr/bin/env node
-// llama-server giả cho kiểm thử B13: nghe cổng --port, trả 200 cho mọi yêu cầu (/health, /props)
+// llama-server giả: /health và /props vẫn trả {}. Có --embeddings thì /v1/embeddings, /embedding và /tokenize trả vector cố định.
+const http = require('http');
+const fs = require('fs');
 const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
-require('http').createServer((q, r) => { r.setHeader('content-type', 'application/json'); r.end('{}'); }).listen(port, '127.0.0.1');
+if (process.env.AIVN_FAKE_SPAWN_LOG) {
+  try { fs.appendFileSync(process.env.AIVN_FAKE_SPAWN_LOG, JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), t: Date.now() }) + '\n'); } catch {}
+}
+const healthDelay = Number(process.env.AIVN_FAKE_HEALTH_MS || 0);
+function readBody(q) {
+  return new Promise((resolve) => {
+    const c = []; q.on('data', (d) => c.push(d)); q.on('end', () => { try { resolve(JSON.parse(Buffer.concat(c).toString() || '{}')); } catch { resolve({}); } });
+    q.on('error', () => resolve({}));
+  });
+}
+function vec(text) {
+  const v = new Array(8).fill(0);
+  const s = String(text);
+  for (let i = 0; i < s.length; i++) v[i % 8] += s.charCodeAt(i);
+  let n = 0; for (const x of v) n += x * x; n = Math.sqrt(n) || 1;
+  return v.map((x) => x / n);
+}
+const server = http.createServer(async (q, r) => {
+  const p = (q.url || '').split('?')[0];
+  r.setHeader('content-type', 'application/json');
+  try {
+    if (q.method === 'POST' && (p === '/v1/embeddings' || p === '/embeddings' || p === '/embedding')) {
+      const b = await readBody(q);
+      let inputs = b.input != null ? b.input : b.content;
+      if (typeof inputs === 'string') inputs = [inputs];
+      if (!Array.isArray(inputs)) inputs = [''];
+      const data = inputs.map((t, index) => ({ object: 'embedding', index, embedding: vec(t) }));
+      if (p === '/embedding') return r.end(JSON.stringify(data.map((d) => ({ index: d.index, embedding: d.embedding }))));
+      const tokens = inputs.reduce((s, t) => s + String(t).length, 0);
+      return r.end(JSON.stringify({ object: 'list', model: 'fake', data, usage: { prompt_tokens: tokens, total_tokens: tokens } }));
+    }
+    if (q.method === 'POST' && p === '/tokenize') {
+      const b = await readBody(q);
+      const n = Math.max(1, String(b.content || '').split(/\s+/).filter(Boolean).length);
+      return r.end(JSON.stringify({ tokens: Array.from({ length: n }, (_, i) => i + 1) }));
+    }
+  } catch {}
+  r.end('{}');
+});
+setTimeout(() => server.listen(port, '127.0.0.1'), healthDelay);
 setInterval(() => {}, 1000);
