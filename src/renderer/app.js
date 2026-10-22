@@ -944,12 +944,21 @@ window.addEventListener('drop', (e) => e.preventDefault()); // không cho cửa 
 const input = $('#input');
 input.addEventListener('input', () => { resizeInput(); syncChatDraft(); });
 input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#composer').requestSubmit(); } });
+// B176: trang này không giữ mô hình thì vẫn gửi. Trang kia đang giữ thì nói rõ chỗ bấm Dừng, không bảo bấm Dừng trên trang không có nút đó.
+function holdSharedModel(toastHere) {
+  const g = composerGate({ mode: state.mode, generating: state.generating, genKind: state.genKind, cloudAgent: !!(state.settings && state.settings.cloudBrain && state.settings.cloudBrain.on) });
+  if (g === 'send') return false;
+  if (g === 'wait-agent') toast('AGENT đang chạy — đợi xong hoặc sang AGENT bấm Dừng', true);
+  else if (g === 'wait-chat') toast('Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng', true);
+  else if (toastHere || $('#stopBtn').hidden) toast('Đang trả lời — bấm Dừng trước đã', true);
+  return true;
+}
 $('#composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   let text = input.value.trim(); $('#slashPop').hidden = true;
   // lệnh / chạy ngay cả khi đang tạo câu trả lời (chỉ đổi cài đặt cục bộ), trừ /moi
   if (!isAgent() && text.startsWith('/') && runSlash(text)) return;
-  if (state.generating) { if ($('#stopBtn').hidden) toast('Đang trả lời — bấm Dừng trước đã', true); return; }
+  if (holdSharedModel(false)) return;
   if (isAgent()) { if (pending.some(a => a.loading)) { toast('Đang đọc tệp, vui lòng đợi một chút…'); return; } if (text || pending.some(a => a.ok)) sendAgent(text); return; }
   if (pending.some(a => a.loading)) { toast('Đang đọc tệp, vui lòng đợi một chút…'); return; }
   const vision = !!state.status.vision;
@@ -1087,7 +1096,7 @@ $('#messages').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-mact]'); if (!b || !state.current) return;
   const conv = state.current; const i = Number(b.closest('.msg').dataset.i); const m = conv.messages[i]; if (!m) return;
   const act = b.dataset.mact;
-  if (state.generating && act !== 'copy') { toast('Đang trả lời — bấm Dừng trước đã', true); return; }
+  if (act !== 'copy' && holdSharedModel(true)) return;
   if (act === 'copy') { await A.copyText(m.content); toast('Đã sao chép ✓'); }
   if (act === 'regen') {
     const u = conv.messages[i - 1]; if (!u || u.role !== 'user') return;
