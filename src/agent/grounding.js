@@ -51,11 +51,22 @@ function sourcesFromMsgs(msgs) {
   }
   return out;
 }
+const LEADIN = '(?:xem(?:[ \t]+(?:thêm|tại|ở))?|link|liên kết|nguồn|đường dẫn|trang|url|source|sources|see|more|链接|来源|网址)';
+const TRACK = /^(?:utm_[a-z]+|fbclid|gclid|gbraid|wbraid|mc_[a-z]+|ref|ref_src|igshid|si|zarsrc|_ga)$/i;
+function urlVariants(u) {
+  const out = [u]; const add = (x) => { if (x && !out.includes(x)) out.push(x); };
+  try { const g = /^(?:https?:\/\/)?(?:www\.)?google\.[a-z.]+\/url\?(.*)$/i.exec(u); if (g) { const q = new URLSearchParams(g[1]); const tgt = q.get('q') || q.get('url'); if (tgt && /^https?:\/\//i.test(tgt)) add(tgt); } } catch {}
+  for (const x of out.slice()) { const i = x.indexOf('?'); if (i < 0) continue; const base = x.slice(0, i); const keep = x.slice(i + 1).split('&').filter(kv => kv && !TRACK.test(kv.split('=')[0]));
+    add(keep.length ? base + '?' + keep.join('&') : base); add(base); }
+  return out;
+}
 // sửa URL trong câu trả lời theo nguồn. Trả { text, urls: [{ said, url|null, how }], dropped, replaced }
 function fixUrls(text, sources) {
   const src = (sources || []).filter(s => s && s.url && !SEARCH_PAGE_RE.test(s.url));
   const found = []; const hold = [];
-  const resolve = (u) => { const n = nearestSource(u, src); return n ? { url: full(n.src.url), how: n.exact ? 'exact' : 'nearest' } : null; };
+  // B126: thử cả dạng đã gỡ chuyển hướng Google (/url?q=…), bỏ tham số theo dõi (utm_*, fbclid…), bỏ cả phần ?… — khớp nguồn thì THAY tại chỗ
+  const resolve = (u) => { for (const c of urlVariants(u)) { const n = nearestSource(c, src); if (n && (n.exact || c === u)) return { url: full(n.src.url), how: n.exact && c === u ? 'exact' : 'nearest' }; }
+    const n = nearestSource(u, src); return n ? { url: full(n.src.url), how: n.exact ? 'exact' : 'nearest' } : null; };
   let t = String(text || '');
   // 1) link markdown [chữ](href): lấy nguồn khớp với href hoặc chữ hiển thị; viết lại thành [nguồn](nguồn)
   t = t.replace(/\[([^\]\n]{1,300})\]\(([^)\s]{1,500})\)/g, (all, label, href) => {
@@ -73,7 +84,15 @@ function fixUrls(text, sources) {
     const r = resolve(u); found.push({ said: u, url: r ? r.url : null, how: r ? r.how : 'dropped' });
     hold.push(r ? r.url : ''); return `\u0000${hold.length - 1}\u0000${tail}`;
   });
-  t = t.replace(/\u0000(\d+)\u0000/g, (_, i) => hold[Number(i)]).replace(/[ \t]+(\n|$)/g, '$1').replace(/\(\s*\)/g, '').replace(/[ \t]{2,}/g, ' ');
+  t = t.replace(/\u0000(\d+)\u0000/g, (_, i) => hold[Number(i)] === '' ? '\u0001' : hold[Number(i)]);
+  // B126: URL bị bỏ → bỏ luôn lời dẫn trơ trọi (“Xem:”, “Link:”, “Nguồn:”…) và không để dòng trống
+  const LEAD_RE = new RegExp('(?:' + LEADIN + ')[ \\t]*[:：]?[ \\t]*<?\\u0001>?[ \\t]*[.,;。]?', 'giu');
+  t = t.split('\n').map(line => {
+    if (!line.includes('\u0001')) return line;
+    const x = line.replace(LEAD_RE, '').replace(/<?\u0001>?/g, '');
+    return /^[\s\-*•:：]*$/u.test(x) ? null : x;
+  }).filter(l => l !== null).join('\n');
+  t = t.replace(/[ \t]+(\n|$)/g, '$1').replace(/\(\s*\)/g, '').replace(/<\s*>/g, '').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').replace(/^\s*\n/, '');
   return { text: t, urls: found, dropped: found.filter(x => !x.url).length, replaced: found.filter(x => x.url && x.how === 'nearest').length };
 }
 
@@ -95,15 +114,32 @@ function numValues(tok) {
   return [...out].filter(Number.isFinite);
 }
 function numbersIn(text) { const t = String(text || '').replace(URL_RE, ' '); const out = []; for (const m of t.matchAll(NUM_RE)) out.push(m[0].trim()); return out; }
-function valueSet(text) { const set = new Set(); for (const tok of numbersIn(text)) for (const v of numValues(tok)) set.add(Math.round(v * 1e6) / 1e6); return set; }
+// B125: hệ số theo chữ đứng ngay sau số (139,3 triệu · 139.300 nghìn · 5k · 2,5 tỷ · 3 million · 13万 · 1.2亿); chữ Hán không cần ranh giới từ
+const SCALE_WORDS = [[/^\s*(?:nghìn|ngàn|nghin|ngan|thousand|thousands|k|K)(?![\p{L}\d])/u, 1e3], [/^\s*(?:triệu|trieu|tr\.?|million|millions|mn|M)(?![\p{L}\d])/u, 1e6],
+  [/^\s*(?:tỷ|tỉ|ty|billion|billions|bn|B)(?![\p{L}\d])/u, 1e9], [/^\s*百万/u, 1e6], [/^\s*十亿/u, 1e9], [/^\s*千/u, 1e3], [/^\s*万/u, 1e4], [/^\s*亿/u, 1e8]];
+function scaleAfter(rest) { for (const [re, k] of SCALE_WORDS) if (re.test(rest)) return k; return 1; }
+function numbersWithScale(text) { const t = String(text || '').replace(URL_RE, ' '); const out = []; for (const m of t.matchAll(NUM_RE)) out.push({ tok: m[0].trim(), scale: scaleAfter(t.slice(m.index + m[0].length, m.index + m[0].length + 12)) }); return out; }
+// đơn vị cả bảng (“(nghìn đồng/lượng)”, “Đơn vị: triệu đồng”, “(thousand VND)”, “单位：千元”) → hệ số cho các số trần trên trang
+function pageScale(text) {
+  const t = String(text || '');
+  const m = /(?:\(|đơn vị\s*:?\s*|unit\s*:?\s*|单位\s*[:：]?\s*)\s*(nghìn|ngàn|triệu|tỷ|tỉ|thousand|million|billion|千|万|百万|亿)\s*(?:đồng|vnd|vnđ|đ|元|dong)/iu.exec(t);
+  if (!m) return 1; const w = m[1].toLowerCase(); return { 'nghìn': 1e3, 'ngàn': 1e3, 'thousand': 1e3, '千': 1e3, 'triệu': 1e6, 'million': 1e6, '百万': 1e6, 'tỷ': 1e9, 'tỉ': 1e9, 'billion': 1e9, '万': 1e4, '亿': 1e8 }[w] || 1;
+}
+const vkey = (v) => Math.round(v * 1e3) / 1e3;
+function valueSet(text) {
+  const set = new Set(); const ps = pageScale(text);
+  for (const { tok, scale } of numbersWithScale(text)) for (const v of numValues(tok)) { set.add(vkey(v)); if (scale !== 1) set.add(vkey(v * scale)); else if (ps !== 1) set.add(vkey(v * ps)); }
+  return set;
+}
 // số trong câu trả lời không thấy trong chữ trang/yêu cầu (bỏ qua số ngày/tháng/năm trong ngày hiện tại)
 function ungroundedNumbers(answer, pageText, { query = '', now = new Date() } = {}) {
   const pool = valueSet(`${pageText || ''}\n${query || ''}`);
   const today = new Set([now.getDate(), now.getMonth() + 1, now.getFullYear()]);
   const bad = [];
-  for (const tok of numbersIn(answer)) {
+  for (const { tok, scale } of numbersWithScale(answer)) {
     const vs = numValues(tok); if (!vs.length) continue;
-    if (vs.some(v => pool.has(Math.round(v * 1e6) / 1e6))) continue;
+    // số có chữ hệ số (“139,3 triệu”) so theo GIÁ TRỊ THẬT; số trần so cả giá trị chữ lẫn giá trị thật
+    if (scale !== 1 ? vs.some(v => pool.has(vkey(v * scale))) : vs.some(v => pool.has(vkey(v)))) continue;
     if (vs.every(v => today.has(v))) continue;
     if (!bad.includes(tok)) bad.push(tok);
   }
@@ -129,4 +165,4 @@ function unsupportedClaims(answer, pageText) {
 // đơn vị của bảng (“LOẠI (NGHÌN ĐỒNG/LƯỢNG)”) để nhắc trong câu trả lời
 function unitOf(pageText) { const m = /\(\s*((?:nghìn|ngàn|triệu)\s+đồng\s*\/\s*(?:lượng|chỉ|kg|gram|g))\s*\)/iu.exec(String(pageText || '')) || /((?:nghìn|ngàn|triệu)\s+đồng\s*\/\s*(?:lượng|chỉ))/iu.exec(String(pageText || '')); return m ? m[1].toLowerCase().replace(/\s*\/\s*/, '/') : null; }
 
-module.exports = { URL_RE, splitUrl, urlKey, nearestSource, sourcesFromMsgs, fixUrls, lev, numValues, numbersIn, ungroundedNumbers, stripStrayCurrency, unsupportedClaims, unitOf, SEARCH_PAGE_RE };
+module.exports = { pageScale, numbersWithScale, URL_RE, splitUrl, urlKey, nearestSource, sourcesFromMsgs, fixUrls, lev, numValues, numbersIn, ungroundedNumbers, stripStrayCurrency, unsupportedClaims, unitOf, SEARCH_PAGE_RE };

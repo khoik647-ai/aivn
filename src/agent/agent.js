@@ -402,7 +402,7 @@ function withSource(text, query, msgs, opts = {}) {
   const fx = G.fixUrls(text, real); if (opts.out) opts.out.urls = fx.urls;
   let t = fx.text.trim();
   const s0 = full((real.find(x => x.kind === 'address') || real[0]).url);
-  if (fx.dropped) return t + '\n\n' + SOURCE_FIX_MSG.replace('{0}', s0); // URL mô hình ghi không phải trang đã mở
+  if (fx.dropped) return (t ? t + '\n\n' : '') + SOURCE_FIX_MSG.replace('{0}', s0); // URL mô hình ghi không phải trang đã mở (B126: không để dòng trống)
   if (!fx.urls.length && wantSrc) return t + '\n\n' + SOURCE_MSG.replace('{0}', s0);
   if (real.every(x => x.kind === 'ocr') && fx.urls.length && (BROWSER_TASK_RE.test(q) || wantSrc)) return t + '\n\n' + SOURCE_UNSEEN_MSG; // chỉ có chữ OCR của thanh địa chỉ
   return t;
