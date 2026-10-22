@@ -106,6 +106,7 @@
     ": toàn bộ cuộc trò chuyện, ghi nhớ, lịch tự động, cài đặt và nhật ký thao tác sẽ bị xoá vĩnh viễn.": ": all conversations, memories, schedules, settings and the action log will be deleted permanently.",
     "; dùng read_file với đường dẫn trên để đọc phần còn lại": "; use read_file with the path above to read the rest",
     "; mô hình chính hiện là mô hình nhìn ảnh lớn — không cần nếu đã có mô hình định vị.": "; the main model is currently a large vision model — not needed if a grounding model is already present.",
+    "AGENT đang chờ bạn cho phép": "AGENT is waiting for your permission",
     "AIVN AGENT chỉ xem, đọc, ghi tệp trong các thư mục này.": "AIVN AGENT only views, reads and writes files in these folders.",
     "AIVN AGENT ghi nhớ": "AIVN AGENT memory",
     "AIVN AGENT gần như không thao tác được với mô hình này.": "AIVN AGENT can barely operate the computer with this model.",
