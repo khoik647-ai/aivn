@@ -294,6 +294,22 @@ input:focus-visible,textarea:focus-visible,select:focus-visible{outline:none}
 .st-running .s-st::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--accent);margin-right:5px;animation:pulse 1s infinite}
 .step .s-ms{font-size:11px;color:var(--faint);white-space:nowrap}
 .step .s-body{padding:0 10px 10px;display:flex;flex-direction:column;gap:6px}
+.step-err{border:1px solid var(--danger-line);border-left:3px solid var(--danger);background:var(--danger-soft);border-radius:9px;padding:8px 10px;display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--text)}
+.step-err .er-h{display:flex;align-items:center;gap:6px 8px;flex-wrap:wrap;min-width:0}
+.step-err .er-k{font-weight:700;color:var(--danger)}
+.step-err .er-line{line-height:1.45}
+.step-err .er-msg,.step-err .er-fix{overflow-wrap:anywhere}
+.step-err .s-name{font-weight:700;white-space:normal}
+.step-err .er-verb{color:var(--muted)}
+.step-err .s-rep{font-weight:700;color:var(--danger);background:var(--card);border-radius:999px;padding:1px 8px}
+.step-err .s-st{font-size:11px;font-weight:700;border-radius:999px;padding:1px 8px;margin-left:auto;color:var(--danger);background:var(--card)}
+.step-err .s-ms{font-size:11px;color:var(--faint);white-space:nowrap}
+.step-err .s-body{padding:4px 0 0;display:flex;flex-direction:column;gap:6px}
+.step-err .s-body h5{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);margin-top:2px}
+.step-err .s-thumb{display:block;max-width:300px;width:100%;border-radius:8px;border:1px solid var(--line);margin:6px 0}
+.step-more{margin-top:2px}.step-more > summary{cursor:pointer;color:var(--muted);font-size:12px}
+.msg .step-err pre{margin:0;max-height:260px;overflow:auto;white-space:pre-wrap;font-size:12px}
+.err-note:empty{display:none}
 .step .s-body h5{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);margin-top:2px}
 .msg .step pre{margin:0;max-height:260px;overflow:auto;white-space:pre-wrap;font-size:12px}
 .web-src{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}
