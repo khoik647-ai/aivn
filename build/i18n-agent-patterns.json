@@ -82,5 +82,10 @@
  "Gửi cho ai? Cho mình tên đầy đủ của người nhận (đúng như trong ứng dụng).",
  "Gửi cho ai?",
  "chưa rõ người nhận — hỏi bạn",
- "tiêu đề cửa sổ"
+ "tiêu đề cửa sổ",
+ "tin “{0}” vẫn còn trong ô soạn — CHƯA gửi",
+ "tiêu đề cuộc trò chuyện đang mở không phải “{0}” — có thể đang ở sai cuộc trò chuyện",
+ "tiêu đề cuộc trò chuyện đang mở không phải “{0}” (đang là “{1}”) — có thể đang ở sai cuộc trò chuyện",
+ "không thấy bong bóng tin “{0}” trong khung tin nhắn sau khi gửi",
+ "tin “{0}” ĐÃ được gửi vào cuộc trò chuyện “{1}”, KHÔNG phải “{2}”"
 ]

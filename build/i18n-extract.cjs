@@ -89,13 +89,14 @@ function extractMain(files = MAIN_FILES) {
 const DATA_FILES = ['src/catalog.js', 'src/runtimes.js', 'src/catalog-claims.js', 'src/presets.js', 'src/perf.js', 'src/license.js', 'src/fit.js', 'src/toolsupport.js', 'src/agent-eligibility.js', 'src/recommend.js', 'src/agent-bench.js', 'src/hf.js', 'src/applock.js', 'src/updater.js', 'src/gate.js', 'src/media.js', 'src/crm/crm.js', 'src/crm/biz.js', 'src/models-dir.js', 'src/load-notice.js', 'src/downloader.js'];
 // 0.16 (QA lượt 5, B33): chữ động của AIVN AGENT mà người dùng THẤY (nhãn công cụ, tóm tắt bước, cảnh báo, thẻ duyệt, câu trả lời do mã tạo) —
 // không lấy forModel (lời dành cho mô hình). Khoá: label/summary/warning/title/desc/okLabel/noLabel/short/message/check/why/text và hằng *_WARN / *_NOTE.
+// B182: và mẫu câu trong say(lang, '…{0}…') (src/agent/say.js — dịch theo ngôn ngữ trả lời trước khi chèn phần thay đổi).
 const AGENT_FILES = ['src/agent/agent.js', 'src/agent/ensure-app.js', 'src/agent/approval.js', 'src/agent/computer-tools.js', 'src/agent/computer.js', 'src/desktop-agent.js', 'src/agent/retry.js', 'src/agent/repeat.js', 'src/agent/desk-policy.js', 'src/agent/autonomy.js', 'src/agent/send-verify.js', 'src/screen-control.js', 'src/agent/compact.js', 'src/agent/scheduler.js', 'src/agent/memory.js', 'src/agent-plan.js', 'src/cloud-brain.js'];
 function extractAgent(files = AGENT_FILES) {
   const out = new Set();
   for (const f of files) {
     if (!fs.existsSync(path.join(ROOT, f))) continue;
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
-    const re = /\b(?:label|summary|warning|title|desc|okLabel|noLabel|short|message|why|reason|hint)\s*[:=]\s*|\b(?:const|let)\s+[A-Z][A-Z0-9_]*(?:WARN|NOTE|LABEL|ANSWER|MSG)\s*=\s*|\bsummary:\s*|\btext\s*=\s*(?=['`"])|\bACT_LABEL\s*=\s*|\bKIND\w*\s*=\s*/g; let m;
+    const re = /\b(?:label|summary|warning|title|desc|okLabel|noLabel|short|message|why|reason|hint)\s*[:=]\s*|\b(?:const|let)\s+[A-Z][A-Z0-9_]*(?:WARN|NOTE|LABEL|ANSWER|MSG)\s*=\s*|\bsummary:\s*|\btext\s*=\s*(?=['`"])|\bACT_LABEL\s*=\s*|\bKIND\w*\s*=\s*|\bsay\(\s*\w+\s*,\s*/g; let m;
     while ((m = re.exec(src))) {
       let i = m.index + m[0].length, d = 0, st = i;
       for (; i < src.length; i++) { const c = src[i];

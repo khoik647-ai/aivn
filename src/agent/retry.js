@@ -1,4 +1,5 @@
 'use strict';
+const { say, sys } = require('./say');
 // 0.16: lập kế hoạch → làm → chụp lại để kiểm tra → chưa được thì đổi cách → chỉ báo những gì đã kiểm chứng.
 // desktop-agent đã chụp lại sau mỗi thao tác và ghi "Kiểm tra: …". Mô-đun này đọc kết quả đó:
 //   • bước không có tác dụng (không thấy phần tử / màn hình không đổi / chưa thấy chữ vừa gõ / chưa kiểm chứng gửi) → đánh dấu
@@ -68,10 +69,10 @@ function createRetryTracker() {
 function describe(a = {}) { const act = String(a.action || ''); const tgt = a.element || a.target || (a.x != null ? `(${a.x}, ${a.y})` : ''); return `${act}${tgt ? ' ' + JSON.stringify(String(tgt)) : ''}${act === 'type_text' && a.text ? ' “' + String(a.text).slice(0, 30) + '”' : ''}${a.keys ? ' ' + a.keys : ''}`; }
 // câu trả lời cuối khẳng định đã xong trong khi bước màn hình cuối cùng chưa có tác dụng
 const DONE_RE = /(đã\s+(xong|hoàn thành|làm xong|mở|bấm|nhấn|gõ|nhập|chọn|lưu|gửi|chuyển)|hoàn tất|thành công)/iu;
-function finalCheck(text, tracker) {
+function finalCheck(text, tracker, lang = 'vi') {
   const l = tracker && tracker.lastBad(); if (!l) return null;
   if (!DONE_RE.test(String(text || ''))) return null;
-  return `AIVN chưa kiểm chứng được bước cuối trên màn hình (${describe(l.a)}: ${l.why}). Hãy xem lại màn hình trước khi tin là đã xong.`;
+  return say(lang, 'AIVN chưa kiểm chứng được bước cuối trên màn hình ({0}: {1}). Hãy xem lại màn hình trước khi tin là đã xong.', describe(l.a), sys(lang, l.why));
 }
 // B39: câu trả lời cuối là LỜI HỨA ở thì tương lai (“Tôi sẽ thử bấm…”) — lượt đã kết thúc nên sẽ không có gì được làm tiếp
 const PROMISE_RE = /(?:^|[.!?\n:]\s*)(?:(?:bây giờ|tiếp theo|tiếp đến|sau đó|giờ|ok|được rồi|vâng)[, ]+)?(?:tôi|mình|em|aivn(?: agent)?)\s+(?:sẽ|xin phép|đang chuẩn bị|chuẩn bị|tiếp tục)\s+(?:thử|thực hiện|tiếp tục|bấm|nhấn|nhấp|gõ|nhập|mở|tìm|làm|gửi|chọn|chuyển|kiểm tra|quay lại|di chuyển|cuộn|dùng|sử dụng)|\b(?:i'll|i will|let me|i am going to|i'm going to|next,? i)\s+(?:now\s+)?(?:try|click|open|type|search|proceed|perform|do|send|select|use|check)|我(?:将|会|现在|接下来)(?:尝试|点击|打开|输入|执行|搜索|发送|选择)/iu;
@@ -81,15 +82,16 @@ function promiseEnding(text) {
   return PROMISE_RE.test(tail);
 }
 // B39: báo trung thực khi dừng sớm / khi mô hình kết thúc bằng lời hứa
-function honestStatus({ query = '', tracker = null, steps = [], reason = '', recipient = null, app = '' } = {}) {
+// B182: lang = ngôn ngữ trả lời (en/zh/vi) — câu do AIVN ghép được dịch theo mẫu {0}; lý do/kết quả bước là chữ hệ thống nên dịch khi có bản dịch trọn
+function honestStatus({ query = '', tracker = null, steps = [], reason = '', recipient = null, app = '', lang = 'vi' } = {}) {
   const fails = tracker ? tracker.failures() : [];
   const okN = steps.filter(x => x.status === 'ok' && !x.check).length;
-  const lines = [`Mình chưa làm xong việc này${reason ? ` (${reason})` : ''}, nên dừng lại thay vì thử mãi một cách đã hỏng.`];
-  if (fails.length) lines.push('Đã thử:\n' + fails.slice(-6).map(f => `- ${f.what}: ${f.n} lần, ${f.why}`).join('\n'));
-  else if (okN) lines.push(`Đã làm ${okN} bước nhưng chưa kiểm chứng được là xong.`);
+  const lines = [reason ? say(lang, 'Mình chưa làm xong việc này ({0}), nên dừng lại thay vì thử mãi một cách đã hỏng.', sys(lang, reason)) : say(lang, 'Mình chưa làm xong việc này, nên dừng lại thay vì thử mãi một cách đã hỏng.')];
+  if (fails.length) lines.push(say(lang, 'Đã thử:') + '\n' + fails.slice(-6).map(f => say(lang, '- {0}: {1} lần, {2}', f.what, f.n, sys(lang, f.why))).join('\n'));
+  else if (okN) lines.push(say(lang, 'Đã làm {0} bước nhưng chưa kiểm chứng được là xong.', okN));
   lines.push(recipient
-    ? `Bạn giúp mình mở sẵn cuộc trò chuyện “${recipient}”${app ? ` trong ${app}` : ''} rồi giao lại việc (hoặc tự gửi tin) nhé.`
-    : 'Bạn có thể mở sẵn đúng cửa sổ/màn hình cần dùng rồi giao lại việc, hoặc tự làm bước này.');
+    ? (app ? say(lang, 'Bạn giúp mình mở sẵn cuộc trò chuyện “{0}” trong {1} rồi giao lại việc (hoặc tự gửi tin) nhé.', recipient, app) : say(lang, 'Bạn giúp mình mở sẵn cuộc trò chuyện “{0}” rồi giao lại việc (hoặc tự gửi tin) nhé.', recipient))
+    : say(lang, 'Bạn có thể mở sẵn đúng cửa sổ/màn hình cần dùng rồi giao lại việc, hoặc tự làm bước này.'));
   return lines.join('\n\n');
 }
 // B95 (máy thật beta.2.2): câu cuối đổ lỗi cho ứng dụng (“Zalo có thể đang gặp sự cố / giao diện bị lỗi”) trong khi chính các bước của AIVN chưa có tác dụng
