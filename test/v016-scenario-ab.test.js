@@ -33,7 +33,7 @@ test('B: màn hình đăng nhập nhận ra được + câu hỏi dịch đượ
   assert.match(T.tr(EA.loginAsk('Google Docs', 'tiêu đề cửa sổ'), 'en'), /^Google Docs is showing a sign-in screen \(window title\)\. I don't sign in on my own/);
   assert.deepStrictEqual(SG.classify('type_text', { text: 'giá vàng SJC', submit: true }, { searchTarget: true, chatOpen: false, recipient: null, messaging: false }).send, false);
   const da = fs.readFileSync(path.join(ROOT, 'src/desktop-agent.js'), 'utf8');
-  assert.match(da, /const ADDRY = \/address\|địa chỉ/); assert.match(da, /browserWin && \/\^\(\?:\(\?:ctrl\|cmd\|command\|meta\)\\\+l\|alt\\\+d\|f6\)\$\/i/);
+  assert.match(da, /const ADDRY = \/address\|địa chỉ/); assert.match(da, /browserWin && \/\^\(\?:\(\?:ctrl\|cmd\|command\|meta\)\\\+\[lt\]\|alt\\\+d\|f6\)\$\/i/); // B114: Ctrl+T (tab mới) cũng là thanh địa chỉ
   assert.match(da, /const searchNotSend = action === 'type_text' && !gate\.send && !!gate\.why;/);
 });
 test('bộ đo: thêm 3 việc trình duyệt giả (A, B, B đăng nhập) — chấm theo trạng thái trang và câu trả lời', () => {
@@ -54,6 +54,10 @@ test('A/B thật (Electron + Xvfb, trình duyệt GIẢ, công cụ thật của
   assert.strictEqual(st('a-click-first').state.url, 'sjc.com.vn/gia-vang-online');
   assert.strictEqual(o.answerA, 'Giá vàng SJC mua vào hôm nay là 118.500 nghìn đồng/lượng.\n\nNguồn: https://sjc.com.vn/gia-vang-online');
   assert.match(o.answerAwrong, /Nguồn \(đường dẫn thật trên thanh địa chỉ\): https:\/\/sjc\.com\.vn\/gia-vang-online$/);
+  // B114: Chrome ở YouTube, con trỏ trong ô tìm kiếm CỦA TRANG → mở tab mới (Ctrl+T), tìm ở thanh địa chỉ; ô của YouTube không bị gõ
+  const yt = st('y-type-page-box'); assert.ok(yt.ok, yt.summary);
+  assert.ok((yt.state.newTab || 0) >= 1, 'đã mở tab mới: ' + JSON.stringify(yt.state)); assert.strictEqual(yt.state.siteSearch || '', '', 'không gõ vào ô tìm kiếm của YouTube');
+  assert.ok(yt.state.searches.includes('thời tiết TP.HCM hôm nay'), JSON.stringify(yt.state.searches));
   // B': màn hình đăng nhập → dừng + hỏi, không gõ gì
   const lg = st('b-login-look'); assert.strictEqual(lg.code, 'login'); assert.ok(lg.stop); assert.match(lg.ask, /đang ở màn hình đăng nhập/); assert.deepStrictEqual(lg.state.typedOnLogin, []);
   // B: thay đủ 3 chỗ, phần còn lại của tài liệu giữ nguyên

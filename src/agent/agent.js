@@ -332,10 +332,15 @@ const HOWTO_RE = /^\s*(?:giải thích|cho (?:tôi|mình|em) biết|hướng d�
 const APP_TASK_RE2 = new RegExp(String.raw`(?:^|[\s,.(])(?:trên|trong|ở|tại|on|in)\s+(?:ứng dụng\s+|app\s+|trang\s+|web\s+)?(?:${APP_NAMES})(?=[\s,.:;!?"“”)'‘’]|$)[^\n]{0,160}?(?:^|[\s,.(])(?:soạn|viết|tạo|điền|gửi|nhắn|trả lời|tìm|xoá|xóa|sửa|đổi|thêm|thay|thay thế|chèn|compose|write|draft|send|create|reply|fill|replace|edit|insert|change|delete)(?=\s)`, 'iu');
 // kịch bản A: “… kèm đường dẫn nguồn” — câu trả lời phải có URL THẬT đã thấy trên thanh địa chỉ trình duyệt (không bịa)
 const SOURCE_RE = /cho\s+(?:mình|tôi|em|tớ|mình xin|tôi xin)\s+(?:cả\s+)?(?:đường dẫn|link|url|nguồn)|(?:kèm|ghi|cho biết|có|gửi kèm|dẫn)\s+(?:cả\s+|theo\s+)?(?:đường dẫn|link|liên kết|url|nguồn)|(?:đường dẫn|link|url|trang)\s+nguồn|(?:^|[\s,.(])nguồn(?:\s+(?:tin|tham khảo|ở đâu|lấy từ))?(?=[\s,.:;!?)]|$)|(?:^|[\s,.(])(?:sources?|cite)(?=[\s,.:;!?)]|$)|(?:with|include|plus|and)\s+(?:the\s+|a\s+)?(?:link|url|source)|来源|出处|附上(?:链接|网址)/iu;
+// B114: việc nêu rõ làm TRONG trình duyệt
+const BROWSER_TASK_RE = /(?:^|[\s,.:(])(?:mở|dùng|trên|bằng|vào|open|use|in|on)\s+(?:trình duyệt\s+)?(?:google chrome|chrome|edge|microsoft edge|firefox|cốc cốc|coc coc|brave|opera|trình duyệt|the browser|browser)(?![\p{L}])|(?:用|在|打开)\s*(?:Chrome|浏览器)/iu;
+// B114: “đường dẫn trang”, “link trang”, “page link”, “网址”
+const SOURCE_RE2 = /(?:đường dẫn|link|liên kết|url|địa chỉ)\s+(?:của\s+)?(?:trang|web|website)|(?:page|site)\s+(?:link|url|address)|(?:link|url)\s+(?:of|to)\s+the\s+(?:page|site)|网址|链接|網址/iu;
 const URL_IN_RE = /\bhttps?:\/\/[^\s<>"'“”)\]]+|\b(?:[a-z0-9-]+\.)+(?:com|vn|net|org|info|io|gov|edu)(?:\.[a-z]{2})?(?:\/[^\s<>"'“”)\]]*)?/giu;
 const SEARCH_PAGE_RE = /^(?:https?:\/\/)?(?:www\.)?(?:google\.[a-z.]+\/search|bing\.com\/search|coccoc\.com\/search|duckduckgo\.com\/\?|search\.yahoo\.com)/i;
 const SOURCE_MSG = 'Nguồn: {0}';
 const SOURCE_FIX_MSG = 'Nguồn (đường dẫn thật trên thanh địa chỉ): {0}';
+const SOURCE_UNSEEN_MSG = '⚠ Đường dẫn ở trên chưa được đối chiếu với thanh địa chỉ của trang đã mở trong trình duyệt.';
 const SOURCE_NONE_MSG = 'Mình chưa đọc được đường dẫn của trang trên thanh địa chỉ nên chưa ghi được nguồn.';
 const hostOf = (u) => String(u || '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').split(/[/?#]/)[0].toLowerCase();
 // URL đã thấy: giá trị ô địa chỉ của trình duyệt trong các lần quan sát (mới nhất trước); trang kết quả tìm kiếm chỉ dùng khi không còn gì khác
@@ -362,22 +367,29 @@ function seenUrls(msgs) {
 // B104: câu báo chữ AIVN đã gõ vào ô soạn (chưa gửi)
 function draftNoteOf(cd) {
   const t = `“${String(cd.text || '').slice(0, 80)}”`;
+  if (cd.kept) return `Tin CHƯA được gửi: bản nháp ${t} vẫn nằm trong ô soạn tin như bạn yêu cầu.`;
   if (cd.cleared) return `Tin CHƯA được gửi. Chữ ${t} AIVN đã gõ vào ô soạn tin đã được xoá.`;
   if (cd.left) return `Tin CHƯA được gửi. Chữ ${t} AIVN đã gõ VẪN CÒN trong ô soạn tin${cd.why ? ` (${cd.why})` : ''} — bạn xoá đi hoặc tự bấm gửi nếu muốn.`;
   return `Tin CHƯA được gửi (chữ ${t} AIVN đã gõ không còn trong ô soạn tin).`;
 }
 function withSource(text, query, msgs) {
-  if (!SOURCE_RE.test(String(query || '')) || chatAppOf(query)) return text; // việc nhắn tin “kèm link” không phải hỏi nguồn
+  if (!(SOURCE_RE.test(String(query || '')) || SOURCE_RE2.test(String(query || ''))) || chatAppOf(query)) return text; // việc nhắn tin “kèm link” không phải hỏi nguồn
   const seen = seenUrls(msgs).filter(u => !SEARCH_PAGE_RE.test(u)); const said = String(text || '').match(URL_IN_RE) || [];
   const full = (u) => /^https?:\/\//i.test(u) ? u : 'https://' + u;
   if (!said.length) return String(text || '').trim() + '\n\n' + (seen.length ? SOURCE_MSG.replace('{0}', full(seen[0])) : SOURCE_NONE_MSG);
   if (seen.length && !said.some(u => seen.some(x => hostOf(x) === hostOf(u)))) return String(text || '').trim() + '\n\n' + SOURCE_FIX_MSG.replace('{0}', full(seen[0])); // URL mô hình ghi không phải trang đã mở
+  if (!seen.length && BROWSER_TASK_RE.test(String(query || ''))) return String(text || '').trim() + '\n\n' + SOURCE_UNSEEN_MSG; // B114: đường dẫn không thấy trên trang đã mở trong trình duyệt
   return text;
 }
 const isAppTask = (q) => { const t = String(q || ''); return (APP_TASK_RE.test(t) || APP_TASK_RE2.test(t)) && !HOWTO_RE.test(t); };
 // ensure_app: “nhắn Zalo cho Lan …”, “gửi Messenger …” — ứng dụng nhắn tin/thư nêu ở bất kỳ đâu trong câu gửi tin (không chỉ “trên X”)
 const CHAT_APP_RE = /(?:^|[\s,.(“"])(zalo|messenger|telegram|teams|slack|discord|whatsapp|viber|gmail|outlook)(?=[\s,.:;!?"“”)]|$)/iu;
 const SEND_VERB_RE = /(?:^|[\s,.])(nhắn|gửi tin|gửi cho|trả lời|soạn tin|send|message|reply|text)(?=[\s,.:]|$)/iu;
+// B109/B111: việc “mở (cuộc) trò chuyện/chat X” — open_chat chạy bằng mã; chỉ XONG khi tiêu đề khung chat khớp người nhận
+const OPEN_CHAT_RE = /(?:^|[\s,.])(?:mở|vào|open|go to|switch to)\s+(?:(?:lại|sẵn)\s+)?(?:(?:the|a)\s+)?(?:(?:cuộc|đoạn|khung)\s+)?(?:trò chuyện|chat|hội thoại|conversation)(?![\p{L}])|(?:打开|打開|进入|進入).{0,24}(?:聊天|对话|對話|会话|會話)/iu;
+const openChatTask = (q) => OPEN_CHAT_RE.test(String(q || '')) && !require('./send-verify').CURRENT_CHAT.test(String(q || ''));
+const CHAT_VERIFIED_RE = /Đã mở cuộc trò chuyện với “[^”]+” \((?:đã kiểm tiêu đề|thấy đúng tên trên màn hình|thấy tên ở tiêu đề)\)|Cuộc trò chuyện với “[^”]+” đang mở sẵn \(đã kiểm tiêu đề\)/u;
+const chatVerifiedStep = (x) => !!x && x.name === 'screen_act' && x.status === 'ok' && CHAT_VERIFIED_RE.test(String(x.detail || ''));
 const chatAppOf = (q) => { const t = String(q || ''); if (!SEND_VERB_RE.test(t)) return ''; const m = CHAT_APP_RE.exec(t); return m ? m[1] : ''; };
 const appOf = (q) => { const m = APP_OF_RE.exec(String(q || '')); return m ? m[1].replace(/\s+/g, ' ').trim() : ''; };
 const NO_APP_ACTION_WARN = (app) => `⚠ AIVN AGENT CHƯA thao tác gì trên ${app || 'ứng dụng'} trong lượt này (không có bước nào được làm) — nội dung ở trên chỉ là chữ trong khung chat, chưa được soạn/gửi trong ${app || 'ứng dụng'}. Bạn giao lại việc hoặc chọn mô hình mạnh hơn nhé.`;
@@ -765,6 +777,9 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const actAsk = compOn && isActAsk(query);
     // B41: việc trên trang web/ứng dụng → ẩn “Chạy JavaScript” (chạy trong hộp cát Node, không chạm được trang: mô hình nhỏ tưởng nó điều khiển được trang → “document is not defined”)
     if (!headless && names.includes('run_javascript') && (isAppTask(query) || /(trang web|website|\bweb\b|trình duyệt|outlook|gmail|zalo|messenger|facebook|youtube|shopee)/iu.test(query))) { while (names.includes('run_javascript')) names.splice(names.indexOf('run_javascript'), 1); tools = mkTools(); deps.log && deps.log('[aivn agent] việc trên trang web/ứng dụng: ẩn công cụ Chạy JavaScript'); }
+    // B114 (máy thật beta.2.5, kịch bản A): việc nêu rõ làm trong TRÌNH DUYỆT (“mở Chrome tìm …”) → ẩn web_search/fetch_url: đường dẫn trong câu trả lời
+    // phải là trang ĐÃ MỞ trong trình duyệt (thanh địa chỉ), không phải trang tải ngầm
+    if (!headless && compOn && BROWSER_TASK_RE.test(query) && names.some(n => n === 'web_search' || n === 'fetch_url')) { for (const n of ['web_search', 'fetch_url']) while (names.includes(n)) names.splice(names.indexOf(n), 1); tools = mkTools(); deps.log && deps.log('[aivn agent] B114: việc làm trong trình duyệt → ẩn tìm/tải trang ngầm (nguồn phải là trang đã mở trong trình duyệt)'); }
     onStatus({ stage: 'prepare' });
     const sys = await systemPrompt({ query, names, headless });
     // B28: cửa sổ đang mở liên quan tới câu lệnh (để không bao giờ nói “chưa cài” khi cửa sổ đang mở)
@@ -864,6 +879,24 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       msgs.push({ role: 'tool', tool_call_id: id, content: String(out.forModel || out.summary || '') });
       if (!out.error) {
         autoOpen = { ok: true, out };
+        // B109 (máy thật beta.2.5): ứng dụng chat vừa được KHỞI ĐỘNG / mở lại từ khay (màn hình chào, chưa mở chat nào), hoặc việc là “mở chat X”
+        // → AIVN tự chạy open_chat bằng mã (tìm đúng tên người nhận trong ô tìm kiếm, bấm kết quả, kiểm tiêu đề), không để mô hình tự mò
+        const SVa = require('./send-verify'); const rcpA = SVa.recipientOf(query);
+        const launchedA = /đã khởi động|từ khay/iu.test(String(out.summary || ''));
+        if (rcpA && !SVa.CURRENT_CHAT.test(query) && CHAT_APP_RE.test(query) && (openChatTask(query) || launchedA) && deps.computer.has('screen_act')) {
+          const id2 = 'auto_openchat_' + Date.now().toString(36); const args2 = { action: 'open_chat', window: ensureTarget, recipient: rcpA };
+          const def2 = defOf('screen_act'); const st2 = { id: id2, name: 'screen_act', label: def2.label, icon: def2.icon, args: args2, status: 'running', startedAt: Date.now(), round: 0, pre: '', auto: true };
+          steps.push(st2); onStep({ ...st2 });
+          let o2; try { o2 = await exec('screen_act', args2, ctx); } catch (e) { const msg = (e && e.message) || String(e); o2 = { error: msg, forModel: `Lỗi: ${msg}`, summary: msg.split('\n')[0] }; }
+          Object.assign(st2, { status: o2.ask ? 'asked' : o2.refused ? 'refused' : o2.error ? 'error' : 'ok', summary: o2.summary, detail: o2.detail ?? o2.forModel, ms: Date.now() - st2.startedAt });
+          onStep({ ...st2 }); logTool(st2); calls++;
+          deps.log && deps.log(`[aivn agent] open_chat tự động “${rcpA}” sau ensure_app (${launchedA ? 'vừa khởi động' : 'việc mở chat'}) → ${st2.status}: ${String(o2.summary || '').slice(0, 160)}`);
+          if (o2.ask) return { ...base, text: o2.ask, asked: 'recipient', outcome: 'asked_user' };
+          msgs.push({ role: 'assistant', content: '', tool_calls: [{ id: id2, type: 'function', function: { name: 'screen_act', arguments: JSON.stringify(args2) } }] });
+          msgs.push({ role: 'tool', tool_call_id: id2, content: String(o2.forModel || o2.summary || '') });
+          // việc CHỈ mở chat (không có nội dung tin) và đã kiểm tiêu đề → xong ngay, không để mô hình gõ gì (B108)
+          if (chatVerifiedStep(st2) && !SVa.msgSend(query) && !SVa.quotedIn(query).length) return { ...base, text: `Đã mở cuộc trò chuyện “${rcpA}” trong ${ensureTarget} (đã kiểm tiêu đề khung chat). Mình không gõ hay gửi gì.`, outcome: 'done' };
+        }
         if (intent && !intent.rest) return { ...base, text: `Đã mở ${ensureTarget}${out.window && out.window.title ? ` (“${out.window.title}”)` : ''} và sẵn sàng.`, outcome: 'done' };
       }
     }
@@ -1050,7 +1083,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
           // QA lượt 8 (B66): lỗi ném ra (vd. phím hỏng) cũng tính vào chống lặp — lần 3 cùng cách bị chặn, nhiều lỗi liền → dừng sớm
           if (call.name === 'screen_act') { try { const rr = retry.after(args, out, rctx); if (rr.bad) { out = { ...out, forModel: String(out.forModel || '') + rr.hint }; step.check = rr.bad; } } catch {} }
         }
-        Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', check: step.check || null, summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, ms: Date.now() - step.startedAt });
+        Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', check: step.check || null, summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, draftIn: out.draftIn || undefined, ms: Date.now() - step.startedAt });
         logTool(step);
         cyc.push(call.name, args, { error: out.error, refused: out.refused, bad: !!step.check, summary: out.summary, verified: !!(out.verify && out.verify.sent), sig: out.sig || (out.raw && out.raw.sig) || null });
         onStep({ ...step });
@@ -1115,10 +1148,15 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     // B44: không bao giờ để lộ tên công cụ nội bộ (system_action, volume_up, screen_look…) trong câu trả lời cho người dùng
     text = scrubToolNames(text, names, defOf);
     if (!outcome) outcome = finishReason === 'abort' ? 'failed' : (honestUsed || wrong.length || !steps.some(x => x.status === 'ok') && !String(text || '').trim()) ? 'failed' : 'done';
+    // B111 (máy thật beta.2.5: exit 0 mà câu cuối “Không tìm thấy cuộc trò chuyện…”; mở chat chỉ qua ensure_app): việc MỞ chat chỉ XONG khi có bước kiểm tiêu đề khớp người nhận
+    if (outcome === 'done' && compOn && openChatTask(query) && require('./send-verify').recipientOf(query) && !sentDone && !steps.some(chatVerifiedStep)) {
+      outcome = 'failed'; deps.log && deps.log('[aivn agent] B111: việc mở cuộc trò chuyện nhưng chưa có bước nào kiểm tiêu đề khớp người nhận → không báo xong');
+      if (!/chưa|không/iu.test(String(text || ''))) text = `${String(text || '').trim()}\n\nMình CHƯA xác nhận được đã mở đúng cuộc trò chuyện “${require('./send-verify').recipientOf(query)}” (tiêu đề khung chat chưa khớp).`.trim();
+    }
     return { text: (text || '').trim(), steps, usage, finishReason, urls, memories: sys.memories.map(m => m.text), tools: names, warning, outcome };
   }
 
   return { refusedSendText, run, replyLang, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck, localizeText };
 }
 
-module.exports = { withSource, seenUrls, scrubToolNames, isAppTask, appOf, NO_APP_ACTION_WARN, noActionWarn, NO_ACTION_WARN, NO_ACTION_OK_WARN, EMPTY_ANSWER, editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };
+module.exports = { BROWSER_TASK_RE, SOURCE_UNSEEN_MSG, OPEN_CHAT_RE, openChatTask, chatVerifiedStep, CHAT_VERIFIED_RE, withSource, seenUrls, scrubToolNames, isAppTask, appOf, NO_APP_ACTION_WARN, noActionWarn, NO_ACTION_WARN, NO_ACTION_OK_WARN, EMPTY_ANSWER, editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };

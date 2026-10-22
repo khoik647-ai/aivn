@@ -31,6 +31,7 @@ test('Zalo giả: tự gửi qua thẻ + kiểm chứng + xong việc; giữ ch�
   const s3 = by['b101-wrong-field']; assert.ok(s3.blocked); assert.match(s3.summary, /chữ vào nhầm ô — chưa gửi, đã xoá/); assert.deepStrictEqual(s3.state.sent, []); assert.strictEqual(s3.state.q, '', 'đã xoá chữ gõ nhầm');
   assert.match(L, /vào NHẦM ô .*KHÔNG bấm Enter/);
   // (4) dọn chữ
+  assert.strictEqual(by['b104-keep'].cleaned.kept, true); assert.strictEqual(by['b104-keep'].cleaned.cleared, false); assert.strictEqual(by['b104-keep'].state.comp, 'AIVN b101 bốn', 'việc chỉ soạn: bản nháp được giữ');
   assert.strictEqual(by['b104-cleanup'].cleaned.cleared, true); assert.strictEqual(by['b104-cleanup'].state.comp, '');
   assert.deepStrictEqual({ cleared: by['b104-stopped'].cleaned.cleared, left: by['b104-stopped'].cleaned.left }, { cleared: false, left: true }); assert.strictEqual(by['b104-stopped'].state.comp, 'AIVN b101 năm', 'người dùng dừng → không thao tác');
   assert.deepStrictEqual(o.final.sent, []);

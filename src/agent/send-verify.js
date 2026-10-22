@@ -173,7 +173,7 @@ function namesFor(recipient, aliases = []) {
   const fixed = ALIASES.find(g => g.some(x => nameKey(x) === k)) || [];
   return [...new Set([recipient, ...fixed, ...(aliases || []).filter(Boolean)])];
 }
-function chatShown(recipient, title = '', header = [], aliases = []) { return namesFor(recipient, aliases).some(n => chatShown1(n, title, header)); }
+function chatShown(recipient, title = '', header = [], aliases = []) { const h = [...(header || []), ...cleanHeader((header || []).filter(Boolean))]; return namesFor(recipient, aliases).some(n => chatShown1(n, title, h)); } // B111: dòng tiêu đề làm sạch (“Q My Documents” → “My Documents”)
 function chatShown1(recipient, title = '', header = []) {
   const k = nameKey(recipient); if (!k) return false;
   const parts = String(title || '').split(/\s+[-–|·]\s+/).map(x => x.trim()).filter(Boolean);
@@ -235,7 +235,7 @@ function regionsOf(obs) {
   const rel = (e) => ({ rx: (e.b[0] + e.b[2] / 2 - W[0]) / W[2], ry: (e.b[1] + e.b[3] / 2 - W[1]) / W[3], left: (e.b[0] - W[0]) / W[2] });
   const searchy = (e) => /tìm|tim kiem|search|find/iu.test(`${e.name || ''} ${e.autoId || ''}`);
   const hasRight = els.some(e => rel(e).left >= 0.3);
-  const out = { header: [], composer: [], messages: [], list: [], side: [] };
+  const out = { header: [], composer: [], messages: [], list: [], side: [] }; const hdr = [];
   // B85 (Zalo thật, 3 cột): danh sách trái chỉ rộng ≈20 % → tiêu đề “My Documents” ở x≈0,24 bị coi là danh sách, còn “đầu khung” lại là bảng
   // “Thông tin hội thoại” bên phải. Mép trái khung chat = mép trái ô soạn (“Nhập @, tin nhắn tới …”); bảng thông tin bên phải bị loại khỏi tiêu đề
   const nm = (e) => String(e.name || e.value || '').trim();
@@ -254,9 +254,18 @@ function regionsOf(obs) {
     if (rx >= panelL && !(e.editable || e.focused)) { out.side.push(txt); continue; }
     if (e.editable || e.focused) { if (!searchy(e)) out.composer.push(e.value != null ? e.value : (e.ocr ? e.name : '')); continue; }
     if (hasRight && left < cut) { out.list.push(txt); continue; }
-    if (ry < 0.16) { if (!MENU_BAR(txt)) out.header.push(txt); }
+    if (ry < 0.16) { if (!MENU_BAR(txt)) hdr.push({ e, txt }); }
     else if (ry > 0.9 && e.ocr) out.composer.push(txt);
     else out.messages.push(txt);
+  }
+  // B116 (máy thật beta.2.5): dải 16 % đầu còn chứa bong bóng tin/khung xem trước đường dẫn ngay dưới tiêu đề (“https://…”, “AIVN - Chạy AI…”)
+  // → chỉ giữ CỤM dòng trên cùng (tên + dòng phụ); gặp khoảng trống dọc rõ rệt thì phần dưới là nội dung khung chat
+  hdr.sort((a, b) => a.e.b[1] - b.e.b[1]);
+  const gap = Math.max(18, W[3] * 0.025); let bottom = null, cutHdr = false;
+  for (const h of hdr) {
+    if (!cutHdr && bottom != null && h.e.b[1] > bottom + gap) cutHdr = true;
+    if (cutHdr || !headerLike(h.txt)) { out.messages.push(h.txt); continue; }
+    out.header.push(h.txt); bottom = Math.max(bottom == null ? -Infinity : bottom, h.e.b[1] + h.e.b[3]);
   }
   out.composer = out.composer.filter(x => x != null);
   return out;
@@ -351,6 +360,9 @@ function composerTarget(texts = []) { for (const t of texts) { const x = String(
 // kiểm tra --approve-send-to dùng CHUNG cách làm sạch này.
 const HEADER_SUB = /^(?:lưu và đồng bộ|luu va dong bo|vừa truy cập|vua truy cap|truy cập|truy cap|đang hoạt động|dang hoat dong|hoạt động|hoat dong|đang nhập|dang nhap|ngoại tuyến|trực tuyến|active|online|offline|last seen|seen|typing|sync|saved messages|在线|离线|刚刚|最近|上次|正在输入)/iu;
 const HEADER_TIME = /^(?:\d{1,2}\s?[:h.]\s?\d{2}(?:\s?(?:am|pm|sa|ch))?|\d{3,4}|\d{1,2}\/\d{1,2}(?:\/\d{2,4})?|hôm (?:nay|qua)|today|yesterday|今天|昨天)$/iu;
+// B116: dòng tiêu đề khung chat không bao giờ là đường dẫn hay một câu dài (đó là bong bóng tin / khung xem trước liên kết)
+const URLISH = /(?:https?:\/\/|www\.)\S|\b[\w-]+\.(?:com|net|org|io|vn|me|app|dev|ai|edu)(?:\.[a-z]{2})?\/\S*/iu;
+function headerLike(x) { const t = String(x == null ? '' : x).trim(); return !!t && !URLISH.test(t) && t.length <= 64 && t.split(/\s+/).length <= 9; }
 function cleanHeaderLine(x) {
   let t = String(x == null ? '' : x).normalize('NFC').replace(/\s+/g, ' ').trim();
   // ký tự lẻ đứng đầu (biểu tượng/ảnh đại diện OCR thành “Q”, “|”, “©”…) + phần sau còn ít nhất 2 chữ cái
@@ -364,7 +376,7 @@ function cleanHeader(lines = []) {
   const out = [];
   for (const x of [].concat(lines || [])) {
     const t = cleanHeaderLine(x); const f = fold(t);
-    if (!t || f.replace(/\s/g, '').length <= 1 || HEADER_TIME.test(t) || HEADER_SUB.test(t) || HEADER_SUB.test(f)) continue;
+    if (!t || f.replace(/\s/g, '').length <= 1 || HEADER_TIME.test(t) || HEADER_SUB.test(t) || HEADER_SUB.test(f) || !headerLike(t)) continue;
     if (!out.includes(t)) out.push(t);
   }
   return out;
@@ -485,6 +497,22 @@ function nameLikeText(text, recipient) {
   const ty = norm(text), nf = norm(recipient), nk = norm(nameKey(recipient));
   return !!ty && (ty === nf || ty === nk || (ty.length >= 2 && (nf.includes(ty) || nk.includes(ty))) || namesFor(recipient).some(n => norm(n) === ty));
 }
+// B108 (máy thật beta.2.5, AN TOÀN): “mở Zalo và mở chat Cloud của tôi” (không có nội dung tin) → mô hình gõ “@My Documents” rồi xin GỬI “Chào bạn!” tự bịa.
+// Nội dung một bước GỬI (hoặc chữ gõ vào ô soạn tin) phải lấy từ YÊU CẦU của người dùng: trong ngoặc kép, hoặc nêu rõ (“nhắn Lan là mai 8h họp”).
+// Đo: các từ NỘI DUNG của chữ (bỏ lời chào/đại từ/từ đệm) phải có trong câu lệnh (không dấu) — ít nhất 1 từ và ≥ 70%.
+const FILLER = new Set(['chao', 'ban', 'nhe', 'nha', 'nhe', 'a', 'oi', 'hi', 'hello', 'hey', 'minh', 'toi', 'em', 'anh', 'chi', 'to', 'cau', 'nhá', 'ha', 'the', 'and', 'i', 'you', 'ok', 'okay', 'thanks', 'cam', 'on', 'vang', 'da', 'u', 'uh', 'nhi', 'nhe', '你好', '您好']);
+function quotedIn(query) { const out = []; const re = /["“«]([^"”»]{1,400})["”»]/gu; let m; while ((m = re.exec(String(query || '')))) out.push(m[1]); return out; }
+function textFromRequest(query, text) {
+  const q = String(query || ''); const tx = String(text || '').replace(/\n\s*$/, '').trim(); if (!tx) return false;
+  const norm = (x) => fold(x).replace(/[^\p{L}\p{N} ]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const nt = norm(tx), nq = norm(q); if (!nt) return false;
+  if (quotedIn(q).some(z => norm(z) === nt) || (` ${nq} `).includes(` ${nt} `)) return true;
+  const qset = new Set(nq.split(' ')); const words = nt.split(' ').filter(w => !FILLER.has(w));
+  // chữ Hán: so theo ký tự
+  if (/[\u3400-\u9fff]/u.test(tx)) { const cs = [...tx.replace(/[^\u3400-\u9fff]/gu, '')]; const hit = cs.filter(c => q.includes(c)).length; return cs.length > 0 && hit / cs.length >= 0.7; }
+  if (!words.length) return false;
+  const hit = words.filter(w => qset.has(w)).length; return hit >= 1 && hit / words.length >= 0.7;
+}
 // B96: phần tử là tệp / tệp đính kèm / ô xem trước (danh sách File, ảnh, video…) — bấm vào sẽ MỞ tệp bằng ứng dụng khác
 const FILE_NAME = /\.(xlsx?|xlsm|csv|docx?|rtf|odt|pptx?|pdf|zip|rar|7z|txt|png|jpe?g|gif|webp|heic|bmp|mp4|mov|avi|mkv|mp3|wav|m4a|exe|msi|apk|psd)\b/i;
 const FILE_UI = /^(?:ảnh\s*\/\s*video|ảnh|video|file|tệp|tệp tin|tệp đính kèm|photos?(?:\s*\/\s*videos?)?|files?|attachments?|media|图片|视频|文件|附件|图片\/视频)$/iu;
@@ -510,4 +538,4 @@ function placeholderLike(name) {
   const t = String(name || '').replace(/^(?:[^\p{L}\p{N}]+|[QqO]\s+)+/u, '').trim();
   return /^(?:tìm|search|find|nhập|enter|type|搜索|查找)/iu.test(t) || /^(?:tim kiem|nhap)\b/.test(fold(t));
 }
-module.exports = { selfReport, msgSend, placeholderLike, DRAFT_ONLY, cleanHeader, cleanHeaderLine, searchClose, searchRowText, fileAt, searchLeftover, isComposerEl, findComposer, nameLikeText, isFileTarget, wantsFiles, FILE_NAME, composerTarget, COMPOSER_TO, namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };
+module.exports = { headerLike, textFromRequest, quotedIn, selfReport, msgSend, placeholderLike, DRAFT_ONLY, cleanHeader, cleanHeaderLine, searchClose, searchRowText, fileAt, searchLeftover, isComposerEl, findComposer, nameLikeText, isFileTarget, wantsFiles, FILE_NAME, composerTarget, COMPOSER_TO, namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };

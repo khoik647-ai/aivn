@@ -114,9 +114,13 @@ function answerFor(req, { draft }) {
 }
 // trạng thái trung thực từ kết quả AIVN AGENT
 // B84: câu trả lời cuối NÓI là chưa làm được / không thể → không bao giờ là “done”
-const FAIL_CLAIM = /(?:chưa (?:làm (?:được|xong)|gửi (?:được|đi)|mở được|thể)|không (?:thể|làm được|điều khiển được|gửi được|mở được|có quyền điều khiển)|cannot|can['’]t|couldn['’]t|could not|unable to|not able to|failed to|无法|不能|没能|未能|没有办法)/iu;
+// B111: “Không tìm thấy cuộc trò chuyện…”, “chưa tìm thấy”, “not found”, “找不到” cũng là câu báo chưa làm được
+const FAIL_CLAIM = /(?:(?:không|chưa) tìm thấy|not found|couldn['’]t find|could not find|did not find|didn['’]t find|找不到|未找到|没找到|chưa (?:làm (?:được|xong)|gửi (?:được|đi)|mở được|thể|xác nhận)|không (?:thể|làm được|điều khiển được|gửi được|mở được|có quyền điều khiển)|cannot|can['’]t|couldn['’]t|could not|unable to|not able to|failed to|无法|不能|没能|未能|没有办法)/iu;
+// B112: câu báo thành công của việc chỉ soạn (“…nhưng chưa gửi đi”, “not sent yet”, “尚未发送”) — không phải câu báo thất bại
+const DRAFT_OK_RE = /(?:nhưng\s+|và\s+|mà\s+)?(?:chưa|không)\s+(?:được\s+)?(?:gửi|bấm gửi|nhấn gửi)(?:\s+(?:đi|tin|nhé|ạ))*|(?:have|has|was|were|is|are)?\s*n['’]?o?t\s+(?:been\s+|yet\s+)?sent(?:\s+yet)?|(?:haven['’]t|hasn['’]t|did\s+not|didn['’]t)\s+sen[dt]|without\s+sending|尚未发送|未发送|没有发送|还没发送|还没有发送/giu;
 const SEND_TASK = /(?:^|[^\p{L}])(?:nhắn|gửi (?:tin|email|mail|thư)|send|text|message|reply|trả lời)(?![\p{L}])|发消息|发送|回复/iu;
 // B104: luôn có finalAnswer (kể cả hết giờ / lỗi): câu trả lời của AIVN, hoặc câu trung thực dựng từ trạng thái + chữ còn trong ô soạn
+const HARD_STOP = Symbol('hard-stop'); const DEADLINE_GRACE_MS = 8000;
 function finalAnswerOf(r, st, { timedOut = false, timeout = 0, draft = null } = {}) {
   let t = String((r && r.text) || '').trim();
   const dn = draft && !(t && t.includes(String(draft.text || '').slice(0, 30)) && /ô soạn/.test(t)) ? (draft.cleared ? `Chữ “${String(draft.text).slice(0, 80)}” AIVN đã gõ vào ô soạn tin (chưa gửi) đã được xoá.` : draft.left ? `Chữ “${String(draft.text).slice(0, 80)}” AIVN đã gõ VẪN CÒN trong ô soạn tin (CHƯA gửi)${draft.why ? ` — ${draft.why}` : ''}.` : '') : '';
@@ -136,7 +140,11 @@ function statusOf(r, { denied = 0, draft = false, error = null, timedOut = false
   if (r.outcome === 'failed') return { status: 'failed', reason: String(r.text || '').slice(0, 300) };
   // B84: KHÔNG mặc định “done” — chỉ khi AIVN AGENT báo done, câu trả lời không nói thất bại, và (việc gửi tin) có bước ĐÃ KIỂM CHỨNG gửi
   if (r.outcome !== 'done') return { status: 'failed', reason: `không rõ kết quả (outcome=${r.outcome == null ? 'không có' : r.outcome})` };
-  if (FAIL_CLAIM.test(String(r.text || ''))) return { status: 'failed', reason: 'câu trả lời cuối nói chưa làm được: ' + String(r.text || '').slice(0, 240) };
+  // B112: việc CHỈ SOẠN — “chưa gửi (đi)” là trạng thái THÀNH CÔNG; xong = có bước kiểm thấy chữ trong Ô SOẠN TIN (không phải kiểm ô tìm kiếm), không gửi
+  const failText = draft ? String(r.text || '').replace(DRAFT_OK_RE, ' ') : String(r.text || '');
+  if (FAIL_CLAIM.test(failText)) return { status: 'failed', reason: 'câu trả lời cuối nói chưa làm được: ' + String(r.text || '').slice(0, 240) };
+  if (draft && (r.steps || []).some(x => x && x.verify && x.verify.sent)) return { status: 'failed', reason: 'việc chỉ soạn nhưng tin đã bị GỬI' };
+  if (draft && SEND_TASK.test(String(task || '')) && !(r.steps || []).some(x => x && x.draftIn)) return { status: 'failed', reason: 'việc chỉ soạn nhưng không có bước nào kiểm thấy chữ trong ô soạn tin' };
   const sendTask = !draft && SEND_TASK.test(String(task || '')) && !/(?:âm lượng|volume|音量)/iu.test(String(task || ''));
   if (sendTask && !(r.steps || []).some(x => x && x.verify && x.verify.sent)) return { status: 'failed', reason: 'việc gửi tin nhưng không có bước nào kiểm chứng được là ĐÃ GỬI đúng người' };
   return { status: 'done' };
@@ -167,7 +175,10 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
     if (why) lastDeny = why;
     return why ? null : v.via;
   };
-  const ask = (kind, req = {}) => { const risk = kind !== 'desk' || isRiskyAsk(req); const self = risk ? selfSend(kind, req) : null;
+  // B117 (máy thật beta.2.5): --timeout 30 nhưng thẻ GỬI vẫn hiện ở giây 40,9 → sau hạn chót mọi thẻ bị HUỶ (từ chối, không tính là thẻ đã hiện)
+  const ask = (kind, req = {}) => { if (timedOut || ac.signal.aborted) { res.cancelledAfterDeadline = (res.cancelledAfterDeadline || 0) + 1; deps.LOG && deps.LOG.log('qa', `B117: hết thời gian (--timeout ${args.timeout} giây) — huỷ thẻ ${kind}, không làm bước: ${req.title || req.desc || req.kind || ''}`); return { ok: false, cancelled: true, reason: 'hết thời gian', final: true }; }
+    return ask0(kind, req); };
+  const ask0 = (kind, req = {}) => { const risk = kind !== 'desk' || isRiskyAsk(req); const self = risk ? selfSend(kind, req) : null;
     const a = self ? { ok: true, reason: '' } : risk ? { ...answerFor({ ...req, risk: true }, { draft }), final: true } : { ok: true, reason: '' }; if (!a.ok) denied++; if (self) sendApproved++;
     res.approvals.push({ kind, at: Date.now() - t0, title: req.title || req.label || req.kind || null, tool: req.tool || null, risk, send: !!req.send, recipient: req.recipient || null, shownChat: req.shown ? { header: req.shown.header || [], composer: req.shown.composer || null } : null, text: req.sendText != null ? String(req.sendText).slice(0, 300) : null, desc: String(req.desc || req.message || req.text || '').slice(0, 300), answer: self ? `allowed (--approve-send-to “${args.approveSendTo}”)` : a.ok ? 'allowed (không rủi ro)' : 'denied' });
     deps.LOG && deps.LOG.log('qa', `QA tự trả lời thẻ ${kind}: ${self ? 'CHO PHÉP (--approve-send-to)' : a.ok ? 'làm (không rủi ro)' : 'TỪ CHỐI'} — ${req.title || req.desc || req.kind || ''}${req.recipient ? ` · người nhận “${req.recipient}”` : ''}`); return a; };
@@ -175,7 +186,7 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
   async function onStep1(s) {
           if (s.status === 'running' || s.status === 'pending') { open.set(s.id, { i0: lines.length, t: Date.now() }); return; }
           const o = open.get(s.id) || { i0: lines.length, t: Date.now() }; open.delete(s.id); n++;
-          const step = { n, id: s.id, auto: !!s.auto, tool: s.name, args: s.args || null, status: s.status, summary: s.summary || null, verification: s.verify || s.check || null, durationMs: s.ms ?? (Date.now() - o.t), debug: lines.slice(o.i0).filter(l => DEBUG_LINE.test(l)).slice(0, 40), shot: null };
+          const step = { n, afterDeadline: timedOut || undefined, id: s.id, auto: !!s.auto, tool: s.name, args: s.args || null, status: s.status, summary: s.summary || null, verification: s.verify || s.check || null, draftIn: s.draftIn || undefined, durationMs: s.ms ?? (Date.now() - o.t), debug: lines.slice(o.i0).filter(l => DEBUG_LINE.test(l)).slice(0, 40), shot: null };
           if (args.shots && deps.capture) { try { const c = await deps.capture({ maxW: 1920 }); const f = path.join(args.shots, `step-${String(n).padStart(2, '0')}-${String(s.name || 'step').replace(/[^\w-]/g, '_')}.jpg`); fs.writeFileSync(f, Buffer.from(c.dataUrl.split(',')[1], 'base64')); step.shot = f; } catch (e) { step.shot = null; step.shotError = String(e.message || e).slice(0, 200); } }
           res.steps.push(step);
   }
@@ -196,10 +207,13 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
     if (deps.desk && deps.desk.clearLastDraft) deps.desk.clearLastDraft();
     if (deps.desk && deps.desk.setBenchAnswer) deps.desk.setBenchAnswer((req) => ask('desk', req));
     const tr = Date.now();
-    const turn = (messages) => deps.runAgentTurn({ reqId: null, convoId: 'qa-' + runId, messages, headless: false, signal: ac.signal,
+    const turn0 = (messages) => deps.runAgentTurn({ reqId: null, convoId: 'qa-' + runId, messages, headless: false, signal: ac.signal,
       qa: { confirm: async (req) => { ask('confirm', req); return false; }, confirmScreen: async (req) => { ask('screen', req); return { ok: false }; },
         approve: async (card) => { const x = ask('approve', card); return { ok: false, reason: x.reason }; },
         onStep: (s) => { const p = onStep1(s); pendingSteps.push(p); return p; } } });
+    // B117: hạn chót CỨNG — hết giờ thì huỷ lượt (signal), chờ tối đa DEADLINE_GRACE_MS cho bước dọn ô soạn (B104) rồi ghi kết quả, dù lượt chưa trả về
+    const hard = new Promise((resolve) => { const fire = () => setTimeout(() => resolve(HARD_STOP), deps.deadlineGraceMs ?? DEADLINE_GRACE_MS); if (ac.signal.aborted) fire(); else ac.signal.addEventListener('abort', fire, { once: true }); });
+    const turn = (messages) => Promise.race([turn0(messages), hard]).then(x => { if (x === HARD_STOP) { res.hardStop = true; deps.LOG && deps.LOG.log('qa', `B117: lượt không dừng kịp sau hạn chót — ghi kết quả ngay (chờ thêm ${deps.deadlineGraceMs ?? DEADLINE_GRACE_MS} ms)`); return null; } return x; });
     r = await turn([{ role: 'user', content: args.task }]);
     // --answer: AIVN AGENT hỏi lại → trả lời MỘT lần rồi làm tiếp (cùng cuộc trò chuyện, cùng luật xin phép)
     if (args.answer && r && (r.outcome === 'asked_user' || r.asked) && !ac.signal.aborted) {
@@ -209,8 +223,8 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
       r = await turn([{ role: 'user', content: args.task }, { role: 'assistant', content: String(r.text || '') }, { role: 'user', content: args.answer }]);
     }
     // B89: onStep chụp ảnh (bất đồng bộ) rồi mới ghi bước — đường tắt (lệnh hệ thống) trả kết quả ngay → phải chờ hết trước khi viết result.json
-    await Promise.allSettled(pendingSteps);
-    if (r && Array.isArray(r.steps)) for (const s of r.steps) if (s && s.status !== 'running' && !res.steps.some(x => x.id === s.id)) res.steps.push({ n: res.steps.length + 1, id: s.id, tool: s.name, args: s.args || null, status: s.status, summary: s.summary || null, verification: s.verify || s.check || null, durationMs: s.ms ?? null, debug: [], shot: null, auto: !!s.auto });
+    await Promise.race([Promise.allSettled(pendingSteps), hard]);
+    if (r && Array.isArray(r.steps)) for (const s of r.steps) if (s && s.status !== 'running' && !res.steps.some(x => x.id === s.id)) res.steps.push({ n: res.steps.length + 1, id: s.id, tool: s.name, args: s.args || null, status: s.status, summary: s.summary || null, verification: s.verify || s.check || null, draftIn: s.draftIn || undefined, durationMs: s.ms ?? null, debug: [], shot: null, auto: !!s.auto });
     res.steps.sort((a, b) => a.n - b.n);
     res.timings.agentMs = Date.now() - tr;
   } catch (e) { error = e; }
@@ -232,4 +246,4 @@ async function waitResult(out, runId, ms, sleep = (t) => new Promise(r => setTim
   while (Date.now() < end) { try { const j = JSON.parse(fs.readFileSync(out, 'utf8')); if (j && j.runId === runId) return j; } catch {} await sleep(500); }
   return null;
 }
-module.exports = { finalAnswerOf, selfChatShown, isSelfChat, SELF_CHAT, parseArgs, validate, validateKind, fromArgv, resolveModel, isRiskyAsk, answerFor, statusOf, exitCodeOf, run, waitResult, writeJson, DRAFT_RE };
+module.exports = { DRAFT_OK_RE, FAIL_CLAIM, finalAnswerOf, selfChatShown, isSelfChat, SELF_CHAT, parseArgs, validate, validateKind, fromArgv, resolveModel, isRiskyAsk, answerFor, statusOf, exitCodeOf, run, waitResult, writeJson, DRAFT_RE };
