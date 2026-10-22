@@ -17,6 +17,8 @@ const TITLE_RE = [
   ['token', /token|mã truy cập|令牌/i],
 ];
 // chữ hiện trên cửa sổ: chuỗi trông như khoá + cụm từ rõ nghĩa
+// chuỗi nhiều đoạn ngắn nối bằng - / _ (vd. Bao-cao-cuoi-ky-2026) là tên tệp/slug, không phải khoá
+const wordy = (m) => { const p = m.split(/[-_]+/).filter(Boolean); return p.length >= 3 && p.every(x => x.length <= 12); };
 const SECRET_RE = [
   ['aivn-code', /\b(?:[0-9A-Z]{5}-){5,}[0-9A-Z]{1,5}\b/g], // mã kích hoạt AIVN: base32 nhóm 5 ký tự (src/license.js)
   ['sk', /\bsk-[A-Za-z0-9_-]{16,}/g],
@@ -24,7 +26,7 @@ const SECRET_RE = [
   ['private-key', /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g],
   ['jwt', /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g],
   ['hex', /\b[0-9a-fA-F]{32,}\b/g],
-  ['base64', /(?<![A-Za-z0-9+/=_-])(?=[A-Za-z0-9+_-]*[0-9])(?=[A-Za-z0-9+_-]*[a-z])(?=[A-Za-z0-9+_-]*[A-Z])[A-Za-z0-9+_-]{40,}={0,2}(?![A-Za-z0-9+/=_-])/g], // không có '/': đường dẫn tệp không bị tính
+  ['base64', /(?<![A-Za-z0-9+/=_-])(?=[A-Za-z0-9+_-]*[0-9])(?=[A-Za-z0-9+_-]*[a-z])(?=[A-Za-z0-9+_-]*[A-Z])[A-Za-z0-9+_-]{40,}={0,2}(?![A-Za-z0-9+/=_-])/g, wordy], // không có '/': đường dẫn tệp không bị tính; tên tệp kiểu chữ-nối-gạch cũng không
 ];
 const TEXT_RE = [
   ['activation', /mã kích hoạt|activation code|license key|licence key|product key|激活码|许可证密钥/i],
@@ -32,17 +34,18 @@ const TEXT_RE = [
   ['env', /^\s*[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)\s*=/m],
 ];
 // quét: trả về danh sách TÊN loại (không có giá trị). Trống = không thấy gì.
+const hit = (re, s, skip) => { re.lastIndex = 0; let m; while ((m = re.exec(s))) { if (!skip || !skip(m[0])) { re.lastIndex = 0; return true; } if (!m[0]) re.lastIndex++; } re.lastIndex = 0; return false; };
 function scan({ title = '', proc = '', text = '' } = {}) {
   const out = new Set(); const t = String(title || '') + ' ' + String(proc || ''); const x = String(text || '');
   for (const [k, re] of TITLE_RE) if (re.test(t)) out.add('title:' + k);
-  for (const [k, re] of SECRET_RE) { re.lastIndex = 0; if (re.test(t)) out.add('title:' + k); re.lastIndex = 0; if (re.test(x)) out.add('text:' + k); re.lastIndex = 0; }
+  for (const [k, re, skip] of SECRET_RE) { if (hit(re, t, skip)) out.add('title:' + k); if (hit(re, x, skip)) out.add('text:' + k); }
   for (const [k, re] of TEXT_RE) if (re.test(x)) out.add('text:' + k);
   return [...out];
 }
 // che chuỗi trông như khoá (giữ phần chữ còn lại để vẫn đọc được bước đã làm gì)
 function redactSecrets(s) {
   if (typeof s !== 'string' || !s) return s;
-  let o = s; for (const [, re] of SECRET_RE) { re.lastIndex = 0; o = o.replace(re, MASK); }
+  let o = s; for (const [, re, skip] of SECRET_RE) { re.lastIndex = 0; o = o.replace(re, (m) => (skip && skip(m) ? m : MASK)); }
   return o;
 }
 // log: che tiêu đề cửa sổ (“…” / "…" ngay sau “cửa sổ”, “Quan sát:”, “window”, “tiêu đề”) và mọi chuỗi trông như khoá
