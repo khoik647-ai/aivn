@@ -10,7 +10,15 @@ const DEFAULT = { mcpServers: {} };
 const EXCEL_PKG = '@negokaz/excel-mcp-server';
 const safeName = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'may-chu';
 const toolName = (server, tool) => `mcp__${safeName(server)}__${String(tool).replace(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 64);
-const secretRef = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.$aivnSecret === 'string' && Object.keys(v).length === 1;
+const SECRET_TOKEN = /^\$\{secret:([^}]+)\}$/;
+// Dạng chuẩn trong mcp.json là chuỗi "${secret:id}". { "$aivnSecret": id } là dạng cũ, vẫn đọc được.
+function secretIdOf(v) {
+  if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.$aivnSecret === 'string' && Object.keys(v).length === 1) return v.$aivnSecret;
+  if (typeof v === 'string') { const m = SECRET_TOKEN.exec(v); if (m && m[1]) return m[1]; }
+  return null;
+}
+function secretPlaceholder(id) { return `\${secret:${id}}`; }
+const secretRef = (v) => secretIdOf(v) != null && typeof v === 'object';
 
 // http: chỉ vòng lặp cục bộ hoặc đúng ba dải nội bộ. Không phân giải DNS.
 function classifyUrl(url) {
@@ -141,19 +149,20 @@ function validate(cfg) {
   if (bad) throw new Error(bad[1]);
   return cfg;
 }
+function materializeValue(slot, v, resolveSecret) {
+  const id = secretIdOf(v);
+  if (!id) {
+    if (typeof v === 'string') return v;
+    throw new Error(`Không giải được khoá bí mật “${slot}”.`);
+  }
+  let got;
+  try { got = typeof resolveSecret === 'function' ? resolveSecret(id) : undefined; } catch { got = undefined; }
+  if (typeof got !== 'string' || got === '') throw new Error(`Không giải được khoá bí mật “${slot}”.`);
+  return got;
+}
 function materializeMap(obj, resolveSecret) {
   const out = {};
-  for (const [k, v] of Object.entries(obj || {})) {
-    if (typeof v === 'string') { out[k] = v; continue; }
-    if (secretRef(v)) {
-      let got;
-      try { got = typeof resolveSecret === 'function' ? resolveSecret(v.$aivnSecret) : undefined; } catch { got = undefined; }
-      if (typeof got !== 'string' || got === '') throw new Error(`Không giải được khoá bí mật “${k}”.`);
-      out[k] = got;
-      continue;
-    }
-    throw new Error(`Không giải được khoá bí mật “${k}”.`);
-  }
+  for (const [k, v] of Object.entries(obj || {})) out[k] = materializeValue(k, v, resolveSecret);
   return out;
 }
 function callTimeout(def) {
@@ -284,7 +293,8 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
         transport = def.type === 'sse' || /\/sse\/?$/.test(u.pathname) ? new Sse(u, opts) : new Http(u, opts);
         addLog(name, clean(`Kết nối ${def.type === 'sse' ? 'SSE' : 'HTTP'} ${u.origin}${u.pathname}`));
       } else {
-        const r = resolveCommand(def.command, def.args || []);
+        const args = (def.args || []).map((a, i) => materializeValue(`arg${i}`, a, resolveSecret));
+        const r = resolveCommand(def.command, args);
         addLog(name, clean(`Chạy: ${def.command} ${(def.args || []).join(' ')}${r.bundled ? ' (dùng Node đi kèm AIVN)' : ''}`));
         transport = new Stdio({ command: r.command, args: r.args, env: { ...process.env, ...r.env, ...env }, stderr: 'pipe', cwd: def.cwd || undefined });
         transport.stderr && transport.stderr.on('data', (d) => addLog(name, clean(String(d))));
@@ -400,4 +410,4 @@ function presets({ folder = null } = {}) {
     memory: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] }
   };
 }
-module.exports = { createMcpManager, validate, resolveCommand, toolName, safeName, resultText, presets, classifyUrl, excelCallError, isExcelServer, claimCatalogId, normCatalogUrl, ADVANCED_CATALOG };
+module.exports = { createMcpManager, validate, resolveCommand, toolName, safeName, resultText, presets, classifyUrl, excelCallError, isExcelServer, claimCatalogId, normCatalogUrl, ADVANCED_CATALOG, secretIdOf, secretPlaceholder };

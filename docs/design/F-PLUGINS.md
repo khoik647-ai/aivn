@@ -713,7 +713,9 @@ Tệp `userData/mcp-secrets.json`:
 }
 ```
 
-Id: `mcp:` + `safeName(khoá máy chủ)` + `:` + tên biến. Trong `mcp.json`, giá trị trở thành `{ "$aivnSecret": "<id>" }`. `start()` giải ra chuỗi chỉ trong bộ nhớ, đưa vào `env` của tiến trình con hoặc `headers`, rồi bỏ. `status()`, sự kiện `mcp:changed`, và mọi trả lời IPC không có `enc`, không có chuỗi gốc, không có giá trị `env`/`headers`.
+Id: `mcp:` + `safeName(khoá máy chủ)` + `:` + tên biến. Trong `mcp.json`, giá trị là chuỗi `${secret:<id>}` — đây là dạng chuẩn. `{ "$aivnSecret": "<id>" }` là dạng của PR 1, chưa phát hành; AIVN vẫn đọc được như bí danh và viết lại thành `${secret:<id>}` khi lưu. `start()` giải ra chuỗi chỉ trong bộ nhớ, đưa vào `env` của tiến trình con, `headers`, hoặc đối số, rồi bỏ. Nhật ký, stderr và “Chi tiết” luôn che giá trị bằng `••••`. `status()`, sự kiện `mcp:changed`, và mọi trả lời IPC không có `enc`, không có chuỗi gốc, không có giá trị `env`/`headers`.
+
+Bản mã trên đĩa là `safeStorage.encryptString` của Electron (DPAPI trên Windows, Keychain trên macOS, libsecret/kwallet trên Linux). Không có bộ mã riêng. Không có kho khoá thật thì không ghi tệp.
 
 Coi là bí mật khi giá trị chuỗi khác rỗng và:
 
@@ -739,6 +741,16 @@ Renderer không được `start`. Mọi đường `start` của máy chủ MCP (
 5. Giải bí mật thất bại (tham chiếu cụt) → `error` trên máy chủ, không chạy với biến rỗng im lặng.
 6. Id thuộc năm mục danh mục Nâng cao, hoặc mục `excel` của cửa hàng → lệnh thực tế là `execPath` + tệp đã giải nén (mục 5.9), kể cả khi `mcp.json` còn ghi `npx` từ bản cũ. Không gọi mạng để đổi gói.
 
+Chạy thử (bản mẫu 4.6), sau khi đã có `approvedAt`:
+
+- Thêm máy chủ, hoặc nhập (PR 5 gọi `probeImported`): chạy thử rồi tắt, ghi `probedAt`.
+- “Chạy thử lại”: luôn chạy thử, kể cả khi lần trước đã được.
+- Kết nối lại lúc trạng thái là lỗi: chạy thử lại.
+- Lần kết nối đầu của mục chưa từng chạy thử được: chạy thử rồi tắt.
+- Mục đã chạy thử được: kết nối thẳng, không chạy thử. Tiến trình được bật và để chạy.
+
+Kết nối lại khi tiến trình đang chạy: nếu cấu hình (`fingerprint`) và dấu vân tay khoá (`secretFp`, hash, không phải giá trị) không đổi thì để nguyên. Chỉ một trong hai đổi thì dừng rồi `start` lại. Lưu, đổi hoặc xoá giá trị khoá do người dùng tự bấm không hiện thẻ; lần kết nối lại sau đó mới khởi động lại nếu tiến trình đang chạy.
+
 `plugins:connect` với `biz` hoặc `excel` không đi bước `start`. Nó chỉ qua `approveCard` rồi ghi `connectors`.
 
 `approveCard` là lối duy nhất tới thẻ: khi bộ chạy QA đang active thì gọi `qa.approve`, không thì `askApproval`. Bộ chạy QA phải trả `{ ok: false }` cho `connector_connect`, `mcp_connect`, `mcp_import`, `mcp_replace` và mọi thẻ có `tool` khớp `^mcp__`, kể cả khi chữ trên thẻ không khớp `RISK_RE`. Sáu công cụ Kinh doanh `danger` ở mục 5.4 cũng bị QA từ chối. Hôm nay `answerFor` có thể cho phép một thẻ MCP nếu chữ không rơi vào gửi/xoá/mua/khoá. beta.4 bịt riêng các thẻ này; các bước màn hình không rủi ro của QA giữ như cũ.
@@ -755,13 +767,14 @@ Khởi động máy chủ Nâng cao: thay `startEnabled()` bằng chỉ `autoSta
 | Gỡ | Xoá cấu hình của đúng kết nối đó, bí mật nếu là máy chủ, meta, và các dòng “Luôn cho phép” của nó |
 | × trên chip “Luôn cho phép” | Bỏ một tên công cụ, như hôm nay |
 | Tắt “Luôn chạy sẵn” trên máy chủ Nâng cao | Lần mở sau không tự bật; phiên đang chạy không bị giết |
-| Đổi `command` / `args` / `url` / đầu mục / tập tên biến | Mất `approvedAt` và `autoStart` của máy chủ MCP |
+| Đổi `command` / `args` / `url` / đầu mục / tập tên biến | Mất `approvedAt`, `autoStart`, `probedAt` và `secretFp` của máy chủ MCP. Lần kết nối sau chạy thử lại |
+| Lưu, đổi hoặc xoá giá trị khoá bí mật người dùng tự nhập | Không thẻ. `mcp.json` chỉ đổi chỗ `${secret:id}`. Tiến trình đang chạy không tự khởi động lại cho đến lần kết nối lại |
 
 Công cụ MCP không được thêm vào nhóm “Tự làm không hỏi”. Không thêm ô “luôn cho phép cả máy chủ” cho từng lần gọi công cụ: mỗi công cụ vẫn một dòng trong `agentAlwaysAllow`.
 
 Thư mục `filesystem` trong Nâng cao, thư mục được phép của AIVN AGENT, và thư mục của Excel là ba phạm vi. Thẻ kết nối phải hiện đường dẫn MCP trong phần Chi tiết. Công cụ tệp của AIVN không vì thế mà đọc được thư mục đó. Excel chỉ đọc `connectors.excel.folders`. Lần kết nối đầu chép danh sách từ AIVN AGENT. “Đổi thư mục” sau đó không đụng `agentFolders`, và đổi `agentFolders` cũng không đổi danh sách của Excel.
 
-Máy chủ từ xa: thẻ nói dữ liệu rời máy. Máy chủ stdio: phần Chi tiết có lệnh. Hugging Face có câu dữ liệu rời máy trong mô tả Nâng cao và trên thẻ. Brave, GitHub và time không có mục.
+Máy chủ từ xa: thẻ nói dữ liệu rời máy. Máy chủ stdio: phần Chi tiết có lệnh. Hugging Face có câu dữ liệu rời máy trong mô tả Nâng cao và trên thẻ. Ô khoá của Hugging Face hiện nhưng ghi “Không bắt buộc”: chỉ cần khi mô hình riêng hoặc mô hình bị giới hạn. Brave và time không có mục. GitHub là một ô cửa hàng, dùng máy chủ MCP chính thức (URL từ xa và token), không dùng gói npm đã ngừng. Cách chạy (URL hoặc Docker) nằm trong Chi tiết hoặc Nâng cao, không phải hai ô. Docker chỉ có hướng dẫn, không có nút cài. beta.4 không có OAuth.
 
 ## 9. Mô hình dữ liệu
 
@@ -784,7 +797,7 @@ Khi người dùng kết nối một mục danh mục Nâng cao, khoá là id da
     },
     "hf-mcp-server": {
       "url": "https://huggingface.co/mcp",
-      "headers": { "Authorization": { "$aivnSecret": "mcp:hf-mcp-server:Authorization" } },
+      "headers": { "Authorization": "${secret:mcp:hf-mcp-server:Authorization}" },
       "timeout": 120000
     }
   }
@@ -1124,9 +1137,10 @@ Mỗi PR vào `wip-0.16`, không gộp một lần. PR tài liệu này không n
 |---|---|---|
 | 1. Lõi `mcp.json` | `validate` theo mục 6.1 và 6.3, kể cả ba dải `http` nội bộ và từ chối `http` công cộng; `headers` vào transport; `timeout` vào `callTool`; tham chiếu `$aivnSecret` được giải qua một hàm tiêm vào (chưa có UI); từ chối `safeName` trùng và tên công cụ cắt trùng; `excelCallError` đọc `getExcelFolders`; `claimCatalogId` theo mục 17.5; kiểm thử `test/mcp.test.js` và `test/v016-fplugins-mcp.test.js` | Hộp thoại, mẫu, không đổi `startEnabled`, chưa thêm phụ thuộc MCP, chưa nhét tệp ảnh logo |
 | 2. Bí mật và thẻ xin phép | `mcp-secrets.json` theo `createKeyStore`; `plugins-meta.json` gồm `connectors` (không `autoStart` cho cửa hàng; `excel.folders`), `notify` và `servers`; `approveCard` với `alwaysLabel` “Luôn chạy sẵn” chỉ cho máy chủ Nâng cao, mặc định tắt, `details` (dòng Lệnh đóng mặc định), và `danger` cho `http` nội bộ cùng lệnh không ghim; bịt `mcp:save` / `mcp:preset` / `startEnabled` cho máy chủ Nâng cao; cửa hàng nhớ đã kết nối và chạy trễ; nâng cấp meta một lần với `autoStart: false`; công tắc chủ tắt cả cửa hàng (mục 17.3, bản mẫu 4.4); QA từ chối thẻ MCP và `connector_connect`; che nhật ký | HTML cửa hàng |
-| 3. Cửa hàng và Nâng cao | `index.html`, `styles.css`, `app.js`, preload, khoá i18n mục 11; lưới mục 4 và 5; icon Excel nguyên bản và `CREDITS.md`; năm ô Sắp có không có nút Kết nối, có “Báo tôi khi có”; trạng thái chờ dùng lần đầu; tab Tài chính dùng câu mục 11.1; dời `#mcpBlock` vào ngăn Nâng cao; năm mục và phiên bản mục 5.4; phụ thuộc npm đúng số đó và dòng SBOM mục 5.10; `start` danh mục bằng `execPath` + tệp bin đã giải nén, cấm `npx-cli.js` và cấm `resources/node`; nút trên `#agentBar` và lệnh Ctrl+K; gợi ý khi công tắc MCP tắt chỉ ở Nâng cao; cảnh báo mục 5.8 trên thanh; kiểm tra tĩnh testid. Giữ nguyên thứ tự `error-view.js`, `drafts.js`, `gen-chrome.js` | `templates.json`, không gọi mạng trong kiểm thử lệnh, không sửa màu icon Excel, không thêm brave, github, time |
+| 3. Cửa hàng và Nâng cao | `index.html`, `styles.css`, `app.js`, preload, khoá i18n mục 11; lưới mục 4 và 5; icon Excel nguyên bản và `CREDITS.md`; năm ô Sắp có không có nút Kết nối, có “Báo tôi khi có”; trạng thái chờ dùng lần đầu; tab Tài chính dùng câu mục 11.1; dời `#mcpBlock` vào ngăn Nâng cao; năm mục và phiên bản mục 5.4; phụ thuộc npm đúng số đó và dòng SBOM mục 5.10; `start` danh mục bằng `execPath` + tệp bin đã giải nén, cấm `npx-cli.js` và cấm `resources/node`; nút trên `#agentBar` và lệnh Ctrl+K; gợi ý khi công tắc MCP tắt chỉ ở Nâng cao; cảnh báo mục 5.8 trên thanh; kiểm tra tĩnh testid. Giữ nguyên thứ tự `error-view.js`, `drafts.js`, `gen-chrome.js`. Một ô GitHub dùng máy chủ chính thức (URL + token, không gói npm đã ngừng); cách chạy URL hoặc Docker nằm trong Chi tiết. Ô khoá Hugging Face ghi “Không bắt buộc” | `templates.json`, không gọi mạng trong kiểm thử lệnh, không sửa màu icon Excel, không thêm brave, không thêm time, không thêm gói npm GitHub đã ngừng, không làm trình cài uv/Node.js (PR 6) |
 | 4. Mẫu và công cụ cửa hàng | `src/agent/templates.json` đúng mục 7.5; đọc/ghi `agent-templates.json`; một `agentTemplate`; cắm `systemPrompt`; hộp thoại mẫu; chip câu gợi ý; `biz_*` và `excel_*` vào `activeToolsRaw` khi `connectors` bật và không headless; thẻ theo bảng mục 5.4; ngưỡng 5.8 trong vòng lượt (không cắt danh sách) | Không tự bật kết nối khi áp dụng mẫu |
-| 5. Nhập / xuất / đối soát | Luồng xung đột mục 6.2, xuất không bí mật và không kèm cửa hàng, câu lỗi mục 11.3, gán `catalogId` bằng `claimCatalogId` (mục 17.5), soát en/zh bằng kiểm thử i18n sẵn có | Không phát hành, không sửa `latest.yml` |
+| 5. Nhập / xuất / đối soát | Luồng xung đột mục 6.2, xuất không bí mật và không kèm cửa hàng, câu lỗi mục 11.3, gán `catalogId` bằng `claimCatalogId` (mục 17.5), soát en/zh bằng kiểm thử i18n sẵn có. Sau khi nhập, gọi `probeImported` | Không phát hành, không sửa `latest.yml` |
+| 6. Cài chương trình giúp người dùng | Nút “Cài giúp tôi” cho uv và Node.js. Cài theo người dùng vào thư mục của AIVN: `%LOCALAPPDATA%\\AIVN\\runtimes\\<tên>-<phiên bản>` trên Windows, `~/Library/Application Support/AIVN/runtimes` trên macOS, thư mục `userData/runtimes` trên Linux. Không sửa PATH của hệ thống, không cần quyền quản trị. Ghim phiên bản trong mã. Chỉ tải HTTPS từ nguồn chính thức. Kiểm SHA256 (ghi sẵn hoặc lấy từ tệp checksum chính thức); lệch thì xoá tệp và hiện câu dễ hiểu. Luôn qua `#approveCard`, thẻ ghi thư mục đích, dung lượng tải và nguồn. Docker chỉ có hướng dẫn, không có nút cài | Không làm trong PR 3. Không đụng bản phát hành |
 
 PR 2 phụ thuộc PR 1. PR 3 phụ thuộc PR 2 (nút Kết nối phải đã đi qua hàm kiểm tra, và `connectors` đã có chỗ ghi). PR 4 phụ thuộc PR 2 về tệp meta, và nên vào sau PR 3 để hai nút trên `#agentBar` không xung đột hàng. PR 5 sau PR 2 và PR 3.
 

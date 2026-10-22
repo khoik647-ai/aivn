@@ -1362,6 +1362,7 @@ function registerIpc() {
   ipcMain.handle('plugins:list', () => ({ connectors: plugins.connectorView(), servers: plugins.publicServers(), secretsSecure: pluginSecrets.secure() }));
   ipcMain.handle('plugins:probe', async (_e, name) => plugins.probeServer(String(name || '')));
   ipcMain.handle('plugins:rename', async (_e, { name, label } = {}) => plugins.setDisplayName(name, label));
+  ipcMain.handle('plugins:secret', async (_e, { name, key, value, bag } = {}) => plugins.setUserSecret(name, key, value, bag));
   ipcMain.handle('plugins:excelFolders', async (_e, folders) => plugins.changeExcelFolders(Array.isArray(folders) ? folders : []));
   setTimeout(() => plugins.startAuto().catch(() => {}), 4000);
   ipcMain.handle('bench:ground', async (_e, { id }) => { try { return { ok: true, result: await runGroundingBench(id) }; } catch (e) { return { ok: false, error: e.message }; } });

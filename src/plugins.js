@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const mcpMod = require('./mcp');
 
-const { safeName, classifyUrl, claimCatalogId, isExcelServer, validate, presets } = mcpMod;
+const { safeName, classifyUrl, claimCatalogId, isExcelServer, validate, presets, secretIdOf, secretPlaceholder } = mcpMod;
 
 const SECRET_NAME = /TOKEN|KEY|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH/i;
 const SECRET_VALUE = /^(?:sk-|ghp_|github_pat_|hf_|Bearer )/;
@@ -103,9 +103,7 @@ function isSecret(name, value) {
   if (typeof value !== 'string' || value === '') return false;
   return isSecretName(name) || looksLikeSecretValue(value);
 }
-function secretRef(v) {
-  return !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.$aivnSecret === 'string' && Object.keys(v).length === 1;
-}
+function secretRef(v) { return secretIdOf(v) != null; }
 function blankSecure() {
   return { isEncryptionAvailable: () => false, encryptString: () => Buffer.alloc(0), decryptString: () => '' };
 }
@@ -186,6 +184,14 @@ function createSecretStore({ dir, safeStorage = null } = {}) {
       return { persisted: true };
     } catch { return { persisted: false }; }
   }
+  function forget(id) {
+    mem.delete(id);
+    if (!secure() || !fs.existsSync(file)) return;
+    const data = read();
+    if (!data.entries[id]) return;
+    delete data.entries[id];
+    write(data);
+  }
   function deleteBySafeName(sn) {
     const prefix = `mcp:${sn}:`;
     for (const id of [...mem.keys()]) if (id.startsWith(prefix)) mem.delete(id);
@@ -200,7 +206,7 @@ function createSecretStore({ dir, safeStorage = null } = {}) {
   }
   loadKnown();
   return {
-    file, secure, get, put, deleteBySafeName, mask, maskDeep, remember, note: remember,
+    file, secure, get, put, forget, deleteBySafeName, mask, maskDeep, remember, note: remember,
     exists: () => fs.existsSync(file),
     sentence: () => (secure() ? KEYCHAIN_OK : KEYCHAIN_NO),
     ids: () => (secure() ? Object.keys(read().entries) : [...mem.keys()]),
@@ -363,18 +369,41 @@ function extractSecrets(cfg, store) {
     for (const bag of ['env', 'headers']) {
       if (!def[bag] || typeof def[bag] !== 'object' || Array.isArray(def[bag])) continue;
       for (const [k, v] of Object.entries(def[bag])) {
-        if (secretRef(v) || typeof v !== 'string' || !isSecret(k, v)) continue;
+        const old = secretIdOf(v);
+        if (old && typeof v === 'object') { def[bag][k] = secretPlaceholder(old); continue; }
+        if (typeof v === 'string' && old) continue;
+        if (typeof v !== 'string' || !isSecret(k, v)) continue;
         const id = `mcp:${safeName(name)}:${k}`;
         if (store) store.put(id, v);
-        def[bag][k] = { $aivnSecret: id };
+        def[bag][k] = secretPlaceholder(id);
         count++;
       }
     }
-    for (const a of Array.isArray(def.args) ? def.args : []) {
-      if (typeof a === 'string' && (looksLikeSecretValue(a) || (store && store.mask(a) !== a))) store && store.note(a);
+    if (Array.isArray(def.args)) {
+      def.args = def.args.map((a, i) => {
+        if (typeof a !== 'string' || secretIdOf(a)) return a;
+        const known = !!(store && store.mask(a) !== a);
+        if (!looksLikeSecretValue(a) && !known) return a;
+        const id = `mcp:${safeName(name)}:arg${i}`;
+        if (store) store.put(id, a);
+        count++;
+        return secretPlaceholder(id);
+      });
     }
   }
   return { cfg: next, count };
+}
+function secretStamp(def, secrets) {
+  const parts = [];
+  const take = (slot, v) => {
+    const id = secretIdOf(v);
+    const raw = id ? (secrets && secrets.get(id)) : (typeof v === 'string' && isSecret(slot, v) ? v : null);
+    if (raw == null || raw === '') return;
+    parts.push(slot + '=' + crypto.createHash('sha256').update(String(raw)).digest('hex'));
+  };
+  for (const bag of ['env', 'headers']) for (const [k, v] of Object.entries((def && def[bag]) || {})) take(bag + ':' + k, v);
+  (def && Array.isArray(def.args) ? def.args : []).forEach((a, i) => take('arg' + i, a));
+  return crypto.createHash('sha256').update(parts.sort().join('\n')).digest('hex');
 }
 function observeSecrets(cfg, store) {
   if (!store) return;
@@ -433,6 +462,10 @@ function createMetaStore({ dir } = {}) {
       const row = { catalogId: rec.catalogId || null, approvedAt: rec.approvedAt || null, autoStart: !!rec.autoStart, fp: rec.fp || null };
       const shown = Object.prototype.hasOwnProperty.call(rec, 'displayName') ? rec.displayName : prev.displayName;
       if (shown) row.displayName = String(shown).slice(0, 80);
+      const probedAt = Object.prototype.hasOwnProperty.call(rec, 'probedAt') ? rec.probedAt : prev.probedAt;
+      const secretFp = Object.prototype.hasOwnProperty.call(rec, 'secretFp') ? rec.secretFp : prev.secretFp;
+      if (probedAt) row.probedAt = probedAt;
+      if (secretFp) row.secretFp = secretFp;
       data.servers[name] = row;
       save();
     },
@@ -496,7 +529,7 @@ function createPluginGate({ dir, mcp, secrets, meta = null, approve = async () =
       const rec = meta.data.servers[name];
       if (!rec) continue;
       const fp = fingerprint(def);
-      if (rec.fp && rec.fp !== fp) { rec.approvedAt = null; rec.autoStart = false; rec.catalogId = claimCatalogId(def); }
+      if (rec.fp && rec.fp !== fp) { rec.approvedAt = null; rec.autoStart = false; rec.catalogId = claimCatalogId(def); rec.probedAt = null; rec.secretFp = null; }
       rec.fp = fp;
     }
     meta.save();
@@ -565,28 +598,48 @@ function createPluginGate({ dir, mcp, secrets, meta = null, approve = async () =
     const errText = server && server.error;
     try { await mcp.stop(name, { quiet: true }); } catch (e) { say(`${name}: tắt sau chạy thử lỗi\n${e && e.stack || e}`); }
     if (bad) return probePlain(errText, logs);
+    const rec = meta.server(name) || {};
+    meta.setServer(name, { ...rec, catalogId: claimCatalogId(def), approvedAt: rec.approvedAt, autoStart: !!rec.autoStart, fp: fingerprint(def), probedAt: now(), secretFp: secretStamp(def, secrets) });
     return { ok: true, probed: true, tools, message: PROBE_OK.replace('{0}', String(tools)) };
   }
-  async function startServer(name) {
+  async function openServer(name, { probe = false } = {}) {
     const gate = await approveServer(name, 'start');
     if (!gate.ok) return gate;
-    const probed = await probeServer(name);
-    if (!probed.ok) return probed;
-    return { ...probed, server: secrets.maskDeep(mcp.status(name)) };
+    const def = (mcp.config().mcpServers || {})[name];
+    if (!def) return { ok: false, error: 'Không có máy chủ này.' };
+    let st = null;
+    try { st = mcp.status(name); } catch { st = null; }
+    const rec = meta.server(name) || {};
+    const sameCfg = rec.fp === fingerprint(def);
+    const sameSec = !!rec.secretFp && rec.secretFp === secretStamp(def, secrets);
+    if (!probe && st && st.state === 'on' && sameCfg && sameSec) return { ok: true, kept: true, server: secrets.maskDeep(st) };
+    if (probe || !rec.probedAt || (st && st.state === 'error')) {
+      const probed = await probeServer(name);
+      return probed.ok ? { ...probed, name } : probed;
+    }
+    if (st && (st.state === 'on' || st.state === 'starting')) { try { await mcp.stop(name, { quiet: true }); } catch { /* chạy lại */ } }
+    let server;
+    try { server = await mcp.start(name); }
+    catch (e) { return { ok: false, error: secrets.mask(e && e.message) }; }
+    const bad = !server || server.state === 'error';
+    if (!bad) {
+      const cur = meta.server(name) || {};
+      meta.setServer(name, { ...cur, catalogId: claimCatalogId(def), fp: fingerprint(def), secretFp: secretStamp(def, secrets) });
+    }
+    return { ok: !bad, direct: true, restarted: !!(st && st.state === 'on'), server: secrets.maskDeep(server), error: bad ? server && server.error : undefined };
   }
+  async function startServer(name, opts = {}) { return openServer(name, { probe: !!(opts && opts.probe) }); }
   async function toggle(name, on) {
     if (!on) {
       try { return { ok: true, server: secrets.maskDeep(await mcp.setEnabled(name, false)) }; }
       catch (e) { return { ok: false, error: secrets.mask(e && e.message) }; }
     }
-    const gate = await approveServer(name, 'start');
-    if (!gate.ok) return gate;
     try {
       const cfg = JSON.parse(JSON.stringify(mcp.config() || { mcpServers: {} }));
       if (cfg.mcpServers && cfg.mcpServers[name]) delete cfg.mcpServers[name].disabled;
       await mcp.saveText(JSON.stringify(cfg));
     } catch (e) { return { ok: false, error: secrets.mask(e && e.message) }; }
-    return probeServer(name);
+    return openServer(name);
   }
   async function addPreset(kind, folder) {
     const P = presets({ folder });
@@ -659,6 +712,29 @@ function createPluginGate({ dir, mcp, secrets, meta = null, approve = async () =
     setExcelFolders(next);
     return { ok: true, folders: next };
   }
+  async function setUserSecret(name, key, value, bag) {
+    const keyName = String(key || '').trim();
+    if (!keyName) return { ok: false, error: 'Thiếu tên khoá.' };
+    const which = bag === 'headers' ? 'headers' : 'env';
+    const cfg = JSON.parse(JSON.stringify(mcp.config() || { mcpServers: {} }));
+    const def = cfg.mcpServers && cfg.mcpServers[name];
+    if (!def) return { ok: false, error: 'Không có máy chủ này.' };
+    const live = meta.server(name);
+    const before = live ? { ...live } : null;
+    const id = `mcp:${safeName(name)}:${keyName}`;
+    def[which] = def[which] && typeof def[which] === 'object' && !Array.isArray(def[which]) ? def[which] : {};
+    const text = value == null ? '' : String(value);
+    if (!text) { delete def[which][keyName]; secrets.forget(id); }
+    else { secrets.put(id, text); def[which][keyName] = secretPlaceholder(id); }
+    const saved = await saveJson(JSON.stringify(cfg));
+    if (!saved.ok) return saved;
+    if (before) {
+      const nowDef = (mcp.config().mcpServers || {})[name] || def;
+      const cur = meta.server(name) || {};
+      meta.setServer(name, { ...cur, catalogId: before.catalogId, approvedAt: before.approvedAt, autoStart: !!before.autoStart, probedAt: before.probedAt || null, displayName: before.displayName, fp: fingerprint(nowDef), secretFp: before.secretFp || null });
+    }
+    return { ok: true, id, removed: !text };
+  }
   function setDisplayName(name, label) {
     const rec = meta.server(name);
     if (!rec) return { ok: false, error: 'Không có máy chủ này.' };
@@ -720,9 +796,19 @@ function createPluginGate({ dir, mcp, secrets, meta = null, approve = async () =
     }
     return out;
   }
+  async function probeImported(names) {
+    const out = [];
+    for (const name of names || []) {
+      const rec = meta.server(name);
+      if (!rec || !rec.approvedAt) { out.push({ name, ok: false, error: 'Hãy cho phép kết nối trước khi chạy thử.' }); continue; }
+      const probed = await probeServer(name);
+      out.push({ name, ...probed });
+    }
+    return out;
+  }
   return {
     secrets, meta, seal, upgradeOnce, saveJson, startServer, toggle, addPreset, setAutostart,
-    connectConnector, disconnectConnector, setExcelFolders, changeExcelFolders, setDisplayName, probeServer, startAuto, ensureLazy, connectorsForAgent, publicPayload, publicServers, connectorView,
+    connectConnector, disconnectConnector, setExcelFolders, changeExcelFolders, setDisplayName, setUserSecret, probeServer, probeImported, startAuto, ensureLazy, connectorsForAgent, publicPayload, publicServers, connectorView,
     sealAndUpgrade: async () => { await seal(); return upgradeOnce(); },
   };
 }
