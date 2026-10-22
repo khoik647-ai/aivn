@@ -28,24 +28,74 @@ test('B191: trình soạn thảo + tiêu đề tài liệu mới chưa đặt t�
 
 // ---- Notepad GIẢ trên Windows 11: các thẻ, thẻ đang chọn, Ctrl+N mở thẻ mới ----
 const NOTEPAD_BOX = [0, 80, 1000, 600];
-function fakeNotepad({ tabs, active = 0, ctrlN = 'tab', valueReadable = true } = {}) {
+function fakeNotepad({ tabs, active = 0, ctrlN = 'tab', valueReadable = true, tabItems = false } = {}) {
   const st = { tabs: tabs.map(t => ({ ...t })), active, keys: [], typed: [], looks: [] };
-  const win = () => ({ title: `${st.tabs[st.active].name} - Notepad`, proc: 'Notepad.exe', pid: 42, hwnd: 7 });
+  const win = () => ({ title: `${st.tabs[st.active].dirty ? '*' : ''}${st.tabs[st.active].name} - Notepad`, proc: 'Notepad.exe', pid: 42, hwnd: 7 });
   const look = async ({ ocr }) => {
     st.looks.push(ocr); const t = st.tabs[st.active];
     if (st.dialog) return { win: win(), elements: [], dialog: st.dialog };
     const els = [{ role: 'Document', kind: 'edit', name: 'Text editor', editable: true, value: valueReadable ? t.text : null, b: NOTEPAD_BOX },
       { role: 'Edit', kind: 'edit', name: 'Find', editable: true, value: '', b: [700, 10, 200, 24] }];
+    if (tabItems) st.tabs.forEach(x => els.push({ role: 'TabItem', kind: 'tab', name: (x.dirty ? '*' : '') + x.name, b: [10, 40, 120, 30] }));
     if (!valueReadable && t.text) els.push({ ocr: true, name: t.text.split('\n')[0], b: [10, 90, 300, 20] });
     return { win: win(), elements: els, dialog: null };
   };
   const hotkey = async (k) => { st.keys.push(k);
     if (k === 'cmd+n') { if (ctrlN === 'tab') { st.tabs.push({ name: 'Untitled', text: '' }); st.active = st.tabs.length - 1; } else if (ctrlN === 'dialog') st.dialog = 'Notepad'; }
     if (k === 'escape') st.dialog = null; };
-  const type = (s) => { st.typed.push([st.tabs[st.active].name, s]); st.tabs[st.active].text += s; };
+  const type = (s) => { st.typed.push([st.tabs[st.active].name, s]); st.tabs[st.active].text += s; st.tabs[st.active].dirty = true; };
   return { st, d: { look, hotkey, sleep: async () => {}, log: () => {} }, type };
 }
 const SECRET = 'mật khẩu ngân hàng: ********';
+
+// ---- review PR #64 (1): sau Ctrl+N “không đọc được giá trị” + OCR không thấy chữ CHƯA đủ — phải có bằng chứng Ctrl+N đã có tác dụng ----
+test('B191 review (1): thẻ “Untitled” khôi phục không đọc được nội dung, Ctrl+N không có tác dụng → DỪNG (fail closed), không gõ vào thẻ cũ', async () => {
+  // màn hình giả đúng như review: look auto → cmd+n (không tác dụng) → look; vùng soạn không có ValuePattern, OCR cũng không đọc ra chữ
+  const N = fakeNotepad({ tabs: [{ name: 'Untitled', text: '' }], ctrlN: 'nothing', valueReadable: false });
+  N.st.tabs[0].hidden = SECRET; // có nội dung thật nhưng không đọc được (không ValuePattern, OCR trượt)
+  const r = await FD.ensureFresh(N.d);
+  assert.strictEqual(r.ok, false, JSON.stringify(r)); assert.strictEqual(r.why, 'unchanged'); assert.deepStrictEqual(N.st.keys, ['cmd+n']);
+  assert.ok(N.st.looks.slice(1).every(o => o === 'force'), 'mọi lần nhìn sau Ctrl+N đều ép OCR: ' + N.st.looks.join(','));
+  assert.ok(r.steps.some(s => /KHÔNG gõ/.test(s)));
+});
+test('B191 review (1): Ctrl+N mở thẻ mới (danh sách thẻ đổi) + OCR ép không thấy chữ → nhận là tài liệu mới', async () => {
+  const N = fakeNotepad({ tabs: [{ name: 'Untitled', text: '' }], valueReadable: false, tabItems: true });
+  const r = await FD.ensureFresh(N.d); assert.ok(r.ok, JSON.stringify(r)); assert.strictEqual(r.how, 'new'); assert.strictEqual(N.st.active, 1);
+  assert.deepStrictEqual(r.print.tabs, ['Untitled', 'Untitled']);
+});
+test('B191 review (1): Ctrl+N không có tác dụng — cả khi danh sách thẻ hiện ra nhưng không đổi → DỪNG', async () => {
+  const N = fakeNotepad({ tabs: [{ name: 'Untitled', text: '' }], ctrlN: 'nothing', valueReadable: false, tabItems: true });
+  const r = await FD.ensureFresh(N.d); assert.strictEqual(r.ok, false); assert.strictEqual(r.why, 'unchanged');
+});
+
+// ---- review PR #64 (2): dấu “đã sửa” (*, ●) = tài liệu có nội dung, không phải tài liệu mới ----
+test('B191 review (2): “*Untitled - Notepad” (thẻ đã sửa) không phải tài liệu mới trống; Ctrl+N mở thẻ mới rồi mới gõ', async () => {
+  assert.strictEqual(FD.dirty('*Untitled - Notepad'), true); assert.strictEqual(FD.dirty('● Untitled-2 - Visual Studio Code'), true); assert.strictEqual(FD.dirty('Untitled - Notepad'), false);
+  assert.deepStrictEqual(FD.blankState({ win: { title: '*Untitled - Notepad', proc: 'Notepad.exe' }, elements: [] }), { blank: false, why: 'dirty', title: '*Untitled - Notepad' });
+  const N = fakeNotepad({ tabs: [{ name: 'Untitled', text: '', dirty: true }], valueReadable: false });
+  const r = await FD.ensureFresh(N.d); assert.ok(r.ok, JSON.stringify(r)); assert.strictEqual(r.how, 'new'); assert.deepStrictEqual(N.st.keys, ['cmd+n']); assert.strictEqual(N.st.active, 1);
+  const N2 = fakeNotepad({ tabs: [{ name: 'Untitled', text: '', dirty: true }], ctrlN: 'nothing', valueReadable: false });
+  const r2 = await FD.ensureFresh(N2.d); assert.strictEqual(r2.ok, false); assert.strictEqual(r2.why, 'dirty');
+});
+
+// ---- review PR #64 (3): Notepad Win11 chung hwnd cho mọi thẻ → trước mỗi lần gõ kiểm danh tính tài liệu (thẻ + trống), không chắc → không gõ ----
+test('B191 review (3): sameDoc — chuyển sang thẻ khác / thẻ “Untitled” khôi phục có nội dung (cùng hwnd) → không gõ', async () => {
+  const N = fakeNotepad({ tabs: [{ name: 'Untitled', text: SECRET, dirty: true }, { name: 'notes.txt', text: 'x' }], tabItems: true });
+  const r = await FD.ensureFresh(N.d); assert.ok(r.ok); const rec = { hwnd: '7', title: r.title, print: r.print, typed: false };
+  assert.strictEqual(N.st.active, 2);
+  assert.deepStrictEqual(FD.sameDoc(rec, await N.d.look({})), { ok: true }, 'đúng thẻ mới AIVN mở');
+  N.type('dòng 1'); rec.typed = true;
+  assert.deepStrictEqual(FD.sameDoc(rec, await N.d.look({})), { ok: true }, 'sau khi AIVN gõ: dấu * là của AIVN, vẫn đúng tài liệu');
+  N.st.active = 0; // chuyển về thẻ “*Untitled” cũ của người dùng — cùng hwnd, cùng danh sách thẻ
+  assert.strictEqual(FD.sameDoc({ ...rec, typed: false }, await N.d.look({})).ok, false, 'chưa gõ: thẻ đã sửa không phải tài liệu mới');
+  assert.deepStrictEqual(FD.sameDoc({ ...rec, texts: ['dòng 1'] }, await N.d.look({})), { ok: false, why: 'content' }, 'đã gõ: nội dung thẻ không chứa chữ AIVN đã gõ → thẻ khác');
+  N.st.active = 2; assert.deepStrictEqual(FD.sameDoc({ ...rec, texts: ['dòng 1'] }, await N.d.look({})), { ok: true });
+  N.st.tabs.push({ name: 'Untitled', text: '' }); N.st.active = 3; // người dùng mở thêm thẻ → danh sách thẻ đổi → không chắc → không gõ
+  assert.deepStrictEqual(FD.sameDoc(rec, await N.d.look({})), { ok: false, why: 'tabs' });
+  N.st.tabs.pop(); N.st.active = 1; assert.deepStrictEqual(FD.sameDoc(rec, await N.d.look({})), { ok: false, why: 'named' });
+  assert.deepStrictEqual(FD.sameDoc(null, await N.d.look({})), { ok: false, why: 'unknown' });
+  assert.deepStrictEqual(FD.sameDoc({ ...rec, print: { ...rec.print, hwnd: '9' } }, await N.d.look({})).ok, false);
+});
 
 test('B191: Notepad khôi phục thẻ cũ có nội dung → Ctrl+N → kiểm tài liệu mới trống → chỉ gõ vào thẻ mới; thẻ cũ giữ nguyên', async () => {
   const N = fakeNotepad({ tabs: [{ name: 'Untitled', text: SECRET }] }); // thẻ chưa lưu được khôi phục: TIÊU ĐỀ vẫn “Untitled” nhưng có nội dung
@@ -96,7 +146,11 @@ test('B191: desktop-agent nối tài liệu mới vào ensure_app và chặn typ
   const gate = inner.indexOf("if (action === 'type_text' && freshDocWanted(ctx, s.obs && s.obs.win))");
   assert.ok(gate > 0 && gate < inner.indexOf('let needPoint ='), 'cổng B191 phải chạy trước khi chọn chỗ gõ');
   assert.match(inner.slice(gate, gate + 2500), /return \{ refused: true, stop: true, error: FRESH_DOC_MSG/);
-  assert.match(inner.slice(gate, gate + 2500), /!FD\.untitled\(W\.title\)/);
+  assert.match(inner.slice(gate, gate + 2500), /!FD\.untitled\(W2\.title\)/);
+  // (3) Notepad Win11 chung hwnd cho mọi thẻ: nhìn lại màn hình và kiểm danh tính tài liệu (thẻ + trống) trước MỖI lần gõ
+  assert.match(inner.slice(gate, gate + 2500), /await observe\(ctx, \{ thumb: false \}\)[^\n]*const g = FD\.sameDoc\(fd, s\.obs\);\s*if \(!g\.ok \|\|/);
+  assert.match(inner.slice(gate, gate + 3000), /if \(s\.freshDoc\) \{ s\.freshDoc\.typed = true; \(s\.freshDoc\.texts = s\.freshDoc\.texts \|\| \[\]\)\.push\(String\(a\.text \|\| ''\)\); \}/);
+  assert.match(src, /s\.freshDoc = \{ hwnd: [^\n]*print: r\.print \|\| FD\.docPrint\(s\.obs\), typed: false/);
   assert.match(src, /hotkey: async \(keys\) => \{ const h = await act\(\{ action: 'hotkey', keys \}, ctx\)/);
 });
 

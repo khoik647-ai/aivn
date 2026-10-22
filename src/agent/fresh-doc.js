@@ -28,6 +28,13 @@ function editorOf(win) {
 const UNTITLED = /^(?:untitled(?:[\s-]?\d+)?|untitled document(?:\s?\d+)?|không có tiêu đề(?:\s?\d+)?|không tiêu đề(?:\s?\d+)?|chưa đặt tên(?:\s?\d+)?|chưa có tên(?:\s?\d+)?|无标题(?:\s?\d+)?|未命名(?:\s?\d+)?|新建文本文档|new \d+|document\s?\d*|tài liệu\s?\d*|文档\s?\d*)$/iu;
 function docName(title) { return String(title || '').split(/\s+[-–—]\s+/)[0].replace(/^[\s*●•]+/u, '').replace(/[\s*●•]+$/u, '').trim(); }
 const untitled = (title) => UNTITLED.test(docName(title));
+// dấu “đã sửa, chưa lưu” (*, ●) ở tên tài liệu = tài liệu ĐANG CÓ nội dung (thẻ khôi phục “*Untitled”) → không phải tài liệu mới trống
+const dirty = (title) => /^\s*[*●•]|[*●•]\s*$/u.test(String(title || '').split(/\s+[-–—]\s+/)[0]);
+// các thẻ tài liệu (Notepad Win11, Notepad++, VS Code… dùng chung MỘT cửa sổ/hwnd cho mọi thẻ): tên thẻ đã bỏ dấu sửa đổi, theo thứ tự
+const tabsOf = (obs) => (obs && Array.isArray(obs.elements) ? obs.elements : []).filter(e => e && /^(TabItem|AXTab)$/.test(String(e.role || '')) && !e.ocr).map(e => docName(e.name));
+// “dấu vân tay” tài liệu đang hiện: cửa sổ + tiêu đề + danh sách thẻ — dùng để chứng minh Ctrl+N ĐÃ có tác dụng và trước mỗi lần gõ
+function docPrint(obs) { const w = (obs && obs.win) || {}; return { hwnd: w.hwnd != null ? String(w.hwnd) : null, title: String(w.title || ''), tabs: tabsOf(obs) }; }
+const samePrint = (a, b) => !!a && !!b && a.hwnd === b.hwnd && a.title === b.title && a.tabs.join('\u0001') === b.tabs.join('\u0001');
 
 // việc “mở/tạo [trình soạn thảo] rồi gõ/viết …” (vi/en/zh) — KHÔNG tính khi người dùng nêu một tệp có sẵn / tài liệu đang mở
 const OPEN = /(?:^|[^\p{L}])(?:mở|bật|khởi động|chạy|tạo|open|launch|start|run|create|new)(?![\p{L}])|打开|新建|启动|开启/iu;
@@ -58,6 +65,7 @@ function blankState(obs) {
   const win = obs && obs.win; const title = String(win && win.title || '');
   if (!editorOf(win)) return { blank: false, why: 'not-editor', title };
   if (!untitled(title)) return { blank: false, why: 'named', title };
+  if (dirty(title)) return { blank: false, why: 'dirty', title };
   const el = docEl(obs);
   if (el && el.value != null) return String(el.value).trim() ? { blank: false, why: 'content', title } : { blank: true, why: 'empty', title };
   // không đọc được giá trị (ValuePattern): chữ (OCR/Text) nằm trong vùng soạn thảo = có nội dung
@@ -73,20 +81,39 @@ async function ensureFresh(d, { tries = 3 } = {}) {
   const steps = []; const log = (m) => { steps.push(m); try { d.log && d.log(m); } catch {} };
   let obs = await d.look({ ocr: 'auto' });
   if (!editorOf(obs && obs.win)) return { ok: false, skip: true, why: 'not-editor', title: obs && obs.win ? obs.win.title || '' : '', steps };
-  const st0 = blankState(obs);
-  if (st0.blank === true) { log(`“${st0.title}” là tài liệu mới trống`); return { ok: true, how: 'blank', title: st0.title, steps }; }
-  log(`“${st0.title}” ${st0.why === 'named' ? 'là tệp có sẵn' : st0.why === 'content' ? 'đã có nội dung' : 'chưa đọc được nội dung'} → mở tài liệu mới (Ctrl+N)`);
+  const st0 = blankState(obs); const p0 = docPrint(obs);
+  if (st0.blank === true) { log(`“${st0.title}” là tài liệu mới trống`); return { ok: true, how: 'blank', title: st0.title, print: p0, steps }; }
+  log(`“${st0.title}” ${st0.why === 'named' ? 'là tệp có sẵn' : st0.why === 'content' ? 'đã có nội dung' : st0.why === 'dirty' ? 'đã sửa, chưa lưu' : 'chưa đọc được nội dung'} → mở tài liệu mới (Ctrl+N)`);
   await d.hotkey('cmd+n');
   let st = null;
   for (let i = 0; i < tries; i++) {
     await d.sleep(600 + 400 * i);
-    obs = await d.look({ ocr: i > 0 ? 'force' : 'auto' });
+    obs = await d.look({ ocr: 'force' }); // luôn ép OCR: “không thấy chữ” chỉ có nghĩa khi đã thật sự đọc màn hình
     if (obs && obs.dialog) { log(`hộp thoại “${obs.dialog}” hiện ra sau Ctrl+N → bấm Esc (Huỷ), không gõ`); await d.hotkey('escape'); st = { blank: false, why: 'dialog', title: String(obs.dialog) }; break; }
     st = blankState(obs);
-    // vừa tự mở tài liệu mới: tiêu đề là tài liệu chưa đặt tên và KHÔNG thấy nội dung → tài liệu mới; thấy nội dung / tên tệp → chưa phải
-    if (st.blank === true || (st.blank === null && st.why === 'unread')) { log(`đã mở tài liệu mới trống “${st.title}”${st.blank === true ? ' (đã kiểm: trống)' : ' (tiêu đề tài liệu mới, không thấy chữ)'}`); return { ok: true, how: 'new', title: st.title, steps }; }
+    // trống ĐÃ KIỂM (đọc được giá trị = rỗng) → tài liệu mới. Chỉ “không đọc được giá trị, OCR ép không thấy chữ” thì CHƯA đủ:
+    // phải có bằng chứng Ctrl+N đã có tác dụng (cửa sổ/tiêu đề/danh sách thẻ đổi so với trước) — không thì có thể vẫn là thẻ cũ → dừng (fail closed)
+    if (st.blank === true) { log(`đã mở tài liệu mới trống “${st.title}” (đã kiểm: trống)`); return { ok: true, how: 'new', title: st.title, print: docPrint(obs), steps }; }
+    if (st.blank === null && st.why === 'unread') {
+      if (!samePrint(p0, docPrint(obs))) { log(`đã mở tài liệu mới trống “${st.title}” (Ctrl+N đã có tác dụng, OCR không thấy chữ)`); return { ok: true, how: 'new', title: st.title, print: docPrint(obs), steps }; }
+      st = { blank: false, why: 'unchanged', title: st.title };
+    }
   }
   log(`sau Ctrl+N vẫn chưa thấy tài liệu mới trống (${st ? st.why : '?'}: “${st ? st.title : ''}”) → KHÔNG gõ`);
   return { ok: false, why: st ? st.why : 'unknown', title: st ? st.title : '', steps };
 }
-module.exports = { EDITORS, editorOf, untitled, docName, freshDocTask, docEl, blankState, ensureFresh };
+// trước MỖI lần gõ: tài liệu đang hiện có còn đúng là tài liệu mới AIVN đã mở (rec = { hwnd, title, print, typed, texts }) không.
+// Notepad Win11 dùng chung hwnd cho mọi thẻ → kiểm cả danh sách thẻ; chưa gõ gì thì tài liệu còn phải trống (không dấu sửa, không nội dung). Không chắc → không gõ.
+function sameDoc(rec, obs) {
+  const w = (obs && obs.win) || {}; const now = docPrint(obs);
+  if (!rec || !rec.print) return { ok: false, why: 'unknown' };
+  if (rec.print.hwnd && now.hwnd && rec.print.hwnd !== now.hwnd) return { ok: false, why: 'window' };
+  if (!untitled(w.title)) return { ok: false, why: 'named' };
+  if (rec.print.tabs.join('\u0001') !== now.tabs.join('\u0001')) return { ok: false, why: 'tabs' };
+  if (!rec.typed) { const st = blankState(obs); if (st.blank === false) return { ok: false, why: st.why }; return { ok: true }; }
+  // đã gõ: đọc được nội dung thì nó phải chứa đúng các đoạn AIVN đã gõ (thẻ “*Untitled” cũ của người dùng cũng có dấu * — phân biệt bằng nội dung)
+  const el = docEl(obs); const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+  if (el && el.value != null && (rec.texts || []).some(t => norm(t) && !norm(el.value).includes(norm(t)))) return { ok: false, why: 'content' };
+  return { ok: true };
+}
+module.exports = { EDITORS, editorOf, untitled, dirty, docName, tabsOf, docPrint, freshDocTask, docEl, blankState, ensureFresh, sameDoc };

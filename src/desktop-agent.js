@@ -591,7 +591,7 @@ function createDesktopAgent(deps) {
       hotkey: async (keys) => { const h = await act({ action: 'hotkey', keys }, ctx); if (h && (h.error || h.refused)) throw new Error(String(h.error || h.summary || 'phím tắt bị từ chối')); },
       sleep, log: (m) => deps.log && deps.log('desk', 'B191: ' + m),
     }).catch(e => ({ ok: false, why: 'error', title: '', steps: [String(e.message || e).split('\n')[0]] }));
-    if (r.ok) { const W = s.obs && s.obs.win; s.freshDoc = { hwnd: (W && W.hwnd) || (s.target && s.target.hwnd) || null, title: r.title, at: Date.now() }; if (s.target) s.target.title = r.title || s.target.title; }
+    if (r.ok) { const W = s.obs && s.obs.win; s.freshDoc = { hwnd: (W && W.hwnd) || (s.target && s.target.hwnd) || null, title: r.title, print: r.print || FD.docPrint(s.obs), typed: false, at: Date.now() }; if (s.target) s.target.title = r.title || s.target.title; }
     return { ...r, text };
   }
   async function ensureApp(a, ctx) {
@@ -733,10 +733,15 @@ function createDesktopAgent(deps) {
         const r = await freshDoc(ctx);
         if (!r.ok && !r.skip) return { refused: true, stop: true, error: FRESH_DOC_MSG, forModel: `KHÔNG gõ: ${FRESH_DOC_MSG}. Cửa sổ “${r.title || W.title || ''}” không phải tài liệu mới trống (${r.why}). DỪNG, báo người dùng.`, summary: 'chưa mở được tài liệu mới trống — không gõ', detail: r.steps.join('; ') };
         if (r.ok && r.how === 'new') { a = { ...a }; for (const k of ['element', 'target', 'x', 'y']) delete a[k]; } // id/toạ độ cũ thuộc tài liệu cũ: gõ vào tài liệu mới đang chọn
-      } else if ((fd.hwnd && W.hwnd && String(fd.hwnd) !== String(W.hwnd)) || !FD.untitled(W.title)) {
-        deps.log && deps.log('desk', `B191: chặn gõ — cửa sổ “${W.title || ''}” không phải tài liệu mới “${fd.title}” AIVN đã mở`);
-        return { refused: true, error: 'không phải tài liệu mới', forModel: `KHÔNG gõ: cửa sổ đang là “${W.title || ''}”, không phải tài liệu mới “${fd.title}” AIVN đã mở cho việc này (đó có thể là tài liệu có sẵn của người dùng). Chuyển lại đúng tài liệu mới rồi type_text KHÔNG kèm element.`, summary: 'không phải tài liệu mới AIVN đã mở — không gõ' };
+      } else {
+        // Notepad Win11: mọi thẻ chung một hwnd → nhìn lại màn hình rồi kiểm cả danh sách thẻ + tài liệu còn trống (chưa gõ) trước khi gõ; không chắc → không gõ
+        await observe(ctx, { thumb: false }).catch(() => {}); const W2 = (s.obs && s.obs.win) || W; const g = FD.sameDoc(fd, s.obs);
+        if (!g.ok || (fd.hwnd && W2.hwnd && String(fd.hwnd) !== String(W2.hwnd)) || !FD.untitled(W2.title)) {
+          deps.log && deps.log('desk', `B191: chặn gõ — cửa sổ “${W2.title || ''}” không phải tài liệu mới “${fd.title}” AIVN đã mở (${g.why || 'window'})`);
+          return { refused: true, error: 'không phải tài liệu mới', forModel: `KHÔNG gõ: cửa sổ đang là “${W2.title || ''}”, không phải tài liệu mới “${fd.title}” AIVN đã mở cho việc này (đó có thể là tài liệu có sẵn của người dùng). Chuyển lại đúng tài liệu mới rồi type_text KHÔNG kèm element.`, summary: 'không phải tài liệu mới AIVN đã mở — không gõ' };
+        }
       }
+      if (s.freshDoc) { s.freshDoc.typed = true; (s.freshDoc.texts = s.freshDoc.texts || []).push(String(a.text || '')); } // từ đây tài liệu mới có chữ của AIVN (dấu * là của AIVN)
     }
     let needPoint = ['click', 'double_click', 'right_click'].includes(action) || ((action === 'type_text' || action === 'scroll') && (a.element || a.target || (a.x != null && a.y != null && !(Number(a.x) === 0 && Number(a.y) === 0))));
     let t = needPoint ? resolveTarget(a) : null;
