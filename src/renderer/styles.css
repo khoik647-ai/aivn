@@ -41,6 +41,8 @@ select:focus,input:focus,textarea:focus{border-color:var(--accent);box-shadow:0 
 .btn.primary{background:var(--accent);color:var(--on-accent);border:1px solid var(--accent)}.btn.primary:hover:not(:disabled){background:var(--accent-hover);border-color:var(--accent-hover)}
 .btn.danger{background:var(--danger-soft);border-color:var(--danger-line);color:var(--danger)}.btn.danger:hover:not(:disabled){background:var(--danger-soft);border-color:var(--danger)}
 .btn.sm{padding:6px 10px;font-size:12.5px}.btn.block{width:100%}
+/* B195: .btn:active dịch 1px — ở 125% DPI chuột thả ra ngoài nút nhỏ nên click không chạy. Vùng bấm rộng thêm, không dịch khi nhấn. */
+.picker-hit{position:relative;min-height:32px}.picker-hit::before{content:"";position:absolute;inset:-4px}.btn.picker-hit:active{transform:none}
 .view{display:none;flex:1;min-height:0}.view.active{display:flex}
 /* chat */
 #view-chat{display:none}#view-chat.active{display:grid;grid-template-columns:230px 1fr 270px}

@@ -2727,7 +2727,8 @@
     "AGENT đang chạy — đợi xong hoặc sang AGENT bấm Dừng": "AGENT 正在运行 — 请等它结束，或切到 AGENT 点击停止",
     "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "对话正在运行 — 请等它结束，或切到对话点击停止",
     "AGENT đang chạy — bấm Dừng ở dưới": "AGENT 正在运行 — 请点击下方的停止",
-    "Trò chuyện đang chạy — bấm Dừng ở dưới": "对话正在运行 — 请点击下方的停止"
+    "Trò chuyện đang chạy — bấm Dừng ở dưới": "对话正在运行 — 请点击下方的停止",
+    "Đổi thư mục lưu mô hình": "更改模型文件夹"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

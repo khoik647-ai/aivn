@@ -2727,7 +2727,8 @@
     "AGENT đang chạy — đợi xong hoặc sang AGENT bấm Dừng": "AGENT is running — wait until it finishes, or switch to AGENT and click Stop",
     "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "Chat is running — wait until it finishes, or switch to Chat and click Stop",
     "AGENT đang chạy — bấm Dừng ở dưới": "AGENT is running — click Stop below",
-    "Trò chuyện đang chạy — bấm Dừng ở dưới": "Chat is running — click Stop below"
+    "Trò chuyện đang chạy — bấm Dừng ở dưới": "Chat is running — click Stop below",
+    "Đổi thư mục lưu mô hình": "Change the models folder"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.en = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

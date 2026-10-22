@@ -8,6 +8,11 @@ const TO = (o) => I18N.trOpts(o, uiLang());
 for (const k of ['showOpenDialog', 'showSaveDialog', 'showMessageBox', 'showOpenDialogSync', 'showSaveDialogSync', 'showMessageBoxSync']) {
   const f = dialog[k].bind(dialog); dialog[k] = (a, b) => (b === undefined ? f(TO(a)) : f(a, TO(b)));
 }
+// B195: hộp thoại tệp/thư mục gắn cửa sổ cha và đưa cửa sổ đó lên trước nếu chưa được chọn (nếu không, Windows để cửa sổ AIVN không hoạt động).
+{ const { focusDialogParent } = require('./dialog-parent');
+  for (const k of ['showOpenDialog', 'showSaveDialog', 'showOpenDialogSync', 'showSaveDialogSync']) {
+    const wrapped = dialog[k].bind(dialog); dialog[k] = (a, b) => (b === undefined ? wrapped(a) : wrapped(focusDialogParent(a), b));
+  } }
 { const ebox = dialog.showErrorBox.bind(dialog); dialog.showErrorBox = (t, c) => ebox(T(t), T(c)); }
 { const bft = Menu.buildFromTemplate.bind(Menu); Menu.buildFromTemplate = (tpl) => bft(TO(tpl)); }
 const path = require('path');
@@ -3410,6 +3415,9 @@ else {
   });
   app.on('before-quit', () => { quitting = true; });
   app.whenReady().then(async () => {
+    // B195: cây trợ năng dựng lười. Chỉ bật sớm khi hệ điều hành đã báo trình đọc/UIA. Không chờ, không trì hoãn ready-to-show.
+    const a11y = require('./a11y-support').armAccessibility(app);
+    LOG.log('app', a11y.enable ? 'Trợ năng đã được hệ điều hành yêu cầu: bật cây trợ năng ngay, không trì hoãn lần vẽ đầu.' : 'Trợ năng: cây của Chromium chỉ dựng khi hệ điều hành báo trình đọc màn hình hoặc client UIA. Lần hỏi đầu có thể thấy cây rỗng trong lúc dựng (đã đo hơn 4 giây). Không bật sẵn cho mọi máy.');
     initStores();
     registerIpc();
     createWindow({ hidden: process.argv.includes('--hidden') && settings.data.keepInTray });

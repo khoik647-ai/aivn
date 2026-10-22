@@ -2399,7 +2399,7 @@ async function refreshSecurity() {
 function paintAdmin(a) {
   const b = $('#admBody');
   if (!a.imported) { b.innerHTML = `<p class="small muted">Dành cho chủ sở hữu AIVN: nhập tệp khoá quản trị <code>aivn-admin-key.json</code> để cấp và thu hồi mã kích hoạt ngay trong ứng dụng. Khoá được mã hoá bằng cụm mật khẩu quản trị bạn đặt và chỉ lưu trên máy này.</p>
-    <div class="sec-form"><input type="password" id="admNewPass" placeholder="Đặt cụm mật khẩu quản trị (ít nhất 8 ký tự)" autocomplete="new-password"><div class="row"><button class="btn primary" id="admImport">Chọn tệp khoá và nhập</button></div></div>`; return; }
+    <div class="sec-form"><input type="password" id="admNewPass" placeholder="Đặt cụm mật khẩu quản trị (ít nhất 8 ký tự)" autocomplete="new-password"><div class="row"><button type="button" class="btn primary" id="admImport" aria-label="Chọn tệp khoá và nhập">Chọn tệp khoá và nhập</button></div></div>`; armPicker($('#admImport')); return; }
   if (!a.unlocked) { b.innerHTML = `<p class="small muted">Khoá quản trị đã được nhập trên máy này. Nhập cụm mật khẩu quản trị để mở (tự khoá sau 15 phút không dùng).</p>
     <form class="sec-form" id="admUnlockForm"><input type="password" id="admPass" placeholder="Cụm mật khẩu quản trị" autocomplete="current-password"><div class="row"><button class="btn primary" type="submit">Mở trang Quản trị</button><button class="btn" type="button" id="admForget">Gỡ khoá khỏi máy này</button></div></form>`; return; }
   b.innerHTML = `<div class="adm-grid">
@@ -2720,6 +2720,10 @@ async function mdirChange() {
 }
 A.onModelsDirProgress((p) => { if (!p || p.finished) return; $('#mdirProg').hidden = false; $('#mdirBar').value = p.bytesTotal ? p.bytesDone / p.bytesTotal : p.done / Math.max(1, p.total); const fn = document.createElement('span'); fn.dataset.noi18n = ''; fn.textContent = String(p.file || '').split(/[\\/]/).pop(); $('#mdirProgTxt').replaceChildren(document.createTextNode(`${p.done}/${p.total} tệp · ${fmtBytes(p.bytesDone)} / ${fmtBytes(p.bytesTotal)}`), document.createTextNode(' · '), fn); }); // B87: chỉ tên tệp không dịch
 $('#mdirChange').addEventListener('click', mdirChange); $('#modelsDirChange').addEventListener('click', mdirChange);
+// B195: Enter/Space trên nút chọn thư mục gọi cùng modelsDirPick với click. Không có listener Enter toàn cục gọi preventDefault.
+function armPicker(el, label) { if (!el || !window.AIVNPicker) return; if (label && !el.getAttribute('aria-label')) el.setAttribute('aria-label', label); window.AIVNPicker.bindPickerButton(el); }
+armPicker($('#mdirChange'), 'Đổi thư mục lưu mô hình'); armPicker($('#modelsDirChange'), 'Đổi thư mục lưu mô hình');
+armPicker($('#importBtn')); armPicker($('#importBtn2')); armPicker($('#addFolder')); armPicker(document.querySelector('[data-mcp-preset="filesystem"]'));
 $('#mdirCancel').addEventListener('click', () => A.modelsDirCancel());
 $('#mdirReset').addEventListener('click', async () => { const x = await A.modelsDirReset(); if (x && x.ok) toast('Đã về thư mục mô hình mặc định ✓'); await mdirRefresh(); refreshModels(); });
 mdirRefresh();
