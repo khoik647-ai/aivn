@@ -859,7 +859,9 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       const lastU = [...histMsgs].reverse().find(m => m.role === 'user'); const dropped = histMsgs.length - 1;
       histMsgs = lastU ? [lastU] : histMsgs; deps.log && deps.log(`[aivn agent] việc mới: bắt đầu ngữ cảnh sạch (bỏ ${dropped} tin của việc trước)`);
     }
-    const msgs = [{ role: 'system', content: sys.text + appHint }, ...histMsgs];
+    // B120: tìm trên web trong trình duyệt → đi thẳng Ctrl+T + thanh địa chỉ, không bấm ô tìm kiếm của trang đang mở
+    const webHint = !headless && compOn && BROWSER_TASK_RE.test(query) && require('../desktop-agent').webSearchTask(query) ? '\n\nTÌM TRÊN WEB TRONG TRÌNH DUYỆT: bước đầu là screen_act hotkey "ctrl+t" (thẻ mới), rồi type_text đúng từ khoá (AIVN gõ vào thanh địa chỉ + Enter). KHÔNG bấm ô tìm kiếm của trang đang mở (YouTube…).' : '';
+    const msgs = [{ role: 'system', content: sys.text + appHint + webHint }, ...histMsgs];
     const st = deps.engine.status();
     // 0.16: tự thu gọn lịch sử + ảnh TRƯỚC MỖI lần gọi mô hình (không còn hỏng vì hết ngữ cảnh giữa lượt dài)
     const tc = (x) => (deps.engine.countTokens ? deps.engine.countTokens(x) : Math.ceil(String(x).length / 3));

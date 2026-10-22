@@ -2569,6 +2569,7 @@ comp.addEventListener('keydown',e=>{if(e.key==='Enter'&&comp.value.trim()){S.sen
       const qy = 'mở Chrome tìm "thời tiết TP.HCM hôm nay", mở kết quả đầu tiên rồi báo cho mình nhiệt độ và đường dẫn trang';
       const cy = { ...ctx, userQuery: qy, auto: require('./agent/autonomy').forTurn({ setting: false, query: qy }) };
       await stepX('y-look', cy, () => d.look({ window: 'Google Chrome' }, cy), t);
+      await stepX('y-click-page-box', cy, () => d.act({ action: 'click', element: 'Tìm kiếm' }, cy), t); // B120: không bấm ô của trang → Ctrl+T
       await stepX('y-type-page-box', cy, () => d.act({ action: 'type_text', text: 'thời tiết TP.HCM hôm nay' }, cy), t);
       // B') Google Docs đang ở màn hình đăng nhập → screen_look DỪNG và hỏi, không gõ gì
       await load(t, 'docs_login');

@@ -1871,6 +1871,7 @@
     "mở": "打开",
     "mở \"Báo cáo quý 3\" bằng cách nhấp đúp.": "双击打开“Báo cáo quý 3”。",
     "mở thẻ \"Cài đặt\" rồi bấm nút \"Bật thông báo\".": "打开“Cài đặt”标签页，然后点击“Bật thông báo”按钮。",
+    "mở thẻ mới (Ctrl+T) thay vì bấm ô tìm kiếm của trang": "打开新标签页（Ctrl+T），而不是点击页面自己的搜索框",
     "mục \"Báo cáo quý 3\"": "项目“Báo cáo quý 3”",
     "mục cây": "树项",
     "mục danh sách": "列表项",

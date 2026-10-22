@@ -640,6 +640,17 @@ function createDesktopAgent(deps) {
     if (!s.obs) await observe(ctx, { thumb: false });
     let needPoint = ['click', 'double_click', 'right_click'].includes(action) || ((action === 'type_text' || action === 'scroll') && (a.element || a.target || (a.x != null && a.y != null && !(Number(a.x) === 0 && Number(a.y) === 0))));
     let t = needPoint ? resolveTarget(a) : null;
+    // B120 (máy thật beta.2.6): việc tìm trên web trong trình duyệt — mô hình BẤM ô “Tìm kiếm” của trang đang mở (YouTube) trước khi gõ
+    // (mở menu gợi ý trong thẻ của người dùng). Không bao giờ bấm ô tìm kiếm của trang khi chưa tìm: mở THẺ MỚI (Ctrl+T) thay cho cú bấm đó.
+    if ((action === 'click' || action === 'double_click') && ctx && ctx.userQuery && !s.webSearched && isBrowserWin(s.obs && s.obs.win) && webSearchTask(ctx.userQuery)) {
+      const el = t && t.el ? t.el : null; const nm = `${el ? `${el.name || ''} ${el.placeholder || ''} ${el.autoId || ''}` : ''} ${a.element || a.target || ''}`;
+      const ADDR0 = /address|địa chỉ|dia chi|\burl\b|omnibox|地址|网址/iu;
+      if (SEARCHY_ANY.test(nm) && !ADDR0.test(nm)) {
+        deps.log && deps.log('desk', `B120: tìm trên web — KHÔNG bấm ô tìm kiếm của trang (“${String(el ? el.name || '' : a.element || '').slice(0, 40)}”); mở THẺ MỚI (Ctrl+T), con trỏ ở thanh địa chỉ`);
+        const hk = await act({ action: 'hotkey', keys: 'ctrl+t' }, ctx); if (hk && (hk.error || hk.refused)) return hk;
+        return { ...(hk || {}), summary: 'mở thẻ mới (Ctrl+T) thay vì bấm ô tìm kiếm của trang', forModel: 'AIVN KHÔNG bấm ô tìm kiếm của trang đang mở (đó là thẻ của người dùng). Đã mở THẺ MỚI (Ctrl+T); con trỏ đang ở thanh địa chỉ. Bước tiếp: screen_act type_text với đúng từ khoá cần tìm (AIVN gõ vào thanh địa chỉ rồi bấm Enter).' };
+      }
+    }
     s.curTarget = t && t.el ? `${t.el.kind || (t.el.ocr ? 'ocr' : '')}:${t.el.name || t.el.value || ''}` : (t && t.query) || String(a.element || a.target || '');
     // gõ vào một nhãn chữ/nút (không phải ô nhập) là sai: gõ vào ô đang được chọn, không bấm vào nhãn
     // trừ chữ gợi ý của ô nhập chỉ thấy qua OCR (Zalo: "Tìm kiếm"): bấm vào đó để chọn ô rồi mới gõ
@@ -718,11 +729,13 @@ function createDesktopAgent(deps) {
         const hk = await act({ action: 'hotkey', keys: 'ctrl+t' }, ctx); if (hk && (hk.error || hk.refused)) return hk;
         await sleep(500);
         const r = await act({ action: 'type_text', text: String(a.text).replace(/\n\s*$/, ''), submit: true, replace: true, __b114: true }, ctx);
+        s.webSearched = true;
         if (r && typeof r === 'object' && r.forModel) r.forModel = `AIVN đã mở THẺ MỚI (Ctrl+T) và tìm “${String(a.text).slice(0, 60)}” trên thanh địa chỉ (không gõ vào ô tìm kiếm của trang đang mở).\n${r.forModel}`;
         return r;
       }
+      s.webSearched = true; // B120: đã tìm trên thanh địa chỉ — từ đây bấm trong trang kết quả là bình thường
       if (!a.replace) a = { ...a, replace: true }; // thanh địa chỉ: chọn hết rồi gõ (không gõ nối vào chữ cũ)
-      if (a.submit == null && !/\n\s*$/.test(String(a.text))) a = { ...a, submit: true };
+      if (!a.submit) a = { ...a, submit: true }; // thanh địa chỉ: gõ xong bấm Enter để tìm (B120: sau Ctrl+T mô hình chỉ gõ từ khoá)
     }
     // B108 (máy thật beta.2.5, AN TOÀN): trong ứng dụng chat, chữ gõ vào ô KHÔNG phải ô tìm kiếm đã xác nhận (ô soạn tin, ô đang chọn) phải lấy từ
     // yêu cầu của người dùng — không gõ lời chào tự bịa, không gõ “@tên” (nhắc tên) vào ô đang chọn. Gõ tên người nhận để tìm thì do chatGate xét.

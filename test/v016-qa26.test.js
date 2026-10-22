@@ -75,3 +75,17 @@ test('B119: thiếu số → viết lại MỘT lần theo trích đoạn trang;
   // chữ mô hình nhìn ảnh tự mô tả không tính là dữ liệu trang
   assert.ok(!AG.readTextOf([{ role: 'tool', content: 'e1 chữ (OCR) "139,300" @1,1\nMô tả màn hình (mô hình chính nhìn ảnh chụp, có thể chưa chính xác):\nGiá 141.000' }]).includes('141.000'));
 });
+
+// ---------- B120: tìm trên web → thẳng Ctrl+T / thanh địa chỉ ----------
+test('B120: bấm ô tìm kiếm của trang khi chưa tìm → Ctrl+T thay cho cú bấm; mô hình được nhắc đi thẳng thanh địa chỉ', () => {
+  const d = src('src/desktop-agent.js');
+  const i = d.indexOf('// B120 (máy thật beta.2.6)'); const j = d.indexOf('let t = needPoint ? resolveTarget(a) : null;');
+  assert.ok(i > j && j > 0, 'B120 nằm ngay sau khi tìm đích, trước mọi cú bấm');
+  assert.match(d, /!s\.webSearched && isBrowserWin\(s\.obs && s\.obs\.win\) && webSearchTask\(ctx\.userQuery\)/);
+  assert.match(d, /SEARCHY_ANY\.test\(nm\) && !ADDR0\.test\(nm\)/); assert.match(d, /s\.webSearched = true;/);
+  assert.match(d, /if \(!a\.submit\) a = \{ \.\.\.a, submit: true \}; \/\/ thanh địa chỉ/);
+  const { SEARCHY_ANY, webSearchTask } = require('../src/desktop-agent');
+  assert.ok(SEARCHY_ANY.test('Tìm kiếm')); assert.ok(SEARCHY_ANY.test('Search')); assert.ok(!SEARCHY_ANY.test('Nhập @, tin nhắn tới My Documents'));
+  assert.ok(webSearchTask('mở Chrome tìm "giá vàng SJC hôm nay", mở kết quả đầu tiên rồi báo cho mình giá và đường dẫn trang'));
+  assert.match(src('src/agent/agent.js'), /TÌM TRÊN WEB TRONG TRÌNH DUYỆT: bước đầu là screen_act hotkey "ctrl\+t"/);
+});

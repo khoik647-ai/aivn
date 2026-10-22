@@ -59,7 +59,9 @@ test('A/B thật (Electron + Xvfb, trình duyệt GIẢ, công cụ thật của
   assert.match(o.pageRead.text, /118[.,]500/, 'chữ trang (DOM) có giá'); assert.strictEqual(o.clipAfter, 'AIVN-clip-giu-nguyen');
   assert.ok(/\[(https?:\/\/)?sjc\.com\.vn\/gia-vang-online\]\((https?:\/\/)?sjc\.com\.vn\/gia-vang-online\)/.test(o.answerAgrounded), o.answerAgrounded);
   // B114: Chrome ở YouTube, con trỏ trong ô tìm kiếm CỦA TRANG → mở tab mới (Ctrl+T), tìm ở thanh địa chỉ; ô của YouTube không bị gõ
+  const yc = st('y-click-page-box'); assert.ok(yc.ok, yc.summary); assert.match(yc.summary, /mở thẻ mới \(Ctrl\+T\) thay vì bấm ô tìm kiếm của trang/); assert.strictEqual(yc.state.newTab, 1, 'B120: Ctrl+T thay cú bấm'); assert.strictEqual(yc.state.siteSearch || '', '');
   const yt = st('y-type-page-box'); assert.ok(yt.ok, yt.summary);
+  assert.strictEqual(yt.state.newTab, 1, 'B120: con trỏ đã ở thanh địa chỉ của thẻ mới → không mở thêm thẻ');
   assert.ok((yt.state.newTab || 0) >= 1, 'đã mở tab mới: ' + JSON.stringify(yt.state)); assert.strictEqual(yt.state.siteSearch || '', '', 'không gõ vào ô tìm kiếm của YouTube');
   assert.ok(yt.state.searches.includes('thời tiết TP.HCM hôm nay'), JSON.stringify(yt.state.searches));
   // B': màn hình đăng nhập → dừng + hỏi, không gõ gì
