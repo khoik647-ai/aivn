@@ -1,0 +1,87 @@
+{
+ "name": "B163: Khám phá trên laptop 4 GB VRAM / 16 GB RAM, Qwen3-VL 4B đã tải",
+ "steps": [
+  {
+   "do": "onError",
+   "mode": "continue"
+  },
+  {
+   "do": "goto",
+   "page": "discover"
+  },
+  {
+   "do": "wait",
+   "target": 4000
+  },
+  {
+   "do": "readText",
+   "testid": "screen-cards",
+   "as": "screen"
+  },
+  {
+   "do": "readText",
+   "testid": "catalog",
+   "as": "other"
+  },
+  {
+   "do": "screenshot",
+   "name": "discover"
+  },
+  {
+   "do": "press",
+   "key": "Escape"
+  },
+  {
+   "do": "click",
+   "testid": "loader-btn"
+  },
+  {
+   "do": "wait",
+   "target": 1500
+  },
+  {
+   "do": "readText",
+   "testid": "ld-list",
+   "as": "loader"
+  },
+  {
+   "do": "readText",
+   "testid": "ld-count",
+   "as": "ldcount"
+  },
+  {
+   "do": "press",
+   "key": "Escape"
+  },
+  {
+   "do": "screenshot",
+   "name": "loader"
+  },
+  {
+   "do": "goto",
+   "page": "discover"
+  },
+  {
+   "do": "type",
+   "testid": "search-q",
+   "text": "qwen3-vl"
+  },
+  {
+   "do": "click",
+   "testid": "search-form-submit"
+  },
+  {
+   "do": "wait",
+   "target": 9000
+  },
+  {
+   "do": "readText",
+   "testid": "hf-results",
+   "as": "hf"
+  },
+  {
+   "do": "screenshot",
+   "name": "search"
+  }
+ ]
+}
