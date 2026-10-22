@@ -35,6 +35,12 @@ def collect():
     for f in ['docs/verified.md']:  # tài liệu tiếng Việt phát hành kèm (bỏ khối mã, đường dẫn, thẻ HTML)
         p = os.path.join(ROOT, f)
         if os.path.exists(p): vi[f + '.html'].add(strip_tags(re.sub(r'`[^`]*`|\]\([^)]*\)', ' ', open(p, encoding='utf-8').read())))
+    for f in ['docs/verified.en.md']:  # bản tiếng Anh của trang kiểm chứng (bỏ khối mã, đường dẫn, thẻ HTML và câu lệnh tiếng Việt trích nguyên văn)
+        p = os.path.join(ROOT, f)
+        if os.path.exists(p):
+            t = strip_tags(re.sub(r'`[^`]*`|\]\([^)]*\)', ' ', open(p, encoding='utf-8').read()))
+            t = re.sub(r'“[^”]*”', lambda m: ' ' if VI_CH.search(m.group(0)) else m.group(0), t)
+            en[f + '.html'].add(' '.join(w for w in t.split() if not VI_CH.search(w)))
     for p in ['src/i18n/en.json']:
         q = os.path.join(ROOT, p)
         if os.path.exists(q): en[p].update(map(str, json.load(open(q, encoding='utf-8')).values()))

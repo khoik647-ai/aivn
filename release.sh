@@ -122,6 +122,12 @@ echo "Dung lượng trên trang: Windows ~$MB_WIN MB · Mac ARM ~$MB_ARM MB · M
 # trang kết quả tự kiểm chứng (nhãn ✓ trong Khám phá trỏ tới đây; QA B8)
 node build/md-page.cjs docs/verified.md "$SITE/verified.html" || die "không tạo được verified.html"
 grep -q 'id="v0143-nhin-anh"' "$SITE/verified.html" || die "verified.html thiếu mục kiểm chứng"
+# trang kiểm chứng ba thứ tiếng như trang chủ (vi/en/zh, nút đổi ngôn ngữ): đủ bản dịch, đủ khối, mỗi khối đủ mỏ neo của bản tiếng Việt
+for L in en zh; do
+  [[ -f docs/verified.$L.md ]] || die "thiếu docs/verified.$L.md (bản dịch trang kiểm chứng)"
+  grep -q "data-lang-block=\"$L\"" "$SITE/verified.html" || die "verified.html thiếu khối ngôn ngữ $L"
+done
+node -e 'const fs=require("fs"),h=fs.readFileSync(process.argv[1],"utf8"),ids=[...fs.readFileSync("docs/verified.md","utf8").matchAll(/<a id="([\w-]+)"><\/a>/g)].map(m=>m[1]);for(const L of ["en","zh"]){const b=(h.split(`data-lang-block="${L}"`)[1]||"").split("</main>")[0];const miss=ids.filter(i=>!b.includes(`data-aid="${i}"`));if(miss.length){console.error(L+": thiếu mỏ neo "+miss.join(", "));process.exit(1)}}' "$SITE/verified.html" || die "verified.html: bản dịch thiếu mỏ neo kiểm chứng"
 
 [[ -f "$SITE/favicon.svg" ]] || die "thiếu site/favicon.svg (logo)"
 node build/merge-revoked.cjs site/revoked.json "$SITE/revoked.json" || die "thiếu revoked.json hợp lệ (chạy /workspace/aivn-admin/admin.cjs publish)"
