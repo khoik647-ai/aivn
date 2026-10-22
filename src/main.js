@@ -1650,7 +1650,7 @@ function agentPlanFor(h, sc, installed = []) {
   if (!h) return { ctx: AGENT_CTX, lowered: false, allowSlow: false, maxSpill: 0 };
   const cat = catalog.map(c => ({ id: c.id, vision: !!c.mmproj, catalog: c, size: c.size, _fit: (ctx) => catAgentFit(c, h, ctx) }));
   const inst = installed.map(m => ({ ...m, _fit: m._fit || ((ctx) => hf.fitFor(m.size || 0, h, { ...(m._meta || {}), ctx })) }));
-  return { ...AP.plan([...cat, ...inst], (e, ctx) => e._fit(ctx), sc), allowVerySlow: settings.data.agentVerySlow === true };
+  return { ...AP.plan([...cat, ...inst], (e, ctx) => e._fit(ctx), sc, { vramBytes: vramTotal() }), allowVerySlow: settings.data.agentVerySlow === true };
 }
 async function withAgentCheck(list) {
   const h = await hw().catch(() => null); const sc = benchScores();

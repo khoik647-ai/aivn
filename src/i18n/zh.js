@@ -2619,6 +2619,7 @@
     "Truy cập mạng đang tắt": "网络访问已关闭",
     "không thấy trang trong trình duyệt": "浏览器中没有找到网页",
     "Đã mở {0} trong {1}": "已在 {1} 中打开 {0}",
+    "Gợi ý cho máy GPU dưới 6 GB: nhẹ, nằm trọn trong VRAM nên mỗi bước nhanh. Mô hình nhỏ gọi công cụ kém hơn (13/25 trong bài thử của AIVN) — AIVN tự đọc trang và kiểm tra từng bước giúp.": "推荐用于显存低于 6 GB 的电脑：轻量，可完全放入显存，每一步都很快。小模型调用工具较弱（AIVN 测试中 13/25），AIVN 会自动读取网页并检查每一步。",
     "{0} đang hỏi chọn hồ sơ — bạn bấm vào hồ sơ của bạn giúp mình rồi giao lại việc nhé.": "{0} 正在询问使用哪个个人资料——请点击你的个人资料，然后重新交给我这个任务。"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;

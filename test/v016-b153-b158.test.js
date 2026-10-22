@@ -192,3 +192,31 @@ test('B156: JavaScript chạy trong hộp cát, không có window/document, khô
   assert.ok(r.steps.some(s => s.name === 'run_javascript'));
   assert.ok(typeof A.createAgent === 'function');
 });
+
+// ---------- B158 ----------
+test('B158: GPU dưới 6 GB → gợi ý Qwen3-VL 2B cho AIVN AGENT, 4B “Chạy chậm”; GPU 8 GB như cũ; 2B trượt bộ đo trên máy → 4B', () => {
+  const AE = require('../src/agent-eligibility'); const AP = require('../src/agent-plan'); const R = require('../src/recommend');
+  const catalog = require('../src/catalog.js'); const L = Array.isArray(catalog) ? catalog : Object.values(catalog).find(Array.isArray);
+  const c2 = L.find(c => c.id === 'qwen3-vl-2b-instruct-q8_0'), c4 = L.find(c => c.id === 'qwen3-vl-4b-instruct-q4_k_m'), c8 = L.find(c => c.id === 'qwen3-vl-8b-instruct-q4_k_m');
+  const GiB = 1024 ** 3;
+  // laptop RTX 3050 Ti 4 GB ở 12K: 2B nằm trọn VRAM (~67 token/giây), 4B tràn 0,7 GB (Chạy chậm ~12 token/giây), 8B tràn vài GB
+  const fits = { [c2.id]: { level: 'fit', tps: 67, ram: 0 }, [c4.id]: { level: 'slow', tps: 12, ram: 0.7 * GiB }, [c8.id]: { level: 'slow', tps: 3, ram: 4 * GiB } };
+  const E = [c2, c4, c8].map(c => ({ id: c.id, vision: true, catalog: c, size: c.size, installed: true }));
+  const fitAt = (e) => fits[e.id];
+  const P = AP.plan(E, fitAt, {}, { vramBytes: 4 * GiB }); assert.ok(P.lowVram); const eo = AP.elOpts(P); assert.ok(eo.lowVram);
+  const at = E.map(e => ({ ...e, agentFit: fits[e.id] }));
+  assert.strictEqual(AE.bestFor(at, {}, eo).id, c2.id, 'GPU 4 GB → ⭐ 2B');
+  const e4 = AE.eligibility({ ...at[1], fit: fits[c4.id] }, eo); assert.ok(e4.ok && e4.slow, JSON.stringify(e4)); assert.match(e4.reason, /^Chạy chậm/);
+  const e2 = AE.eligibility({ ...at[0], fit: fits[c2.id] }, eo); assert.ok(e2.ok); assert.strictEqual(e2.code, 'lowvram');
+  // 2B trượt bộ đo đầy đủ trên CHÍNH máy này → thang dự phòng: 4B
+  const fail = { local: { [c2.id]: { full: { complete: true, agentOk: false } } } };
+  assert.strictEqual(AE.bestFor(at, fail, AP.elOpts(AP.plan(E, fitAt, fail, { vramBytes: 4 * GiB }))).id, c4.id);
+  // GPU 8 GB: 2B vẫn không dùng cho AIVN AGENT (gọi công cụ 13/25), gợi ý mạnh nhất chạy mượt
+  const big = { [c2.id]: { level: 'fit', tps: 90 }, [c4.id]: { level: 'fit', tps: 60 }, [c8.id]: { level: 'fit', tps: 35 } };
+  const P8 = AP.plan(E, (e) => big[e.id], {}, { vramBytes: 8 * GiB }); assert.ok(!P8.lowVram);
+  assert.strictEqual(AE.bestFor(E.map(e => ({ ...e, agentFit: big[e.id] })), {}, AP.elOpts(P8)).id, c8.id);
+  assert.strictEqual(AE.eligibility({ ...E[0], fit: big[c2.id] }, AP.elOpts(P8)).code, 'tools');
+  // chưa có số liệu độ vừa máy: theo VRAM
+  const lite = [c2, c4, c8].map(c => ({ ...c }));
+  assert.strictEqual(R.screenSetup(lite, 4 * GiB).solo, c2.id); assert.strictEqual(R.screenSetup(lite, 8 * GiB).solo, c8.id); assert.strictEqual(R.screenSetup(lite, 0).solo, c4.id);
+});

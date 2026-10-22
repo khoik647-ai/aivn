@@ -16,10 +16,15 @@ const GiB = 1024 ** 3;
 const SMALL_SPILL = 1 * GiB;
 
 // entries: [{ id, vision, catalog, size, mmprojSize?, params? }]; fitAt(entry, ctx) → fit; scores: { shipped, local }
-function plan(entries, fitAt, scores = {}) {
+// opt.vramBytes: VRAM riêng của GPU rời — dưới 6 GB → lowVram (B158: gợi ý Qwen3-VL 2B, 4B “Chạy chậm”)
+function plan(entries, fitAt, scores = {}, opt = {}) {
+  const lowVram = AE.lowVramOf(opt.vramBytes || 0); const L = lowVram ? { lowVram: true } : {};
+  const r = plan0(entries, fitAt, scores, lowVram); return { ...r, ...L };
+}
+function plan0(entries, fitAt, scores, lowVram) {
   const at = (ctx) => entries.map(e => ({ ...e, agentFit: fitAt(e, ctx) }));
-  const smooth = (list) => list.some(m => AE.eligibility({ ...m, fit: m.agentFit }, { shipped: m.catalog && (scores.shipped || {})[m.catalog.id], local: (scores.local || {})[m.id] }).ok);
-  if (smooth(at(CTX_FULL))) return { ctx: CTX_FULL, lowered: false, allowSlow: false, maxSpill: 0 };
+  const smooth = (list) => list.some(m => AE.eligibility({ ...m, fit: m.agentFit }, { shipped: m.catalog && (scores.shipped || {})[m.catalog.id], local: (scores.local || {})[m.id], lowVram }).ok);
+  if (smooth(at(CTX_FULL))) return { ctx: CTX_FULL, lowered: false, allowSlow: !!lowVram, maxSpill: lowVram ? SMALL_SPILL : 0 }; // B158: GPU < 6 GB → 4B (tràn ít) vẫn chọn được, nhãn “Chạy chậm”
   if (smooth(at(CTX_LOW))) return { ctx: CTX_LOW, lowered: true, allowSlow: true, maxSpill: SMALL_SPILL };
   // beta.2: (2B bị bỏ khỏi AIVN AGENT) không có mô hình chạy mượt nhưng có mô hình tràn ít (≤ 1 GB) → vẫn chỉ nhận mô hình tràn ít
   // (vd. laptop 4 GB: Qwen3-VL 4B “Chạy chậm”, 8B tràn vài GB vẫn là “Quá nặng”); không có cả mô hình tràn ít → mọi mô hình đủ nhanh
@@ -32,7 +37,7 @@ function plan(entries, fitAt, scores = {}) {
   return { ctx: CTX_LOW, lowered: true, allowSlow: true, maxSpill: Number.isFinite(least) ? least + SMALL_SPILL : Infinity, noSmooth: true };
 }
 // offerVerySlow: máy yếu (không có mô hình chạy mượt kể cả ở 12K) → mô hình tràn nhiều được hiện là “Rất chậm” (bật tay mới dùng); allowVerySlow = người dùng đã bật
-const elOpts = (p) => ({ allowSlow: !!(p && p.allowSlow), maxSpill: !p ? 0 : p.maxSpill == null ? Infinity : p.maxSpill, offerVerySlow: !!(p && p.noSmooth), allowVerySlow: !!(p && p.noSmooth && p.allowVerySlow) });
+const elOpts = (p) => ({ allowSlow: !!(p && p.allowSlow), maxSpill: !p ? 0 : p.maxSpill == null ? Infinity : p.maxSpill, offerVerySlow: !!(p && p.noSmooth), allowVerySlow: !!(p && p.noSmooth && p.allowVerySlow), lowVram: !!(p && p.lowVram) });
 // câu giải thích cho giao diện
 function note(p) {
   if (!p || !p.lowered) return '';

@@ -144,6 +144,7 @@
  "Gọi được (AIVN thử 1 lần)",
  "Gọi được, chưa ổn định",
  "Gộp {0} liên hệ trùng: {1}",
+ "Gợi ý cho máy GPU dưới 6 GB: nhẹ, nằm trọn trong VRAM nên mỗi bước nhanh. Mô hình nhỏ gọi công cụ kém hơn (13/25 trong bài thử của AIVN) — AIVN tự đọc trang và kiểm tra từng bước giúp.",
  "Hai bước: mở thẻ rồi bấm",
  "Hai lần nhập mật khẩu không khớp",
  "Hiểu ảnh, đọc chữ trong ảnh; định vị nút theo điểm ảnh. Nhỏ.",
