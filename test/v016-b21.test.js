@@ -71,7 +71,7 @@ test('B22: dung lượng tải ở cổng AIVN AGENT gồm cả tệp thị giá
 });
 test('B26: số luồng / lô của từng mô hình truyền cho llama-server (mô hình nhìn ảnh và mắt nhìn)', () => {
   assert.match(rd('src/vision-server.js'), /args\.push\('-t', String\(Math\.round\(threads\)\), '-tb'/);
-  assert.match(rd('src/engine.js'), /gpu: !!\(l && l\.gpu\), \.\.\.vx \}/); assert.match(rd('src/engine.js'), /gpu: false, \.\.\.vx \}/);
+  assert.match(rd('src/engine.js'), /gpu: !!\(l && l\.gpu\), \.\.\.vx, \.\.\.extra \}/); assert.match(rd('src/engine.js'), /gpu: false, \.\.\.vx/);
   assert.match(rd('src/engine-host.js'), /threads: gopts\.threads, batchSize: gopts\.batchSize/);
   assert.match(rd('src/main.js'), /const gth = gml\.threads \|\| gpf\.threads/);
 });

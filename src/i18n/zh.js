@@ -2727,7 +2727,11 @@
     "AGENT đang chạy — đợi xong hoặc sang AGENT bấm Dừng": "AGENT 正在运行 — 请等它结束，或切到 AGENT 点击停止",
     "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "对话正在运行 — 请等它结束，或切到对话点击停止",
     "AGENT đang chạy — bấm Dừng ở dưới": "AGENT 正在运行 — 请点击下方的停止",
-    "Trò chuyện đang chạy — bấm Dừng ở dưới": "对话正在运行 — 请点击下方的停止"
+    "Trò chuyện đang chạy — bấm Dừng ở dưới": "对话正在运行 — 请点击下方的停止",
+    "Đã nạp bằng {0} ({1}), ngữ cảnh {2}. Mô hình không vừa trọn VRAM nên phần còn lại chạy bằng CPU — chậm hơn nhưng vẫn dùng được.": "已使用 {0}（{1}），上下文 {2}。模型无法完全放入显存，其余部分由 CPU 运行——较慢，但仍可使用。",
+    "Đã nạp trên GPU, ngữ cảnh {0}.": "已在 GPU 上加载，上下文 {0}。",
+    "GPU không nạp được mô hình này, AIVN đã chuyển sang {0}, ngữ cảnh {1} (chậm hơn nhưng vẫn dùng được).": "GPU 无法加载此模型，AIVN 已切换到 {0}，上下文 {1}（较慢，但仍可使用）。",
+    "Đã dùng ngữ cảnh {0} thay vì {1} vì lần nạp trước mô hình chỉ vừa ở ngữ cảnh đó.": "已改用上下文 {0}，而不是 {1}，因为上次加载时模型只放得下这个上下文。"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

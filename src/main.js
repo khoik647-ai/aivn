@@ -462,20 +462,23 @@ function noteLayers(id, st, kvUsed) {
   const u = settings.data.modelUsage || (settings.data.modelUsage = {}); const e = u[id] || (u[id] = { uses: 0 });
   e.layers = { ctx: st.contextSize || null, gpu: st.gpuLayers, total: st.totalLayers, device: st.device || null, kv: kvUsed || (st.loadParams && st.loadParams.kvCache) || null, at: Date.now() }; settings.save();
 }
-// B190: lần nạp phải bước xuống vì hết VRAM → lần sau bắt đầu từ cấu hình đó, không thử lại offload trọn rồi sập vòng lặp.
-function noteOffload(id, st) {
+// B190: nhớ cấu hình offload theo tệp + GPU + cài đặt. Không ghim CPU khi thẻ đang bận; không xoá khi mới nạp một phần.
+const OM = require('./offload-memory');
+function offloadIdentity(m, h) {
+  const d = settings.data || {};
+  return OM.identity({ file: m && m.path, size: m && m.size, mtime: m && m.mtime, backend: h && h.gpu || '', gpuName: h && h.gpuName || '', vramTotal: h && h.vram && h.vram.total || 0, settings: [d.gpu, d.gpuDevice, d.gpuLayers, d.vramLimitGB].join('|') });
+}
+async function noteOffload(id, st, m) {
   const o = st && st.offload; if (!o || !Number.isInteger(o.gpu)) return;
   const u = settings.data.modelUsage || (settings.data.modelUsage = {}); const e = u[id] || (u[id] = { uses: 0 });
-  if (o.oom) e.offload = { gpu: o.gpu, ctx: o.ctx || st.contextSize || null, kv: o.kv || null, oom: true, at: Date.now() };
-  else if (e.offload && e.offload.oom) delete e.offload;
+  const h = await hw().catch(() => null);
+  const next = OM.note(e.offload, { gpu: o.gpu, totalLayers: st.totalLayers || null, ctx: o.ctx || st.contextSize || null, requestedCtx: o.requestedCtx || st.contextSize || null, oom: !!o.oom, freeAt: h && h.vram ? h.vram.free : null }, offloadIdentity(m, h));
+  if (next) e.offload = next; else delete e.offload;
   settings.save();
 }
-function rememberedOffload(id, ctx) {
+function rememberedOffload(id, ctx, h, m) {
   const o = ((settings.data.modelUsage || {})[id] || {}).offload;
-  if (!o || !o.oom || o.ctx !== ctx) return {};
-  if (Number.isInteger(o.gpu)) return { capLayers: o.gpu };
-  if (o.crash) return { safe: true };
-  return {};
+  return OM.recall(o, { ctx, free: h && h.vram ? h.vram.free : 0, identity: offloadIdentity(m, h) });
 }
 async function loadById(id, { force = false, ctx = null, reason = null, minCtx = null, load = null } = {}) {
   const m = listModels().find(x => x.id === id);
@@ -513,8 +516,13 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       if (!picked && ctxWant > cap) { ctxNote = [ctxNote, `Đã giới hạn độ dài ngữ cảnh ở ${cap} (giá trị cũ ${ctxWant}) để mô hình nằm trên GPU nhiều nhất có thể. Muốn dùng ngữ cảnh lớn hơn, hãy chọn trong hộp nạp (Ctrl+L).`].filter(Boolean).join(' '); ctxWant = cap; }
     }
     const lowVramVision = await (async () => { if (!(m.mmproj && settings.data.vision !== false)) return false; const h = await hw(); return !!(h && h.gpu && h.gpu !== 'metal' && h.vram && !h.vram.integratedOnly && h.vram.total > 0 && h.vram.total < 6 * 1024 ** 3); })().catch(() => false); // B163
-    const remembered = Number.isInteger(gl) ? {} : rememberedOffload(m.id, ctxWant);
-    const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(remembered.capLayers != null ? { capLayers: remembered.capLayers } : {}), ...(remembered.safe ? { safe: true } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj, serverArgs: require('./model-launch').launchArgs({ id: m.id, family: SC.groundingFamily(NAMES.isGeneric(m.file) ? m.id : (m.file || m.id)), catalog: m.catalog, load: ml }) } : {}), ...(ml.mmap === false ? { useMmap: false } : {}), ...(ml.mlock ? { useMlock: true } : {}), ...(load ? { reload: true } : {}),
+    const hRemember = await hw().catch(() => null);
+    const remembered = Number.isInteger(gl) ? {} : rememberedOffload(m.id, ctxWant, hRemember, m);
+    if (remembered.reducedCtx && remembered.ctx && remembered.ctx < ctxWant) {
+      ctxNote = [ctxNote, require('./load-notice').ctxReducedNote(ctxWant, remembered.ctx, (s) => T(s))].filter(Boolean).join(' ');
+      ctxWant = remembered.ctx;
+    }
+    const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, kvType: ml.kvCache || 'auto', ...(Number.isInteger(ml.batchSize) && ml.batchSize > 0 ? { batchSize: Math.min(2048, ml.batchSize) } : {}), ...(ml.flashAttention != null ? { flashAttention: ml.flashAttention } : {}), ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(remembered.capLayers != null ? { capLayers: remembered.capLayers } : {}), ...(remembered.safe ? { safe: true } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj, serverArgs: require('./model-launch').launchArgs({ id: m.id, family: SC.groundingFamily(NAMES.isGeneric(m.file) ? m.id : (m.file || m.id)), catalog: m.catalog, load: ml }) } : {}), ...(ml.mmap === false ? { useMmap: false } : {}), ...(ml.mlock ? { useMlock: true } : {}), ...(load ? { reload: true } : {}),
       // B170: llama-server (mô hình nhìn ảnh) nay cũng theo Bộ đệm K/V / Flash attention của hộp nạp (trước đây bị bỏ qua)
       ...(ml.kvCache ? { kvCache: ml.kvCache } : lowVramVision ? { kvCache: 'q8_0' } : {}), ...(ml.flashAttention != null ? { flashAttention: ml.flashAttention } : {}) };
     if (lowVramVision && !ml.kvCache) LOG.log('load', 'B163: GPU rời dưới 6 GB → bộ đệm K/V q8_0 cho mô hình nhìn ảnh (đổi trong hộp nạp Ctrl+L)');
@@ -534,8 +542,8 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
           holdCrash = true;
           try {
             const u = settings.data.modelUsage || (settings.data.modelUsage = {}); const rec = u[m.id] || (u[m.id] = { uses: 0 });
-            const again = rec.offload && rec.offload.crash;
-            rec.offload = again ? { gpu: 0, ctx: opts.contextSize || null, oom: true, crash: true, at: Date.now() } : { ctx: opts.contextSize || null, oom: true, crash: true, at: Date.now() };
+            const h = await hw().catch(() => null);
+            rec.offload = OM.noteCrash(rec.offload, offloadIdentity(m, h), { ctx: opts.contextSize || null, gpu: rec.offload && rec.offload.gpu });
             settings.save();
           } catch {}
           const safeCtx = Math.max(MIN_CTX_CHAT, Math.min(MIN_CTX_AGENT, opts.contextSize || MIN_CTX_AGENT));
@@ -564,13 +572,13 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       const x = new Error(`Không nạp được ${m.catalog ? m.catalog.name : m.file}${n ? ` (đã thử ${n} cách: GPU, GPU một phần, CPU)` : ''}. Lỗi: ${e.message}. Chi tiết đã ghi vào nhật ký (Mô hình của tôi → Mở thư mục nhật ký).`);
       x.code = 'LOAD_FAILED'; throw x;
     }
-    if (st.fallbackFrom && st.fallbackFrom.length) { engineLog('Nạp ' + m.file + ' bằng chế độ dự phòng: ' + st.mode, null, { attempts: st.fallbackFrom, final: { mode: st.mode, ctx: st.contextSize, gpuLayers: st.gpuLayers, totalLayers: st.totalLayers } }); st.notice = require('./load-notice').loadNotice(st); }
+    if (st.fallbackFrom && st.fallbackFrom.length) { engineLog('Nạp ' + m.file + ' bằng chế độ dự phòng: ' + st.mode, null, { attempts: st.fallbackFrom, final: { mode: st.mode, ctx: st.contextSize, gpuLayers: st.gpuLayers, totalLayers: st.totalLayers } }); st.notice = require('./load-notice').loadNotice(st, (s) => T(s)); }
     st = { ...st, loadParams: ml }; lastCtx = st.contextSize || lastCtx; engineDied = false;
     if (ctxNote) { st = { ...st, notice: [st.notice, ctxNote].filter(Boolean).join(' ') }; LOG.log('load', ctxNote); }
     if (reason) LOG.log('load', 'Lý do nạp lại: ' + reason);
     measureVram(m.id, st).catch(() => {});
     noteLayers(m.id, st, opts.kvCache);
-    if (!holdCrash) noteOffload(m.id, st);
+    if (!holdCrash) await noteOffload(m.id, st, m);
     LOG.log('load', `Đã nạp ${m.file} sau ${Date.now() - tLoad} ms`, { mode: st.mode, ctx: st.contextSize, gpu: st.backend || st.gpu, runtime: st.vision ? (st.runtime || 'bundled') : 'node-llama-cpp', ...(st.vision && st.gpu && st.backend !== st.gpu ? { chatGpu: st.gpu } : {}), gpuLayers: st.gpuLayers, totalLayers: st.totalLayers, toolMode: st.toolMode, fallbackFrom: st.fallbackFrom });
     noteUsage(null, m.id);
     settings.data.lastModel = m.id; settings.save(); lastUse = Date.now();

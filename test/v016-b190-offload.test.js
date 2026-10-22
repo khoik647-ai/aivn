@@ -28,17 +28,23 @@ const CARDS = {
 };
 const CTX = 16384;
 
-test('B190: 12 GB offload trọn 14B và 20B ở ngữ cảnh 16384, KV f16; 4 GB thì một phần và dưới VRAM trống', () => {
-  for (const name of ['2B', '4B', '8B', '14B', '20B']) {
+test('B190: 12 GB — 2B/4B/8B/14B trọn lớp ở 16384 KV f16; 20B một phần; không confident khi chưa có byte tensor; 4 GB thì một phần', () => {
+  for (const name of ['2B', '4B', '8B', '14B']) {
     const d = G.chooseOffload(MODELS[name], { ctx: CTX, vram: CARDS['12'] });
-    assert.strictEqual(d.gpuLayers, d.totalLayers, name + ' trên 12 GB phải đủ lớp');
+    assert.strictEqual(d.gpuLayers, d.totalLayers, name + ' trên 12 GB phải đủ lớp, nhận ' + d.gpuLayers);
     assert.strictEqual(d.kv, 'f16', name + ' trên 12 GB không bị ép q8_0');
     assert.ok(d.used <= d.free, name + ' vượt VRAM trống');
+    assert.notStrictEqual(d.confident, true, name + ' chưa đo tensor thì không bỏ kiểm tra bộ nhớ');
     const plans = loadPlans({ gpu: 'cuda', vram: CARDS['12'], fileSize: MODELS[name].fileSize, geo: MODELS[name], ctx: CTX, minCtx: 8192 });
     assert.strictEqual(plans[0].gpuLayers, d.totalLayers);
     assert.strictEqual(plans[0].ctx, CTX);
-    assert.strictEqual(plans[0].confident, true);
+    assert.notStrictEqual(plans[0].confident, true);
   }
+  const big = G.chooseOffload(MODELS['20B'], { ctx: CTX, vram: CARDS['12'] });
+  assert.ok(big.gpuLayers > 0 && big.gpuLayers < big.totalLayers, '20B trên 12 GB là một phần, nhận ' + big.gpuLayers);
+  assert.ok(big.gpuLayers >= 20, '20B không được rơi xuống dưới 20 lớp ở lô 512, nhận ' + big.gpuLayers);
+  assert.strictEqual(big.kv, 'f16');
+  assert.ok(big.used <= big.free);
   for (const name of ['14B', '20B', '8B']) {
     const d = G.chooseOffload(MODELS[name], { ctx: CTX, vram: CARDS['4'] });
     assert.ok(d.gpuLayers > 0 && d.gpuLayers < d.totalLayers, name + ' trên 4 GB phải một phần, nhận ' + d.gpuLayers + '/' + d.totalLayers);
@@ -62,20 +68,21 @@ test('B190: bảng VRAM 4/6/8/12/16 GB × 2B/4B/8B/14B/20B — không bao giờ 
   assert.strictEqual(q.kv, 'f16');
 });
 
-test('B190: hết VRAM thì bước xuống tối đa 3 lần GPU rồi CPU; lần nạp sau bắt đầu từ mức đã chọn', () => {
+test('B190: hết VRAM thì bước xuống 4 lớp, tối đa 3 lần GPU rồi CPU; ngữ cảnh GPU không bị cắt trước', () => {
   const model = MODELS['14B'];
   const plans = loadPlans({ gpu: 'cuda', vram: CARDS['12'], fileSize: model.fileSize, geo: model, ctx: CTX, minCtx: 8192 });
   const sched = oomSchedule(plans);
-  assert.ok(sched.length >= 2 && sched.length <= 4, JSON.stringify(sched));
-  assert.ok(sched.filter(p => Number(p.gpuLayers) > 0).length <= 3);
+  const gpuTries = sched.filter(p => Number(p.gpuLayers) > 0);
+  assert.ok(sched.length >= 2 && sched.length <= 6, JSON.stringify(sched));
+  assert.ok(gpuTries.length <= 3 && gpuTries.length >= 2);
   assert.strictEqual(sched[0].gpuLayers, 41);
   assert.strictEqual(sched[0].ctx, CTX);
-  assert.ok(sched[1].gpuLayers < sched[0].gpuLayers, 'bước xuống bớt lớp trước');
+  assert.strictEqual(sched[1].gpuLayers, 37, 'bước −4, không nhảy 41 → 30');
+  assert.strictEqual(sched[1].ctx, CTX);
+  assert.ok(gpuTries.every(p => p.ctx === CTX), 'lần thử GPU giữ ngữ cảnh xin');
   assert.strictEqual(sched[sched.length - 1].gpuLayers, 0);
-  const ctxDrop = sched.find(p => p.ctx < CTX && p.gpuLayers > 0);
-  assert.ok(ctxDrop, 'vẫn có một bước giảm ngữ cảnh trong số lần thử');
-  assert.ok(sched.indexOf(ctxDrop) > sched.indexOf(sched[1]));
-  const winner = sched[2];
+  assert.ok(sched.some(p => p.gpuLayers === 0 && p.ctx === 4096), 'CPU còn bậc 4096');
+  const winner = gpuTries[gpuTries.length - 1];
   const next = loadPlans({ gpu: 'cuda', vram: CARDS['12'], fileSize: model.fileSize, geo: model, ctx: CTX, capLayers: winner.gpuLayers });
   assert.ok(next[0].gpuLayers <= winner.gpuLayers);
   assert.notStrictEqual(next[0].confident, true, 'không thử lại offload trọn sau khi đã phải bước xuống');
@@ -111,4 +118,57 @@ test('B190: --fit-target trên GPU lớn là lề 300–512 MiB, GPU 4 GB vẫn 
   a = await argsOf({ gpuLayers: 41 });
   assert.strictEqual(a[a.indexOf('-ngl') + 1], '41');
   assert.ok(!a.includes('--fit-target'));
+});
+
+test('B190: số lớp người dùng đứng đầu và thang chỉ đi xuống; CPU (0 lớp) không bị kế hoạch 41 lớp leo qua', () => {
+  const model = MODELS['14B'];
+  const base = { gpu: 'cuda', vram: CARDS['12'], fileSize: model.fileSize, geo: model, ctx: CTX, minCtx: 8192 };
+  const manual = loadPlans({ ...base, userLayers: 10 });
+  assert.deepStrictEqual([manual[0].mode, manual[0].gpuLayers], ['gpu-manual', 10]);
+  assert.ok(manual.every(p => !(Number(p.gpuLayers) > 10)), JSON.stringify(manual.map(p => p.gpuLayers)));
+  const cpu = loadPlans({ ...base, userLayers: 0 });
+  assert.ok(cpu.every(p => p.gpuLayers === 0), JSON.stringify(cpu));
+  assert.ok(oomSchedule(cpu).every(p => p.gpuLayers === 0));
+  const none = loadPlans({ gpu: false, vram: null, fileSize: model.fileSize, geo: model, ctx: CTX });
+  assert.strictEqual(none.filter(p => p.ctx === CTX).length, 1, 'CPU-only không thêm hai lần cùng ngữ cảnh');
+  assert.ok(none.some(p => p.ctx === 4096 && p.mode === 'cpu-only'));
+});
+
+test('B190: mmproj trừ khỏi chỗ trống; GPU tích hợp không q8 và không confident; f16 tường minh không bị đổi', () => {
+  const mm = Math.round(1.2 * GiB);
+  const withMm = G.chooseOffload(MODELS['14B'], { ctx: CTX, vram: CARDS['12'], mmprojBytes: mm, weightBytes: MODELS['14B'].fileSize });
+  assert.ok(withMm.gpuLayers < withMm.totalLayers, '14B + mmproj trên 12 GB không được -ngl 41, nhận ' + withMm.gpuLayers);
+  assert.notStrictEqual(withMm.confident, true);
+  const ig = G.chooseOffload(MODELS['2B'], { ctx: 4096, vram: { total: 8 * GiB, free: 7 * GiB, integratedOnly: true }, weightBytes: 1.2e9 });
+  assert.strictEqual(ig.kv, 'f16');
+  assert.notStrictEqual(ig.confident, true);
+  const keep = G.chooseOffload(MODELS['4B'], { ctx: CTX, vram: CARDS['4'], kvType: 'f16' });
+  assert.strictEqual(keep.kv, 'f16');
+  const measured = G.chooseOffload(MODELS['2B'], { ctx: CTX, vram: CARDS['12'], weightBytes: Math.round(MODELS['2B'].fileSize * 0.9) });
+  assert.strictEqual(measured.gpuLayers, measured.totalLayers);
+  assert.strictEqual(measured.confident, true);
+});
+
+test('B190: bộ đệm tính toán theo lô (mốc 1,9 GB ở lô 2048); VRAM trống thật, không phải tổng', () => {
+  assert.strictEqual(G.contextComputeBuf({ ctx: CTX, batch: 2048, layers: 40 }), 1907425280);
+  const small = G.contextComputeBuf({ ctx: CTX, batch: 512, layers: 40 });
+  assert.ok(small < 1907425280 / 3, 'lô 512 phải nhỏ hơn nhiều so với lô 2048, nhận ' + small);
+  assert.ok(small >= 256 * MiB);
+  const busy = { total: 12 * GiB, free: 12 * GiB - 5.8 * GiB };
+  const d = G.chooseOffload(MODELS['14B'], { ctx: CTX, vram: busy });
+  assert.ok(d.gpuLayers < 30 && d.gpuLayers >= 10, 'thẻ gần đầy không còn 41/41, nhận ' + d.gpuLayers);
+  assert.notStrictEqual(d.confident, true);
+  const plans = oomSchedule(loadPlans({ gpu: 'vulkan', vram: busy, fileSize: MODELS['14B'].fileSize, geo: MODELS['14B'], ctx: CTX, minCtx: 8192 }));
+  const gpu = plans.filter(p => p.gpuLayers > 0);
+  assert.ok(gpu.length >= 2, JSON.stringify(plans.map(p => p.gpuLayers)));
+  assert.ok(gpu.some(p => p.gpuLayers >= 10 && p.gpuLayers <= 16), 'còn một bước khoảng 10–15 lớp, không nhảy thẳng CPU');
+});
+
+test('B190: ngữ cảnh node-llama-cpp nhận batchSize ≤ 2048 và flash attention, không lấy lô 2048 của perf', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/engine.js'), 'utf8');
+  assert.match(src, /batchSize: Math\.max\(1, Math\.min\(batchCap, plan\.ctx\)\)/);
+  assert.match(src, /flashAttention: flashOff \? false : true/);
+  assert.match(src, /const batchCap = Math\.max\(1, Math\.min\(Number\.isInteger\(opts\.batchSize\) \? opts\.batchSize : 512, 2048\)\)/);
+  assert.match(src, /kvUsed = plan\.kv === 'q8_0' \|\| kvType === 'q8_0'/);
+  assert.match(src, /ignoreMemorySafetyChecks: true/);
 });

@@ -62,14 +62,36 @@ function readMeta(file) {
       } else if (t === T.STR && key === 'tokenizer.chat_template') { const s = r.str(256 << 10); kv[key] = s; }
       else kv[key] = r.scalar(t);
     }
-    return { version, tensors, kv, size };
+    // Siêu dữ liệu xong thì tới bảng tensor (chỉ tên, kích thước, kiểu — không đọc trọng số).
+    let weightBytes = null;
+    try { if (tensors > 0 && tensors <= 200000) weightBytes = sumTensorBytes(r, tensors); } catch { weightBytes = null; }
+    return { version, tensors, kv, size, weightBytes };
   } finally { fs.closeSync(fd); }
+}
+// Byte của một tensor GGML. Kiểu lạ (MXFP4, IQ, …) → null: không được coi là “đã đo” để bỏ kiểm tra bộ nhớ.
+// block/type size theo llama.cpp (ggml): Q4_0 32×18, Q4_K 256×144, Q6_K 256×210, Q8_0 32×34, …
+const GGML_BLK = {
+  0: [1, 4], 1: [1, 2], 2: [32, 18], 3: [32, 20], 6: [32, 22], 7: [32, 24], 8: [32, 34], 9: [32, 36],
+  10: [256, 84], 11: [256, 110], 12: [256, 144], 13: [256, 176], 14: [256, 210], 30: [1, 2],
+};
+function sumTensorBytes(r, count) {
+  let sum = 0;
+  for (let i = 0; i < count; i++) {
+    const nameLen = r.u64(); if (nameLen > 4096) return null; r.skip(nameLen);
+    const nDims = r.u32(); if (nDims < 1 || nDims > 6) return null;
+    let n = 1; for (let d = 0; d < nDims; d++) n *= r.u64();
+    const type = r.u32(); r.u64(); // offset
+    const spec = GGML_BLK[type]; if (!spec) return null;
+    const [blk, bytes] = spec;
+    sum += Math.ceil(n / blk) * bytes;
+  }
+  return sum > 0 ? sum : null;
 }
 
 const num = (v) => Array.isArray(v) ? Math.max(...v.map(Number).filter(Number.isFinite)) : (Number.isFinite(Number(v)) ? Number(v) : null);
 // Tóm tắt thông số hữu ích cho người dùng và cho ước lượng bộ nhớ
 function summarize(file) {
-  const { kv, size, tensors } = readMeta(file);
+  const { kv, size, tensors, weightBytes } = readMeta(file);
   const arch = kv['general.architecture'] || null;
   const g = (k) => kv[`${arch}.${k}`];
   const layers = num(g('block_count'));
@@ -85,9 +107,10 @@ function summarize(file) {
     arch, name: kv['general.name'] || kv['general.basename'] || null, sizeLabel: kv['general.size_label'] || null,
     organization: kv['general.organization'] || null, license: kv['general.license'] || null,
     quant: ft != null ? (FILE_TYPES[ft] || null) : null,
-    layers, trainCtx: num(g('context_length')), embedding: emb, heads, kvHeads, kvPerToken,
-    experts: num(g('expert_count')) || null, splitCount: num(kv['split.count']) || 1,
-    hasTemplate: !!tpl, templateTools: /\btools\b/.test(tpl), tensors, fileSize: size,
+    layers, trainCtx: num(g('context_length')), embedding: emb, heads, kvHeads, keyLength: keyLen, valueLength: valLen, kvPerToken,
+    experts: num(g('expert_count')) || null, expertsUsed: num(g('expert_used_count')) || null,
+    splitCount: num(kv['split.count']) || 1,
+    hasTemplate: !!tpl, templateTools: /\btools\b/.test(tpl), tensors, fileSize: size, weightBytes: weightBytes || null,
   };
 }
 
@@ -97,32 +120,46 @@ const GB = 1024 * MB;
 // Số lớp tối đa đưa lên GPU mà vẫn giữ trọn ngữ cảnh: mỗi lớp trên GPU mang theo trọng số + bộ đệm K/V của lớp đó (mặc định llama.cpp).
 // Dùng chung cho engine.loadPlans (khi nạp thật) và hộp nạp (ước lượng hiển thị) để hai bên luôn khớp nhau.
 const computeBuf = (ctx) => 300 * MB + ctx * 2048;
-// B190: tệp GGUF lớn hơn phần trọng số thật sự nằm trên GPU (siêu dữ liệu, căn chỉnh). 0,86 khớp phép đo llama.cpp
-// trên RTX 4070 SUPER 12 GB — Qwen3-14B Q4 dự kiến ~10,6 GB và nạp đủ 41/41 @ 16384; gpt-oss-20b MXFP4 đủ 25/25.
-const WEIGHT_PACK = 0.86;
-// Lề trống: khoảng 5 % VRAM, kẹp 300–512 MiB. Không còn giữ 8 % + ~1 GiB (công thức cũ để 14B ở 37/41).
+// B190: khi KHÔNG có tổng byte tensor, coi trọng số = 0,92 × kích thước tệp. 0,86 cũ quá lạc quan: nó bỏ qua
+// bộ đệm tính toán ~1,9 GB (đo ở lô 2048) nên kế hoạch vẫn nói 41/41 trong khi Vulkan hết bộ nhớ.
+const WEIGHT_PACK = 0.92;
+// Lề trống: khoảng 5 % VRAM, kẹp 300–512 MiB. “confident” dùng đúng lề này, không còn sàn 256 MiB.
 const headroomBytes = (total) => Math.min(512 * MB, Math.max(300 * MB, (total || 0) * 0.05));
-const FIT_FLOOR = 256 * MB; // chỉ offload trọn khi nhu cầu còn dưới VRAM trống ít nhất chừng này
+// Bộ đệm tính toán của ngữ cảnh node-llama-cpp. ƯỚC TÍNH, không phải số đo lại.
+// Mốc QA (RTX 4070 SUPER, Qwen3-14B Q4_K_M, 40 lớp): lô 2048 (perf đẩy batchSize; n_ubatch = n_batch)
+// làm ggml_gallocr_reserve_n_impl xin 1907425280 byte và ErrorOutOfDeviceMemory. Thư viện mặc định chỉ min(ctx, 512).
+// Co theo lô/2048 và số lớp/40, sàn 256 MiB. Flash attention có thể nhỏ hơn — không trừ thêm.
+const COMPUTE_ANCHOR = 1907425280, ANCHOR_BATCH = 2048, ANCHOR_LAYERS = 40;
+function contextComputeBuf({ ctx = 8192, batch = 512, layers = ANCHOR_LAYERS } = {}) {
+  const b = Math.max(1, Math.min(Number(batch) || 512, ctx || ANCHOR_BATCH, 2048));
+  const L = Math.max(1, Number(layers) || ANCHOR_LAYERS);
+  return Math.max(256 * MB, Math.round(COMPUTE_ANCHOR * (b / ANCHOR_BATCH) * (L / ANCHOR_LAYERS)));
+}
 function freeBytes(vram) {
   if (!vram || !(vram.total > 0)) return 0;
   return Math.max(0, Math.min(vram.free || vram.total, vram.total));
 }
-// n = số lớp vừa ngân sách; confident = trọng số + KV + bộ đệm tính toán còn dưới VRAM trống (trừ FIT_FLOOR).
-function fitCount({ fileSize, layers, kvPerToken }, { ctx = 8192, kvScale = 1, vram = null } = {}) {
+// n = số lớp vừa ngân sách. Trọn lớp khi trọng số + KV + bộ đệm tính toán + mmproj còn dưới VRAM trống trừ lề.
+// confident (bỏ kiểm tra bộ nhớ của thư viện) CHỈ khi byte trọng số lấy từ tensor GGUF, có lề, và không phải GPU tích hợp.
+function fitCount({ fileSize, layers, kvPerToken }, { ctx = 8192, kvScale = 1, vram = null, batch = 512, mmprojBytes = 0, weightBytes = 0 } = {}) {
   const L = (layers || 32) + 1;
   const free = freeBytes(vram);
-  const scratch = computeBuf(ctx);
-  const weights = (fileSize || 0) * WEIGHT_PACK;
+  const scratch = contextComputeBuf({ ctx, batch, layers: layers || 32 });
+  const measured = weightBytes > 0;
+  const weights = measured ? weightBytes : (fileSize || 0) * WEIGHT_PACK;
   const kv = kvPerToken && layers ? kvPerToken * ctx * kvScale : 400 * MB * kvScale;
+  const mm = mmprojBytes || 0;
   const per = weights / L + kv / (layers || L);
-  const avail = free - headroomBytes(vram.total) - scratch;
+  const room = headroomBytes(vram && vram.total);
+  const avail = free - room - scratch - mm;
   let n = per > 0 ? Math.floor(Math.max(0, avail) / per) : 0;
   n = Math.max(0, Math.min(L, n));
-  const fullCost = weights + kv + scratch;
-  const confident = fullCost > 0 && fullCost <= free - FIT_FLOOR;
-  if (confident) n = L;
-  const used = (n / L) * weights + kv * (layers ? Math.min(1, n / layers) : n / L) + (n ? scratch : 0);
-  return { n, L, confident, used, free, kvBytes: kv };
+  const fullCost = weights + kv + scratch + mm;
+  const fits = fullCost > 0 && fullCost <= free - room;
+  if (fits) n = L;
+  const confident = fits && measured && !(vram && vram.integratedOnly);
+  const used = (n / L) * weights + kv * (layers ? Math.min(1, n / layers) : n / L) + (n ? scratch : 0) + (n ? mm : 0);
+  return { n, L, confident, used, free, kvBytes: kv, scratch, measured };
 }
 function gpuFit(model, opts = {}) {
   if (!opts.vram || !(opts.vram.total > 0)) return null;
@@ -130,17 +167,20 @@ function gpuFit(model, opts = {}) {
 }
 // B190: thứ tự ưu tiên — trọn lớp + đúng ngữ cảnh (KV đang dùng) → trọn lớp với KV q8_0 nếu được phép → một phần.
 // q8_0 tự bật chỉ khi GPU rời dưới 6 GB (B163), hoặc khi người gọi đặt allowQ8. KV f16 người dùng chọn thì không đổi.
-function chooseOffload(model, { ctx = 8192, kvType, kvScale, vram = null, allowQ8 } = {}) {
+function chooseOffload(model, { ctx = 8192, kvType, kvScale, vram = null, allowQ8, batch = 512, mmprojBytes = 0, weightBytes = 0 } = {}) {
   const L = (model.layers || 32) + 1;
   const scale = kvScale != null ? kvScale : (kvType === 'q8_0' ? 0.55 : 1);
   if (!vram || !(vram.total > 0)) return { gpuLayers: L, totalLayers: L, kv: scale < 0.9 ? 'q8_0' : 'f16', confident: false, used: 0, free: 0 };
-  const allow = allowQ8 != null ? !!allowQ8 : (kvType !== 'f16' && scale >= 0.9 && vram.total < 6 * GB);
-  const cur = fitCount(model, { ctx, kvScale: scale, vram });
-  const pack = (r, kv) => ({ gpuLayers: r.n, totalLayers: r.L, kv, confident: r.confident, used: r.used, free: r.free });
-  if (cur.confident || cur.n >= cur.L) return pack(cur, scale < 0.9 ? 'q8_0' : 'f16');
+  // q8_0 tự bật chỉ trên GPU RỜI dưới 6 GB. GPU tích hợp không bao giờ tự q8 và không bao giờ confident.
+  const discrete = !vram.integratedOnly;
+  const allow = allowQ8 != null ? !!allowQ8 : (kvType !== 'f16' && scale >= 0.9 && discrete && vram.total < 6 * GB);
+  const fitOpts = { ctx, vram, batch, mmprojBytes, weightBytes };
+  const cur = fitCount(model, { ...fitOpts, kvScale: scale });
+  const pack = (r, kv) => ({ gpuLayers: r.n, totalLayers: r.L, kv, confident: !!(r.confident && discrete), used: r.used, free: r.free, scratch: r.scratch });
+  if (cur.n >= cur.L) return pack(cur, scale < 0.9 ? 'q8_0' : 'f16');
   if (allow) {
-    const q8 = fitCount(model, { ctx, kvScale: 0.55, vram });
-    if (q8.confident) return pack(q8, 'q8_0');
+    const q8 = fitCount(model, { ...fitOpts, kvScale: 0.55 });
+    if (q8.n >= q8.L) return pack(q8, 'q8_0');
   }
   return pack(cur, scale < 0.9 ? 'q8_0' : 'f16');
 }
@@ -183,7 +223,7 @@ function estimate(g, o = {}) {
   const kvScale = kvType === 'q8_0' ? 0.55 : 1;
   const kv = (kvPerToken || 0) * ctx * kvScale;
   const kvGpuFrac = layers ? Math.min(1, n / layers) : frac;
-  const compute = computeBuf(ctx); // bộ đệm tính toán (ước chừng)
+  const compute = o.server ? computeBuf(ctx) : contextComputeBuf({ ctx, batch: o.batch || 512, layers }); // bộ đệm tính toán (ước chừng; lô node-llama-cpp)
   const mmGpu = o.server && n ? (o.server.mmprojBytes || 0) : 0; // phần nhìn ảnh (mmproj) cũng nằm trên GPU
   const vram = n ? fileSize * frac + kv * kvGpuFrac + compute + mmGpu : 0;
   const ram = fileSize * (1 - frac) + kv * (1 - kvGpuFrac) + (n ? 150 * 1024 * 1024 : compute);
@@ -199,4 +239,4 @@ function cachedSummary(file) {
   cache.set(key, v); return v;
 }
 
-module.exports = { serverMarginMiB, serverFit, readMeta, summarize, estimate, autoLayers, gpuFit, chooseOffload, fitCount, headroomBytes, computeBuf, cachedSummary, FILE_TYPES, WEIGHT_PACK };
+module.exports = { serverMarginMiB, serverFit, readMeta, summarize, estimate, autoLayers, gpuFit, chooseOffload, fitCount, headroomBytes, computeBuf, contextComputeBuf, cachedSummary, FILE_TYPES, WEIGHT_PACK };

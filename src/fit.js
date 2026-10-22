@@ -42,7 +42,21 @@ function strength(m) {
 // KV cache f16 mỗi token: dùng số đo từ GGUF nếu có, nếu không ước theo số tham số (GQA phổ biến: 8B ≈ 110 KB/token)
 // B38 (máy thật của Khôi: Qwen3-VL 4B ước 4,4 GB nhưng VRAM thật tăng ~7,2 GB): hiệu chỉnh theo kiến trúc thật của các họ phổ biến
 // (Qwen3/Qwen3-VL: 28 lớp × 8 đầu KV × 128 ≈ 115 KB/token cho ≤ 2B; 36 lớp ≈ 147 KB/token cho 4B/8B; 14B 40 lớp ≈ 164 KB; 32B 64 lớp ≈ 262 KB)
-const kvPerToken = (m) => { if (m.kvPerToken) return m.kvPerToken; const P = parseParams(m.params || m.sizeLabel, m.size).total || 4; return P <= 2.6 ? 115e3 : P <= 9.5 ? 147e3 : P <= 16 ? 164e3 : 262e3; };
+// KV f16 mỗi token. Có số đo hoặc kiến trúc GGUF (block_count, head_count_kv, key/value length) thì dùng đúng số đó.
+// Không có kiến trúc: ước theo TỔNG tham số ghi trong tên (danh mục). MoE 30B-A3B không có siêu dữ liệu vẫn đi lối này.
+function archKv(m) {
+  if (!m || typeof m !== 'object') return null;
+  if (m.kvPerToken > 0) return m.kvPerToken;
+  const layers = Number(m.layers) || 0;
+  const heads = Number(m.heads) || 0;
+  const kvHeads = Number(m.kvHeads) || heads;
+  const emb = Number(m.embedding) || 0;
+  const keyLen = Number(m.keyLength) || (emb && heads ? emb / heads : 0);
+  const valLen = Number(m.valueLength) || keyLen;
+  if (layers > 0 && kvHeads > 0 && keyLen > 0) return layers * kvHeads * (keyLen + valLen) * 2;
+  return null;
+}
+const kvPerToken = (m) => { const a = archKv(m); if (a) return a; const P = parseParams(m && (m.params || m.sizeLabel), m && m.size).total || 4; return P <= 2.6 ? 115e3 : P <= 9.5 ? 147e3 : P <= 16 ? 164e3 : 262e3; };
 // bộ đệm tính toán của llama.cpp lớn dần theo ngữ cảnh (đo: ~0,7 GB ở 16K cho mô hình 4B)
 const computeBuf = (ctx) => 300 * MiB + ctx * 24 * 1024;
 // mô hình nhìn ảnh: bộ đệm mã hoá ảnh (ảnh chụp màn hình ~1 triệu điểm ảnh) ngoài trọng số mmproj
@@ -59,7 +73,7 @@ function metaOf({ catalog = null, size = 0, mmprojSize = null, file = '', kvPerT
 const GPU_BW = [
   [/5090/, 1790], [/5080/, 960], [/5070 ?ti/i, 896], [/5070/, 672], [/5060 ?ti/i, 448], [/5060/, 448],
   [/4090/, 1008], [/4080/, 717], [/4070 ?ti ?super/i, 672], [/4070 ?ti/i, 504], [/4070 ?super/i, 504], [/4070/, 504], [/4060 ?ti/i, 288], [/4060/, 272],
-  [/3090/, 936], [/3080/, 760], [/3070/, 448], [/3060 ?ti/i, 448], [/3060/, 360], [/3050/, 224], [/2080/, 448], [/2070/, 448], [/2060/, 336], [/1660/, 192], [/1650/, 128],
+  [/3090/, 936], [/3080/, 760], [/3070/, 448], [/3060 ?ti/i, 448], [/3060/, 360], [/3050 ?ti ?laptop/i, 192], [/3050/, 224], [/2080/, 448], [/2070/, 448], [/2060/, 336], [/1660/, 192], [/1650/, 128],
   [/7900 ?xtx/i, 960], [/7900/, 800], [/7800/, 624], [/7700/, 432], [/7600/, 288], [/6800/, 512], [/6700/, 384], [/6600/, 224],
   [/arc.*a770/i, 560], [/arc.*a750/i, 512],
 ];
@@ -167,4 +181,4 @@ function fitDetail(f) {
   if (f.parts.mmproj) return `Ước tính ở ngữ cảnh ${f.ctx}: trọng số ${gb(f.parts.weights)} + tệp thị giác ${gb(f.parts.mmproj)} + bộ đệm KV ${gb(f.parts.kv)} + bộ đệm tính toán ${gb(f.parts.compute)} = ${gb(f.need)}${ms}`;
   return `Ước tính ở ngữ cảnh ${f.ctx}: trọng số ${gb(f.parts.weights)} + bộ đệm KV ${gb(f.parts.kv)} + bộ đệm tính toán ${gb(f.parts.compute)} = ${gb(f.need)}${ms}`;
 }
-module.exports = { GROUPS, LABEL, parseParams, strength, kvPerToken, computeBuf, metaOf, gpuBandwidth, machineFit, sortByFit, groupByFit, fmtFit, fitDetail };
+module.exports = { GROUPS, LABEL, parseParams, strength, kvPerToken, archKv, computeBuf, metaOf, gpuBandwidth, machineFit, sortByFit, groupByFit, fmtFit, fitDetail };

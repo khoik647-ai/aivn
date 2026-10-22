@@ -7,7 +7,7 @@ test('B71: thông báo nạp nói đúng trạng thái CUỐI (GPU một phần 
   assert.match(t, /GPU một phần \+ CPU \(15\/25 lớp trên GPU\), ngữ cảnh 16\.384/); assert.ok(!/không nạp được|8192|8\.192/.test(t));
   assert.match(L.loadNotice({ mode: 'cpu-only', contextSize: 8192 }), /chuyển sang CPU \(không dùng GPU\), ngữ cảnh 8\.192/);
   assert.strictEqual(L.attemptText('gpu (25 lớp GPU, ngữ cảnh 16384): A context size of 8192 is too large for the available VRAM'), 'gpu (25 lớp GPU, ngữ cảnh 16384): không đủ VRAM');
-  const m = fs.readFileSync(path.join(__dirname, '../src/main.js'), 'utf8'); assert.match(m, /st\.notice = require\('\.\/load-notice'\)\.loadNotice\(st\)/);
+  const m = fs.readFileSync(path.join(__dirname, '../src/main.js'), 'utf8'); assert.match(m, /st\.notice = require\('\.\/load-notice'\)\.loadNotice\(st/);
   assert.match(m, /final: \{ mode: st\.mode, ctx: st\.contextSize, gpuLayers: st\.gpuLayers, totalLayers: st\.totalLayers \}/);
 });
 test('B71: nhãn khớp máy cho gpt-oss-20b trên 12 GB VRAM là “Chạy chậm” (8k và 16k)', () => {
