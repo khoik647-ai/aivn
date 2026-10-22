@@ -1,0 +1,223 @@
+'use strict';
+// B10 (b): POST /v1/messages chuẩn Anthropic, dịch sang engine.generate / engine.chatStep.
+const test = require('node:test');
+const assert = require('node:assert');
+const http = require('http');
+const { createApiServer } = require('../src/server');
+
+function parseSse(text) {
+  const events = [];
+  for (const block of String(text).split(/\n\n/)) {
+    if (!block.trim()) continue;
+    let event = ''; const data = [];
+    for (const line of block.split(/\n/)) {
+      if (line.startsWith('event:')) event = line.slice(6).trim();
+      else if (line.startsWith('data:')) data.push(line.slice(5).trim());
+    }
+    events.push({ event, data: JSON.parse(data.join('')) });
+  }
+  return events;
+}
+
+async function withServer(fn, { engineExtra = {}, ensureModel = async () => {}, apiKey = null, text = 'Xin chào', finishReason = 'stop' } = {}) {
+  const calls = []; let disconnectSaw = null;
+  const engine = {
+    status: () => ({ loaded: true, id: 'm1' }),
+    countTokens: (t) => String(t).length,
+    async generate(messages, o = {}) {
+      calls.push({ fn: 'generate', messages, o });
+      if (engineExtra.hold) {
+        if (o.onToken) o.onToken('Xin');
+        await new Promise((resolve) => {
+          if (o.signal && o.signal.aborted) return resolve();
+          const t = setTimeout(resolve, 2000);
+          o.signal && o.signal.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true });
+        });
+        disconnectSaw = !!(o.signal && o.signal.aborted);
+        return { text: 'Xin', finishReason: disconnectSaw ? 'abort' : 'stop', usage: { completion_tokens: 1 } };
+      }
+      const out = text;
+      if (o.onToken) {
+        for (const ch of out.match(/.{1,4}/gs) || []) {
+          if (o.signal && o.signal.aborted) return { text: out, finishReason: 'abort', usage: { completion_tokens: 1 } };
+          o.onToken(ch);
+        }
+      }
+      return { text: out, finishReason, toolCalls: [], usage: { completion_tokens: 7 } };
+    },
+    async chatStep(messages, o = {}) {
+      calls.push({ fn: 'chatStep', messages, o });
+      if (o.onToken && engineExtra.toolText) o.onToken(engineExtra.toolText);
+      return engineExtra.chatResult || { text: 'xong', toolCalls: [], finishReason: 'stop', usage: { completion_tokens: 2 } };
+    },
+  };
+  const logs = [];
+  const api = createApiServer({ engine, models: () => [{ id: 'm1', mtime: Date.now() }], ensureModel, log: (m) => logs.push(m), getOpts: () => ({ apiKey }) });
+  const port = 21000 + Math.floor(Math.random() * 10000);
+  await api.start(port, '127.0.0.1');
+  try { return await fn({ url: `http://127.0.0.1:${port}`, port, calls, logs, disconnect: () => disconnectSaw }); }
+  finally { await api.stop(); }
+}
+
+const post = (url, body, headers = {}) => fetch(url + '/v1/messages', {
+  method: 'POST', headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', ...headers },
+  body: typeof body === 'string' ? body : JSON.stringify(body),
+});
+
+test('POST /v1/messages không stream: system, khối text, usage, tham số lấy mẫu', async () => {
+  await withServer(async ({ url, calls }) => {
+    const r = await post(url, {
+      model: 'aivn-local', max_tokens: 32, temperature: 0.2, top_p: 0.8, top_k: 20,
+      metadata: { user_id: 'u-1' },
+      system: [{ type: 'text', text: 'Bạn là trợ lý.' }],
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'Xin chào' }] }],
+    });
+    assert.strictEqual(r.status, 200);
+    const j = await r.json();
+    assert.match(j.id, /^msg_/); assert.strictEqual(j.type, 'message'); assert.strictEqual(j.role, 'assistant');
+    assert.strictEqual(j.model, 'aivn-local');
+    assert.deepStrictEqual(j.content, [{ type: 'text', text: 'Xin chào' }]);
+    assert.strictEqual(j.stop_reason, 'end_turn'); assert.strictEqual(j.stop_sequence, null);
+    assert.strictEqual(j.usage.output_tokens, 7);
+    assert.strictEqual(j.usage.input_tokens, 'Bạn là trợ lý.'.length + 'Xin chào'.length + 8);
+    assert.strictEqual(calls[0].fn, 'generate');
+    assert.deepStrictEqual(calls[0].messages.map((m) => m.role), ['system', 'user']);
+    assert.strictEqual(calls[0].messages[1].content, 'Xin chào');
+    assert.strictEqual(calls[0].o.maxTokens, 32);
+    assert.strictEqual(calls[0].o.temperature, 0.2);
+    assert.strictEqual(calls[0].o.topP, 0.8);
+    assert.strictEqual(calls[0].o.sampling.topK, 20);
+  });
+});
+
+test('POST /v1/messages stream: đúng thứ tự sự kiện Anthropic', async () => {
+  await withServer(async ({ url }) => {
+    const r = await post(url, { model: 'aivn-local', max_tokens: 16, stream: true, messages: [{ role: 'user', content: 'Xin chào' }] });
+    assert.strictEqual(r.status, 200);
+    assert.match(r.headers.get('content-type'), /text\/event-stream/);
+    const ev = parseSse(await r.text());
+    const names = ev.map((e) => e.event);
+    const deltas = ev.filter((e) => e.event === 'content_block_delta');
+    assert.deepStrictEqual(names.filter((n) => n !== 'content_block_delta'), ['message_start', 'content_block_start', 'ping', 'content_block_stop', 'message_delta', 'message_stop']);
+    assert.ok(deltas.length >= 1);
+    assert.ok(names.indexOf('content_block_start') < names.indexOf('ping'));
+    assert.ok(names.indexOf('ping') < names.indexOf('content_block_delta'));
+    assert.ok(deltas.every((d) => d.data.delta.type === 'text_delta'));
+    assert.strictEqual(deltas.map((d) => d.data.delta.text).join(''), 'Xin chào');
+    assert.strictEqual(ev[0].data.message.usage.output_tokens, 0);
+    assert.strictEqual(ev.find((e) => e.event === 'message_delta').data.delta.stop_reason, 'end_turn');
+    assert.strictEqual(ev.find((e) => e.event === 'message_delta').data.usage.output_tokens, 7);
+    assert.strictEqual(ev[ev.length - 1].data.type, 'message_stop');
+  });
+});
+
+test('stop_sequences cắt câu trả lời và max_tokens thành stop_reason', async () => {
+  await withServer(async ({ url, calls }) => {
+    const r = await post(url, { model: 'm1', max_tokens: 20, stop_sequences: ['STOP'], messages: [{ role: 'user', content: 'x' }] });
+    const j = await r.json();
+    assert.strictEqual(j.stop_reason, 'stop_sequence'); assert.strictEqual(j.stop_sequence, 'STOP');
+    assert.strictEqual(j.content[0].text, 'Xin chào ');
+    assert.deepStrictEqual(calls[0].o.stop, ['STOP']);
+  }, { text: 'Xin chào STOP phần sau' });
+  await withServer(async ({ url, calls }) => {
+    const r = await post(url, { model: 'm1', max_tokens: 4, messages: [{ role: 'user', content: 'x' }] });
+    const j = await r.json();
+    assert.strictEqual(j.stop_reason, 'max_tokens'); assert.strictEqual(j.stop_sequence, null);
+    assert.strictEqual(calls[0].o.maxTokens, 4);
+  }, { finishReason: 'length' });
+});
+
+test('thiếu max_tokens hoặc content sai → 400; chưa nạp mô hình giống đường OpenAI', async () => {
+  await withServer(async ({ url }) => {
+    const a = await post(url, { model: 'm1', messages: [{ role: 'user', content: 'x' }] });
+    assert.strictEqual(a.status, 400);
+    const ja = await a.json();
+    assert.strictEqual(ja.type, 'error'); assert.strictEqual(ja.error.type, 'invalid_request_error');
+    assert.match(ja.error.message, /max_tokens/);
+    const b = await post(url, { max_tokens: 8, messages: [{ role: 'user', content: 1 }] });
+    assert.strictEqual(b.status, 400); assert.strictEqual((await b.json()).error.type, 'invalid_request_error');
+    const c = await post(url, '{', { 'content-type': 'application/json' });
+    assert.strictEqual(c.status, 400);
+  });
+  const msg = 'Chưa nạp mô hình nào. Hãy nạp mô hình trong AIVN hoặc chỉ định "model".';
+  await withServer(async ({ url }) => {
+    const r = await post(url, { model: 'khong-co', max_tokens: 8, messages: [{ role: 'user', content: 'x' }] });
+    assert.strictEqual(r.status, 400);
+    const j = await r.json();
+    assert.strictEqual(j.error.type, 'invalid_request_error'); assert.strictEqual(j.error.message, msg);
+  }, { ensureModel: async () => { throw new Error(msg); } });
+});
+
+test('khoá API: 401 dạng Anthropic; Bearer hoặc x-api-key thì 200', async () => {
+  await withServer(async ({ url }) => {
+    const bare = await post(url, { model: 'm1', max_tokens: 8, messages: [{ role: 'user', content: 'x' }] }, { 'anthropic-version': '2023-06-01' });
+    assert.strictEqual(bare.status, 401);
+    const j = await bare.json();
+    assert.strictEqual(j.type, 'error'); assert.strictEqual(j.error.type, 'authentication_error');
+    assert.strictEqual(j.error.code, undefined);
+    const bad = await post(url, { model: 'm1', max_tokens: 8, messages: [{ role: 'user', content: 'x' }] }, { 'x-api-key': 'sai' });
+    assert.strictEqual(bad.status, 401);
+    const okB = await post(url, { model: 'm1', max_tokens: 8, messages: [{ role: 'user', content: 'x' }] }, { authorization: 'Bearer test-key' });
+    assert.strictEqual(okB.status, 200);
+    const okX = await post(url, { model: 'm1', max_tokens: 8, messages: [{ role: 'user', content: 'x' }] }, { 'x-api-key': 'test-key' });
+    assert.strictEqual(okX.status, 200);
+  }, { apiKey: 'test-key' });
+});
+
+test('ngắt kết nối thì huỷ lượt sinh', async () => {
+  await withServer(async ({ port, disconnect }) => {
+    await new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/v1/messages', headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' } }, (res) => {
+        res.on('data', () => req.destroy());
+        res.on('error', () => resolve());
+        res.on('close', () => resolve());
+      });
+      req.on('error', () => resolve());
+      req.write(JSON.stringify({ model: 'm1', max_tokens: 8, stream: true, messages: [{ role: 'user', content: 'x' }] }));
+      req.end();
+      setTimeout(() => reject(new Error('treo')), 4000);
+    });
+    for (let i = 0; i < 30 && disconnect() == null; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.strictEqual(disconnect(), true);
+  }, { engineExtra: { hold: true } });
+});
+
+test('tool_use / tool_result đi qua chatStep; stream có input_json_delta', async () => {
+  const chatResult = { text: '', toolCalls: [{ id: 'toolu_1', name: 'get_weather', arguments: { city: 'Huế' } }], finishReason: 'tool_calls', usage: { completion_tokens: 3 } };
+  const body = {
+    model: 'm1', max_tokens: 40,
+    tools: [{ name: 'get_weather', description: 'Thời tiết', input_schema: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] } }],
+    messages: [
+      { role: 'user', content: 'Thời tiết?' },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'get_weather', input: { city: 'Huế' } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'nắng' }, { type: 'text', text: 'trả lời ngắn' }] },
+    ],
+  };
+  await withServer(async ({ url, calls }) => {
+    const r = await post(url, body);
+    assert.strictEqual(r.status, 200, await r.clone().text());
+    const j = await r.json();
+    assert.strictEqual(j.stop_reason, 'tool_use');
+    assert.deepStrictEqual(j.content, [{ type: 'tool_use', id: 'toolu_1', name: 'get_weather', input: { city: 'Huế' } }]);
+    assert.strictEqual(calls[0].fn, 'chatStep');
+    assert.strictEqual(calls[0].o.tools[0].name, 'get_weather');
+    assert.strictEqual(calls[0].o.tools[0].parameters.properties.city.type, 'string');
+    const roles = calls[0].messages.map((m) => m.role);
+    assert.ok(roles.includes('tool'));
+    const tool = calls[0].messages.find((m) => m.role === 'tool');
+    assert.strictEqual(tool.tool_call_id, 'toolu_1'); assert.strictEqual(tool.content, 'nắng');
+    const asst = calls[0].messages.find((m) => m.tool_calls);
+    assert.strictEqual(asst.tool_calls[0].function.name, 'get_weather');
+  }, { engineExtra: { chatResult } });
+  await withServer(async ({ url }) => {
+    const r = await post(url, { ...body, stream: true, messages: [{ role: 'user', content: 'Thời tiết?' }] });
+    const ev = parseSse(await r.text());
+    const delta = ev.find((e) => e.data.delta && e.data.delta.type === 'input_json_delta');
+    assert.ok(delta, ev.map((e) => e.event).join(','));
+    assert.deepStrictEqual(JSON.parse(delta.data.delta.partial_json), { city: 'Huế' });
+    assert.strictEqual(ev.find((e) => e.event === 'message_delta').data.delta.stop_reason, 'tool_use');
+    const start = ev.find((e) => e.event === 'content_block_start');
+    assert.strictEqual(start.data.content_block.type, 'tool_use');
+    assert.ok(ev.findIndex((e) => e.event === 'ping') > ev.findIndex((e) => e.event === 'content_block_start'));
+  }, { engineExtra: { chatResult } });
+});

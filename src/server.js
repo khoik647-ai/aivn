@@ -2,6 +2,7 @@
 const http = require('http');
 const crypto = require('crypto');
 const { normalizeTools, dropNullOptionals } = require('./schema');
+const { handleMessages, anthropicError } = require('./anthropic-api');
 
 // tool_choice kiểu OpenAI → 'auto' | 'none' | 'required' | { name }
 function parseToolChoice(tc, tools) {
@@ -40,7 +41,7 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
     res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', ...cors() });
     res.end(JSON.stringify(obj));
   };
-  const cors = () => (getOpts().cors ? { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' } : {});
+  const cors = () => (getOpts().cors ? { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key, anthropic-version', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' } : {});
   // B80: mọi phản hồi lỗi đều vào nhật ký kèm mã (trước đây 404 chỉ thấy “POST /v1/completions”, không thấy mã)
   const err = (res, code, message, type = 'invalid_request_error') => { if (code !== 401) log(`  → ${code} ${String(message).slice(0, 200)}`); return send(res, code, { error: { message, type, code } }); };
 
@@ -66,10 +67,15 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
     const url = new URL(req.url, 'http://localhost');
     const p = url.pathname.replace(/\/+$/, '');
     if (req.method === 'OPTIONS') { res.writeHead(204, cors()); return res.end(); }
+    const isAnthropic = p === '/v1/messages' || p === '/messages';
     const blocked = isBlocked && isBlocked();
-    if (blocked) return err(res, 423, blocked, 'locked');
+    if (blocked) return isAnthropic ? anthropicError(res, 423, 'api_error', blocked, cors()) : err(res, 423, blocked, 'locked');
     const key = getOpts().apiKey;
-    if (key && !keyOk(req, key)) { log(`${req.method} ${p} → 401 (thiếu hoặc sai khoá API) từ ${req.socket.remoteAddress || '?'}`); return err(res, 401, 'Thiếu hoặc sai khoá API. Gửi tiêu đề "Authorization: Bearer <khoá>" (khoá ở mục Máy chủ API của AIVN).', 'invalid_api_key'); }
+    if (key && !keyOk(req, key)) {
+      log(`${req.method} ${p} → 401 (thiếu hoặc sai khoá API) từ ${req.socket.remoteAddress || '?'}`);
+      const msg = 'Thiếu hoặc sai khoá API. Gửi tiêu đề "Authorization: Bearer <khoá>" (khoá ở mục Máy chủ API của AIVN).';
+      return isAnthropic ? anthropicError(res, 401, 'authentication_error', msg, cors()) : err(res, 401, msg, 'invalid_api_key');
+    }
     log(`${req.method} ${p}${host === '0.0.0.0' ? ` từ ${req.socket.remoteAddress || '?'}` : ''}`);
 
     if (req.method === 'GET' && (p === '/v1/models' || p === '/models')) {
@@ -219,6 +225,7 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
         });
       } catch (e) { return err(res, 500, e.message, 'server_error'); }
     }
+    if (req.method === 'POST' && isAnthropic) return handleMessages({ req, res, engine, ensureModel, log, cors, readBody });
     return err(res, 404, `Không tìm thấy ${req.method} ${p}`);
   }
 
