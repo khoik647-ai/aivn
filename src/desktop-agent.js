@@ -1235,6 +1235,29 @@ function createDesktopAgent(deps) {
   // kết quả tìm kiếm đã hiện nhưng chưa bấm vào (mô hình nhỏ hay dừng lại hỏi thay vì mở)
   function searchFound() { const s = session; return s && s.inSearch && s.foundHit ? s.foundHit : null; }
   // B95: “ngữ cảnh” của một thao tác cho chống lặp — phần tử đang chọn (Trợ năng, hoặc chỗ vừa bấm / phím vừa bấm khi ứng dụng chỉ đọc được bằng OCR) + dấu của màn hình
+  // B118/B119: đọc NGUYÊN VĂN trang đang mở trong trình duyệt qua bộ nhớ tạm — chữ trang (Ctrl+A, Ctrl+C: chữ DOM, tốt hơn OCR cho bảng)
+  // và đường dẫn trên thanh địa chỉ (Ctrl+L, Ctrl+C, Esc). Chỉ làm khi cửa sổ trình duyệt đang ở trước; trả lại bộ nhớ tạm như cũ.
+  async function readBrowserPage({ page = true } = {}) {
+    const s = session; if (!s) return null;
+    const W = (s.obs && s.obs.win) || s.target; if (!isBrowserWin(W)) return null;
+    let clip; try { clip = require('electron').clipboard; } catch { return null; }
+    try { const fg = await fgWin(); if (fg && fg.pid === process.pid) { await refocus(); } const fg2 = await fgWin(); if (fg2 && !(isBrowserWin({ title: fg2.title }) || (s.target && fg2.pid === s.target.pid))) { deps.log && deps.log('desk', `B118: không đọc trang — cửa sổ ở trước không phải trình duyệt (“${String(fg2.title || '').slice(0, 50)}”)`); return null; } } catch {}
+    const n = SC.libnut(); const mod = require('./agent/keys').primaryOf(process.platform);
+    const P = async (f, d) => { try { const v = await Promise.resolve(f()); return v == null ? d : v; } catch { return d; } }; // bộ nhớ tạm có thể trả Promise
+    const fm = await P(() => clip.availableFormats(), []);
+    const prev = { text: String(await P(() => clip.readText(), '')), image: (fm || []).some(f => /image/.test(f)) ? await P(() => clip.readImage(), null) : null };
+    const grab = async (keys) => { await P(() => clip.writeText(''), null); for (const k of keys) { n.keyTap(k[0], k[1] ? [k[1]] : []); await sleep(k[2] || 150); } return String(await P(() => clip.readText(), '') || ''); };
+    let text = '', url = '';
+    try {
+      if (page) text = await grab([['a', mod, 150], ['c', mod, 400]]);
+      url = (await grab([['l', mod, 250], ['c', mod, 300]])).trim();
+      n.keyTap('escape'); await sleep(120); n.keyTap('escape'); await sleep(120); // thanh địa chỉ về như cũ
+    } catch (e) { deps.log && deps.log('desk', 'B118: không đọc được trang qua bộ nhớ tạm: ' + e.message); }
+    finally { await sleep(150); if (prev.image && prev.image.isEmpty && !prev.image.isEmpty()) await P(() => clip.writeImage(prev.image), null); else await P(() => clip.writeText(prev.text || ''), null); }
+    if (!/^(?:https?:\/\/)?[^\s/]+\.[^\s/]+/i.test(url) || /\s/.test(url)) url = '';
+    deps.log && deps.log('desk', `B118: đọc trang trình duyệt: thanh địa chỉ ${url ? `“${url.slice(0, 120)}”` : 'không đọc được'} · chữ trang ${text.length} ký tự`);
+    return { url, text: text.slice(0, 30000), title: W.title || '' };
+  }
   function actKey() {
     const s = session; if (!s || !s.obs) return '';
     const f = (s.obs.elements || []).find(e => e.focused && !e.ocr);
@@ -1242,7 +1265,7 @@ function createDesktopAgent(deps) {
     const names = (s.obs.elements || []).map(e => U.fold(String(e.name || ''))).filter(Boolean).sort().join('|');
     return focus + '#' + require('crypto').createHash('sha1').update(`${s.obs.win ? s.obs.win.title : ''}#${names}`).digest('hex').slice(0, 10);
   }
-  return { cleanupDraft, lastDraft: () => lastDraft, clearLastDraft: () => { lastDraft = null; }, hasDraft: () => !!(session && session.draftTyped), actKey, likely: (q) => (session && session.obs ? U.likelyTarget(session.obs.elements, q) : null), diag: () => ({ calib: { ...calib }, displays: session && session.diag ? session.diag.displays : SC.displayInfo().text }), searchFound, searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, ensureApp, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
+  return { readBrowserPage, cleanupDraft, lastDraft: () => lastDraft, clearLastDraft: () => { lastDraft = null; }, hasDraft: () => !!(session && session.draftTyped), actKey, likely: (q) => (session && session.obs ? U.likelyTarget(session.obs.elements, q) : null), diag: () => ({ calib: { ...calib }, displays: session && session.diag ? session.diag.displays : SC.displayInfo().text }), searchFound, searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, ensureApp, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
 }
 
 module.exports = { createDesktopAgent, SEARCHY_ANY, webSearchTask, isBrowserWin };

@@ -54,6 +54,10 @@ test('A/B thật (Electron + Xvfb, trình duyệt GIẢ, công cụ thật của
   assert.strictEqual(st('a-click-first').state.url, 'sjc.com.vn/gia-vang-online');
   assert.strictEqual(o.answerA, 'Giá vàng SJC mua vào hôm nay là 118.500 nghìn đồng/lượng.\n\nNguồn: https://sjc.com.vn/gia-vang-online');
   assert.match(o.answerAwrong, /Nguồn \(đường dẫn thật trên thanh địa chỉ\): https:\/\/sjc\.com\.vn\/gia-vang-online$/);
+  // B118: thanh địa chỉ đọc nguyên văn (chép), chữ trang đọc được, bộ nhớ tạm trả lại; link sai href được sửa theo nguồn
+  assert.ok(o.pageRead && !o.pageRead.error, JSON.stringify(o.pageRead)); assert.strictEqual(o.pageRead.url.replace(/^https?:\/\//, ''), 'sjc.com.vn/gia-vang-online');
+  assert.match(o.pageRead.text, /118[.,]500/, 'chữ trang (DOM) có giá'); assert.strictEqual(o.clipAfter, 'AIVN-clip-giu-nguyen');
+  assert.ok(/\[(https?:\/\/)?sjc\.com\.vn\/gia-vang-online\]\((https?:\/\/)?sjc\.com\.vn\/gia-vang-online\)/.test(o.answerAgrounded), o.answerAgrounded);
   // B114: Chrome ở YouTube, con trỏ trong ô tìm kiếm CỦA TRANG → mở tab mới (Ctrl+T), tìm ở thanh địa chỉ; ô của YouTube không bị gõ
   const yt = st('y-type-page-box'); assert.ok(yt.ok, yt.summary);
   assert.ok((yt.state.newTab || 0) >= 1, 'đã mở tab mới: ' + JSON.stringify(yt.state)); assert.strictEqual(yt.state.siteSearch || '', '', 'không gõ vào ô tìm kiếm của YouTube');

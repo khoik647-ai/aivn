@@ -2510,6 +2510,7 @@
     "⚠ Kiến trúc “{0}” có thể chưa được hỗ trợ bởi llama.cpp trong AIVN; mô hình có thể không nạp được.": "⚠ Architecture “{0}” may not be supported by AIVN's llama.cpp yet; the model may fail to load.",
     "⚠ Lần chạy CUDA gần nhất lỗi: {0} — đang dùng bản đi kèm cho tới khi mở lại AIVN.": "⚠ The last CUDA run failed: {0} — using the bundled build until AIVN is restarted.",
     "⚠ Máy chủ MCP là chương trình chạy trên máy bạn (stdio) hoặc dịch vụ bên ngoài (http/SSE) và có thể đọc/ghi dữ liệu. Chỉ thêm máy chủ bạn tin tưởng. AIVN luôn xin phép trước mỗi lần gọi công cụ MCP (trừ khi bạn chọn “Luôn cho phép”).": "⚠ An MCP server is a program running on your computer (stdio) or an external service (http/SSE) and can read/write data. Only add servers you trust. AIVN always asks permission before each MCP tool call (unless you choose “Always allow”).",
+    "⚠ Mình chưa thấy các số sau trên trang đã đọc nên chưa chắc chúng đúng: {0}. Bạn xem lại trên trang giúp mình.": "⚠ I couldn't find these numbers on the page I read, so they may be wrong: {0}. Please check them on the page.",
     "⚠ Sát giới hạn — có thể chậm": "⚠ Near the limit — may be slow",
     "⚠ Đây là mô hình embedding (tạo vector), không dùng để trò chuyện.": "⚠ This is an embedding model (creates vectors), not for chat.",
     "⚠ Đường dẫn ở trên chưa được đối chiếu với thanh địa chỉ của trang đã mở trong trình duyệt.": "⚠ The link above has not been checked against the address bar of a page opened in the browser.",

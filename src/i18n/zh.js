@@ -2510,6 +2510,7 @@
     "⚠ Kiến trúc “{0}” có thể chưa được hỗ trợ bởi llama.cpp trong AIVN; mô hình có thể không nạp được.": "⚠ AIVN 内置的 llama.cpp 可能尚不支持“{0}”架构；模型可能无法加载。",
     "⚠ Lần chạy CUDA gần nhất lỗi: {0} — đang dùng bản đi kèm cho tới khi mở lại AIVN.": "⚠ 上次运行 CUDA 出错：{0} — 在重新打开 AIVN 之前使用随附版本。",
     "⚠ Máy chủ MCP là chương trình chạy trên máy bạn (stdio) hoặc dịch vụ bên ngoài (http/SSE) và có thể đọc/ghi dữ liệu. Chỉ thêm máy chủ bạn tin tưởng. AIVN luôn xin phép trước mỗi lần gọi công cụ MCP (trừ khi bạn chọn “Luôn cho phép”).": "⚠ MCP 服务器是在你电脑上运行的程序（stdio）或外部服务（http/SSE），可以读写数据。请只添加你信任的服务器。每次调用 MCP 工具前 AIVN 都会请求许可（除非你选择“始终允许”）。",
+    "⚠ Mình chưa thấy các số sau trên trang đã đọc nên chưa chắc chúng đúng: {0}. Bạn xem lại trên trang giúp mình.": "⚠ 我在已读取的页面上没有找到以下数字，因此不确定它们是否正确：{0}。请在页面上核对。",
     "⚠ Sát giới hạn — có thể chậm": "⚠ 接近上限 — 可能较慢",
     "⚠ Đây là mô hình embedding (tạo vector), không dùng để trò chuyện.": "⚠ 这是嵌入模型（生成向量），不能用于对话。",
     "⚠ Đường dẫn ở trên chưa được đối chiếu với thanh địa chỉ của trang đã mở trong trình duyệt.": "⚠ 上面的链接尚未与浏览器中已打开页面的地址栏核对。",

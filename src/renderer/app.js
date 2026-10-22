@@ -29,12 +29,22 @@ function toast(msg, err = false, { sticky = false } = {}) {
 }
 function clearInfoToasts() { for (const el of [...toastStack.children]) if (el.dataset.route === 'nav') el.remove(); }
 
+// B118: đường dẫn hiển thị LUÔN là chính href (không bao giờ chữ một đằng, link một nẻo). [chữ](href) chỉ thành link khi chữ === href;
+// khác nhau → hiện cả hai dạng chữ thường, không link. URL trần http(s) → link với href === chữ.
+function mdLinks(h) {
+  const ok = (u) => /^https?:\/\/[^\s"'<>]+$/i.test(u);
+  const a = (u) => `<a href="${u}" target="_blank" rel="noopener">${u}</a>`;
+  const hold = [];
+  h = h.replace(/\[([^\]\n]{1,400})\]\(([^)\s]{1,600})\)/g, (all, t, u) => { hold.push(t === u && ok(u) ? a(u) : all); return `\u0001${hold.length - 1}\u0001`; });
+  h = h.replace(/\bhttps?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]]/gi, (u) => a(u));
+  return h.replace(/\u0001(\d+)\u0001/g, (_, i) => hold[Number(i)]);
+}
 // Markdown tối giản: khối code, code inline, in đậm, nghiêng, xuống dòng
 function md(src) {
   const parts = src.split(/```/);
   return parts.map((p, i) => {
     if (i % 2) { const nl = p.indexOf('\n'); const code = nl >= 0 ? p.slice(nl + 1) : p; return `<pre><code>${esc(code.replace(/\n$/, ''))}</code></pre>`; }
-    return esc(p).replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>').replace(/\n/g, '<br>');
+    return mdLinks(esc(p)).replace(/`([^`\n]+)`/g, '<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<i>$2</i>').replace(/\n/g, '<br>');
   }).join('');
 }
 

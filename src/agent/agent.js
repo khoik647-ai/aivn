@@ -372,15 +372,76 @@ function draftNoteOf(cd) {
   if (cd.left) return `Tin CHƯA được gửi. Chữ ${t} AIVN đã gõ VẪN CÒN trong ô soạn tin${cd.why ? ` (${cd.why})` : ''} — bạn xoá đi hoặc tự bấm gửi nếu muốn.`;
   return `Tin CHƯA được gửi (chữ ${t} AIVN đã gõ không còn trong ô soạn tin).`;
 }
-function withSource(text, query, msgs) {
-  if (!(SOURCE_RE.test(String(query || '')) || SOURCE_RE2.test(String(query || ''))) || chatAppOf(query)) return text; // việc nhắn tin “kèm link” không phải hỏi nguồn
-  const seen = seenUrls(msgs).filter(u => !SEARCH_PAGE_RE.test(u)); const said = String(text || '').match(URL_IN_RE) || [];
-  const full = (u) => /^https?:\/\//i.test(u) ? u : 'https://' + u;
-  if (!said.length) return String(text || '').trim() + '\n\n' + (seen.length ? SOURCE_MSG.replace('{0}', full(seen[0])) : SOURCE_NONE_MSG);
-  if (seen.length && !said.some(u => seen.some(x => hostOf(x) === hostOf(u)))) return String(text || '').trim() + '\n\n' + SOURCE_FIX_MSG.replace('{0}', full(seen[0])); // URL mô hình ghi không phải trang đã mở
-  if (!seen.length && BROWSER_TASK_RE.test(String(query || ''))) return String(text || '').trim() + '\n\n' + SOURCE_UNSEEN_MSG; // B114: đường dẫn không thấy trên trang đã mở trong trình duyệt
-  return text;
+// B118: đường dẫn trong câu trả lời phải KHỚP CHÍNH XÁC nguồn đọc từ công cụ (thanh địa chỉ chép được / cây giao diện / URL cuối của fetch_url);
+// link markdown viết lại thành [nguồn](nguồn); URL lệch → nguồn gần nhất, không khớp nguồn nào → bỏ; không có nguồn nào → giữ chữ (không thành link) + cảnh báo
+function sourcesOf(msgs, extra = []) {
+  const G = require('./grounding');
+  const out = [];
+  const add = (x) => { if (x && x.url && !out.some(y => G.urlKey(y.url) === G.urlKey(x.url))) out.push(x); };
+  for (const x of extra || []) add(x);
+  for (const x of G.sourcesFromMsgs(msgs)) add(x);
+  if (!out.some(x => x.kind === 'address')) for (const u of seenUrls(msgs)) add({ url: u, kind: 'ocr' }); // OCR thanh địa chỉ: chỉ dùng khi không có nguồn chắc hơn
+  return [...out.filter(x => !SEARCH_PAGE_RE.test(x.url)), ...out.filter(x => SEARCH_PAGE_RE.test(x.url))];
 }
+function withSource(text, query, msgs, opts = {}) {
+  const G = require('./grounding');
+  const q = String(query || ''); const wantSrc = SOURCE_RE.test(q) || SOURCE_RE2.test(q);
+  if (chatAppOf(query)) return text; // việc nhắn tin “kèm link” không phải hỏi nguồn
+  const said = String(text || '').match(G.URL_RE) || [];
+  if (!wantSrc && !said.length) return text;
+  const sources = sourcesOf(msgs, opts.sources); const real = sources.filter(x => !SEARCH_PAGE_RE.test(x.url));
+  const full = (u) => /^https?:\/\//i.test(u) ? u : 'https://' + u;
+  if (opts.out) opts.out.sources = real;
+  if (!real.length) {
+    // không có nguồn nào để đối chiếu: không biến chữ mô hình viết thành link (href có thể sai); giữ chữ hiển thị + cảnh báo
+    const U1 = new RegExp(G.URL_RE.source, 'iu');
+    const t = String(text || '').replace(/\[([^\]\n]{1,300})\]\(([^)\s]{1,500})\)/g, (all, label, href) => (U1.test(label) ? label : `${label} (${href})`)).trim();
+    if (!said.length) return t + '\n\n' + SOURCE_NONE_MSG;
+    return t + (BROWSER_TASK_RE.test(q) || wantSrc ? '\n\n' + SOURCE_UNSEEN_MSG : '');
+  }
+  const fx = G.fixUrls(text, real); if (opts.out) opts.out.urls = fx.urls;
+  let t = fx.text.trim();
+  const s0 = full((real.find(x => x.kind === 'address') || real[0]).url);
+  if (fx.dropped) return t + '\n\n' + SOURCE_FIX_MSG.replace('{0}', s0); // URL mô hình ghi không phải trang đã mở
+  if (!fx.urls.length && wantSrc) return t + '\n\n' + SOURCE_MSG.replace('{0}', s0);
+  if (real.every(x => x.kind === 'ocr') && fx.urls.length && (BROWSER_TASK_RE.test(q) || wantSrc)) return t + '\n\n' + SOURCE_UNSEEN_MSG; // chỉ có chữ OCR của thanh địa chỉ
+  return t;
+}
+// B119: số liệu trong câu trả lời phải có trong chữ trang đã đọc (chép trang > cây giao diện > OCR); thiếu → viết lại MỘT lần theo trích đoạn trang,
+// vẫn thiếu → nói rõ chưa chắc. Bỏ ký hiệu tiền không có trên trang (₽…), bỏ nhận định so sánh/nguyên nhân trang không nói.
+function readTextOf(msgs) {
+  return (msgs || []).filter(m => m && m.role === 'tool').map(m => String(m.content || '').split(/\nMô tả màn hình \(/)[0]).join('\n'); // bỏ phần mô hình nhìn ảnh tự mô tả (không phải dữ liệu trang)
+}
+function pageExcerpt(pageText, query, answer, max = 5000) {
+  const G = require('./grounding'); const words = new Set(`${query} ${answer}`.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length >= 3));
+  const lines = String(pageText || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const score = (l) => (G.numbersIn(l).length ? 2 : 0) + l.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => words.has(w)).length;
+  const keep = lines.map((l, i) => ({ l, i, s: score(l) })).filter(x => x.s >= 2).slice(0, 400);
+  let out = ''; for (const x of keep) { if (out.length + x.l.length > max) break; out += x.l + '\n'; }
+  return out || lines.join('\n').slice(0, max);
+}
+async function groundAnswer(text, { query, pageText, engine, signal, log } = {}) {
+  const G = require('./grounding'); let t = String(text || '');
+  const check = (x) => ({ nums: G.ungroundedNumbers(x, pageText, { query }), claims: G.unsupportedClaims(x, pageText), cur: G.stripStrayCurrency(x, pageText).removed });
+  let c = check(t); const info = { before: c, repaired: false, after: null };
+  if (!c.nums.length && !c.claims.length && !c.cur.length) return { text: t, info };
+  log && log(`[aivn agent] B119: số/ký hiệu/nhận định chưa có trên trang đã đọc: số [${c.nums.join(', ')}] · ký hiệu [${c.cur.join(' ')}] · nhận định ${c.claims.length}`);
+  const unit = G.unitOf(pageText);
+  if (engine && engine.chatStep && !(signal && signal.aborted) && String(pageText || '').trim()) {
+    const sys = `Bạn sửa câu trả lời cho khớp ĐÚNG dữ liệu trang web đã đọc. Quy tắc: chỉ dùng con số có NGUYÊN VĂN trong TRÍCH ĐOẠN TRANG (chép đúng số, không làm tròn, không tự đổi); ${unit ? `ghi đơn vị đúng như trang: ${unit}; ` : ''}không dùng ký hiệu tiền tệ (₫, ₽, $…) nếu trang không có; không thêm nhận định, so sánh hay nguyên nhân mà trang không nói; giữ nguyên mọi đường dẫn; ngắn gọn, cùng ngôn ngữ với câu hỏi. Chỉ in câu trả lời đã sửa.`;
+    const user = `CÂU HỎI: ${query}\n\nCÂU TRẢ LỜI NHÁP:\n${t}\n\nTRÍCH ĐOẠN TRANG:\n${pageExcerpt(pageText, query, t)}`;
+    const r = await engine.chatStep([{ role: 'system', content: sys }, { role: 'user', content: user }], { tools: [], toolChoice: 'none', temperature: 0.1, maxTokens: 700, signal }).catch(() => null);
+    const nt = r && String(r.text || '').trim();
+    if (nt) { const c2 = check(nt); if (c2.nums.length <= c.nums.length) { t = nt; c = c2; info.repaired = true; } }
+  }
+  // còn sót: bỏ ký hiệu tiền lạ, bỏ câu nhận định không có trên trang, nói rõ số chưa đối chiếu được
+  t = G.stripStrayCurrency(t, pageText).text;
+  for (const cl of G.unsupportedClaims(t, pageText)) t = t.replace(cl, '').replace(/\n{3,}/g, '\n\n');
+  c = check(t); info.after = c;
+  if (c.nums.length) t = t.trim() + '\n\n' + UNGROUNDED_MSG.replace('{0}', c.nums.slice(0, 6).join(', '));
+  return { text: t.trim(), info };
+}
+const UNGROUNDED_MSG = '⚠ Mình chưa thấy các số sau trên trang đã đọc nên chưa chắc chúng đúng: {0}. Bạn xem lại trên trang giúp mình.';
 const isAppTask = (q) => { const t = String(q || ''); return (APP_TASK_RE.test(t) || APP_TASK_RE2.test(t)) && !HOWTO_RE.test(t); };
 // ensure_app: “nhắn Zalo cho Lan …”, “gửi Messenger …” — ứng dụng nhắn tin/thư nêu ở bất kỳ đâu trong câu gửi tin (không chỉ “trên X”)
 const CHAT_APP_RE = /(?:^|[\s,.(“"])(zalo|messenger|telegram|teams|slack|discord|whatsapp|viber|gmail|outlook)(?=[\s,.:;!?"“”)]|$)/iu;
@@ -1115,7 +1176,18 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       const okSteps = steps.filter(x => x.status === 'ok');
       text = 'Đã làm:\n' + okSteps.slice(-12).map(x => `- ${x.label || x.name}: ${String(x.summary || '').slice(0, 120)}`).join('\n') + (okSteps.length > 12 ? `\n- … và ${okSteps.length - 12} bước khác` : '');
     }
-    if (!hardStop && finishReason !== 'abort' && String(text || '').trim() && steps.some(x => ['screen_look', 'screen_act'].includes(x.name) && x.status === 'ok')) text = withSource(text, query, msgs); // kịch bản A
+    let srcOut = {};
+    if (!hardStop && finishReason !== 'abort' && String(text || '').trim() && steps.some(x => ['screen_look', 'screen_act'].includes(x.name) && x.status === 'ok')) { // kịch bản A
+      // B118/B119: việc trên trình duyệt → đọc nguyên văn thanh địa chỉ + chữ trang (chép) trước khi chốt câu trả lời
+      let page = null;
+      if (BROWSER_TASK_RE.test(String(query || '')) && deps.computer && deps.computer.readBrowserPage && !(signal && signal.aborted)) { try { page = await deps.computer.readBrowserPage({ page: true }); } catch {} }
+      if (BROWSER_TASK_RE.test(String(query || '')) && !(signal && signal.aborted)) {
+        const pageText = `${page && page.text ? page.text : ''}\n${readTextOf(msgs)}`;
+        try { const g = await groundAnswer(text, { query, pageText, engine: deps.engine, signal, log: deps.log }); text = g.text; srcOut.grounding = g.info; } catch {}
+      }
+      text = withSource(text, query, msgs, { sources: page && page.url ? [{ url: page.url, kind: 'address' }] : [], out: srcOut });
+      if (srcOut.urls && srcOut.urls.length) deps.log && deps.log(`[aivn agent] B118: đường dẫn trong câu trả lời: ${srcOut.urls.map(u => `${u.said} → ${u.url || 'BỎ'} (${u.how})`).join(' · ')}`);
+    }
     if (fakeSeen && !warning && finishReason !== 'abort' && !steps.some(x => COMP.includes(x.name) && x.status === 'ok')) warning = noActionWarn(steps, gateOk());
     // B30: không có chữ nào và không bước nào làm được → báo rõ “mô hình không trả lời”, không để câu trả lời rỗng
     if (!String(text || '').trim() && finishReason !== 'abort' && !steps.some(x => x.status === 'ok')) { text = EMPTY_ANSWER(Math.round((Date.now() - t0) / 1000)); if (warning === NO_ACTION_OK_WARN || warning === NO_ACTION_WARN) warning = null; deps.log && deps.log(`[aivn agent] câu trả lời trống sau ${Math.round((Date.now() - t0) / 1000)} giây, ${steps.length} bước — báo lỗi rõ cho người dùng`); }
@@ -1153,10 +1225,10 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       outcome = 'failed'; deps.log && deps.log('[aivn agent] B111: việc mở cuộc trò chuyện nhưng chưa có bước nào kiểm tiêu đề khớp người nhận → không báo xong');
       if (!/chưa|không/iu.test(String(text || ''))) text = `${String(text || '').trim()}\n\nMình CHƯA xác nhận được đã mở đúng cuộc trò chuyện “${require('./send-verify').recipientOf(query)}” (tiêu đề khung chat chưa khớp).`.trim();
     }
-    return { text: (text || '').trim(), steps, usage, finishReason, urls, memories: sys.memories.map(m => m.text), tools: names, warning, outcome };
+    return { text: (text || '').trim(), steps, usage, finishReason, urls, memories: sys.memories.map(m => m.text), tools: names, warning, outcome, sources: srcOut.sources || [], grounding: srcOut.grounding || null };
   }
 
   return { refusedSendText, run, replyLang, activeTools, resolvePath, folders, get defs() { return allDefs(); }, exec, claimCheck, localizeText };
 }
 
-module.exports = { BROWSER_TASK_RE, SOURCE_UNSEEN_MSG, OPEN_CHAT_RE, openChatTask, chatVerifiedStep, CHAT_VERIFIED_RE, withSource, seenUrls, scrubToolNames, isAppTask, appOf, NO_APP_ACTION_WARN, noActionWarn, NO_ACTION_WARN, NO_ACTION_OK_WARN, EMPTY_ANSWER, editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };
+module.exports = { groundAnswer, sourcesOf, readTextOf, UNGROUNDED_MSG, BROWSER_TASK_RE, SOURCE_UNSEEN_MSG, OPEN_CHAT_RE, openChatTask, chatVerifiedStep, CHAT_VERIFIED_RE, withSource, seenUrls, scrubToolNames, isAppTask, appOf, NO_APP_ACTION_WARN, noActionWarn, NO_ACTION_WARN, NO_ACTION_OK_WARN, EMPTY_ANSWER, editDist, openNudge, OPEN_WANT_RE, NOT_FOUND_RE, searchNudge, isActAsk, REFUSE_RE, CHIPS_RE, REPEAT_WARN, GUIDE_NOTE, stripIntro, ASK_ID_RE, openIntent, sanitizeHistory, NOT_INSTALLED_RE, createAgent, DEFS, ToolError, csvStats, IDENTITY, WELCOME, welcomeFor, CREATOR, TOOL_GROUPS, fakeActionCheck, stripFake, NO_ACTION_WARN, NO_COMP_WARN, sendClaimCheck, guardClaims, SEND_CLAIM_RE, tidyAnswer, noActionWarn };
