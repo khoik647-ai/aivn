@@ -206,6 +206,15 @@ footer{border-top:1px solid var(--line);padding:56px 0 32px;background:var(--bg2
   .app{transform:none}
   .privacy{padding:36px}
 }
+/* B185: iPad dọc 768–900 px — hàng menu co lại để nút “Download free” không đẩy trang tràn ngang. Điện thoại (≤760) và máy tính (>900) giữ nguyên. */
+@media (max-width:900px) and (min-width:761px){
+  header .wrap{padding-left:14px;padding-right:14px}
+  .nav ul{gap:8px}
+  .nav ul a{font-size:.84rem}
+  .nav-cta{gap:8px;flex-shrink:0}
+  .nav-cta .btn-sm{padding:8px 11px;white-space:nowrap}
+  .lang button{padding:6px 7px;min-width:30px}
+}
 @media (max-width:760px){
   .mac-wrap{display:flex;flex-direction:column}
   .mac-menu{position:static;margin-top:8px;min-width:0}
