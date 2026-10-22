@@ -61,7 +61,7 @@ test('B192: việc cần gõ mà mô hình chỉ bấm menu, không gõ chữ n�
 
 test('B192: việc không cần gõ — bước màn hình cuối chưa có tác dụng → failed; có tác dụng → done', async () => {
   const NOCHANGE = (a) => ({ forModel: `Đã bấm "${a.element}".\nKiểm tra: Màn hình không thay đổi rõ ràng — nếu cần, thử cách khác.`, summary: `bấm “${a.element}”` });
-  let r = await run(mkAgent([call('screen_act', { action: 'click', element: 'Bật' }), say('Đã bật xong.')], 'vi', NOCHANGE), 'mở Cài đặt và bấm nút Bật Bluetooth');
+  let r = await run(mkAgent([call('screen_act', { action: 'click', element: 'Bật' }), say('Đã bấm nút Bật xong rồi nhé.')], 'vi', NOCHANGE), 'mở Cài đặt và bấm nút Bật Bluetooth');
   assert.strictEqual(r.outcome, 'failed', r.text); assert.match(r.text, /bước cuối chưa có tác dụng trên màn hình/);
   assert.match(r.warning || '', /chưa kiểm chứng được bước cuối trên màn hình/, 'cảnh báo cũ (v016-retry) vẫn giữ');
   r = await run(mkAgent([call('screen_act', { action: 'click', element: 'Bật' }), say('Đã bật xong.')], 'vi', NOT_SEEN), 'mở Cài đặt và bấm nút Bật Bluetooth');
