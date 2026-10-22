@@ -55,14 +55,14 @@ function redactTitles(s, titles = []) {
 }
 // thẻ bước trong app (agent.js): bước có chữ/cửa sổ nhạy cảm → bỏ ảnh nhỏ (khỏi lưu vào cuộc trò chuyện), cảnh báo trên thanh bước,
 // che chuỗi trông như khoá trong phần “Kết quả” hiển thị (mô hình vẫn nhận nguyên kết quả qua forModel)
-function guardStep(step, out, { say = (l, k) => k, lang = 'vi' } = {}) {
+function guardStep(step, out, { warn = () => WARN } = {}) {
   if (!step || !out) return step;
   const w = out.window && typeof out.window === 'object' ? out.window : null;
   if (w && (w.hwnd != null || w.title)) step.win = { hwnd: w.hwnd ?? null, pid: w.pid ?? null, proc: w.proc || null, title: w.title || '', b: Array.isArray(w.b) ? w.b : undefined };
   const hits = scan({ title: w ? w.title : '', proc: w ? w.proc : '', text: [out.forModel, out.summary, out.detail].filter(x => typeof x === 'string').join('\n') });
   if (hits.length) {
     step.sensitive = hits; step.thumb = undefined;
-    step.summary = (step.summary ? String(step.summary) + ' · ' : '') + '⚠ ' + say(lang, WARN);
+    step.summary = (step.summary ? String(step.summary) + ' · ' : '') + '⚠ ' + warn();
   }
   if (typeof step.detail === 'string') step.detail = redactSecrets(step.detail);
   if (typeof step.summary === 'string') step.summary = redactSecrets(step.summary);

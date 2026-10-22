@@ -17,6 +17,7 @@ const { DAY_VI } = require('./scheduler');
 const CP = require('./compact');
 const RT = require('./retry');
 const { say, sys: sysTr, langOf } = require('./say'); // B182: câu do mã ghép theo ngôn ngữ trả lời
+const SG = require('./shot-guard'); // B193: ảnh chụp/kết quả bước có nội dung nhạy cảm
 const WR = require('./web-read');
 // B156: lỗi của mã JavaScript tưởng có trình duyệt/DOM
 const DOM_ERR_RE = /\b(?:window|document|navigator|location|localStorage|alert|fetch|XMLHttpRequest|chrome)\b(?: is not defined|\.[\w.]+ is not a function)|Cannot read propert(?:y|ies) of undefined \(reading '(?:querySelector|getElementById|body)'/i;
@@ -1225,6 +1226,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
           if (call.name === 'screen_act') { try { const rr = retry.after(args, out, rctx); if (rr.bad) { out = { ...out, forModel: String(out.forModel || '') + rr.hint }; step.check = rr.bad; } } catch {} }
         }
         Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok' /* B166: bước có step.check hiện “không có tác dụng” (màu hổ phách), không phải “xong” xanh */, check: step.check || null, summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, draftIn: out.draftIn || undefined, ms: Date.now() - step.startedAt });
+        SG.guardStep(step, out, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá') }); // B193: bước có cửa sổ/chữ nhạy cảm (mã kích hoạt, mật khẩu, khoá) → bỏ ảnh nhỏ, cảnh báo trên thanh bước, che chuỗi trông như khoá
         logTool(step);
         cyc.push(call.name, args, { error: out.error, refused: out.refused, bad: !!step.check, summary: out.summary, verified: !!(out.verify && out.verify.sent), sig: out.sig || (out.raw && out.raw.sig) || null });
         onStep({ ...step });
