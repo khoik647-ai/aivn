@@ -53,6 +53,15 @@ Get-Content -Encoding UTF8 C:\qa\r1\result.json | ConvertFrom-Json
 * **Bước gửi bị từ chối** (B93): AIVN AGENT dừng lượt; `finalAnswer` nói rõ *“Mình CHƯA gửi tin “…” cho “<đúng tên trong lệnh>”: bước gửi đã bị từ chối…”*
   (không diễn đạt lại tên, không hỏi lại). `approvals[]` của thẻ gửi có `send: true`, `recipient` (tên trong lệnh), `shownChat` (tiêu đề khung chat giữa + tên trong chữ gợi ý ô soạn) và `text`.
 
+* **Gửi tin là bước do AIVN làm** (B101, beta.2.5): trong việc gửi tin, khi cổng người nhận (B90) đã chốt mà mô hình chỉ gõ nội dung, AIVN **tự** gõ → kiểm chữ đã nằm trong ô soạn
+  (nhật ký `B94: kiểm chữ sau khi gõ “…”: CÓ trong ô soạn tin → bấm Enter`) → bấm Enter → kiểm bong bóng tin + ô soạn trống → kết thúc việc là `done`
+  (`finalAnswer`: *“Đã gửi tin “…” tới “…” và đã kiểm chứng trên màn hình…”*). Đây vẫn là **bước GỬI**: qua thẻ (QA: tự từ chối, hoặc `--approve-send-to`).
+  Chữ vào nhầm ô → không bấm Enter, xoá chữ gõ nhầm. Lệnh “chỉ soạn / đừng gửi” → không tự gửi.
+* **Chốt người nhận giữ suốt lượt** (B102) khi tiêu đề khung chat (đã làm sạch) vẫn đúng — không phụ thuộc chữ gợi ý ô soạn (biến mất khi ô có chữ).
+* **Chữ đã gõ mà chưa gửi** (B104): lượt thất bại / hết `--timeout` → AIVN xoá chữ nó đã gõ trong ô soạn; người dùng bấm Dừng → không thao tác thêm, chỉ báo chữ vẫn còn.
+  `finalAnswer` **luôn có** (kể cả hết giờ, lỗi, thoát sớm mã 2) và nói rõ chữ đã xoá / vẫn còn.
+* **`version` + `commit` có ở mọi `result.json`** (B106), kể cả thoát sớm (cờ sai, đang chạy việc QA khác, `--qa-ui` không có `--profile`).
+
 ### `--approve-send-to "<tên>"` — chỉ để thử gửi THẬT vào cuộc trò chuyện của chính mình (beta.2.2)
 
 * Chỉ dùng kèm `AIVN_QA_MODE=1` **và** `--agent-task` (kèm `--qa-ui` / `--qa-input-diag` → cờ sai, thoát 2).

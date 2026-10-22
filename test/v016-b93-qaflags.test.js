@@ -107,6 +107,8 @@ test('thật (Xvfb): --approve-send-to "Trần Văn Bình" → từ chối chạ
   const r = spawnSync('timeout', ['90', 'nice', '-n', '19', 'xvfb-run', '-a', '-s', '-screen 0 1280x800x24', path.join(root, 'node_modules/.bin/electron'), '.', '--no-sandbox', '--agent-task', TASK, '--approve-send-to', 'Trần Văn Bình', '--out', path.join(d, 'r.json'), '--profile', path.join(d, 'p')], { cwd: root, encoding: 'utf8', env: { ...process.env, AIVN_SKIP_ACTIVATION: '1', AIVN_QA_MODE: '1', AIVN_USER_DATA: ud } });
   assert.strictEqual(r.status, 2, r.stderr); assert.match(r.stderr, /TỪ CHỐI “Trần Văn Bình”/);
   const j = JSON.parse(fs.readFileSync(path.join(d, 'r.json'), 'utf8')); assert.strictEqual(j.exitCode, 2); assert.match(j.reason, /chính bạn/);
+  // B106: thoát sớm vẫn có version + commit + finalAnswer
+  assert.ok(j.version && /^\d+\.\d+\.\d+/.test(j.version), 'thiếu version'); assert.ok(j.commit && /^[0-9a-f]{7,40}/.test(j.commit), 'thiếu commit: ' + j.commit); assert.match(j.finalAnswer, /chính bạn/);
   const logs = [path.join(ud, 'logs', 'aivn.log'), path.join(d, 'p', 'logs', 'aivn.log')].filter(f => fs.existsSync(f)).map(f => fs.readFileSync(f, 'utf8')).join('\n');
   assert.match(logs, /--approve-send-to TỪ CHỐI “Trần Văn Bình”.*thoát mã 2/);
 });

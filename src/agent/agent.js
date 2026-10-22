@@ -359,6 +359,13 @@ function seenUrls(msgs) {
   }
   return [...out.filter(u => !SEARCH_PAGE_RE.test(u)), ...out.filter(u => SEARCH_PAGE_RE.test(u))];
 }
+// B104: câu báo chữ AIVN đã gõ vào ô soạn (chưa gửi)
+function draftNoteOf(cd) {
+  const t = `“${String(cd.text || '').slice(0, 80)}”`;
+  if (cd.cleared) return `Tin CHƯA được gửi. Chữ ${t} AIVN đã gõ vào ô soạn tin đã được xoá.`;
+  if (cd.left) return `Tin CHƯA được gửi. Chữ ${t} AIVN đã gõ VẪN CÒN trong ô soạn tin${cd.why ? ` (${cd.why})` : ''} — bạn xoá đi hoặc tự bấm gửi nếu muốn.`;
+  return `Tin CHƯA được gửi (chữ ${t} AIVN đã gõ không còn trong ô soạn tin).`;
+}
 function withSource(text, query, msgs) {
   if (!SOURCE_RE.test(String(query || '')) || chatAppOf(query)) return text; // việc nhắn tin “kèm link” không phải hỏi nguồn
   const seen = seenUrls(msgs).filter(u => !SEARCH_PAGE_RE.test(u)); const said = String(text || '').match(URL_IN_RE) || [];
@@ -828,7 +835,8 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       if (desk && !deskVerified()) return honestOf('chưa kiểm chứng được trên màn hình là việc đã xong');
       return 'Xong: ' + String(lastOk.summary || '').replace(/^\(lặp lại\)\s*/, '') + '.';
     };
-    const cyc = require('./cycle').createCycleGuard(); // B66b: chu kỳ thao tác 2–6 bước / nhiều bước không tiến triển → dừng, báo trung thực
+    let sentDone = null; // B101
+    const cyc = require('./cycle').createCycleGuard(); // B66b/B103: chu kỳ thao tác 2–8 bước / nhiều bước không tiến triển → dừng, báo trung thực
     let hardStop = null; let text = '', finishReason = 'stop', calls = 0, searchNudged = false, openNudged = false, nudged = false, deskNudged = false, forcedTried = false, warning = null, fakeSeen = false, emptyNudged = false, loopRetried = false;
     const smp = SMP.samplingFor(st.id || '', 'agent', { temperature: typeof s.agentTemperature === 'number' && s.agentTemperature !== 0.2 ? s.agentTemperature : null }); // 0.2 = mặc định cũ (dễ lặp) → tự động theo mô hình
     const turnBudget = Number(s.agentTurnMaxTokens) || 6000;
@@ -1049,9 +1057,12 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         msgs.push({ role: 'tool', tool_call_id: call.id, content: typeof out.forModel === 'string' && out.forModel ? out.forModel : String(out.forModel ?? out.message ?? out.summary ?? JSON.stringify(out)) || '(không có kết quả)' });
         // B49/B36: công cụ yêu cầu DỪNG (chặn người nhận 3 lần) hoặc tin đã bị GỬI NHẦM → dừng thật, không để mô hình làm tiếp
         if (out.stop || (out.verify && out.verify.wrongChat)) { hardStop = out.sendRefused ? { why: String(out.error || ''), sendRefused: out.sendRefused } : out.ask ? { why: String(out.error || ''), ask: String(out.ask) } : out.verify && out.verify.wrongChat ? { why: out.verify.why, wrong: true } : { why: String(out.error || out.summary || 'công cụ yêu cầu dừng') }; break; }
+        // B101: tin đã GỬI và KIỂM CHỨNG trong việc gửi tin → xong, không để mô hình làm tiếp (bấm lung tung / gửi trùng)
+        if (!hardStop && out.sentDone && out.verify && out.verify.sent) { sentDone = out.sentDone; break; }
         if (signal?.aborted) break;
       }
       if (signal?.aborted) { finishReason = 'abort'; break; }
+      if (sentDone) { outcome = 'done'; finishReason = 'stop'; warning = null; text = `Đã gửi tin “${String(sentDone.msg).slice(0, 200)}”${sentDone.to ? ` tới “${sentDone.to}”` : ''} và đã kiểm chứng trên màn hình: thấy tin trong khung chat, ô soạn tin đã trống.`; deps.log && deps.log(`[aivn agent] B101: gửi xong và đã kiểm chứng → kết thúc việc`); break; }
       if (hardStop) { outcome = hardStop.ask ? 'asked_user' : hardStop.wrong || hardStop.sendRefused ? 'blocked' : 'failed'; text = hardStop.sendRefused ? refusedSendText(hardStop.sendRefused) : hardStop.ask ? hardStop.ask : hardStop.wrong ? `⚠ ${hardStop.why}. AIVN AGENT đã dừng, không gửi thêm gì. Bạn mở cuộc trò chuyện đó để thu hồi/xoá tin giúp mình.` : honestOf(hardStop.why); warning = null; finishReason = 'stop'; deps.log && deps.log(`[aivn agent] dừng theo yêu cầu của công cụ: ${hardStop.why}`); break; }
       // B39: cùng một cách đã hỏng mà mô hình cứ quay lại (bị chặn 2–3 lần) → dừng sớm, báo trung thực những gì đã thử
       if (look.blocked >= 2) { text = honestOf('quan sát màn hình nhiều lần liền mà mô hình không làm bước nào'); warning = null; finishReason = 'stop'; deps.log && deps.log('[aivn agent] dừng sớm (B40): quan sát lặp lại'); break; }
@@ -1090,6 +1101,13 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       text = verified ? String(text).split(/\n+/).filter(l => !RT.promiseEnding(l)).join('\n').trim() || 'Đã làm xong và kiểm chứng trên màn hình.' : honestOf('mô hình định làm tiếp nhưng lượt đã kết thúc');
     }
     if (finishReason !== 'abort') { const fc = RT.finalCheck(text, retry); if (fc) warning = warning || fc; }
+    // B104: việc gửi tin chưa xong mà ô soạn còn chữ AIVN gõ → xoá (hoặc báo rõ còn đó); người dùng bấm Dừng → không thao tác thêm
+    if (!sentDone && deps.computer && deps.computer.cleanupDraft && require('./send-verify').MSG_SEND.test(String(query || '')) && !/(chỉ soạn|soạn sẵn|không gửi|đừng gửi|chưa gửi|don't send|do not send|draft only|只起草|不要发送|别发送|先不要发)/iu.test(String(query || ''))) {
+      try {
+        const cd = await deps.computer.cleanupDraft({ clear: !(signal?.aborted && signal.reason !== 'timeout') });
+        if (cd) { const note = draftNoteOf(cd); text = `${String(text || '').trim()}${String(text || '').trim() ? '\n\n' : ''}${note}`; }
+      } catch {}
+    }
     usage.seconds = (Date.now() - t0) / 1000;
     usage.tokensPerSecond = usage.seconds ? usage.completion_tokens / usage.seconds : 0;
     const urls = steps.flatMap(x => x.urls || []);

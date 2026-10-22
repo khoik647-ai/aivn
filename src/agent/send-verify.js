@@ -213,6 +213,7 @@ const MENU_WORDS = new Set(['tep', 'sua', 'xem', 'cua', 'so', 'tro', 'giup', 'ch
 const MENU_BAR = (t) => { const w = fold(t).split(' ').filter(Boolean); return w.length > 0 && w.length <= 10 && w.every(x => MENU_WORDS.has(x)); };
 const INFO_PANEL = /^(?:thông tin hội thoại|thong tin hoi thoai|thông tin nhóm|thông tin cuộc trò chuyện|conversation info|chat info|group info|details|会话信息|聊天信息|群信息|對話資訊|会话资料)$/iu;
 const COMPOSER_HINT = /^(?:nhập|nhap|soạn tin|aa$|type a message|write a message|send a message|message\s|输入消息|发送消息|輸入訊息)/iu;
+const CUT_MEMO = new Map(); // B102: mép trái khung chat theo cửa sổ
 function regionsOf(obs) {
   const els = (obs && obs.elements || []).filter(e => Array.isArray(e.b) && e.b.length >= 4);
   if (!els.length) return null;
@@ -226,7 +227,12 @@ function regionsOf(obs) {
   // “Thông tin hội thoại” bên phải. Mép trái khung chat = mép trái ô soạn (“Nhập @, tin nhắn tới …”); bảng thông tin bên phải bị loại khỏi tiêu đề
   const nm = (e) => String(e.name || e.value || '').trim();
   const comp = els.filter(e => rel(e).ry > 0.8 && rel(e).left > 0.08 && rel(e).left < 0.33 && (e.editable || COMPOSER_HINT.test(nm(e)) || /tin nhắn|message|消息|訊息/iu.test(String(e.placeholder || '')))).sort((a, b) => a.b[0] - b.b[0])[0];
-  const cut = comp ? Math.min(0.3, rel(comp).left - 0.03) : 0.3;
+  // B102 (máy thật beta.2.4): gõ nội dung xong thì chữ gợi ý “Nhập @, tin nhắn tới …” biến mất → mất mép khung chat → tiêu đề “My Documents”
+  // lại bị coi là danh sách → chốt người nhận (B90) mất. Nhớ mép đã thấy cho cùng cửa sổ (cùng ứng dụng + cùng khung) và dùng lại.
+  const wkey = `${String((obs.win && (obs.win.proc || obs.win.pid)) || '')}|${W.map(v => Math.round(v / 8)).join(',')}`;
+  let cut = comp ? Math.min(0.3, rel(comp).left - 0.03) : null;
+  if (cut != null) { CUT_MEMO.delete(wkey); CUT_MEMO.set(wkey, cut); if (CUT_MEMO.size > 32) CUT_MEMO.delete(CUT_MEMO.keys().next().value); }
+  else cut = CUT_MEMO.has(wkey) ? CUT_MEMO.get(wkey) : 0.3;
   const ip = els.find(e => rel(e).ry < 0.16 && rel(e).left > 0.55 && INFO_PANEL.test(nm(e)));
   const panelL = ip ? Math.max(0.5, (2 * (ip.b[0] + ip.b[2] / 2) - (W[0] + W[2]) - W[0]) / W[2] - 0.02) : 2;
   for (const e of els) {

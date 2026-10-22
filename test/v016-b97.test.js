@@ -88,7 +88,8 @@ test('B97 thật (Electron + Xvfb, Zalo giả): tiêu đề “Q My Documents / 
   const c1 = by['b97-noisy-header'].asks.find(a => a.send); assert.ok(c1, 'bước gõ + Enter phải qua thẻ GỬI');
   assert.ok(c1.shown.headerRaw.some(h => /^Q My Documents$/.test(h)), 'tái hiện tiêu đề OCR “Q My Documents”: ' + JSON.stringify(c1.shown.headerRaw));
   assert.deepStrictEqual(c1.shown.header, ['My Documents']); assert.ok(Q.selfChatShown(c1).ok, JSON.stringify(Q.selfChatShown(c1)));
-  const c2 = by['b97-time-only-enter'].asks.find(a => a.send); assert.ok(c2, 'Enter riêng phải qua thẻ GỬI');
+  // B101 (beta.2.5): người nhận đã chốt → bước gõ nội dung tự thành bước GỬI (gõ + Enter), thẻ GỬI ở bước gõ; nếu không thì ở Enter riêng
+  const c2 = by['b97-time-only-type'].asks.find(a => a.send) || by['b97-time-only-enter'].asks.find(a => a.send); assert.ok(c2, 'bước gửi (gõ + tự Enter, hoặc Enter riêng) phải qua thẻ GỬI');
   assert.deepStrictEqual(c2.shown.header, [], 'chỉ còn giờ → không còn tên: ' + JSON.stringify(c2.shown.headerRaw));
   assert.strictEqual(c2.shown.gate.chatOpen, SV.nameKey('Cloud của tôi')); assert.strictEqual(c2.shown.gate.placeholder, 'My Documents');
   assert.ok(Q.selfChatShown(c2).ok, 'cổng + chữ gợi ý trong lượt → qua'); assert.ok(!Q.selfChatShown({ ...c2, shown: { ...c2.shown, gate: null } }).ok, 'bỏ kết quả cổng → không qua');

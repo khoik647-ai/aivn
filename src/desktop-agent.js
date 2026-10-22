@@ -16,6 +16,28 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const { riskOf, RISKY_NAME, ACT_LABEL, ALIASES } = require('./agent/desk-policy');
 const AU = require('./agent/autonomy');
 
+const DRAFT_SEND = /(chỉ soạn|soạn sẵn|không gửi|đừng gửi|chưa gửi|don't send|do not send|draft only|只起草|不要发送|别发送|先不要发)/iu;
+// B94/B101: chữ vừa gõ nằm ở đâu — 'composer' (ô soạn tin), 'wrong' (ô khác, vd. ô tìm kiếm) hoặc null (không đọc được)
+function landedOf(before, obs, text, composerBox) {
+  const SVl = require('./agent/send-verify'); const Ul = require('./agent/uitree');
+  const typed = Ul.fold(String(text || '').split('\n')[0]).slice(0, 40); if (!obs || !typed) return { landed: null, wrongEl: null };
+  const W = obs.win && Array.isArray(obs.win.b) && obs.win.b[3] > 50 ? obs.win.b : null;
+  const cb = composerBox || (SVl.findComposer(obs) || {}).b || null;
+  const hasTyped = (e) => (e.value && Ul.fold(e.value).includes(typed)) || (e.name && Ul.fold(e.name).includes(typed)) || (e.ocr && e.name && Ul.fuzzyHas(Ul.fold(e.name), typed.slice(0, 24)));
+  const preEls = (before && before.elements) || [];
+  const existed = (e) => preEls.some(p => p.b && e.b && hasTyped(p) && Math.abs(p.b[0] - e.b[0]) <= 16 && Math.abs(p.b[1] - e.b[1]) <= 16);
+  const inComp = (e) => (e.focused || e.editable) && SVl.isComposerEl(e, obs.win) || (cb && e.b && Math.abs((e.b[1] + e.b[3] / 2) - (cb[1] + cb[3] / 2)) <= Math.max(24, cb[3]) && e.b[0] + e.b[2] > cb[0] - 10) || (W && e.b && (e.b[1] + e.b[3] / 2 - W[1]) / W[3] > 0.82 && !/tìm|tim kiem|search|find/iu.test(`${e.name || ''} ${e.placeholder || ''}`));
+  const hits = (obs.elements || []).filter(e => hasTyped(e) && !existed(e));
+  // không biết khung cửa sổ lẫn ô soạn (OCR cả màn hình, chữ gợi ý không nêu tên) → chỉ coi là NHẦM ô khi có bằng chứng (ô tìm kiếm / con trỏ UIA ở ô khác);
+  // còn lại là “chưa đọc được” → bấm Enter rồi kiểm chứng sau khi gửi (b21: Messenger giả, ô soạn “Nhập tin nhắn...”)
+  const sure = (e) => !!(W || cb) || /tìm|tim kiem|search|find|搜索/iu.test(`${e.name || ''} ${e.placeholder || ''}`) || !!(e.focused && !e.ocr);
+  const good = hits.filter(inComp); const bad = hits.filter(e => !inComp(e) && sure(e));
+  // ô tìm kiếm hẹp: OCR có thể không đọc được chữ vừa gõ nhưng hàng ô tìm kiếm ĐỔI trong khi ô soạn không có chữ mới → cũng là gõ nhầm ô
+  const rowB = Ul.fold(SVl.searchRowText(before)), rowA = Ul.fold(SVl.searchRowText(obs));
+  if (!good.length && !bad.length && rowA !== rowB) { const R0 = (obs.elements || []).filter(e => Array.isArray(e.b) && W && (e.b[1] + e.b[3] / 2 - W[1]) / W[3] < 0.16 && (e.b[0] - W[0]) / W[2] < 0.35); bad.push(R0.sort((x, y) => x.b[0] - y.b[0])[0] || { name: 'ô tìm kiếm', b: null }); }
+  return { landed: good.length ? 'composer' : bad.length ? 'wrong' : null, wrongEl: !good.length && bad.length ? bad[0] : null, good: good[0] || null };
+}
+
 function createDesktopAgent(deps) {
   // trạng thái “đang tìm kiếm/vừa gõ” còn hiệu lực 5 phút; mô hình “Rất chậm” (bật tay) → ×3 (deps.stepScale)
   const SEARCH_MS = () => 300000 * Math.max(1, Number(deps.stepScale ? deps.stepScale() : 1) || 1);
@@ -80,6 +102,31 @@ function createDesktopAgent(deps) {
     deps.log && deps.log('desk', 'Bắt đầu điều khiển máy tính');
     try { const di = SC.displayInfo(); session.diag = { displays: di.text, nutSize: di.nutSize, calib: calib.cal }; deps.log && deps.log('desk', `Màn hình (tự nhận tỉ lệ): ${di.text} · bộ điều khiển chuột thấy màn hình chính ${di.nutSize || '?'}${calib.cal ? ` · hiệu chỉnh chuột đã đo: ×${calib.cal.kx.toFixed(3)}/×${calib.cal.ky.toFixed(3)}` : ''}${calib.mode !== 'libnut' ? ' · đặt con trỏ bằng ' + calib.mode : ''}`); } catch (e) { deps.log && deps.log('desk', 'Không đọc được thông tin màn hình: ' + e.message); }
     return session;
+  }
+  // B104 (máy thật beta.2.4): việc gửi tin thất bại / hết giờ mà ô soạn còn chữ AIVN đã gõ (chưa gửi) → xoá đi (clear) hoặc báo rõ chữ vẫn còn
+  let lastDraft = null;
+  async function cleanupDraft({ clear = true } = {}) {
+    const s = session; const d = s && s.draftTyped; if (!d) return null;
+    const res = { text: String(d.text || ''), cleared: false, left: true, why: '' };
+    if (!clear) { res.why = 'lượt bị dừng — AIVN không thao tác thêm'; }
+    else {
+      try {
+        await refocus(); await sleep(250);
+        await observe(s.ctx, { ocr: 'auto', thumb: false }); // cùng phiên (ctx khác sẽ mở phiên MỚI, mất trạng thái)
+        const e = draftEl(s.obs);
+        if (!e) { res.left = false; res.why = 'không còn thấy chữ đó trong ô soạn'; }
+        else {
+          await performAt('click', e.b[0] + Math.min(e.b[2] / 2, 40), e.b[1] + e.b[3] / 2, { __el: e, __q: e.name, __notSend: true }); await sleep(200);
+          await clearFocused(); await sleep(300);
+          await observe(s.ctx, { ocr: 'auto', thumb: false }); // cùng phiên (ctx khác sẽ mở phiên MỚI, mất trạng thái)
+          if (draftEl(s.obs)) res.why = 'đã thử xoá nhưng chữ vẫn còn';
+          else { res.cleared = true; res.left = false; }
+        }
+      } catch (er) { res.why = 'không xoá được: ' + er.message; }
+    }
+    s.draftTyped = null; lastDraft = res;
+    deps.log && deps.log('desk', `B104: chữ AIVN đã gõ trong ô soạn (chưa gửi) “${res.text.slice(0, 40)}” → ${res.cleared ? 'ĐÃ XOÁ' : res.left ? 'VẪN CÒN' : 'không còn'}${res.why ? ` (${res.why})` : ''}`);
+    return res;
   }
   function end(reason = 'xong lượt') {
     if (!session) return;
@@ -172,6 +219,11 @@ function createDesktopAgent(deps) {
     if (st && st.vision) return { eng: deps.engine, id: st.path || st.id || '', kind: 'mô hình chính' };
     let g = null; try { g = deps.grounder ? await deps.grounder() : null; } catch (e) { deps.log && deps.log('desk', 'Không nạp được mắt nhìn: ' + e.message); }
     return g ? { eng: g.engine, id: g.id, kind: 'mắt nhìn' } : null;
+  }
+  // B102/B104: phần tử ô soạn tin đang chứa chữ AIVN đã gõ (chưa gửi) — gần chỗ đã gõ
+  function draftEl(obs) {
+    const d = session && session.draftTyped; if (!d || !obs) return null; const key = U.fold(String(d.text).split('\n')[0]).slice(0, 24); if (key.length < 3) return null;
+    return (obs.elements || []).find(e => Array.isArray(e.b) && ((e.value && U.fold(e.value).includes(key)) || (e.name && U.fold(e.name).includes(key))) && (!d.box || Math.abs((e.b[1] + e.b[3] / 2) - (d.box[1] + d.box[3] / 2)) <= Math.max(30, d.box[3]))) || null;
   }
   async function observe(ctx, { query = '', ocr = 'auto', thumb = true, vision = 'auto', question = '' } = {}) {
     const s = await begin(ctx); status('Đang quan sát màn hình…');
@@ -367,7 +419,7 @@ function createDesktopAgent(deps) {
       // 0.16: mọi hệ điều hành đều DÁN cả đoạn một lần (nhanh, đúng dấu tiếng Việt). Trước đây Linux dùng "xdotool type" —
       // kiểm thử thật cho thấy nó làm rơi chữ có dấu (“xin chào” → “xin cho”), nên chỉ còn là phương án dự phòng (AIVN_TYPE_XDOTOOL=1).
       if (process.platform === 'linux' && process.env.AIVN_TYPE_XDOTOOL === '1') {
-        try { await new Promise((res, rej) => require('child_process').execFile('xdotool', ['type', '--delay', '12', '--', t], { timeout: 60000 }, (e) => e ? rej(e) : res())); if (a.__submit) { await sleep(150); n.keyTap('enter'); } return; } catch {}
+        try { await new Promise((res, rej) => require('child_process').execFile('xdotool', ['type', '--delay', '12', '--', t], { timeout: 60000 }, (e) => e ? rej(e) : res())); if (a.__submit && (!a.__beforeSubmit || await a.__beforeSubmit())) { await sleep(150); n.keyTap('enter'); } else if (a.__submit) a.__submitSkipped = true; return; } catch {}
       }
       const { clipboard } = require('electron');
       const prev = await Promise.resolve(clipboard.readText()).catch(() => '');
@@ -376,7 +428,8 @@ function createDesktopAgent(deps) {
       setTimeout(async () => { try { if (await Promise.resolve(clipboard.readText()) === t) await Promise.resolve(clipboard.writeText(prev || '')); } catch {} }, 1500);
     }
     // 0.16: gõ xong bấm Enter trong CÙNG một bước (bấm ô + dán chữ + Enter = một lượt của mô hình)
-    if (action === 'type_text' && a.__submit) { await sleep(150); n.keyTap('enter'); }
+    // B101: trước khi bấm Enter, kiểm chữ đã nằm trong ô soạn tin (hook do act() đặt); không đạt → KHÔNG bấm Enter
+    if (action === 'type_text' && a.__submit) { if (!a.__beforeSubmit || await a.__beforeSubmit()) { await sleep(150); n.keyTap('enter'); } else a.__submitSkipped = true; }
     if (action === 'hotkey') {
       const KY = require('./agent/keys'); const k = KY.parse(a.keys); const esc = k.key === 'escape';
       deps.log && deps.log('desk', KY.diag(k));
@@ -635,7 +688,7 @@ function createDesktopAgent(deps) {
         const tIsComp = !!(t && ((t.el && SV.isComposerEl(t.el, win)) || (!t.el && t.query && SV.isComposerEl({ name: t.query }, win))));
         const focusOk = tIsComp || (uiaFocus ? SV.isComposerEl(uiaFocus, win) : !!(s.composerFocus && la && (la.action === 'type_text' || (['click', 'double_click'].includes(la.action) && SV.isComposerEl(la.el || { name: la.query }, win)))));
         if (!focusOk) {
-          const comp = SV.findComposer(s.obs);
+          const comp = SV.findComposer(s.obs) || draftEl(s.obs); // B102: chữ gợi ý ô soạn đã biến mất vì ô còn chữ AIVN gõ trước → nhận ô theo chữ đó
           // không đọc được ô soạn (Messenger “Aa”, OCR bỏ sót) và KHÔNG có dấu hiệu con trỏ ở ô khác → cho gõ, kiểm chữ sau khi gõ (vào nhầm ô → báo + xoá)
           const elsewhere = !!(uiaFocus && !SV.isComposerEl(uiaFocus, win)) || searchConfirmed(null, null, a) || !!SV.searchLeftover(s.obs) || !!SV.searchClose(s.obs);
           if (!comp && !elsewhere) { deps.log && deps.log('desk', 'B94: không đọc được ô soạn tin nhưng không thấy dấu hiệu con trỏ ở ô khác — gõ rồi kiểm chữ có ở ô soạn không'); }
@@ -673,8 +726,17 @@ function createDesktopAgent(deps) {
           }
         } else if (t && t.el && Array.isArray(t.el.b)) t = { ...t, composerBox: t.el.b.slice() };
         s.composerFocus = true;
+        // B104: ô soạn còn chữ AIVN gõ trước đó (chưa gửi) → xoá trước khi gõ lại, tránh tin bị lặp chữ
+        { const dE = draftEl(s.obs); if (dE) { await clearFocused(); deps.log && deps.log('desk', `B104: xoá chữ AIVN gõ trước đó còn trong ô soạn (“${String(s.draftTyped.text).slice(0, 40)}”) trước khi gõ lại`); s.draftTyped = null; await sleep(250); try { await observe(ctx, { ocr: 'auto', thumb: false }); } catch {} } }
         if (!(t && t.composerBox)) { const c0 = SV.findComposer(s.obs); if (c0 && Array.isArray(c0.b)) t = { ...(t || {}), composerBox: c0.b.slice() }; }
       }
+    }
+    // B101 (máy thật beta.2.4: gõ đúng vào ô soạn rồi mô hình KHÔNG bấm Enter, đi bấm lung tung tới hết giờ): việc GỬI tin, người nhận đã chốt (B90),
+    // gõ NỘI DUNG tin → AIVN tự gửi trong cùng bước: gõ → kiểm chữ nằm trong ô soạn → bấm Enter → kiểm bong bóng tin + ô soạn trống.
+    // Bước này là bước GỬI: vẫn qua thẻ xin phép (QA: --approve-send-to). Lệnh “chỉ soạn / đừng gửi” → không tự gửi.
+    if (bodyTyping && action === 'type_text' && !a.submit && s.chatOpen && !DRAFT_SEND.test(String(ctx.userQuery || ''))) {
+      a = { ...a, submit: true, __autoSubmit: true };
+      deps.log && deps.log('desk', `B101: việc gửi tin, người nhận đã chốt — AIVN tự bấm Enter sau khi gõ và kiểm chữ trong ô soạn (bước GỬI, qua thẻ xin phép)`);
     }
     // B24: gõ tên/từ khoá (+ Enter) vào ô tìm kiếm ĐÃ XÁC NHẬN là TÌM, không phải gửi — không coi là bước rủi ro, kể cả chế độ “chỉ soạn, đừng gửi”
     // B69: MỘT chốt quyết định thao tác nào là GỬI (agent/send-gate.js) — gõ + Enter, phím Enter/Ctrl+Enter sau khi gõ, bấm nút Gửi…
@@ -806,7 +868,25 @@ function createDesktopAgent(deps) {
     if (t && t.x != null) { a.__el = t.el || null; a.__q = t.query || String(a.element || ''); }
     // B69: chốt cuối — performAt từ chối mọi thao tác có thể gửi mà chưa qua chốt này (đã duyệt / tự làm theo cài đặt / xác nhận là tìm kiếm)
     if (gate.send) { a.__sendOk = true; deps.log && deps.log('desk', `GỬI (${autoGo ? 'tự làm không hỏi: ' + auto.why : 'người dùng đã cho phép'}): ${desc}`); } else a.__notSend = true;
+    // B101: gõ nội dung tin + Enter → kiểm chữ trong ô soạn TRƯỚC khi bấm Enter (log B94); chữ vào nhầm ô → không bấm Enter, xoá chữ gõ nhầm
+    let preSend = null;
+    if (gate.send && bodyTyping && action === 'type_text') {
+      const pre = s.obs; const cbx = (t && t.composerBox) || null;
+      a.__beforeSubmit = async () => {
+        await sleep(300);
+        try { await observe(ctx, { ocr: 'auto', thumb: false }); } catch {}
+        const L = landedOf(pre, s.obs, a.text, cbx); preSend = L;
+        deps.log && deps.log('desk', `B94: kiểm chữ sau khi gõ “${String(a.text).slice(0, 40)}”: ${L.landed === 'composer' ? 'CÓ trong ô soạn tin → bấm Enter' : L.landed === 'wrong' ? `vào NHẦM ô (“${String((L.wrongEl && L.wrongEl.name) || '').slice(0, 40)}”${L.wrongEl && L.wrongEl.b ? ` @${L.wrongEl.b.join(',')}` : ''}; ô soạn ${cbx ? '@' + cbx.join(',') : 'chưa rõ'}; cửa sổ ${s.obs && s.obs.win && s.obs.win.b ? '@' + s.obs.win.b.join(',') : '?'}) → KHÔNG bấm Enter` : 'chưa đọc được ô soạn tin → vẫn bấm Enter, kiểm sau khi gửi'}`);
+        if (L.landed === 'wrong') { await clearFocused(); deps.log && deps.log('desk', 'B94: đã xoá chữ gõ nhầm'); return false; }
+        return true;
+      };
+    }
     await performAt(action, t && t.x != null ? t.x : null, t && t.x != null ? t.y : null, a);
+    if (a.__submitSkipped) {
+      s.composerFocus = false; s.lastAction = { action, at: Date.now(), doneAt: Date.now(), query: 'ô soạn tin' };
+      const w = preSend && preSend.wrongEl;
+      return { refused: true, error: 'chữ vào nhầm ô', forModel: `Tin CHƯA được gửi: chữ vừa gõ đã vào NHẦM ô (“${String((w && w.name) || 'ô khác').slice(0, 40)}”), không phải ô soạn tin — AIVN KHÔNG bấm Enter và đã xoá chữ gõ nhầm. Bấm vào ô soạn tin (“Nhập @, tin nhắn tới …”) rồi gõ lại nội dung tin.`, summary: 'chữ vào nhầm ô — chưa gửi, đã xoá' };
+    }
     if (gate.send) { s.sentKeys.add(SG.sendKey(gateRcp, gate.text || s.lastTyped || '')); s.sentAny = true; s.lastSent = gate.text || s.lastTyped || ''; }
     const prevAction = s.lastAction;
     // bấm vào kết quả tìm kiếm khớp người nhận → coi như đã mở cuộc trò chuyện (kiểm lại tiêu đề ngay bên dưới)
@@ -871,18 +951,9 @@ function createDesktopAgent(deps) {
       // B94: nội dung tin → phải nằm trong Ô SOẠN TIN; chữ mới xuất hiện ở ô khác (ô tìm kiếm…) = gõ NHẦM ô → báo + xoá
       let landed = null;
       if (bodyTyping && !a.submit) {
+        const L = landedOf(before, o.obs, a.text, (t && t.composerBox) || null); const bad = L.wrongEl ? [L.wrongEl] : []; const good = L.landed === 'composer' ? [1] : [];
         const W = o.obs.win && Array.isArray(o.obs.win.b) && o.obs.win.b[3] > 50 ? o.obs.win.b : null;
-        const cb = (t && t.composerBox) || (SV.findComposer(o.obs) || {}).b || null;
-        const hasTyped = (e) => (e.value && U.fold(e.value).includes(typed)) || (e.name && U.fold(e.name).includes(typed)) || (e.ocr && e.name && U.fuzzyHas(U.fold(e.name), typed.slice(0, 24)));
-        const preEls = (before && before.elements) || [];
-        const existed = (e) => preEls.some(p => p.b && e.b && hasTyped(p) && Math.abs(p.b[0] - e.b[0]) <= 16 && Math.abs(p.b[1] - e.b[1]) <= 16);
-        const inComp = (e) => (e.focused || e.editable) && SV.isComposerEl(e, o.obs.win) || (cb && e.b && Math.abs((e.b[1] + e.b[3] / 2) - (cb[1] + cb[3] / 2)) <= Math.max(24, cb[3]) && e.b[0] + e.b[2] > cb[0] - 10) || (W && e.b && (e.b[1] + e.b[3] / 2 - W[1]) / W[3] > 0.82 && !/tìm|tim kiem|search|find/iu.test(`${e.name || ''} ${e.placeholder || ''}`));
-        const hits = o.obs.elements.filter(e => hasTyped(e) && !existed(e));
-        const good = hits.filter(inComp); const bad = hits.filter(e => !inComp(e));
-        // ô tìm kiếm hẹp: OCR có thể không đọc được chữ vừa gõ nhưng hàng ô tìm kiếm ĐỔI trong khi ô soạn không có chữ mới → cũng là gõ nhầm ô
-        const rowB = U.fold(SV.searchRowText(before)), rowA = U.fold(SV.searchRowText(o.obs));
-        if (!good.length && !bad.length && rowA !== rowB) { const R0 = (o.obs.elements || []).filter(e => Array.isArray(e.b) && W && (e.b[1] + e.b[3] / 2 - W[1]) / W[3] < 0.16 && (e.b[0] - W[0]) / W[2] < 0.35); bad.push(R0.sort((x, y) => x.b[0] - y.b[0])[0] || { name: 'ô tìm kiếm', b: null }); }
-        if (good.length) landed = 'composer';
+        if (good.length) { landed = 'composer'; s.draftTyped = { text: String(a.text || ''), box: L.good && Array.isArray(L.good.b) ? L.good.b.slice() : ((t && t.composerBox) || null), chat: s.chatOpen || null, at: Date.now() }; } // B104: nhớ chữ còn nằm trong ô soạn (chưa gửi)
         else if (bad.length) {
           landed = 'wrong'; const w = bad[0]; const searchy = /tìm|tim kiem|search|find|搜索/iu.test(`${w.name || ''} ${w.placeholder || ''}`) || (W && w.b && (w.b[1] - W[1]) / W[3] < 0.2);
           s.composerFocus = false;
@@ -891,6 +962,7 @@ function createDesktopAgent(deps) {
           checks.push(`Chữ vừa gõ đã vào NHẦM ô (“${String(w.name || '').slice(0, 40)}”${searchy ? ', có thể là ô tìm kiếm — AIVN đã xoá chữ gõ nhầm' : ''}), KHÔNG phải ô soạn tin. Tin CHƯA được soạn. Bấm vào ô soạn tin (“Nhập @, tin nhắn tới …”) rồi gõ lại.`);
         }
       }
+      if (bodyTyping && !a.submit) deps.log && deps.log('desk', `B94: kiểm chữ sau khi gõ “${String(a.text).slice(0, 40)}”: ${landed === 'composer' ? 'CÓ trong ô soạn tin' : landed === 'wrong' ? 'vào NHẦM ô' : 'chưa đọc được ô soạn tin'}`);
       if (!a.submit) checks.push(landed === 'composer' ? 'Đã thấy chữ vừa gõ trong Ô SOẠN TIN.' : landed === 'wrong' ? '' : seen ? 'Đã thấy chữ vừa gõ trên màn hình.' : 'CHƯA thấy chữ vừa gõ trong danh sách phần tử (có thể ô không hiện giá trị) — hãy kiểm tra trước khi làm tiếp.');
       else checks.push('Đã gõ (dán một lần) rồi bấm Enter.');
       // ô tìm kiếm: chờ kết quả tải, nhìn lại, rồi mới kết luận; gợi ý tìm không dấu / một phần tên
@@ -1011,7 +1083,10 @@ function createDesktopAgent(deps) {
       deps.log && deps.log('desk', `Gửi chưa kiểm chứng → dừng, không gửi lại (B70): ${verify.why}`);
       return { stop: true, ask: msgV, error: 'đã gửi, chưa kiểm chứng', verify, forModel: msgV, summary: `${desc} · đã bấm gửi, CHƯA kiểm chứng — dừng, không gửi lại` };
     }
-    return { ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.filter(Boolean).join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
+    // B101: việc gửi tin đã GỬI + KIỂM CHỨNG (bong bóng tin + ô soạn trống + đúng người nhận) → báo agent.js kết thúc việc là XONG
+    const sentDone = verify && verify.sent && gate.send && bodyTyping ? { msg: String(a.text || '').replace(/\n\s*$/, ''), to: SV.recipientOf(ctx.userQuery) || s.chatOpen || '', auto: !!a.__autoSubmit } : null;
+    if (sentDone) { s.draftTyped = null; deps.log && deps.log('desk', `B101: đã gửi “${sentDone.msg.slice(0, 60)}” tới “${sentDone.to}” và KIỂM CHỨNG trên màn hình (thấy tin trong khung chat, ô soạn trống) → việc xong`); }
+    return { ...(sentDone ? { sentDone } : {}), ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.filter(Boolean).join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
   }
 
   async function look(a, ctx) {
@@ -1086,7 +1161,7 @@ function createDesktopAgent(deps) {
     const names = (s.obs.elements || []).map(e => U.fold(String(e.name || ''))).filter(Boolean).sort().join('|');
     return focus + '#' + require('crypto').createHash('sha1').update(`${s.obs.win ? s.obs.win.title : ''}#${names}`).digest('hex').slice(0, 10);
   }
-  return { actKey, likely: (q) => (session && session.obs ? U.likelyTarget(session.obs.elements, q) : null), diag: () => ({ calib: { ...calib }, displays: session && session.diag ? session.diag.displays : SC.displayInfo().text }), searchFound, searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, ensureApp, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
+  return { cleanupDraft, lastDraft: () => lastDraft, clearLastDraft: () => { lastDraft = null; }, hasDraft: () => !!(session && session.draftTyped), actKey, likely: (q) => (session && session.obs ? U.likelyTarget(session.obs.elements, q) : null), diag: () => ({ calib: { ...calib }, displays: session && session.diag ? session.diag.displays : SC.displayInfo().text }), searchFound, searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, ensureApp, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
 }
 
 module.exports = { createDesktopAgent };

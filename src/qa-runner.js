@@ -116,6 +116,13 @@ function answerFor(req, { draft }) {
 // B84: câu trả lời cuối NÓI là chưa làm được / không thể → không bao giờ là “done”
 const FAIL_CLAIM = /(?:chưa (?:làm (?:được|xong)|gửi (?:được|đi)|mở được|thể)|không (?:thể|làm được|điều khiển được|gửi được|mở được|có quyền điều khiển)|cannot|can['’]t|couldn['’]t|could not|unable to|not able to|failed to|无法|不能|没能|未能|没有办法)/iu;
 const SEND_TASK = /(?:^|[^\p{L}])(?:nhắn|gửi (?:tin|email|mail|thư)|send|text|message|reply|trả lời)(?![\p{L}])|发消息|发送|回复/iu;
+// B104: luôn có finalAnswer (kể cả hết giờ / lỗi): câu trả lời của AIVN, hoặc câu trung thực dựng từ trạng thái + chữ còn trong ô soạn
+function finalAnswerOf(r, st, { timedOut = false, timeout = 0, draft = null } = {}) {
+  let t = String((r && r.text) || '').trim();
+  const dn = draft && !(t && t.includes(String(draft.text || '').slice(0, 30)) && /ô soạn/.test(t)) ? (draft.cleared ? `Chữ “${String(draft.text).slice(0, 80)}” AIVN đã gõ vào ô soạn tin (chưa gửi) đã được xoá.` : draft.left ? `Chữ “${String(draft.text).slice(0, 80)}” AIVN đã gõ VẪN CÒN trong ô soạn tin (CHƯA gửi)${draft.why ? ` — ${draft.why}` : ''}.` : '') : '';
+  if (!t) t = timedOut ? `AIVN AGENT chưa xong việc: hết thời gian (--timeout ${timeout} giây) nên đã dừng giữa chừng.` : st && st.status && st.status !== 'done' ? `AIVN AGENT chưa xong việc: ${st.reason || st.status}.` : '';
+  return [t, dn].filter(Boolean).join('\n\n') || null;
+}
 function statusOf(r, { denied = 0, draft = false, error = null, timedOut = false, task = '' } = {}) {
   if (timedOut) return { status: 'failed', reason: 'hết thời gian (--timeout)' };
   if (error) return { status: ['AGENT_GATE', 'NOT_ACTIVATED', 'NO_MODEL', 'SCREEN_OFF'].includes(error.code) ? 'blocked' : 'failed', reason: String(error.message || error) };
@@ -147,7 +154,7 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
   try { res.screen = deps.displays ? deps.displays() : null; } catch (e) { res.screen = { error: e.message }; }
   const lines = []; const untap = deps.LOG && deps.LOG.tap ? deps.LOG.tap((l) => { if (lines.length < 4000) lines.push(l.replace(/\n$/, '')); }) : () => {};
   const open = new Map(); let denied = 0, r = null, error = null, timedOut = false; let restoreLang = null;
-  const ac = new AbortController(); const timer = setTimeout(() => { timedOut = true; ac.abort(); }, args.timeout * 1000);
+  const ac = new AbortController(); const timer = setTimeout(() => { timedOut = true; ac.abort('timeout'); }, args.timeout * 1000); // B104: lý do 'timeout' → AIVN được dọn chữ đã gõ trong ô soạn
   // ghi lại + trả lời một thẻ xin phép (đồng bộ). Thẻ ngoài lớp phủ màn hình (confirm/approve/screen) luôn coi là bước quan trọng → TỪ CHỐI
   let sendApproved = 0; let lastDeny = null;
   // --approve-send-to: CHỈ thẻ GỬI của lớp phủ màn hình, người nhận theo lệnh là cuộc trò chuyện của chính mình, tiêu đề khung giữa ĐÚNG là nó, chưa cho phép lần nào
@@ -186,6 +193,7 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
     res.model = { id: st.id, file: st.path ? path.basename(st.path) : null, mode: st.mode || null, contextSize: st.contextSize || null, gpuLayers: st.gpuLayers ?? null, totalLayers: st.totalLayers ?? null, gpu: st.gpu || null };
     res.timings.modelLoadMs = Date.now() - tl;
     if (args.shots) fs.mkdirSync(args.shots, { recursive: true });
+    if (deps.desk && deps.desk.clearLastDraft) deps.desk.clearLastDraft();
     if (deps.desk && deps.desk.setBenchAnswer) deps.desk.setBenchAnswer((req) => ask('desk', req));
     const tr = Date.now();
     const turn = (messages) => deps.runAgentTurn({ reqId: null, convoId: 'qa-' + runId, messages, headless: false, signal: ac.signal,
@@ -211,7 +219,7 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
   // B99: bị từ chối ở kiểm tra --approve-send-to → ghi ĐÚNG lý do (không phải cảnh báo mô hình yếu)
   if (s.status === 'blocked' && denied > 0 && lastDeny) s.reason = `bước GỬI bị tự TỪ CHỐI: --approve-send-to không cho phép — ${lastDeny}`;
   else if (s.status === 'blocked' && denied > 0 && args.approveSendTo == null && res.approvals.some(x => x.send && x.answer === 'denied')) s.reason = 'bước GỬI bị tự TỪ CHỐI (chế độ QA không có --approve-send-to nên mọi bước gửi đều bị từ chối) — tin CHƯA được gửi';
-  Object.assign(res, { status: s.status, reason: s.reason || null, question: s.question || null, finalAnswer: r ? r.text || '' : null, warning: r && r.warning && !(denied > 0 && /mô hình mạnh hơn/.test(r.warning)) ? r.warning : null, draftOnly: draft, deniedApprovals: denied, approvedSends: sendApproved, approveSendTo: args.approveSendTo || null, exitCode: exitCodeOf(s.status) });
+  Object.assign(res, { status: s.status, reason: s.reason || null, question: s.question || null, finalAnswer: finalAnswerOf(r, s, { timedOut, timeout: args.timeout, draft: deps.desk && deps.desk.lastDraft ? deps.desk.lastDraft() : null }), warning: r && r.warning && !(denied > 0 && /mô hình mạnh hơn/.test(r.warning)) ? r.warning : null, draftOnly: draft, deniedApprovals: denied, approvedSends: sendApproved, approveSendTo: args.approveSendTo || null, exitCode: exitCodeOf(s.status) });
   res.timings.totalMs = Date.now() - t0; res.timings.finishedAt = new Date().toISOString();
   res.log = lines.slice(-600);
   try { writeJson(args.out, res); } catch (e) { deps.LOG && deps.LOG.log('qa', 'Không ghi được result.json: ' + e.message); }
@@ -224,4 +232,4 @@ async function waitResult(out, runId, ms, sleep = (t) => new Promise(r => setTim
   while (Date.now() < end) { try { const j = JSON.parse(fs.readFileSync(out, 'utf8')); if (j && j.runId === runId) return j; } catch {} await sleep(500); }
   return null;
 }
-module.exports = { selfChatShown, isSelfChat, SELF_CHAT, parseArgs, validate, validateKind, fromArgv, resolveModel, isRiskyAsk, answerFor, statusOf, exitCodeOf, run, waitResult, writeJson, DRAFT_RE };
+module.exports = { finalAnswerOf, selfChatShown, isSelfChat, SELF_CHAT, parseArgs, validate, validateKind, fromArgv, resolveModel, isRiskyAsk, answerFor, statusOf, exitCodeOf, run, waitResult, writeJson, DRAFT_RE };
