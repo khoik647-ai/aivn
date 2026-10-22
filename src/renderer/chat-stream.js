@@ -58,6 +58,14 @@
     if (!body || body.isConnected === false) return null;
     return body;
   }
-  const api = { modeOf, generatingFor, convoForMode, listForMode, selectAfterRun, streamBody };
+  // B184: dấu đang chạy trên thanh bên — đúng cuộc đang stream, hết khi map được xoá (xong / dừng / lỗi).
+  function isRunning(c, generatingByMode) {
+    if (!c || c.id == null || !generatingByMode) return false;
+    return ['chat', 'agent'].some((k) => generatingByMode[k] && generatingByMode[k].id === c.id);
+  }
+  function runBadge(on) {
+    return on ? '<span class="convo-run" role="status" title="Đang chạy" aria-label="Đang chạy"></span>' : '';
+  }
+  const api = { modeOf, generatingFor, convoForMode, listForMode, selectAfterRun, streamBody, isRunning, runBadge };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.ChatStream = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

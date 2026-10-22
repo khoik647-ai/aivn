@@ -2727,7 +2727,8 @@
     "AGENT đang chạy — đợi xong hoặc sang AGENT bấm Dừng": "AGENT is running — wait until it finishes, or switch to AGENT and click Stop",
     "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "Chat is running — wait until it finishes, or switch to Chat and click Stop",
     "AGENT đang chạy — bấm Dừng ở dưới": "AGENT is running — click Stop below",
-    "Trò chuyện đang chạy — bấm Dừng ở dưới": "Chat is running — click Stop below"
+    "Trò chuyện đang chạy — bấm Dừng ở dưới": "Chat is running — click Stop below",
+    "Việc đang chạy ở danh sách bên trái — mở việc đó rồi bấm Dừng": "The running task is in the list on the left — open it, then click Stop"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.en = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

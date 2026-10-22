@@ -2,7 +2,7 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const A = window.aivn;
-const state = { settings: null, models: [], status: { loaded: false }, convos: [], current: null, generating: null, generatingConv: null, generatingByMode: { chat: null, agent: null }, genKind: null, genPhase: null, genNote: '', agentFoot: '', _genStatsShown: '', catalog: [], mode: 'chat', lastByMode: {}, agent: null };
+const state = { settings: null, models: [], status: { loaded: false }, convos: [], current: null, generating: null, generatingConv: null, generatingByMode: { chat: null, agent: null }, genKind: null, genPhase: null, genNote: '', agentFoot: '', agentFootId: null, _genStatsShown: '', catalog: [], mode: 'chat', lastByMode: {}, agent: null };
 const isAgent = () => state.mode === 'agent';
 // B172: bản nháp chưa gửi của từng trang (Trò chuyện, AIVN AGENT, Lịch, Ghi nhớ) trong phiên này
 const DraftsAPI = window.AIVN_DRAFTS;
@@ -701,7 +701,7 @@ function renderConvos() {
   const q = fold(($('#convoQ') && $('#convoQ').value || '').trim());
   let mine = ChatStream.listForMode({ mode: state.mode, convos: state.convos, generating: state.generatingConv, generatingByMode: state.generatingByMode }); // B173/B178: cuộc mới chưa lưu vẫn nằm trong thanh bên
   const rows = mine.map(c => [c, convoHit(c, q)]).filter(([, h]) => h.ok);
-  $('#convoList').innerHTML = rows.map(([c, h]) => `<div class="convo ${state.current && c.id === state.current.id ? 'active' : ''}" data-id="${c.id}"><span data-noi18n title="${esc(c.title)}">${esc(c.title)}${h.snip ? `<small class="convo-snip">${esc(h.snip)}</small>` : ''}</span><button class="exp" title="Xuất ra tệp (.md/.txt/.json)" aria-label="Xuất ra tệp" data-testid="convo-export">⤓</button><button class="del" title="Xoá">✕</button></div>`).join('')
+  $('#convoList').innerHTML = rows.map(([c, h]) => { const running = ChatStream.isRunning(c, state.generatingByMode); return `<div class="convo ${state.current && c.id === state.current.id ? 'active' : ''}${running ? ' running' : ''}" data-id="${c.id}"${running ? ' data-running="1"' : ''}>${ChatStream.runBadge(running)}<span data-noi18n title="${esc(c.title)}">${esc(c.title)}${h.snip ? `<small class="convo-snip">${esc(h.snip)}</small>` : ''}</span><button class="exp" title="Xuất ra tệp (.md/.txt/.json)" aria-label="Xuất ra tệp" data-testid="convo-export">⤓</button><button class="del" title="Xoá">✕</button></div>`; }).join('')
     || `<div class="muted" style="padding:8px;font-size:12.5px">${q && mine.length ? `Không có cuộc trò chuyện nào khớp “${esc($('#convoQ').value.trim())}”` : isAgent() ? 'Chưa giao việc nào cho AIVN AGENT' : 'Chưa có cuộc trò chuyện nào'}</div>`;
 }
 // B82: xuất ra tệp — hộp thoại Lưu, định dạng theo đuôi chọn (.md/.txt/.json)
@@ -716,7 +716,7 @@ $('#convoList').addEventListener('click', async (e) => {
   const genRow = ChatStream.generatingFor(state.mode, state.generatingConv, state.generatingByMode);
   state.current = (genRow && genRow.id === row.dataset.id) ? genRow : state.convos.find(c => c.id === row.dataset.id);
   if (isAgent() && state.current && state.generatingByMode.agent && state.current.id === state.generatingByMode.agent.id) { state.agentExplicitNew = false; state.lastByMode.agent = state.current.id; }
-  renderConvos(); renderMessages();
+  renderConvos(); renderMessages(); paintGenChrome();
   if (typeof state.streamFlush === 'function') state.streamFlush();
 });
 $('#messages').addEventListener('click', async (e) => {
@@ -732,7 +732,7 @@ $('#newChat').addEventListener('click', () => {
   pending = [];
   drafts.clearFiles(page);
   renderChips();
-  renderConvos(); renderMessages(); $('#input').focus();
+  renderConvos(); renderMessages(); paintGenChrome(); $('#input').focus();
 });
 
 // biểu tượng nút thao tác tin nhắn (SVG đơn sắc: ký tự ⧉ ⑂ thiếu trong phông Windows/Linux nên hiện ô trống)
@@ -949,7 +949,8 @@ input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) {
 // B176: trang này không giữ mô hình thì vẫn gửi. Trang kia đang giữ thì nói rõ chỗ bấm Dừng.
 // Đang đứng trên chính trang bận thì “bấm Dừng ở dưới”, không bảo sang trang mình đang xem.
 function holdSharedModel() {
-  const g = composerGate({ mode: state.mode, generating: state.generating, genKind: state.genKind, cloudAgent: !!(state.settings && state.settings.cloudBrain && state.settings.cloudBrain.on) });
+  const here = state.mode === 'agent' ? 'agent' : 'chat';
+  const g = composerGate({ mode: state.mode, generating: state.generating, genKind: state.genKind, cloudAgent: !!(state.settings && state.settings.cloudBrain && state.settings.cloudBrain.on), viewingRun: state.generating && state.genKind === here ? viewingThisRun() : undefined });
   if (g === 'send') return false;
   const msg = holdCopy(g, state.mode);
   if (msg) toast(msg, true);
@@ -958,7 +959,9 @@ function holdSharedModel() {
 $('#composer').addEventListener('submit', async (e) => {
   e.preventDefault();
   let text = input.value.trim(); $('#slashPop').hidden = true;
-  // lệnh / chạy ngay cả khi đang tạo câu trả lời (chỉ đổi cài đặt cục bộ), trừ /moi
+  // B184: /moi luôn được, kể cả khi đang chạy — cùng lối nút “＋” (tách việc mới, không dừng lượt kia).
+  if (/^\/moi(?:\s|$)/i.test(text)) { runSlash(text); return; }
+  // lệnh / khác chạy ngay cả khi đang tạo câu trả lời (chỉ đổi cài đặt cục bộ)
   if (!isAgent() && text.startsWith('/') && runSlash(text)) return;
   if (holdSharedModel()) return;
   if (isAgent()) { if (pending.some(a => a.loading)) { toast('Đang đọc tệp, vui lòng đợi một chút…'); return; } if (text || pending.some(a => a.ok)) sendAgent(text); return; }
@@ -995,7 +998,7 @@ $('#composer').addEventListener('submit', async (e) => {
 async function runTurn(conv, userMsg, reply, { docsToSend = [], directImgs = [] } = {}) {
   const vision = !!state.status.vision;
   reply.streaming = true; state.generatingConv = conv; state.generatingByMode.chat = conv; // B173/B178: renderMessages dựng lại DOM vẫn trỏ đúng cuộc này
-  renderMessages();
+  renderMessages(); renderConvos(); // B184: dấu đang chạy trên thanh bên ngay khi bắt đầu stream
   const ri = conv.messages.indexOf(reply);
   const liveBody = () => ChatStream.streamBody({ query: (i) => document.querySelector('#messages .msg[data-i="' + i + '"]'), conv, visible: state.current, visibleMode: state.mode, index: ri });
   const reqId = uid(); state.generating = reqId; state.genKind = 'chat'; state.genPhase = null; genStartedAt = Date.now();
@@ -1277,7 +1280,7 @@ function cpTab(t) {
 }
 // ---- Lệnh "/" trong ô nhập ----
 const SLASH = [
-  { c: '/moi', d: 'Bắt đầu cuộc trò chuyện mới', run: () => { if (state.generating) return toast('Đang tạo câu trả lời — bấm Dừng trước khi mở cuộc trò chuyện mới', true); $('#newChat').click(); } },
+  { c: '/moi', d: 'Bắt đầu cuộc trò chuyện mới', run: () => { $('#newChat').click(); } },
   { c: '/preset', a: '<tên>', d: 'Chuyển cấu hình mẫu (vd. /preset Lập trình viên)', run: async (arg) => { const p = presetsAll().find(x => x.name.toLowerCase() === arg.toLowerCase()) || presetsAll().find(x => x.name.toLowerCase().includes(arg.toLowerCase())); if (!p) return toast('Không thấy cấu hình mẫu “' + arg + '”', true); await applyPreset(p); toast(`Đang dùng cấu hình mẫu “${p.name}”`); } },
   { c: '/he-thong', a: '<lời nhắc>', d: 'Đặt lời nhắc hệ thống', run: async (arg) => { if (!arg) return cpTab('sys'), $('#sysPrompt').focus(); await cpSave({ systemPrompt: arg }); paintCp(); toast('Đã đặt lời nhắc hệ thống'); } },
   { c: '/nhiet-do', a: '<0–2>', d: 'Đặt nhiệt độ', run: async (arg) => { const v = Number(String(arg).replace(',', '.')); if (!(v >= 0 && v <= 2)) return toast('Nhiệt độ phải từ 0 đến 2', true); await cpSave({ temperature: v }); paintCp(); toast('Nhiệt độ: ' + v); } },
@@ -1295,8 +1298,9 @@ function runSlash(text) {
 let slashSel = 0;
 function paintSlash() {
   const v = input.value; const pop = $('#slashPop');
-  if (isAgent() || !/^\/\S*$/.test(v)) { pop.hidden = true; return; }
-  const list = SLASH.filter(x => x.c.startsWith(v.toLowerCase())); if (!list.length) { pop.hidden = true; return; }
+  const pool = isAgent() ? SLASH.filter(x => x.c === '/moi') : SLASH; // B184: trên AGENT chỉ /moi (việc mới)
+  if (!/^\/\S*$/.test(v)) { pop.hidden = true; return; }
+  const list = pool.filter(x => x.c.startsWith(v.toLowerCase())); if (!list.length) { pop.hidden = true; return; }
   slashSel = Math.min(slashSel, list.length - 1);
   pop.innerHTML = list.map((x, i) => `<button type="button" role="option" aria-selected="${i === slashSel}" class="${i === slashSel ? 'on' : ''}" data-slash="${x.c}"><code>${x.c}${x.a ? ' ' + esc(x.a) : ''}</code><span>${esc(x.d)}</span></button>`).join(''); pop.hidden = false;
 }
@@ -1631,6 +1635,7 @@ async function sendAgent(text) {
   const stick = () => { box.scrollTop = box.scrollHeight; };
   const startEl = msgEl(); if (startEl) startEl.querySelector('.body').classList.add('cursor');
   const reqId = uid(); state.generating = reqId; state.genKind = 'agent'; state.generatingByMode.agent = conv; state.lastByMode.agent = conv.id; state.genPhase = null; genStartedAt = Date.now(); // B178: việc mới chưa lưu vẫn được chọn lại khi quay về AGENT
+  state.agentFoot = ''; state.agentFootId = conv.id; // B184: dòng “N bước · … giây” của lượt trước không dính sang việc mới
   renderConvos(); // việc đang chạy phải có mặt trên thanh bên ngay, không chờ đến lúc bấm Việc mới
   setGenNote('Đang chuẩn bị (công cụ, ghi nhớ)…');
   const paintNote = (el) => { const n = el.querySelector('.err-note'); if (n) n.innerHTML = errNoteHtml(reply); };
@@ -1671,10 +1676,11 @@ async function sendAgent(text) {
   } finally {
     const onAgent = isAgent();
     offTok(); offStep(); offSt();
-    state.generating = null; state.genKind = null; state.genNote = ''; state.genPhase = null; state.agentFoot = summary;
+    state.generating = null; state.genKind = null; state.genNote = ''; state.genPhase = null; state.agentFoot = summary; state.agentFootId = conv.id;
     paintGenChrome();
     if (onAgent) { setPhase('done'); setTimeout(() => { if (!state.generating) setPhase(null); }, 4000); }
     else setPhase(null);
+    if (onAgent && !(state.current && state.current.id === conv.id)) setPhase(null); // B184: việc trống / việc khác không nhận thanh bước của lượt vừa xong
     state.generatingByMode.agent = null;
     conv.updatedAt = Date.now(); await A.saveConvo(conv); await loadConvos();
     const picked = ChatStream.selectAfterRun({ visibleMode: state.mode, current: state.current, conv, convos: state.convos, explicitNew: state.agentExplicitNew }); // B178: lưu xong thì chọn lại việc, trừ khi người dùng đã bấm Việc mới
@@ -1710,22 +1716,34 @@ A.onAgentConfirmCancel(({ id }) => { if (modalOpen && modalOpen.id === id) close
 
 // --- Thẻ xin phép chung (0.15.0): Cho phép (Ctrl+Enter) / Từ chối (Esc) / Từ chối kèm lý do / Luôn cho phép ---
 const apQueue = []; let apOpen = null;
+function taskHasSteps(c) { return !!(c && Array.isArray(c.messages) && c.messages.some(m => m && Array.isArray(m.steps) && m.steps.length)); }
+function viewingThisRun() {
+  const gen = window.ChatStream && ChatStream.generatingFor(state.mode, state.generatingConv, state.generatingByMode);
+  return !!(gen && state.current && gen.id === state.current.id);
+}
 function setPhase(ph) {
   const el = $('#phaseStrip'); if (!el) return;
-  if (!ph || !isAgent()) { el.hidden = true; return; }
+  if (!ph || !isAgent()) {
+    // B184: việc đang xem còn bước thì giữ thanh (Kết quả). Việc trống thì tắt.
+    if (!ph && isAgent() && taskHasSteps(state.current)) ph = 'done';
+    else { el.hidden = true; return; }
+  }
   el.hidden = false; const order = ['think', 'ask', 'act', 'done']; const k = order.indexOf(ph);
   el.querySelectorAll('span').forEach(sp => { const i = order.indexOf(sp.dataset.ph); sp.classList.toggle('on', i === k); sp.classList.toggle('done', ph === 'done' ? i < k : false); });
 }
 // B169: Dừng, dòng “đang…”, và thanh bước theo trang đang xem — không để lượt AIVN AGENT còn hiện trên Trò chuyện.
 function paintGenChrome() {
   const gs = $('#genStats');
-  const plan = planGenChrome({ mode: state.mode, genKind: state.genKind || null, genPhase: state.genPhase || null, genNote: state.genNote || '', agentFoot: state.agentFoot || '' });
+  const hasSteps = taskHasSteps(state.current);
+  const here = state.mode === 'agent' ? 'agent' : 'chat';
+  const plan = planGenChrome({ mode: state.mode, genKind: state.genKind || null, genPhase: state.genPhase || null, genNote: state.genNote || '', agentFoot: state.agentFoot || '', viewingRun: state.genKind === here ? viewingThisRun() : undefined, hasSteps, showFoot: !!(state.current && state.agentFootId === state.current.id && hasSteps) });
   const send = $('#sendBtn'); const stop = $('#stopBtn');
   if (send) send.hidden = plan.sendHidden;
   if (stop) stop.hidden = plan.stopHidden;
   if (gs && state._genStatsShown !== plan.genStats) { state._genStatsShown = plan.genStats; gs.textContent = plan.genStats; }
   // Trang AIVN AGENT đang nghỉ giữ thanh “Kết quả” thêm vài giây. Mọi trường hợp khác vẽ đúng kế hoạch.
   if (state.genKind || !isAgent()) setPhase(plan.phase);
+  else setPhase(plan.phase); // B184: đổi sang việc trống thì thanh bước không giữ của lượt trước
 }
 function setGenNote(text) { state.genNote = text; paintGenChrome(); }
 function apShow() {
