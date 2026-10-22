@@ -35,6 +35,19 @@ const tabsOf = (obs) => (obs && Array.isArray(obs.elements) ? obs.elements : [])
 // “dấu vân tay” tài liệu đang hiện: cửa sổ + tiêu đề + danh sách thẻ — dùng để chứng minh Ctrl+N ĐÃ có tác dụng và trước mỗi lần gõ
 function docPrint(obs) { const w = (obs && obs.win) || {}; return { hwnd: w.hwnd != null ? String(w.hwnd) : null, title: String(w.title || ''), tabs: tabsOf(obs) }; }
 const samePrint = (a, b) => !!a && !!b && a.hwnd === b.hwnd && a.title === b.title && a.tabs.join('\u0001') === b.tabs.join('\u0001');
+// bằng chứng Ctrl+N ĐÃ mở một tài liệu MỚI (review #64 (a)): “có gì đó đổi” chưa đủ — thêm thẻ khác/đổi thứ tự/đóng thẻ/hwnd null→có đều KHÔNG tính.
+// Chỉ nhận: (1) cùng cửa sổ, danh sách thẻ = các thẻ cũ GIỮ NGUYÊN thứ tự + ĐÚNG MỘT thẻ mới, thẻ mới là Untitled và trùng tên tài liệu đang hiện;
+// hoặc (2) hwnd cũ và mới đều có giá trị và khác nhau (cửa sổ mới), cửa sổ mới không có thẻ hoặc chỉ một thẻ đúng tên tài liệu đang hiện. Còn lại → không chắc → không gõ.
+function newDocEvidence(a, b) {
+  if (!a || !b) return false;
+  const name = docName(b.title); if (!UNTITLED.test(name)) return false;
+  if (a.hwnd != null && b.hwnd != null && a.hwnd !== b.hwnd) return b.tabs.length === 0 || (b.tabs.length === 1 && b.tabs[0] === name);
+  if (a.hwnd !== b.hwnd || !b.tabs.length || b.tabs.length !== a.tabs.length + 1) return false;
+  // a.tabs phải là dãy con giữ thứ tự của b.tabs; phần dư đúng một thẻ
+  let i = 0; let extra = null;
+  for (const t of b.tabs) { if (i < a.tabs.length && t === a.tabs[i]) i++; else if (extra === null) extra = t; else return false; }
+  return i === a.tabs.length && extra !== null && UNTITLED.test(extra) && extra === name;
+}
 
 // việc “mở/tạo [trình soạn thảo] rồi gõ/viết …” (vi/en/zh) — KHÔNG tính khi người dùng nêu một tệp có sẵn / tài liệu đang mở
 const OPEN = /(?:^|[^\p{L}])(?:mở|bật|khởi động|chạy|tạo|open|launch|start|run|create|new)(?![\p{L}])|打开|新建|启动|开启/iu;
@@ -95,8 +108,8 @@ async function ensureFresh(d, { tries = 3 } = {}) {
     // phải có bằng chứng Ctrl+N đã có tác dụng (cửa sổ/tiêu đề/danh sách thẻ đổi so với trước) — không thì có thể vẫn là thẻ cũ → dừng (fail closed)
     if (st.blank === true) { log(`đã mở tài liệu mới trống “${st.title}” (đã kiểm: trống)`); return { ok: true, how: 'new', title: st.title, print: docPrint(obs), steps }; }
     if (st.blank === null && st.why === 'unread') {
-      if (!samePrint(p0, docPrint(obs))) { log(`đã mở tài liệu mới trống “${st.title}” (Ctrl+N đã có tác dụng, OCR không thấy chữ)`); return { ok: true, how: 'new', title: st.title, print: docPrint(obs), steps }; }
-      st = { blank: false, why: 'unchanged', title: st.title };
+      if (newDocEvidence(p0, docPrint(obs))) { log(`đã mở tài liệu mới trống “${st.title}” (Ctrl+N đã mở thẻ/cửa sổ mới, OCR không thấy chữ)`); return { ok: true, how: 'new', title: st.title, print: docPrint(obs), steps }; }
+      st = { blank: false, why: samePrint(p0, docPrint(obs)) ? 'unchanged' : 'not-new', title: st.title };
     }
   }
   log(`sau Ctrl+N vẫn chưa thấy tài liệu mới trống (${st ? st.why : '?'}: “${st ? st.title : ''}”) → KHÔNG gõ`);
@@ -116,4 +129,4 @@ function sameDoc(rec, obs) {
   if (el && el.value != null && (rec.texts || []).some(t => norm(t) && !norm(el.value).includes(norm(t)))) return { ok: false, why: 'content' };
   return { ok: true };
 }
-module.exports = { EDITORS, editorOf, untitled, dirty, docName, tabsOf, docPrint, freshDocTask, docEl, blankState, ensureFresh, sameDoc };
+module.exports = { EDITORS, editorOf, untitled, dirty, docName, tabsOf, docPrint, newDocEvidence, freshDocTask, docEl, blankState, ensureFresh, sameDoc };

@@ -68,11 +68,48 @@ test('B191 review (1): Ctrl+N không có tác dụng — cả khi danh sách th�
   const r = await FD.ensureFresh(N.d); assert.strictEqual(r.ok, false); assert.strictEqual(r.why, 'unchanged');
 });
 
+// ---- review PR #64 (a): “danh sách thẻ/hwnd có đổi” chưa phải bằng chứng đã mở tài liệu mới — phải có ĐÚNG MỘT thẻ Untitled mới (hoặc cửa sổ mới) ----
+const P = (tabs, title = 'Untitled - Notepad', hwnd = '7') => ({ hwnd, title, tabs });
+test('B191 review (a): newDocEvidence — chỉ nhận thêm đúng một thẻ Untitled mới (giữ thứ tự thẻ cũ) hoặc cửa sổ mới', () => {
+  const E = FD.newDocEvidence;
+  assert.strictEqual(E(P(['secret.txt']), P(['secret.txt', 'Untitled'])), true, 'thêm thẻ Untitled');
+  assert.strictEqual(E(P(['Untitled', 'notes.txt']), P(['Untitled', 'notes.txt', 'Untitled'])), true, 'thêm thẻ Untitled thứ hai (trùng tên thẻ cũ vẫn là thẻ MỚI theo số lượng)');
+  assert.strictEqual(E(P(['a.txt', 'b.txt']), P(['a.txt', 'Untitled', 'b.txt'])), true, 'thẻ mới chèn giữa, thẻ cũ giữ thứ tự');
+  assert.strictEqual(E(P([], 'x - Notepad', '7'), P([], 'Untitled - Notepad', '8')), true, 'cửa sổ mới (hwnd đều có giá trị, khác nhau)');
+  assert.strictEqual(E(P(['a.txt'], 'a.txt - Notepad', '7'), P(['Untitled'], 'Untitled - Notepad', '8')), true, 'cửa sổ mới chỉ một thẻ Untitled');
+  // các trường hợp probe của review: đều phải KHÔNG nhận
+  assert.strictEqual(E(P(['Untitled']), P(['Untitled', 'notes.txt'])), false, 'thêm thẻ KHÔNG phải Untitled');
+  assert.strictEqual(E(P(['Untitled']), P(['Untitled', 'notes.txt'], 'notes.txt - Notepad')), false);
+  assert.strictEqual(E(P(['Untitled', 'notes.txt']), P(['notes.txt', 'Untitled'])), false, 'đổi thứ tự thẻ');
+  assert.strictEqual(E(P(['Untitled', 'notes.txt']), P(['Untitled'])), false, 'một thẻ bị đóng');
+  assert.strictEqual(E(P(['Untitled', 'notes.txt']), P(['Untitled', 'Untitled'])), false, 'đóng một thẻ + mở một thẻ (số thẻ không +1)');
+  assert.strictEqual(E(P([], 'Untitled - Notepad', null), P([], 'Untitled - Notepad', '7')), false, 'hwnd null → có giá trị');
+  assert.strictEqual(E(P([], 'Untitled - Notepad', '7'), P([], 'Untitled - Notepad', null)), false, 'hwnd có giá trị → null');
+  assert.strictEqual(E(P([], '*Untitled - Notepad'), P([], 'Untitled - Notepad')), false, 'không có thẻ, cùng hwnd: chỉ tiêu đề đổi → có thể là chuyển thẻ');
+  assert.strictEqual(E(P(['a.txt']), P(['a.txt', 'Untitled', 'Untitled'])), false, 'thêm hai thẻ');
+  assert.strictEqual(E(P(['a.txt']), P(['a.txt', 'Untitled 2'], 'Untitled - Notepad')), false, 'thẻ mới không trùng tài liệu đang hiện');
+  assert.strictEqual(E(P(['a.txt'], 'a.txt - Notepad', '7'), P(['Untitled', 'b.txt'], 'Untitled - Notepad', '8')), false, 'cửa sổ khác có sẵn nhiều thẻ');
+  assert.strictEqual(E(P(['a.txt']), P(['a.txt', 'Untitled'], 'b.txt - Notepad')), false, 'tài liệu đang hiện không phải Untitled');
+  assert.strictEqual(E(null, P(['Untitled'])), false);
+});
+test('B191 review (a): ensureFresh — sau Ctrl+N danh sách thẻ đổi nhưng KHÔNG có thẻ Untitled mới (đang ở thẻ “Untitled” cũ không đọc được) → DỪNG, không gõ', async () => {
+  const mk = (after) => { const looks = [P(['Untitled', 'notes.txt']), after]; const keys = []; let i = 0;
+    const toObs = (p) => ({ win: { proc: 'Notepad.exe', title: p.title, hwnd: p.hwnd, pid: 1 }, elements: [{ role: 'Document', editable: true, value: null, b: NOTEPAD_BOX }, ...p.tabs.map(n => ({ role: 'TabItem', name: n, b: [0, 40, 100, 30] }))] });
+    return { keys, d: { look: async () => toObs(looks[Math.min(i++, 1)]), hotkey: async (k) => keys.push(k), sleep: async () => {}, log: () => {} } }; };
+  for (const [label, after] of [['thêm thẻ không phải Untitled', P(['Untitled', 'notes.txt', 'todo.txt'])], ['đổi thứ tự', P(['notes.txt', 'Untitled'])],
+    ['đóng thẻ', P(['Untitled'])], ['hwnd null→có', P(['Untitled', 'notes.txt'], 'Untitled - Notepad', '9')]]) {
+    const M = mk(after); if (label.startsWith('hwnd')) M.d.look = (() => { let j = 0; const o = [{ ...P(['Untitled', 'notes.txt']), hwnd: null }, after]; return async () => { const p = o[Math.min(j++, 1)]; return { win: { proc: 'Notepad.exe', title: p.title, hwnd: p.hwnd, pid: 1 }, elements: [{ role: 'Document', editable: true, value: null, b: NOTEPAD_BOX }, ...p.tabs.map(n => ({ role: 'TabItem', name: n, b: [0, 40, 100, 30] }))] }; }; })();
+    const r = await FD.ensureFresh(M.d);
+    assert.strictEqual(r.ok, false, label + ': ' + JSON.stringify(r)); assert.strictEqual(r.why, 'not-new', label); assert.deepStrictEqual(M.keys, ['cmd+n'], label);
+    assert.ok(r.steps.some(s => /KHÔNG gõ/.test(s)), label);
+  }
+});
+
 // ---- review PR #64 (2): dấu “đã sửa” (*, ●) = tài liệu có nội dung, không phải tài liệu mới ----
 test('B191 review (2): “*Untitled - Notepad” (thẻ đã sửa) không phải tài liệu mới trống; Ctrl+N mở thẻ mới rồi mới gõ', async () => {
   assert.strictEqual(FD.dirty('*Untitled - Notepad'), true); assert.strictEqual(FD.dirty('● Untitled-2 - Visual Studio Code'), true); assert.strictEqual(FD.dirty('Untitled - Notepad'), false);
   assert.deepStrictEqual(FD.blankState({ win: { title: '*Untitled - Notepad', proc: 'Notepad.exe' }, elements: [] }), { blank: false, why: 'dirty', title: '*Untitled - Notepad' });
-  const N = fakeNotepad({ tabs: [{ name: 'Untitled', text: '', dirty: true }], valueReadable: false });
+  const N = fakeNotepad({ tabs: [{ name: 'Untitled', text: '', dirty: true }], valueReadable: false, tabItems: true });
   const r = await FD.ensureFresh(N.d); assert.ok(r.ok, JSON.stringify(r)); assert.strictEqual(r.how, 'new'); assert.deepStrictEqual(N.st.keys, ['cmd+n']); assert.strictEqual(N.st.active, 1);
   const N2 = fakeNotepad({ tabs: [{ name: 'Untitled', text: '', dirty: true }], ctrlN: 'nothing', valueReadable: false });
   const r2 = await FD.ensureFresh(N2.d); assert.strictEqual(r2.ok, false); assert.strictEqual(r2.why, 'dirty');
@@ -106,8 +143,11 @@ test('B191: Notepad khôi phục thẻ cũ có nội dung → Ctrl+N → kiểm 
 });
 
 test('B191: thẻ cũ là tệp có tên (secret.txt) → Ctrl+N; tài liệu mới đọc không được giá trị nhưng không thấy chữ → nhận là mới', async () => {
-  const N = fakeNotepad({ tabs: [{ name: 'secret.txt', text: SECRET }], valueReadable: false });
+  const N = fakeNotepad({ tabs: [{ name: 'secret.txt', text: SECRET }], valueReadable: false, tabItems: true });
   const r = await FD.ensureFresh(N.d); assert.ok(r.ok, JSON.stringify(r)); assert.strictEqual(r.title, 'Untitled - Notepad'); assert.deepStrictEqual(N.st.keys, ['cmd+n']);
+  // không thấy danh sách thẻ, cùng hwnd: tiêu đề đổi sang “Untitled” có thể chỉ là chuyển sang một thẻ khác của người dùng → không đủ bằng chứng → dừng
+  const N2 = fakeNotepad({ tabs: [{ name: 'secret.txt', text: SECRET }], valueReadable: false });
+  const r2 = await FD.ensureFresh(N2.d); assert.strictEqual(r2.ok, false, JSON.stringify(r2)); assert.strictEqual(r2.why, 'not-new');
 });
 
 test('B191: đã là tài liệu mới trống → không bấm gì thêm', async () => {
