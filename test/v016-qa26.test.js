@@ -89,3 +89,25 @@ test('B120: bấm ô tìm kiếm của trang khi chưa tìm → Ctrl+T thay cho 
   assert.ok(webSearchTask('mở Chrome tìm "giá vàng SJC hôm nay", mở kết quả đầu tiên rồi báo cho mình giá và đường dẫn trang'));
   assert.match(src('src/agent/agent.js'), /TÌM TRÊN WEB TRONG TRÌNH DUYỆT: bước đầu là screen_act hotkey "ctrl\+t"/);
 });
+
+// ---------- B121: thanh tác vụ tự ẩn (máy QA: StuckRects3=3, 125 %, 2560×1440) ----------
+test('B121: phát hiện ABM_GETSTATE → StuckRects3; toạ độ vật lý; bấm cao hơn trong khung ô soạn; luôn ghi quyết định', async () => {
+  const T = require('../src/agent/taskbar');
+  assert.match(T.PS, /SHAppBarMessage\(4, ref d\)/); assert.match(T.PS, /StuckRects3/); assert.match(T.PS, /\$v\[8\]/);
+  assert.deepStrictEqual(T.parseState('ABM=1;STUCK=3;ERR='), { abm: 1, stuck: 3, autoHide: true, via: 'ABM_GETSTATE', err: '' });
+  assert.strictEqual(T.parseState('ABM=-1;STUCK=3;ERR=Add-Type lỗi').via, 'StuckRects3'); assert.strictEqual(T.parseState('ABM=-1;STUCK=3;ERR=x').autoHide, true);
+  assert.strictEqual(T.parseState('ABM=0;STUCK=3;ERR=').autoHide, true, 'một trong hai nguồn báo tự ẩn → coi là tự ẩn (dời điểm bấm vô hại)');
+  assert.strictEqual(T.parseState('ABM=0;STUCK=2;ERR=').autoHide, false); assert.strictEqual(T.parseState('ABM=-1;STUCK=-1;ERR=x').autoHide, false);
+  T._reset(); const d = await T.detect({ run: () => 'ABM=-1;STUCK=3;ERR=' }); assert.strictEqual(d.autoHide, true);
+  assert.match(T.describe(d), /thanh tác vụ tự ẩn: CÓ \(theo StuckRects3; ABM_GETSTATE=-1, StuckRects3=3\)/);
+  T._reset(); assert.strictEqual((await T.detect({ platform: 'linux' })).via, 'không phải Windows'); T._reset();
+  // đúng số đo QA: màn hình vật lý 2560×1440 (125 %), ô soạn OCR 1394–1419, beta.2.6 bấm y=1409/1407
+  const P = { x: 0, y: 0, width: 2560, height: 1440 };
+  for (const y of [1409, 1407]) { const ny = T.safeY(y, P, [400, 1394, 1400, 25]); assert.ok(ny < y && ny >= 1394 && ny <= 1396, `${y} → ${ny}`); }
+  // lỗi cũ: so điểm vật lý với khung DIP (1152 cao) → “phần tử nằm trọn trong dải” → không dời. Nay dùng khung vật lý
+  const s = src('src/desktop-agent.js');
+  assert.match(s, /function physBoundsAt\(x, y\) \{ try \{ const G = SC\.geos\(\); const g = D\.displayForRect\(G, \[Math\.round\(x\), Math\.round\(y\), 1, 1\]\); return g && g\.phys/);
+  assert.match(s, /deps\.log\('desk', `B121: \$\{TB\.describe\(d\)\}`\)/, 'quyết định phát hiện luôn được ghi (một lần mỗi phiên)');
+  assert.match(s, /trong dải đáy \$\{band\} px của màn hình \$\{b\.width\}×\$\{b\.height\} nhưng thanh tác vụ không tự ẩn/);
+  assert.ok(!/displayBoundsAt\(x, y\); const ny = TB\.safeY/.test(s), 'không còn dùng khung DIP cho điểm bấm vật lý');
+});

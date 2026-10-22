@@ -130,7 +130,7 @@ test('B114: nhận ra việc tìm web trong trình duyệt; link phải từ tra
 // ---------- B115: thanh tác vụ tự ẩn che ô soạn ----------
 test('B115: SHAppBarMessage(ABM_GETSTATE) → tự ẩn; không bấm trong dải đáy; đọc lại sau khi đưa chuột đi', async () => {
   const T = require('../src/agent/taskbar');
-  assert.deepStrictEqual(T.parseState('1'), { state: 1, autoHide: true }); assert.deepStrictEqual(T.parseState('2\r\n'), { state: 2, autoHide: false }); assert.strictEqual(T.parseState(''), null);
+  assert.strictEqual(T.parseState('1').autoHide, true); assert.strictEqual(T.parseState('2\r\n').autoHide, false); assert.strictEqual(T.parseState(''), null);
   assert.match(T.PS, /SHAppBarMessage\(4,/); // ABM_GETSTATE = 4
   T._reset(); assert.strictEqual(await T.autoHide({ platform: 'linux' }), false);
   T._reset(); assert.strictEqual(await T.autoHide({ run: () => '3' }), true);
@@ -141,11 +141,11 @@ test('B115: SHAppBarMessage(ABM_GETSTATE) → tự ẩn; không bấm trong dả
   // QA: bấm ô soạn ở y≈1408/1440 → dời lên nhưng vẫn trong ô soạn
   const ny = T.safeY(1408, B, [600, 1385, 1200, 46]); assert.ok(ny < 1408 && ny >= 1387, String(ny));
   assert.ok(T.safeY(1408, B, null) < 1408); assert.strictEqual(T.safeY(700, B, null), 700);
-  assert.strictEqual(T.safeY(1432, B, [600, 1425, 300, 14]), 1432, 'phần tử nằm trọn trong dải đáy: không dời ra ngoài phần tử');
+  assert.strictEqual(T.safeY(1432, B, [600, 1425, 300, 14]), 1428, 'B121: phần tử nằm trọn trong dải đáy: bấm dòng trên cùng của phần tử, không ra ngoài phần tử');
   assert.strictEqual(T.safeY(1000, { x: 0, y: 1440, width: 1920, height: 1080 }, null), 1000, 'màn hình thứ hai: tính theo màn hình chứa điểm');
   const s = src('src/desktop-agent.js');
   assert.match(s, /await refocus\(\); await sleep\(250\); await awayFromTaskbar\(\);/, 'phép kiểm B104 đọc lại sau khi đưa chuột ra xa đáy');
-  assert.match(s, /TB\.safeY\(y, b,/);
+  assert.match(s, /TB\.safeY\(y, b, box\)/);
 });
 test('B115 (đi kèm): việc CHỈ SOẠN không bao giờ bị phép dọn B104 xoá bản nháp', () => {
   const s = src('src/desktop-agent.js');

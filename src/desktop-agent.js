@@ -113,10 +113,24 @@ function createDesktopAgent(deps) {
   }
   // B104 (máy thật beta.2.4): việc gửi tin thất bại / hết giờ mà ô soạn còn chữ AIVN đã gõ (chưa gửi) → xoá đi (clear) hoặc báo rõ chữ vẫn còn
   let lastDraft = null;
+  // B121: khung màn hình VẬT LÝ chứa điểm (x, y) vật lý
+  function physBoundsAt(x, y) { try { const G = SC.geos(); const g = D.displayForRect(G, [Math.round(x), Math.round(y), 1, 1]); return g && g.phys ? g.phys : null; } catch { return null; } }
+  async function taskbarSafe(a, x, y) {
+    const d = await TB.detect(); const s = session;
+    if (s && !s.tbLogged) { s.tbLogged = true; deps.log && deps.log('desk', `B121: ${TB.describe(d)}`); }
+    const b = physBoundsAt(x, y); if (!b) { deps.log && deps.log('desk', 'B121: không biết khung màn hình (vật lý) của điểm bấm — không kiểm dải đáy'); return y; }
+    const band = TB.bandOf(b); const inBand = y > b.y + b.height - band - 1;
+    if (!inBand) return y;
+    const box = a && a.__el && Array.isArray(a.__el.b) ? a.__el.b : null;
+    if (!d.autoHide) { deps.log && deps.log('desk', `B121: điểm bấm y=${Math.round(y)} trong dải đáy ${band} px của màn hình ${b.width}×${b.height} nhưng thanh tác vụ không tự ẩn → bấm như cũ`); return y; }
+    const ny = TB.safeY(y, b, box);
+    deps.log && deps.log('desk', ny !== y ? `B121: thanh tác vụ tự ẩn — điểm bấm y=${Math.round(y)} nằm trong dải đáy (${band} px, màn hình ${b.width}×${b.height} vật lý) → bấm cao hơn trong khung phần tử: y=${Math.round(ny)}${box ? ` (khung ${box[1]}–${box[1] + box[3]})` : ''}` : `B121: thanh tác vụ tự ẩn — điểm bấm y=${Math.round(y)} trong dải đáy nhưng không dời được (phần tử nằm trọn trong dải)`);
+    return ny;
+  }
   // B115: thanh tác vụ tự ẩn có thể đang che ô soạn (chuột vừa chạm đáy) → đưa chuột lên giữa cửa sổ đích, chờ thanh tác vụ ẩn rồi mới đọc lại
   async function awayFromTaskbar() {
-    try { if (!(await TB.autoHide())) return false; const s = session; const W = s && s.obs && s.obs.win && Array.isArray(s.obs.win.b) ? s.obs.win.b : null;
-      const b = W ? null : displayBoundsAt(0, 0); const x = W ? W[0] + W[2] / 2 : b.x + b.width / 2; const y = W ? W[1] + W[3] * 0.4 : b.y + b.height * 0.4;
+    try { const dd = await TB.detect(); if (session && !session.tbLogged) { session.tbLogged = true; deps.log && deps.log('desk', `B121: ${TB.describe(dd)}`); } if (!dd.autoHide) return false; const s = session; const W = s && s.obs && s.obs.win && Array.isArray(s.obs.win.b) ? s.obs.win.b : null;
+      const b = W ? null : (physBoundsAt(0, 0) || displayBoundsAt(0, 0)); const x = W ? W[0] + W[2] / 2 : b.x + b.width / 2; const y = W ? W[1] + W[3] * 0.4 : b.y + b.height * 0.4;
       await moveTo(x, y); await sleep(900); deps.log && deps.log('desk', 'B115: thanh tác vụ tự ẩn — đưa chuột ra xa đáy màn hình rồi mới đọc lại ô soạn'); return true; } catch { return false; }
   }
   function displayBoundsAt(x, y) { try { const { screen } = require('electron'); return screen.getDisplayNearestPoint({ x: Math.round(x), y: Math.round(y) }).bounds; } catch { return null; } }
@@ -413,8 +427,8 @@ function createDesktopAgent(deps) {
       // chính AIVN (cửa sổ chat/lớp phủ) đang ở trước → đưa ứng dụng đích lên trước rồi mới bấm; ứng dụng khác (hộp thoại hệ thống…) thì không giành tiêu điểm
       if (fg0 && fg0.pid === process.pid && session && session.target) { deps.log && deps.log('desk', 'AIVN đang ở trước ngay trước cú bấm — đưa ứng dụng đích lên trước'); await refocus(); fg0 = await fgWin(); }
     }
-    // B115: thanh tác vụ tự ẩn → không bấm trong dải đáy màn hình (chạm đáy làm thanh tác vụ bật lên che ô soạn)
-    if (clicky && x != null) { try { if (await TB.autoHide()) { const b = displayBoundsAt(x, y); const ny = TB.safeY(y, b, a && a.__el && Array.isArray(a.__el.b) ? a.__el.b : null); if (ny !== y) { deps.log && deps.log('desk', `B115: thanh tác vụ tự ẩn — dời điểm bấm từ y=${Math.round(y)} lên y=${Math.round(ny)} (tránh dải đáy màn hình)`); y = ny; } } } catch {} }
+    // B115/B121: thanh tác vụ tự ẩn → không bấm trong dải đáy màn hình (chạm đáy làm thanh tác vụ bật lên che ô soạn). Mọi toạ độ ở đây là VẬT LÝ.
+    if (clicky && x != null) { try { await taskbarSafe(a, x, y).then(ny => { y = ny; }); } catch (e) { deps.log && deps.log('desk', 'B121: kiểm thanh tác vụ lỗi: ' + e.message); } }
     if (x != null) { const m = await moveTo(x, y); a.__moved = m; if (!m.ok) { const e = new Error(`Chuột không tới được đúng chỗ cần bấm (cần ${m.want.x},${m.want.y}; con trỏ ở ${m.got.x},${m.got.y}) — AIVN không bấm để tránh bấm nhầm.`); e.code = 'CURSOR_OFF'; throw e; } await sleep(80); }
     // B62: cửa sổ dưới điểm bấm (Windows) — là cửa sổ của chính AIVN (lớp phủ…) thì ẩn lớp phủ trong lúc bấm
     let hidOv = false; a.__under = null;
