@@ -151,3 +151,53 @@ test('B165: agent turn time cap ends honestly and status carries elapsed/cap for
   assert.ok(st.some(s => s.elapsedMs != null && s.capMs === 1000), JSON.stringify(st.slice(0, 4)));
   assert.strictEqual(r.outcome, 'failed'); assert.match(r.text, /1 giây|chưa/i);
 });
+
+test('B165: agent system + tools prefix is identical on every step and every turn (prompt cache hits); the clock goes into the last user message; llama-server gets cache_prompt', async () => {
+  const replies = [call('screen_act', { action: 'click', element: 'Mở' }), call('screen_act', { action: 'click', element: 'Lưu' }), say('Đã lưu.')];
+  const { agent, seen } = mkAgent(replies);
+  await agent.run({ messages: [{ role: 'user', content: 'mở Paint rồi lưu tệp' }], confirm: async () => true });
+  assert.ok(seen.length >= 3);
+  const sys0 = seen[0].msgs[0].content; const tools0 = JSON.stringify(seen[0].tools);
+  for (const s of seen.slice(1)) { assert.strictEqual(s.msgs[0].content, sys0, 'lời nhắc hệ thống đổi giữa các bước'); assert.strictEqual(JSON.stringify(s.tools.filter(t => t !== 'cannot_do')), JSON.stringify(seen[0].tools.filter(t => t !== 'cannot_do'))); }
+  assert.ok(!/Thời điểm hiện tại/.test(sys0), 'giờ không nằm trong lời nhắc hệ thống');
+  const lastUser = [...seen[0].msgs].reverse().find(m => m.role === 'user'); assert.match(String(lastUser.content), /Thời điểm hiện tại/);
+  // lượt sau (giờ khác) — phần đầu vẫn y hệt
+  const two = mkAgent([say('Được.')]); const RealDate = Date; const later = new RealDate(RealDate.now() + 3 * 3600e3);
+  global.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : [later.getTime()])); } static now() { return later.getTime(); } };
+  try { await two.agent.run({ messages: [{ role: 'user', content: 'mở Paint rồi lưu tệp' }], confirm: async () => true }); } finally { global.Date = RealDate; }
+  assert.strictEqual(two.seen[0].msgs[0].content, sys0, 'lời nhắc hệ thống đổi giữa hai lượt');
+  assert.match(fs.readFileSync(path.join(__dirname, '../src/vision-server.js'), 'utf8'), /cache_prompt: true/);
+});
+
+test('B163: exact laptop (Vulkan lists AMD iGPU first, RTX 3050 Ti 4 GB) → AIVN AGENT plan = 8K + K/V q8_0, Qwen3-VL 2B is "Chạy mượt" from the dGPU free VRAM; 4B re-evaluated the same way', () => {
+  const AP = require('../src/agent-plan'); const hf = require('../src/hf'); const F = require('../src/fit'); const catalog = require('../src/catalog'); const AE = require('../src/agent-eligibility');
+  const M = 1024 ** 2;
+  const h = { gpu: 'vulkan', vram: { total: 3.9 * GiB, free: 3.55 * GiB, shared: 7.8 * GiB, mixed: true, integratedOnly: false }, devices: ['AMD Radeon(TM) Graphics', 'NVIDIA GeForce RTX 3050 Ti Laptop GPU'], ram: 15.4 * GiB, freeRam: 7 * GiB, cpu: { cores: 8, threads: 16 } };
+  assert.strictEqual(GP.pick(h.devices.map((n, i) => ({ id: 'Vulkan' + i, name: n }))).name, 'NVIDIA GeForce RTX 3050 Ti Laptop GPU');
+  const fitOf = (c, ctx, fo = {}) => hf.fitFor(c.size, h, { ...F.metaOf({ catalog: c }), ctx, ...fo });
+  const cat = catalog.map(c => ({ id: c.id, vision: !!c.mmproj, catalog: c, size: c.size }));
+  const P = AP.plan(cat, (e, ctx, fo) => fitOf(e.catalog, ctx, fo), {}, { vramBytes: h.vram.total });
+  assert.strictEqual(P.ctx, 8192); assert.strictEqual(P.kv, 'q8_0'); assert.ok(P.lowVram); assert.match(AP.note(P), /8K/);
+  const vl2 = catalog.find(c => c.id === 'qwen3-vl-2b-instruct-q8_0'), vl4 = catalog.find(c => c.id === 'qwen3-vl-4b-instruct-q4_k_m');
+  const f2 = fitOf(vl2, P.ctx, AP.fitOpts(P)), f4 = fitOf(vl4, P.ctx, AP.fitOpts(P));
+  assert.strictEqual(f2.group, 'smooth', JSON.stringify(f2)); assert.ok(f2.gpuFrac >= 0.9);
+  assert.ok(f4.gpuFrac > fitOf(vl4, 16384, { server: true }).gpuFrac, '4B được nhiều lớp trên GPU hơn so với 16K f16');
+  const e2 = AE.eligibility({ vision: true, catalog: vl2, fit: f2 }, AP.elOpts(P)); assert.ok(e2.ok, JSON.stringify(e2));
+  // máy 12 GB: không đổi (không dùng hồ sơ 8K/q8)
+  const P12 = AP.plan(cat, (e, ctx, fo) => hf.fitFor(e.catalog.size, { ...h, vram: { total: 12 * GiB, free: 11 * GiB } }, { ...F.metaOf({ catalog: e.catalog }), ctx, ...fo }), {}, { vramBytes: 12 * GiB });
+  assert.notStrictEqual(P12.kv, 'q8_0'); assert.strictEqual(GP.ctxCapFor({ gpu: 'vulkan', vram: { total: 3.9 * GiB } }, { vision: true }), 8192);
+  void M;
+});
+
+test('CUDA runtime is offered on this laptop profile (RTX 3050 Ti, driver 566.07 / CUDA 12.7, Windows x64)', async () => {
+  const { createRuntimes } = require('../src/runtimes');
+  const rt = createRuntimes({ dir: fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-rt-')), platform: 'win32', arch: 'x64', nvidiaSmi: async () => 'NVIDIA GeForce RTX 3050 Ti Laptop GPU, 566.07, 4096' });
+  const st = await rt.status(); assert.strictEqual(st.supported, true, st.why); assert.strictEqual(st.installed, false); assert.match(st.gpu.name, /3050 Ti/);
+});
+
+test('B168: Auto GPU never exports GGML_VK_VISIBLE_DEVICES to the engine (empty values are dropped before spawning)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/engine-proxy.js'), 'utf8');
+  assert.match(src, /for \(const k of Object\.keys\(env\)\) if \(env\[k\] === '' \|\| env\[k\] == null\) delete env\[k\]/);
+  const main = fs.readFileSync(path.join(__dirname, '../src/main.js'), 'utf8');
+  assert.match(main, /filter\(\(\[k, v\]\) => v && !process\.env\[k\]\)/); assert.match(main, /if \(v\) process\.env\[k\] = v; else delete process\.env\[k\]/);
+});

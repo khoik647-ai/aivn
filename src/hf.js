@@ -98,7 +98,7 @@ function screenFit(size, hw) {
 // Mức chạy được trên máy này: xem fit.js (nhóm Chạy mượt / Chạy chậm / Không chạy được, kèm tốc độ và bộ nhớ ước tính)
 function fitFor(size, hw, meta = {}) {
   if (!size || !hw || !hw.ram) return null;
-  return require('./fit').machineFit({ size, ...meta }, hw, { ctx: meta.ctx });
+  return require('./fit').machineFit({ size, ...meta }, hw, { ctx: meta.ctx, server: meta.server, kvScale: meta.kvScale });
 }
 
 // Gom tệp .gguf: các phần -00001-of-0000N thành một mô hình

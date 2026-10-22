@@ -154,7 +154,7 @@ async function withCtxGrow(fn, { minCtx = MIN_CTX_CHAT, maxCtx = 0, onGrow } = {
 }
 // B165: trần ngữ cảnh theo VRAM của GPU rời (bộ đệm K/V f16 của mô hình 4B ≈ 144 KB/token: 16K ≈ 2,3 GB, 64K ≈ 9 GB).
 // Áp cho MỌI nguồn ngữ cảnh không do người dùng vừa chọn trong hộp nạp: giá trị lưu riêng của mô hình, tự tăng ngữ cảnh, tự phục hồi.
-const ctxCapFor = (h) => require('./gpu-pick').ctxCapFor(h);
+const ctxCapFor = (h, o) => require('./gpu-pick').ctxCapFor(h, o);
 const ctxCapByVram = async () => ctxCapFor(await hw());
 // Bộ máy AI dừng giữa lượt (sập/thiếu bộ nhớ): nạp lại mô hình với ngữ cảnh nhỏ hơn rồi thử lại MỘT lần
 async function withEngineRecovery(fn, { onRetry, minCtx = MIN_CTX_CHAT } = {}) {
@@ -457,10 +457,10 @@ async function measureVram(id, st) {
   LOG.log('load', `Đo VRAM thật: ${id} dùng ${(used / 1024 ** 3).toFixed(2)} GB ở ngữ cảnh ${st.contextSize}`);
 }
 // B170: số lớp GPU THẬT của lần nạp gần nhất (theo ngữ cảnh + thiết bị) — hộp nạp hiện số này thay cho ước lượng khi cùng điều kiện
-function noteLayers(id, st) {
+function noteLayers(id, st, kvUsed) {
   if (!st || !Number.isInteger(st.gpuLayers) || !st.totalLayers) return;
   const u = settings.data.modelUsage || (settings.data.modelUsage = {}); const e = u[id] || (u[id] = { uses: 0 });
-  e.layers = { ctx: st.contextSize || null, gpu: st.gpuLayers, total: st.totalLayers, device: st.device || null, kv: (st.loadParams && st.loadParams.kvCache) || null, at: Date.now() }; settings.save();
+  e.layers = { ctx: st.contextSize || null, gpu: st.gpuLayers, total: st.totalLayers, device: st.device || null, kv: kvUsed || (st.loadParams && st.loadParams.kvCache) || null, at: Date.now() }; settings.save();
 }
 async function loadById(id, { force = false, ctx = null, reason = null, minCtx = null, load = null } = {}) {
   const m = listModels().find(x => x.id === id);
@@ -494,12 +494,14 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       if (vt > 0 && vt < 6 * 1024 ** 3) { ctxNote = `Đã giới hạn độ dài ngữ cảnh ở 8192 (bạn chọn ${ctxWant}) vì GPU chỉ có ${(vt / 1024 ** 3).toFixed(1)} GB VRAM.`; ctxWant = 8192; }
     }
     { // B165: ngữ cảnh lưu riêng / tự tăng vượt trần VRAM → hạ về trần (chỉ giữ nguyên khi người dùng VỪA chọn trong hộp nạp)
-      const picked = load && cleanLoad(load).contextSize; const cap = ctxCapFor(await hw());
+      const picked = load && cleanLoad(load).contextSize; const cap = ctxCapFor(await hw(), { vision: !!(m.mmproj && settings.data.vision !== false) });
       if (!picked && ctxWant > cap) { ctxNote = [ctxNote, `Đã giới hạn độ dài ngữ cảnh ở ${cap} (giá trị cũ ${ctxWant}) để mô hình nằm trên GPU nhiều nhất có thể. Muốn dùng ngữ cảnh lớn hơn, hãy chọn trong hộp nạp (Ctrl+L).`].filter(Boolean).join(' '); ctxWant = cap; }
     }
+    const lowVramVision = await (async () => { if (!(m.mmproj && settings.data.vision !== false)) return false; const h = await hw(); return !!(h && h.gpu && h.gpu !== 'metal' && h.vram && !h.vram.integratedOnly && h.vram.total > 0 && h.vram.total < 6 * 1024 ** 3); })().catch(() => false); // B163
     const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj, serverArgs: require('./model-launch').launchArgs({ id: m.id, family: SC.groundingFamily(NAMES.isGeneric(m.file) ? m.id : (m.file || m.id)), catalog: m.catalog, load: ml }) } : {}), ...(ml.mmap === false ? { useMmap: false } : {}), ...(ml.mlock ? { useMlock: true } : {}), ...(load ? { reload: true } : {}),
       // B170: llama-server (mô hình nhìn ảnh) nay cũng theo Bộ đệm K/V / Flash attention của hộp nạp (trước đây bị bỏ qua)
-      ...(ml.kvCache ? { kvCache: ml.kvCache } : {}), ...(ml.flashAttention != null ? { flashAttention: ml.flashAttention } : {}) };
+      ...(ml.kvCache ? { kvCache: ml.kvCache } : lowVramVision ? { kvCache: 'q8_0' } : {}), ...(ml.flashAttention != null ? { flashAttention: ml.flashAttention } : {}) };
+    if (lowVramVision && !ml.kvCache) LOG.log('load', 'B163: GPU rời dưới 6 GB → bộ đệm K/V q8_0 cho mô hình nhìn ảnh (đổi trong hộp nạp Ctrl+L)');
     if (opts.mmproj) opts.serverExe = await serverExeFor();
     LOG.log('load', `Bắt đầu nạp ${m.file}`, { size: m.size, ctx: opts.contextSize, gpuLayers: opts.gpuLayers ?? 'tự động', vision: !!opts.mmproj, ...(opts.serverArgs && opts.serverArgs.length ? { args: opts.serverArgs.join(' ') } : {}) });
     const tLoad = Date.now();
@@ -542,7 +544,7 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
     if (ctxNote) { st = { ...st, notice: [st.notice, ctxNote].filter(Boolean).join(' ') }; LOG.log('load', ctxNote); }
     if (reason) LOG.log('load', 'Lý do nạp lại: ' + reason);
     measureVram(m.id, st).catch(() => {});
-    noteLayers(m.id, st);
+    noteLayers(m.id, st, opts.kvCache);
     LOG.log('load', `Đã nạp ${m.file} sau ${Date.now() - tLoad} ms`, { mode: st.mode, ctx: st.contextSize, gpu: st.backend || st.gpu, runtime: st.vision ? (st.runtime || 'bundled') : 'node-llama-cpp', ...(st.vision && st.gpu && st.backend !== st.gpu ? { chatGpu: st.gpu } : {}), gpuLayers: st.gpuLayers, totalLayers: st.totalLayers, toolMode: st.toolMode, fallbackFrom: st.fallbackFrom });
     noteUsage(null, m.id);
     settings.data.lastModel = m.id; settings.save(); lastUse = Date.now();
@@ -1026,7 +1028,7 @@ function catalogList() {
     // B17: một cách tính duy nhất (agent-plan.js) cho ngữ cảnh AIVN AGENT, độ vừa máy của thẻ trong mục Điều khiển máy tính,
     // gợi ý ⭐ điều khiển máy và cổng AIVN AGENT
     const sc = benchScores(); const P = agentPlanFor(H, sc);
-    list = list.map(c => ({ ...c, agentFit: catAgentFit(c, H, P.ctx) }));
+    list = list.map(c => ({ ...c, agentFit: catAgentFit(c, H, P.ctx, AP.fitOpts(P)) }));
     return require('./recommend').annotate(list, sc, vramTotal(), AP.elOpts(P)).list.map(c => ({ ...c, strength: require('./fit').strength(c), agentCtx: P.ctx,
       agentCheck: AE.eligibility({ vision: !!c.mmproj, catalog: c, fit: c.agentFit }, { shipped: sc.shipped[c.id], local: (sc.local || {})[c.id], ...AP.elOpts(P) }) }));
   });
@@ -1222,6 +1224,8 @@ function registerIpc() {
     const server = m.mmproj && settings.data.vision !== false ? { mmprojBytes: (() => { try { return fs.statSync(m.mmproj).size; } catch { return 0; } })() } : null;
     let vram = gpu && h.gpu !== 'metal' ? h.vram : null; let device = h.gpuName || null;
     if (server && gpu && h.gpu !== 'metal' && !(process.env.AIVN_QA_FAKEHW && !app.isPackaged)) { const d = await serverDevice(); if (d) { vram = { ...(vram || {}), total: d.totalMiB * 1024 ** 2, free: (d.freeMiB || d.totalMiB) * 1024 ** 2 }; device = d.name; } }
+    // B163: GPU rời dưới 6 GB + mô hình nhìn ảnh, K/V để Tự động → lúc nạp dùng q8_0 (loadById) → ước lượng cũng theo q8_0
+    if (server && gpu && h.gpu !== 'metal' && h.vram && h.vram.total > 0 && h.vram.total < 6 * 1024 ** 3 && !h.vram.integratedOnly && (o.kvType == null || o.kvType === 'auto')) o = { ...o, kvType: 'q8_0' };
     const est = require('./gguf').estimate({ ...g, fileSize: m.size }, { ...o, gpu, vram, server });
     // lần nạp thật gần nhất cùng ngữ cảnh + cùng chế độ tự động → hiện số THẬT (không để ước lượng lệch số thật)
     const real = ((settings.data.modelUsage || {})[m.id] || {}).layers;
@@ -1708,13 +1712,13 @@ const AP = require('./agent-plan');
 // B38: MỘT cách tính cho Khám phá và Mô hình của tôi (fit.metaOf): cùng dung lượng (mô hình + mmproj), cùng KV/bộ đệm, và số đo thật nếu đã nạp trên máy này
 const usageOfCatalog = (cid) => { const inst = cid ? listModels().find(m => m.catalog && m.catalog.id === cid) : null; return inst ? (settings.data.modelUsage || {})[inst.id] || null : null; };
 const fitMetaCat = (c) => { const u = usageOfCatalog(c.id); return { ...require('./fit').metaOf({ catalog: c, measured: u && u.vram }), measuredTps: u && u.tps }; };
-const catAgentFit = (c, h, ctx = AGENT_CTX) => (h ? hf.fitFor(c.size || 0, h, { ...fitMetaCat(c), ctx }) : null);
+const catAgentFit = (c, h, ctx = AGENT_CTX, fo = {}) => (h ? hf.fitFor(c.size || 0, h, { ...fitMetaCat(c), ctx, ...fo }) : null); // fo: AP.fitOpts(P) — B163 GPU < 6 GB: llama-server + K/V q8_0
 // B17: kế hoạch AIVN AGENT cho máy này (ngữ cảnh 16K hoặc 12K, có cho “Chạy chậm” không) — xem agent-plan.js
 function agentPlanFor(h, sc, installed = []) {
   if (!h) return { ctx: AGENT_CTX, lowered: false, allowSlow: false, maxSpill: 0 };
-  const cat = catalog.map(c => ({ id: c.id, vision: !!c.mmproj, catalog: c, size: c.size, _fit: (ctx) => catAgentFit(c, h, ctx) }));
-  const inst = installed.map(m => ({ ...m, _fit: m._fit || ((ctx) => hf.fitFor(m.size || 0, h, { ...(m._meta || {}), ctx })) }));
-  return { ...AP.plan([...cat, ...inst], (e, ctx) => e._fit(ctx), sc, { vramBytes: vramTotal() }), allowVerySlow: settings.data.agentVerySlow === true };
+  const cat = catalog.map(c => ({ id: c.id, vision: !!c.mmproj, catalog: c, size: c.size, _fit: (ctx, fo) => catAgentFit(c, h, ctx, fo) }));
+  const inst = installed.map(m => ({ ...m, _fit: m._fit || ((ctx, fo) => hf.fitFor(m.size || 0, h, { ...(m._meta || {}), ctx, ...(fo || {}) })) }));
+  return { ...AP.plan([...cat, ...inst], (e, ctx, fo) => e._fit(ctx, fo), sc, { vramBytes: vramTotal() }), allowVerySlow: settings.data.agentVerySlow === true };
 }
 async function withAgentCheck(list) {
   const h = await hw().catch(() => null); const sc = benchScores();
@@ -1726,7 +1730,7 @@ async function withAgentCheck(list) {
     return { ...m, fit, _meta: meta, strength: require('./fit').strength({ ...m, ...meta }), quant: hf.parseQuant(m.file) || null, params: m.catalog ? m.catalog.params : null, usage: u ? { lastUsed: u.lastUsed || null, uses: u.uses || 0, tps: u.tps || null, vram: u.vram || null } : null, mmprojSize: mm };
   });
   const P = agentPlanFor(h, sc, out);
-  const res = out.map(({ _meta, ...m }) => { const agentFit = h ? hf.fitFor(m.size || 0, h, { ..._meta, ctx: P.ctx }) : null;
+  const res = out.map(({ _meta, ...m }) => { const agentFit = h ? hf.fitFor(m.size || 0, h, { ..._meta, ctx: P.ctx, ...AP.fitOpts(P) }) : null;
     return { ...m, agentFit, agentCtx: P.ctx, agent: AE.eligibility({ ...m, fit: agentFit }, { shipped: m.catalog && sc.shipped[m.catalog.id], local: sc.local[m.id], ...AP.elOpts(P) }) }; });
   Object.defineProperty(res, 'plan', { value: P, enumerable: false });
   return res;
@@ -1739,7 +1743,7 @@ async function agentModelGate() {
   const P = list.plan || agentPlanFor(h, sc);
   const allowSlow = P.allowSlow; const eo = AP.elOpts(P);
   const best = AE.bestFor(list.map(m => ({ ...m, installed: true })), sc, eo);
-  const catE = catalog.map(c => ({ id: c.id, vision: !!c.mmproj, catalog: c, agentFit: catAgentFit(c, h, P.ctx), size: c.size, dlSize: (c.size || 0) + (c.mmproj && c.mmproj.size || 0) })); // B22: dung lượng tải = mô hình + tệp thị giác (khớp thẻ Khám phá)
+  const catE = catalog.map(c => ({ id: c.id, vision: !!c.mmproj, catalog: c, agentFit: catAgentFit(c, h, P.ctx, AP.fitOpts(P)), size: c.size, dlSize: (c.size || 0) + (c.mmproj && c.mmproj.size || 0) })); // B22: dung lượng tải = mô hình + tệp thị giác (khớp thẻ Khám phá)
   const recommended = [];
   for (let k = 0; k < 2; k++) { const r = AE.bestFor(catE.filter(x => !recommended.some(y => y.id === x.id)), sc, eo); if (r) recommended.push(r); }
   const recOut = recommended.map(x => ({ id: x.id, name: x.catalog.name, size: x.dlSize || x.size, installed: list.some(m => m.catalog && m.catalog.id === x.id), slow: !!(x.agentFit && x.agentFit.level === 'slow'), fitText: x.agentFit ? x.agentFit.text : '' }));

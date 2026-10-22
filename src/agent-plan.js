@@ -17,8 +17,19 @@ const SMALL_SPILL = 1 * GiB;
 
 // entries: [{ id, vision, catalog, size, mmprojSize?, params? }]; fitAt(entry, ctx) → fit; scores: { shipped, local }
 // opt.vramBytes: VRAM riêng của GPU rời — dưới 6 GB → lowVram (B158: gợi ý Qwen3-VL 2B, 4B “Chạy chậm”)
+// B163 (laptop thật Ryzen + RTX 3050 Ti 4 GB): GPU rời dưới 6 GB → AIVN AGENT chạy ngữ cảnh 8K + bộ đệm K/V q8_0 trên llama-server
+// (lịch sử và ảnh được tự thu gọn — compact.js); độ vừa tính theo VRAM trống thật của GPU rời (fit.js, nhánh server).
+// Khi đó Qwen3-VL 2B nằm gần trọn GPU → “Chạy mượt”, ⭐ (B158); 4B được tính lại theo cùng cách (thường vẫn “Chạy chậm” trên 4 GB).
+const CTX_LOWVRAM = 8192;
+const LOWVRAM_FIT = { server: true, kvScale: 0.55 };
+const fitOpts = (p) => (p && p.kv === 'q8_0' ? LOWVRAM_FIT : {});
 function plan(entries, fitAt, scores = {}, opt = {}) {
   const lowVram = AE.lowVramOf(opt.vramBytes || 0); const L = lowVram ? { lowVram: true } : {};
+  if (lowVram) {
+    const at = entries.map(e => ({ ...e, agentFit: fitAt(e, CTX_LOWVRAM, LOWVRAM_FIT) }));
+    const el = (m, o = {}) => AE.eligibility({ ...m, fit: m.agentFit }, { shipped: m.catalog && (scores.shipped || {})[m.catalog.id], local: (scores.local || {})[m.id], lowVram, ...o }).ok;
+    if (at.some(m => el(m))) return { ctx: CTX_LOWVRAM, kv: 'q8_0', lowered: true, lowProfile: true, allowSlow: true, maxSpill: SMALL_SPILL, ...L };
+  }
   const r = plan0(entries, fitAt, scores, lowVram); return { ...r, ...L };
 }
 function plan0(entries, fitAt, scores, lowVram) {
@@ -41,8 +52,9 @@ const elOpts = (p) => ({ allowSlow: !!(p && p.allowSlow), maxSpill: !p ? 0 : p.m
 // câu giải thích cho giao diện
 function note(p) {
   if (!p || !p.lowered) return '';
+  if (p.lowProfile) return 'GPU của máy này dưới 6 GB, nên AIVN AGENT dùng ngữ cảnh 8K và bộ đệm K/V q8_0 (lịch sử và ảnh màn hình được tự thu gọn) để mô hình nằm gần trọn trên GPU.';
   return p.maxSpill === Infinity || p.noSmooth
     ? 'Máy này không có mô hình AIVN AGENT nào nằm trọn trong VRAM, nên AIVN dùng ngữ cảnh 12K cho AIVN AGENT và cho phép mô hình “Chạy chậm” (mỗi bước có thể mất 10–30 giây).'
     : 'AIVN AGENT dùng ngữ cảnh 12K trên máy này để mô hình nằm trọn trong VRAM (lịch sử và ảnh màn hình được tự thu gọn). Mô hình tràn ít (dưới 1 GB) vẫn chọn được nhưng chậm hơn.';
 }
-module.exports = { plan, elOpts, note, CTX_FULL, CTX_LOW, SMALL_SPILL };
+module.exports = { CTX_LOWVRAM, LOWVRAM_FIT, fitOpts, plan, elOpts, note, CTX_FULL, CTX_LOW, SMALL_SPILL };

@@ -753,7 +753,6 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     const RL = replyLang(query, s.uiLang); const RI = require('../i18n/core').REPLY_IN[RL]; // B57: ngôn ngữ câu lệnh / giao diện en/zh → trả lời bằng ngôn ngữ đó
     const lines = [
       RL !== 'vi' && RI ? IDENTITY.replace('Luôn trả lời bằng tiếng Việt,', `Luôn trả lời bằng ${RI}, kể cả khi báo lỗi;`) : IDENTITY,
-      `Thời điểm hiện tại: ${nowVi()} (${tz()}).`,
       '',
       'Nguyên tắc làm việc:',
       '- Khi cần dữ liệu thật (nội dung tệp, phép tính, ngày giờ, thông tin trên web), hãy gọi công cụ phù hợp thay vì đoán.',
@@ -791,7 +790,9 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     if (att.length) lines.push('', 'Tệp người dùng đính kèm trong lượt này (nội dung đã có trong tin nhắn; đọc thêm bằng read_file với đường dẫn đầy đủ):', ...att.map(f => `- ${f.path}`));
     if (mem.items.length) lines.push('', 'Những điều bạn đã ghi nhớ trước đây (dùng khi liên quan):', ...mem.items.map(m => `- ${m.text}`));
     if (headless) lines.push('', 'Việc này đang chạy tự động theo lịch, người dùng không có mặt: không hỏi lại, làm hết khả năng rồi viết kết quả.');
-    return { text: lines.join('\n'), memories: mem.items };
+    // B165: thời điểm hiện tại đổi mỗi phút → KHÔNG để trong lời nhắc hệ thống (đứng trước danh sách công cụ trong mẫu chat) để phần đầu
+    // lời nhắc (~2,4k token: hệ thống + công cụ) giống hệt giữa các lượt và llama-server dùng lại bộ đệm (cache_prompt) — đưa vào tin người dùng cuối.
+    return { text: lines.join('\n'), memories: mem.items, now: `Thời điểm hiện tại: ${nowVi()} (${tz()}).` };
   }
 
   // messages: lịch sử kiểu OpenAI (không có system). Trả { text, steps, usage, finishReason, urls, memories }
@@ -887,6 +888,12 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     let recipe = null; try { recipe = !headless && deps.recipes && names.includes('screen_act') && !((runStore.getStore() || {}).attachments || []).length ? deps.recipes.get(query) : null; } catch {}
     if (recipe) deps.log && deps.log(`[aivn agent] B167: làm lại theo ${recipe.steps.length} bước đã thành công (${recipe.ok} lần)`);
     const msgs = [{ role: 'system', content: sys.text + appHint + webHint + (recipe ? require('./recipes').hint(recipe) : '') }, ...histMsgs];
+    { // B165: bối cảnh hay đổi (giờ) nằm ở tin người dùng cuối, không phá bộ đệm phần đầu lời nhắc
+      let li = -1; for (let i = msgs.length - 1; i > 0; i--) if (msgs[i].role === 'user') { li = i; break; }
+      if (li > 0 && sys.now) { const u = msgs[li]; const pre = `(${sys.now})\n`;
+        msgs[li] = { ...u, content: typeof u.content === 'string' ? pre + u.content : Array.isArray(u.content) ? [{ type: 'text', text: pre.trim() }, ...u.content] : u.content }; }
+      else if (sys.now) msgs[0] = { ...msgs[0], content: msgs[0].content + '\n' + sys.now };
+    }
     const st = deps.engine.status();
     // 0.16: tự thu gọn lịch sử + ảnh TRƯỚC MỖI lần gọi mô hình (không còn hỏng vì hết ngữ cảnh giữa lượt dài)
     const tc = (x) => (deps.engine.countTokens ? deps.engine.countTokens(x) : Math.ceil(String(x).length / 3));

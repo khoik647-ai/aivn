@@ -1614,6 +1614,7 @@
     "Thiết bị Vulkan #{0}": "Vulkan device #{0}",
     "lớp{0}": "layers{0}",
     "— GPU tích hợp": "— integrated GPU",
+    "Khoảng {0} % mô hình nằm trên GPU, phần còn lại chạy bằng CPU": "About {0}% of the model is on the GPU; the rest runs on the CPU",
     "không có tác dụng": "no effect",
     "Tự động: lần nạp trước với cùng cài đặt có {0}/{1} lớp nằm trên GPU ({2}).": "Automatic: the last load with the same settings put {0}/{1} layers on the GPU ({2}).",
     "Chưa tới một nửa số lớp nằm trên GPU nên mô hình sẽ chạy chậm. Hãy giảm độ dài ngữ cảnh (8192 là đủ cho Trò chuyện và AIVN AGENT) hoặc chọn mô hình nhỏ hơn.": "Fewer than half of the layers are on the GPU, so the model will run slowly. Lower the context length (8192 is enough for Chat and AIVN AGENT) or choose a smaller model.",

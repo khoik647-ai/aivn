@@ -37,9 +37,10 @@ const order = (names) => (names || []).slice().sort((a, b) => Number(isIntegrate
 // nhiều GPU và có cả tích hợp lẫn rời → cần chọn rõ thiết bị (không để llama.cpp/Vulkan tự quyết)
 const mixed = (devs) => { const n = (devs || []).map(d => typeof d === 'string' ? d : d.name).filter(Boolean); return n.length > 1 && n.some(isIntegrated) && n.some(x => !isIntegrated(x)); };
 // B165: trần ngữ cảnh theo VRAM GPU rời (KV f16 của 4B ≈ 144 KB/token: 16K ≈ 2,3 GB, 64K ≈ 9 GB)
-function ctxCapFor(h) {
+function ctxCapFor(h, { vision = false } = {}) {
   const vt = h && h.gpu && h.gpu !== 'metal' && h.vram && !h.vram.integratedOnly ? h.vram.total : 0;
   if (!(vt > 0)) return Infinity;
-  return vt < 6 * 1024 ** 3 ? 16384 : vt < 10 * 1024 ** 3 ? 32768 : Infinity;
+  // B163/B165: mô hình nhìn ảnh (llama-server) trên GPU rời dưới 6 GB → 8K (+ K/V q8_0, xem main.js loadById) để nằm gần trọn GPU
+  return vt < 6 * 1024 ** 3 ? (vision ? 8192 : 16384) : vt < 10 * 1024 ** 3 ? 32768 : Infinity;
 }
 module.exports = { isIntegrated, isDiscrete, pick, order, mixed, ctxCapFor };

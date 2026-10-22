@@ -1614,6 +1614,7 @@
     "Thiết bị Vulkan #{0}": "Vulkan 设备 #{0}",
     "lớp{0}": "层{0}",
     "— GPU tích hợp": "— 集成显卡",
+    "Khoảng {0} % mô hình nằm trên GPU, phần còn lại chạy bằng CPU": "约 {0}% 的模型在 GPU 上，其余部分在 CPU 上运行",
     "không có tác dụng": "没有效果",
     "Tự động: lần nạp trước với cùng cài đặt có {0}/{1} lớp nằm trên GPU ({2}).": "自动：上次使用相同设置加载时，{0}/{1} 层位于 GPU 上（{2}）。",
     "Chưa tới một nửa số lớp nằm trên GPU nên mô hình sẽ chạy chậm. Hãy giảm độ dài ngữ cảnh (8192 là đủ cho Trò chuyện và AIVN AGENT) hoặc chọn mô hình nhỏ hơn.": "不到一半的层位于 GPU 上，模型会运行较慢。请减小上下文长度（8192 足够用于对话和 AIVN AGENT），或选择更小的模型。",

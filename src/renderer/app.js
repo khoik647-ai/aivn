@@ -404,7 +404,7 @@ function ldRead() {
 }
 async function ldEstimate() {
   const f = ld.form, id = ld.sel; if (!f || !id) return; const seq = ++ld.estSeq; const gm = ld.metas.get(id); if (!gm || gm.error) return;
-  const e = await A.modelEstimate(id, { ctx: f.contextSize, gpuLayers: f.gpuLayers, kvType: f.kvCache === 'q8_0' ? 'q8_0' : 'f16' }).catch(() => null);
+  const e = await A.modelEstimate(id, { ctx: f.contextSize, gpuLayers: f.gpuLayers, kvType: f.kvCache === 'q8_0' ? 'q8_0' : f.kvCache === 'auto' ? 'auto' : 'f16' }).catch(() => null);
   if (seq !== ld.estSeq || $('#loader').hidden || !$('#ldBars')) return; ld.est = e;
   if (!e) { $('#ldVerdict').textContent = 'Không ước lượng được'; $('#ldVerdict').className = 'ld-verdict'; $('#ldBars').innerHTML = ''; return; }
   const h = e.hw || {}; const gb = (b) => (b / 1024 ** 3).toFixed(1).replace('.', DEC()) + ' GB';
@@ -505,7 +505,8 @@ const fitGroupOf = (f) => (f && (f.group || ({ fit: 'smooth', slow: 'slow', big:
 // xếp: Chạy mượt → Chạy chậm → Không chạy được, trong mỗi nhóm mạnh trước
 function sortFit(list, fitOf = (c) => c.fit) {
   const o = { smooth: 0, slow: 1, no: 2 };
-  return [...list].sort((a, b) => o[fitGroupOf(fitOf(a))] - o[fitGroupOf(fitOf(b))] || (b.strength || 0) - (a.strength || 0) || (a.size || 0) - (b.size || 0));
+  const star = (c) => (c.recScreen && c.agentCheck && c.agentCheck.ok ? 1 : 0); // B163: thẻ ⭐ gợi ý luôn đứng đầu nhóm của nó (laptop 4 GB: Qwen3-VL 2B đầu nhóm Chạy mượt)
+  return [...list].sort((a, b) => o[fitGroupOf(fitOf(a))] - o[fitGroupOf(fitOf(b))] || star(b) - star(a) || (b.strength || 0) - (a.strength || 0) || (a.size || 0) - (b.size || 0));
 }
 function fitSections(list, card, fitOf = (c) => c.fit) {
   const sorted = sortFit(list, fitOf);

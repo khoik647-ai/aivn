@@ -178,7 +178,8 @@ function createVisionServer({ log = () => {} } = {}) {
     if (!info) throw new Error('Chưa nạp mô hình nhìn ảnh.');
     const t0 = Date.now();
     // chống lặp: DRY (bắt chuỗi lặp dài) + phạt lặp nhẹ; mô hình nhìn ảnh nhỏ dễ lặp câu khi mô tả
-    const body = { messages, temperature, max_tokens: maxTokens, stream: true, stream_options: { include_usage: true }, top_k: 40, min_p: 0.05,
+    // cache_prompt + một khe (-np 1): phần đầu lời nhắc giống lượt trước (hệ thống + công cụ của AIVN AGENT) không phải tính lại (B165)
+    const body = { messages, temperature, max_tokens: maxTokens, stream: true, cache_prompt: true, stream_options: { include_usage: true }, top_k: 40, min_p: 0.05,
       repeat_penalty: 1.1, repeat_last_n: 256, presence_penalty: 0.3, dry_multiplier: 0.8, dry_base: 1.75, dry_allowed_length: 2, top_p: 0.9,
       ...(extra.response_format || (extra.tool_choice && extra.tool_choice !== 'auto' && extra.tool_choice !== 'none') ? SMP.toServer(SMP.samplingFor('', 'json')) : SMP.toServer(sampling)), ...(topP != null ? { top_p: topP } : {}), ...extra };
     if (Number.isInteger(seed) && seed >= 0) { body.seed = seed; body.cache_prompt = false; } // seed: tính lại lời nhắc từ đầu như engine.js
