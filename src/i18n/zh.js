@@ -2221,7 +2221,6 @@
     "Đang suy nghĩ tiếp…": "正在继续思考…",
     "Đang suy nghĩ…": "正在思考…",
     "Đang suy nghĩ… (bước {0})": "正在思考…（第 {0} 步）",
-    "Đang trả lời — bấm Dừng trước đã": "正在回答 — 请先点击停止",
     "Đang trả lời…": "正在回答…",
     "Đang tìm trên Hugging Face…": "正在搜索 Hugging Face…",
     "Đang tìm đoạn liên quan trong tài liệu…": "正在文档中查找相关段落…",
@@ -2726,7 +2725,9 @@
     "Kiểm tra lại đường dẫn, tên tệp, và xem thư mục đó có nằm trong thư mục được phép không.": "请检查路径、文件名，以及该文件夹是否在允许的文件夹中。",
     "“{0}” là thư mục, không phải tệp.": "“{0}” 是文件夹，不是文件。",
     "AGENT đang chạy — đợi xong hoặc sang AGENT bấm Dừng": "AGENT 正在运行 — 请等它结束，或切到 AGENT 点击停止",
-    "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "对话正在运行 — 请等它结束，或切到对话点击停止"
+    "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "对话正在运行 — 请等它结束，或切到对话点击停止",
+    "AGENT đang chạy — bấm Dừng ở dưới": "AGENT 正在运行 — 请点击下方的停止",
+    "Trò chuyện đang chạy — bấm Dừng ở dưới": "对话正在运行 — 请点击下方的停止"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;
