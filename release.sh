@@ -129,6 +129,18 @@ touch "$SITE/.nojekyll"
 grep -q "$BASE_URL/AIVN-Setup.exe" "$SITE/index.html" || die "không thay được link tải Windows trong trang web"
 ls -la "$OUT" "$SITE"
 
+# Bảo vệ trang thật: gh-pages bị ghi đè hoàn toàn khi phát hành — sửa nóng trên gh-pages (vd. B68) chưa chép vào site/ sẽ mất.
+# So 3 chiều với lần triển khai gần nhất (tools/site_drift.py); khối beta do tools/site_beta.py quản lý không tính. Mất nội dung → DỪNG.
+step "Kiểm tra trang dựng từ site/ không làm mất nội dung chỉ có trên gh-pages"
+if git ls-remote --exit-code --heads "https://github.com/$OWNER/$REPO.git" gh-pages >/dev/null 2>&1; then
+  LIVE="$(mktemp -d)"
+  git clone -q --branch gh-pages "https://github.com/$OWNER/$REPO.git" "$LIVE" || die "không clone được gh-pages để kiểm tra"
+  python3 tools/site_drift.py --rendered "$SITE" --live "$LIVE" || { rm -rf "$LIVE"; die "trang thật có nội dung chưa có trong site/ — chép vào site/index.html (site/i18n) trước khi phát hành"; }
+  rm -rf "$LIVE"
+else
+  echo "Chưa có nhánh gh-pages — bỏ qua kiểm tra."
+fi
+
 if [[ "$DRY_RUN" == "1" ]]; then
   echo; echo "DRY_RUN=1: dừng trước các bước GitHub. Tệp phát hành: $OUT · Trang web: $SITE"
   exit 0

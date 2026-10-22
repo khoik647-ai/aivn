@@ -63,6 +63,10 @@ header.scrolled{border-color:var(--line)}
 .hero h1{font-size:clamp(2.3rem,5vw,3.7rem);line-height:1.12;font-weight:800;letter-spacing:-.03em;margin-bottom:20px}
 .hero p.lead{margin-bottom:32px}
 .dl-row{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px}
+#tai-ve{scroll-margin-top:calc(var(--hdr,72px) + 20px)}
+.dl-row.flash{animation:dlflash 1.8s ease-out}
+@keyframes dlflash{0%,30%{box-shadow:0 0 0 6px rgba(99,102,241,.35);border-radius:16px;background:rgba(99,102,241,.08)}100%{box-shadow:0 0 0 0 rgba(99,102,241,0);background:transparent}}
+@media (prefers-reduced-motion:reduce){.dl-row.flash{animation:none;outline:3px solid rgba(99,102,241,.5);outline-offset:6px;border-radius:16px}}
 .dl-btn{position:relative}
 .dl-btn .os-sub{display:block;font-size:.72rem;font-weight:500;opacity:.7;line-height:1.1}
 .dl-btn .os-main{display:block;line-height:1.2}
@@ -612,6 +616,23 @@ console.<span class="f">log</span>(data.choices[<span class="n">0</span>].messag
   if(os){document.querySelectorAll('.dl-btn[data-os="'+os+'"]:not(.soon)').forEach(function(b){b.classList.add('detected');var el=b.closest('.mac-wrap')||b;el.parentNode.prepend(el);});}
 
   document.querySelectorAll('.dl-btn.soon').forEach(function(b){b.addEventListener('click',function(e){e.preventDefault();});});
+  // Nút “Tải về / Tải miễn phí” (href="#tai-ve"): tải THẲNG bản cho hệ điều hành đã nhận ra; không rõ máy → cuộn tới hàng nút tải (không bị đầu trang che) và nháy sáng
+  var REL='https://github.com/khoik647-ai/aivn/releases/latest/download/';
+  var row=document.getElementById('tai-ve');
+  function setHdr(){if(hd)document.documentElement.style.setProperty('--hdr',hd.getBoundingClientRect().height+'px');}
+  var hd=document.querySelector('header');setHdr();window.addEventListener('resize',setHdr,{passive:true});
+  var mobile=phone;
+  var macArch=null; // Apple Silicon hay Intel: chỉ biết chắc qua User-Agent Client Hints (Chrome/Edge); không biết → mở menu chọn chip
+  if(os==='mac'&&navigator.userAgentData&&navigator.userAgentData.getHighEntropyValues){navigator.userAgentData.getHighEntropyValues(['architecture']).then(function(v){macArch=v&&v.architecture==='arm'?'arm64':v&&v.architecture==='x86'?'x64':null;wire();}).catch(function(){});}
+  function directUrl(){if(mobile)return null;if(os==='windows')return REL+'AIVN-Setup.exe';if(os==='mac'&&macArch)return REL+'AIVN-mac-'+macArch+'.zip';return null;}
+  function toRow(openMac){if(!row)return;setHdr();row.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});row.classList.remove('flash');void row.offsetWidth;row.classList.add('flash');
+    if(openMac){var mw=row.querySelector('.mac-wrap');if(mw){setTimeout(function(){mw.classList.add('open');var t=mw.querySelector('.mac-toggle');t&&t.setAttribute('aria-expanded',true);},350);}}
+    if(history.replaceState)history.replaceState(null,'','#tai-ve');}
+  var dlLinks=document.querySelectorAll('a[href="#tai-ve"],a[data-dl-direct]');
+  function wire(){var u=directUrl();dlLinks.forEach(function(a){a.setAttribute('data-dl-direct','');if(u){a.href=u;a.setAttribute('download','');}else{a.href='#tai-ve';a.removeAttribute('download');}});}
+  wire();
+  dlLinks.forEach(function(a){a.addEventListener('click',function(e){var u=directUrl();if(u){setTimeout(function(){toRow(false);},400);return;} e.preventDefault();toRow(os==='mac');});});
+  if(location.hash==='#tai-ve')setTimeout(function(){toRow(false);},60);
   // macOS menu (Apple Silicon / Intel)
   document.querySelectorAll('.mac-toggle').forEach(function(b){b.addEventListener('click',function(e){e.stopPropagation();var w=b.parentNode,o=!w.classList.contains('open');document.querySelectorAll('.mac-wrap.open').forEach(function(x){x.classList.remove('open');x.querySelector('.mac-toggle').setAttribute('aria-expanded',false)});if(o){w.classList.add('open');b.setAttribute('aria-expanded',true);}});});
   document.addEventListener('click',function(){document.querySelectorAll('.mac-wrap.open').forEach(function(x){x.classList.remove('open');x.querySelector('.mac-toggle').setAttribute('aria-expanded',false)})});
