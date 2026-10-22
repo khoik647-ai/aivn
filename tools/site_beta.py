@@ -78,7 +78,7 @@ if not a.clear:
     def maclinks(l, files, beta):
         out = []
         for arch in ('arm64', 'x64'):
-            x = files[arch]; lab = (f'Tải bản thử nghiệm {nv} cho {ARCH[l][arch]}' if l == 'vi' else f'Download the {nv} beta for {ARCH[l][arch]}' if l == 'en' else f'下载 {nv} 测试版（{ARCH[l][arch]}）') if beta else \
+            x = files[arch]; lab = (f'Tải bản thử nghiệm {nv} cho {ARCH[l][arch]}' if l == 'vi' else f'Download test version {nv} for {ARCH[l][arch]}' if l == 'en' else f'下载 {nv} 测试版（{ARCH[l][arch]}）') if beta else \
                   (f'Tải bản ổn định {STABLE["version"]} cho {ARCH[l][arch]}' if l == 'vi' else f'Download stable {STABLE["version"]} for {ARCH[l][arch]}' if l == 'en' else f'下载稳定版 {STABLE["version"]}（{ARCH[l][arch]}）')
             out.append(f'<a class="beta-link beta-mac-link" data-arch="{arch}" href="{H.escape(x["url"], quote=True)}" rel="noopener">{"🧪" if beta else "⬇"} {lab} <span class="beta-size">· {MBs(x, l)}</span></a>')
         return ''.join(out) + f'<span class="beta-archhint">{HINT[l]}</span>'
@@ -124,7 +124,8 @@ if not a.clear:
     WARN = {'vi': '⚠ Bản thử nghiệm có thể còn lỗi và không tự cập nhật. Nếu dùng hằng ngày, bạn nên chọn bản ổn định ở trên.',
             'en': '⚠ Beta: it may still have bugs and does not update automatically. For everyday use, choose the stable version above.',
             'zh': '⚠ 测试版可能仍有错误，也不会自动更新。日常使用请选择上方的稳定版。'}
-    WINLAB = {'vi': (f'Tải bản thử nghiệm {nv} cho Windows', f'~{mb} MB'), 'en': (f'Download the {nv} beta for Windows', f'~{mb} MB'), 'zh': (f'下载 {nv} 测试版（Windows）', f'约 {mb} MB')}
+    # B145: số phiên bản đã chứa “beta” — en nói “test version” (cùng cách với link đầu trang), không viết thêm chữ beta. vi “bản thử nghiệm”, zh “测试版” cũng không lặp.
+    WINLAB = {'vi': (f'Tải bản thử nghiệm {nv} cho Windows', f'~{mb} MB'), 'en': (f'Download test version {nv} for Windows', f'~{mb} MB'), 'zh': (f'下载 {nv} 测试版（Windows）', f'约 {mb} MB')}
     # B144/B145: lời theo góp ý QA — không lặp “beta”, zh không dùng 试用版, vi có “Nếu”
     T = {l: f'<div class="beta-sec beta-win">{link(*WINLAB[l])}</div>' + macsec(l) + mnote(MNOTE[l]) + f'<span class="beta-lnote">🐧 {LNOTE[l]}</span>'
             + f'<small>{WARN[l]}{shas(l)}</small>' for l in ('vi', 'en', 'zh')}
@@ -138,11 +139,11 @@ if not a.clear:
                       '.beta-dl .beta-lnote{display:none;font-weight:600}.beta-dl .beta-gk{margin:.2rem 0 .4rem;font-size:.9em}.beta-dl .beta-gk summary{cursor:pointer;min-height:44px;padding:.55rem 0;box-sizing:border-box;font-weight:600}'
                       '.beta-dl .beta-gk ol{margin:.2rem 0 .3rem 1.2rem;padding:0}.beta-dl .beta-gk li{margin:.15rem 0}.beta-dl .beta-gk-note{display:block;color:var(--muted)}.beta-dl .beta-gk code{word-break:break-all}'
                       'html.beta-os-mac .beta-dl .beta-win,html.is-mobile .beta-dl .beta-win,html.beta-os-linux .beta-dl .beta-win{display:none}'
-                      'html.beta-os-win .beta-dl .beta-mac,html.beta-os-linux .beta-dl .beta-mac,html.beta-os-android .beta-dl .beta-mac{display:none}'
+                      'html.beta-os-win .beta-dl .beta-mac,html.beta-os-linux .beta-dl .beta-mac,html.beta-os-android .beta-dl .beta-mac,html.beta-os-ios .beta-dl .beta-mac{display:none}'
                       'html.beta-os-linux .beta-dl .beta-lnote{display:block}html.is-mobile .beta-dl .beta-mac .beta-link{color:var(--accent)}'
                       'html.beta-arch-arm64 .beta-dl .beta-mac-link[data-arch=x64],html.beta-arch-x64 .beta-dl .beta-mac-link[data-arch=arm64],html.beta-arch-arm64 .beta-dl .beta-archhint,html.beta-arch-x64 .beta-dl .beta-archhint{display:none}'
                       '.beta-hero .bh-nowin{display:none}html.beta-nowin .beta-hero .bh-any{display:none}html.beta-nowin .beta-hero .bh-nowin{display:inline}</style>')
-    # B143: điện thoại/máy tính bảng (kể cả iPad báo “MacIntel”) → không tải tệp .exe, chỉ nhắc dòng “chỉ cho Windows”
+    # B143: điện thoại/máy tính bảng (kể cả iPad báo “MacIntel”) → không tải tệp .exe. B183: iPhone/iPad (beta-os-ios, gồm iPadOS báo Macintosh và maxTouchPoints>1) ẩn luôn phần Mac như Android — không còn link tải, chỉ dòng 📱
     # B174: nhận hệ điều hành cho khối beta + link đầu trang; chip Mac chỉ biết chắc qua User-Agent Client Hints (Chrome/Edge) — Safari không cho biết → để người dùng chọn
     nowin = '"mac":' + ('0' if MACB else '1') + ',"ios":1,"android":1,"linux":1'
     js = ('<script>(function(){var d=document.documentElement,n=navigator,u=n.userAgent||"",c=n.userAgentData,p=((c&&c.platform)||n.platform||"").toLowerCase();'
