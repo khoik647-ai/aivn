@@ -99,18 +99,40 @@ const BLAME_RE = /(?:gặp|bị|có)\s+(?:sự cố|trục trặc|lỗi)|giao di
 function blamesApp(text) { return BLAME_RE.test(String(text || '')); }
 // B192 (QA beta.3, Notepad): gõ “chưa thấy chữ” 2 lần, bấm menu (bước “ok”) rồi câu cuối hỏi lại → vẫn outcome “done”.
 // Việc chỉ XONG khi thao tác quyết định đã có tác dụng ĐÃ KIỂM trên màn hình (step.check = kiểm tra tự động thấy chưa có tác dụng):
-//   (a) việc cần GÕ chữ vào ứng dụng mà không có bước type_text nào được kiểm là đã có chữ → 'typed'
-//   (b) bước màn hình cuối cùng (screen_act) chưa có tác dụng → 'last'
-const TYPE_TASK = /(?:^|[^\p{L}])(?:gõ|viết|(?<!đăng\s)nhập|điền|soạn|type|write|enter the text|input)(?![\p{L}])|输入|键入|写/iu;
+//   (a) việc cần GÕ chữ vào ứng dụng mà không có bước nào được kiểm là đã có chữ (gõ / dán / ghi tệp rồi mở) → 'typed'
+//   (b) bước màn hình cuối cùng (bỏ qua phím lưu/đóng/Enter) báo lỗi hoặc có dấu hiệu CHẮC CHẮN chưa có tác dụng → 'last'
+// review #68: chỉ coi là việc GÕ khi động từ ở đầu mệnh đề (mệnh lệnh: “…và gõ”, “then type”) hoặc có tân ngữ/chuỗi trích dẫn đi kèm;
+// không tính “bài viết”, “nhập khẩu”, “what type”, “input settings”, “写字楼”, “输入法”…
+const TYPE_NOT = /bài\s+viết|người\s+viết|nhà\s+văn|nhập\s+(?:khẩu|cảnh|học|viện|ngũ|môn|tâm|vai|gia)|đăng\s+nhập|(?:what|which|this|that|file|data|any|the)\s+type\b|type\s+(?:of|is|it|was)\b|\binput\s+(?:settings?|methods?|devices?|sources?|languages?|lag)\b|写字楼|输入法|输入设置|描写|写真/giu;
+const TYPE_VI = /(?:^|[,.;:!?\n]\s*|(?:^|[^\p{L}])(?:và|rồi|sau đó|xong|hãy|giúp|cho|để|thì|vào|lên|mình|tôi|em|bạn)\s+)(?:gõ|viết|nhập|điền|soạn)(?![\p{L}])|(?:^|[^\p{L}])(?:gõ|viết|nhập|điền|soạn)(?:\s+(?:vào|lên|thêm|lại|một|1|hai|vài|mấy|các|những))*\s+(?:["“'«]|(?:chữ|câu|dòng|nội dung|văn bản|đoạn|thư|tin|lời|số|tên|địa chỉ|ghi chú|tiêu đề|từ)(?![\p{L}]))/iu;
+const TYPE_EN = /(?:^|[,.;:!?\n]\s*|\b(?:and|then|please|to|also|now)\s+)(?:type|write|enter|input|jot)\b|\b(?:type|write|enter|input|jot)\s+(?:(?:in|into|down|out)\s+)?(?:["“']|(?:a|an|the|some|this|my)\s+(?:line|sentence|text|note|message|word|paragraph|letter|list|poem)\b|(?:hello|hi)\b)/iu;
+const TYPE_ZH = /输入|键入|写(?:一|下|上|入|几|段|句|行|个|封|首|篇|点)|填写/u;
+function typeTask(q) { const t = String(q || '').replace(TYPE_NOT, ' '); return TYPE_VI.test(t) || TYPE_EN.test(t) || TYPE_ZH.test(t); }
+const TYPE_TASK = { test: typeTask }; // giữ tên cũ (.test) cho chỗ gọi cũ
 const actOf = (x) => String((x && x.args && x.args.action) || '').toLowerCase();
+const chainActs = (x) => [actOf(x), ...((x && x.args && Array.isArray(x.args.then)) ? x.args.then.map(t => String((t && t.action) || '').toLowerCase()) : [])];
+const keysOf = (x) => String((x && x.args && x.args.keys) || '').toLowerCase().replace(/\s+/g, '');
+const PASTE = /^(?:ctrl|cmd|command|meta|control)\+v$/;
+// phím lưu/đóng/xác nhận sau khi gõ: thường gần như không đổi màn hình → không dùng làm “bước cuối” để chấm
+const SAVE_KEYS = /^(?:(?:ctrl|cmd|command|meta|control)\+(?:shift\+)?(?:s|w)|alt\+f4|enter|return|escape|esc|tab)$/;
+// “màn hình không thay đổi rõ ràng” chỉ là đo điểm ảnh (cú bấm làm đổi rất nhỏ cũng ra câu này) → không đủ chắc để đánh hỏng việc
+const WEAK_CHECK = new Set(['màn hình không thay đổi']);
 function effectOf(steps = [], query = '') {
-  const acts = (steps || []).filter(x => x && x.name === 'screen_act' && !['screen_look', 'look', 'wait', 'ensure_app'].includes(actOf(x)));
+  const all = (steps || []).filter(Boolean);
+  const acts = all.filter(x => x.name === 'screen_act' && x.status !== 'refused' && !['screen_look', 'look', 'wait', 'ensure_app'].includes(actOf(x)));
   if (!acts.length) return { ok: true };
-  const typed = acts.filter(x => actOf(x) === 'type_text');
-  const typedOk = typed.some(x => x.status === 'ok' && !x.check) || (steps || []).some(x => x && (x.draftIn || (x.verify && x.verify.sent)));
-  if (TYPE_TASK.test(String(query || '')) && !typedOk) return { ok: false, why: 'typed', n: typed.length };
-  const last = acts[acts.length - 1];
-  if (last.status === 'ok' && last.check) return { ok: false, why: 'last', step: last };
+  const okStep = (x) => x.status === 'ok' && !x.check;
+  const typed = acts.filter(x => chainActs(x).includes('type_text'));
+  const pasted = acts.some(x => actOf(x) === 'hotkey' && PASTE.test(keysOf(x)) && okStep(x));
+  const wfAt = all.findIndex(x => x.name === 'write_file' && x.status === 'ok');
+  const fileOpened = wfAt >= 0 && all.slice(wfAt + 1).some(x => ['open_path', 'open_app'].includes(x.name) && x.status === 'ok');
+  const typedOk = typed.some(okStep) || pasted || fileOpened || all.some(x => x.draftIn || (x.verify && x.verify.sent));
+  if (typeTask(query) && !typedOk) return { ok: false, why: 'typed', n: typed.length };
+  let k = acts.length - 1;
+  while (k > 0 && actOf(acts[k]) === 'hotkey' && SAVE_KEYS.test(keysOf(acts[k])) && acts[k].status !== 'error') k--;
+  const last = acts[k];
+  if (last.status === 'error') return { ok: false, why: 'last', step: last };
+  if (last.status === 'ok' && last.check && !WEAK_CHECK.has(last.check)) return { ok: false, why: 'last', step: last };
   return { ok: true };
 }
-module.exports = { BLAME_RE, blamesApp, PROMISE_RE, promiseEnding, honestStatus, createRetryTracker, outcome, key, alternatives, finalCheck, describe, DONE_RE, TYPE_TASK, effectOf };
+module.exports = { BLAME_RE, blamesApp, PROMISE_RE, promiseEnding, honestStatus, createRetryTracker, outcome, key, alternatives, finalCheck, describe, DONE_RE, TYPE_TASK, typeTask, effectOf };
