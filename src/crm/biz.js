@@ -528,7 +528,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
     const c = company();
     if (inv.kind !== 'out_invoice' || inv.state !== 'posted' || !(inv.residual > 0)) return { ok: false, reason: 'not_due' };
     if (!c.qr_ready) return { ok: false, reason: 'no_bank' };
-    const payload = V.build({ bin: c.bank_bin, account: c.bank_account, amount: inv.residual, memo: inv.number });
+    let payload; try { payload = V.build({ bin: c.bank_bin, account: c.bank_account, amount: inv.residual, memo: inv.number }); } catch (e) { return { ok: false, reason: 'invalid', error: e.message }; }
     return { ok: true, payload, amount: inv.residual, memo: V.memoOf(inv.number), bank: c.bank_name, account: c.bank_account, holder: c.bank_holder, svg: QR.toSvg(QR.encode(payload, { ecl: 'M' }), { title: 'VietQR' }) };
   }
   // mã tĩnh (không có số tiền) để thử quét trong Cài đặt › Công ty

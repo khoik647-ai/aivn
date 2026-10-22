@@ -170,7 +170,7 @@ test('VietQR: chuỗi đúng chuẩn NAPAS (khớp mẫu công khai từng byte)
   const p = V.parse(vcb); assert.strictEqual(p.crcOk, true); assert.strictEqual(p.amount, 50000); assert.strictEqual(p.bin, '970436');
   assert.strictEqual(V.parse(vcb.slice(0, -1) + 'E').crcOk, false);
   assert.ok(V.build({ bin: '970436', account: '0011001234567' }).startsWith('000201010211'), 'mã tĩnh không có số tiền');
-  assert.strictEqual(V.memoOf('Hoá đơn INV/2026/00001 — Đặng'), 'Hoa don INV/2026/00001 Da', 'tối đa 25 ký tự, bỏ dấu và ký tự lạ');
+  assert.strictEqual(V.memoOf('Hoá đơn INV/2026/00001 — Đặng'), 'Hoa don INV-2026-00001 Da', 'tối đa 25 ký tự, bỏ dấu, “/” → “-”, bỏ ký tự lạ (#40)');
   const h = (q) => crypto.createHash('sha256').update(Array.from({ length: q.size }, (_, y) => Array.from({ length: q.size }, (_, x) => q.modules[y][x] ? '1' : '0').join('')).join('\n')).digest('hex');
   // tham chiếu: python-qrcode (border 0) cùng mức sửa lỗi và mặt nạ
   const ref = [[vcb, 'M', 3, 8, '5f5ae67dcce14f0d21bebda22800528c6325350642fe4b8e29ddea6c4caa0b14'], ['AIVN · Hoá đơn INV/2026/00001', 'Q', 5, 4, '59870d7f7b09f9e4e3df7f4dd5dc8f8a2f3e4564fc5e4311b009c129c64d5cdc'],
@@ -192,7 +192,7 @@ test('Công ty: lưu MST, ngân hàng, logo; kiểm tra dữ liệu; mã VietQR 
   assert.strictEqual(biz.invoiceQr(inv.id).ok, false, 'nháp chưa có QR');
   inv = biz.postInvoice(inv.id); biz.registerPayment(inv.id, { amount: 100000 });
   const qr = biz.invoiceQr(inv.id); assert.strictEqual(qr.ok, true); const p = V.parse(qr.payload);
-  assert.strictEqual(p.crcOk, true); assert.strictEqual(p.amount, 1000000); assert.strictEqual(p.memo, inv.number); assert.match(qr.svg, /^<svg/);
+  assert.strictEqual(p.crcOk, true); assert.strictEqual(p.amount, 1000000); assert.strictEqual(p.memo, inv.number.replace(/\//g, '-')); assert.match(qr.svg, /^<svg/);
   biz.registerPayment(inv.id, {}); assert.strictEqual(biz.invoiceQr(inv.id).ok, false, 'đã thu đủ thì không hiện QR');
 });
 
@@ -243,6 +243,15 @@ for (const lang of ['vi', 'en', 'zh']) {
     assert.match(d.bill.number, /^BILL\/\d{4}\/\d{2}\/0001$/);
     assert.strictEqual(d.payable.agedTotals.total, 5140000); assert.strictEqual(d.overview.payable, 5140000); assert.strictEqual(d.overview.poToReceive, 1);
     assert.strictEqual(d.inv.qr, true);
+    // #40: ảnh chụp màn hình và PDF hoá đơn giải mã (zbar) ra CÙNG một chuỗi VietQR: số tiền = còn phải thu 18.460.000, nội dung = số hoá đơn
+    if (spawnSync('which', ['zbarimg']).status === 0 && spawnSync('which', ['pdftoppm']).status === 0) {
+      const zb = (png) => spawnSync('zbarimg', ['--raw', '-q', '-Sdisable', '-Sqrcode.enable', png], { encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+      const scr = zb(path.join(dir, `${lang}-22-hoa-don-vietqr.png`)); assert.strictEqual(scr.length, 1, 'màn hình: đúng một mã QR');
+      assert.match(scr[0], /^00020101021238570010A00000072701270006970436011300110012345670208QRIBFTTA53037045408184600005802VN62180814INV-\d{4}-000016304[0-9A-F]{4}$/);
+      const pdfPng = path.join(dir, `${lang}-hoa-don-pdf`); assert.strictEqual(spawnSync('pdftoppm', ['-r', '150', '-png', '-singlefile', path.join(dir, 'pdf', `${lang}-INV-${d.inv.number.slice(4, 8)}-00001.pdf`), pdfPng]).status, 0);
+      assert.deepStrictEqual(zb(pdfPng + '.png'), scr, 'PDF: cùng mã với màn hình');
+    }
+    assert.match(d.inv.qrText, { vi: /Số tiền: 18\.460\.000 ₫ · Nội dung: INV-\d{4}-00001/, en: /Amount: 18,460,000 ₫ · Memo: INV-\d{4}-00001/, zh: /金额： 18,460,000 ₫ · 备注： INV-\d{4}-00001/ }[lang]);
     // B73: “6,5” (vi) / “6.5” (en) / “６.５” (zh) = 6,5; ô điền sẵn không sửa → không đổi tồn; 1,125 không thành 1125
     assert.deepStrictEqual([d.b73.typed.on_hand, d.b73.same.on_hand, d.b73.three.on_hand], [6.5, 6.5, 1.125]);
     assert.strictEqual(d.b73.three.shown, { vi: '1,125', en: '1.125', zh: '1.125' }[lang]);
@@ -251,7 +260,7 @@ for (const lang of ['vi', 'en', 'zh']) {
     const money = { vi: (s) => s.replace(/,/g, '.'), en: (s) => s, zh: (s) => s }[lang];
     assert.match(d.po.taxes.join(' | '), new RegExp(money('40,000 ₫').replace('.', '\\.'))); assert.match(d.inv.totals.at(-1), new RegExp(money('18,460,000 ₫').replace(/\./g, '\\.')));
     assert.match(d.bill.due.at(-1), new RegExp(money('5,140,000 ₫').replace(/\./g, '\\.')));
-    if (lang === 'vi') { assert.strictEqual(d.bill.ribbon, 'THANH TOÁN MỘT PHẦN'); assert.deepStrictEqual(d.poAfterReceipt.badges, ['Nhận một phần', 'Chờ hoá đơn']); assert.match(d.inv.qrText, /Nội dung: INV\/\d{4}\/00001/); }
+    if (lang === 'vi') { assert.strictEqual(d.bill.ribbon, 'THANH TOÁN MỘT PHẦN'); assert.deepStrictEqual(d.poAfterReceipt.badges, ['Nhận một phần', 'Chờ hoá đơn']); assert.match(d.inv.qrText, /Nội dung: INV-\d{4}-00001/); }
     if (lang === 'en') { assert.strictEqual(d.bill.ribbon, 'PARTIALLY PAID'); assert.deepStrictEqual(d.poAfterReceipt.badges, ['Partially received', 'To bill']); assert.match(d.invDraft.join(' | '), /VAT 8% on 12,000,000 ₫ 960,000 ₫/); }
     if (lang === 'zh') assert.deepStrictEqual(d.poAfterReceipt.badges, ['部分收货', '待收账单']);
     // PDF: chữ có dấu tiếng Việt trích ra được (phông nhúng đúng)

@@ -27,8 +27,9 @@ function crc16(str) {
   return crc.toString(16).toUpperCase().padStart(4, '0');
 }
 const tlv = (id, v) => { v = String(v); if (v.length > 99) throw new Error(`Trường ${id} dài quá 99 ký tự.`); return id + String(v.length).padStart(2, '0') + v; };
-// nội dung chuyển khoản: bỏ dấu tiếng Việt, chỉ giữ ký tự ASCII in được; NAPAS giới hạn 25 ký tự cho trường 62-08
-const memoOf = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^\x20-\x7e]/g, '').replace(/\s+/g, ' ').trim().slice(0, 25);
+// nội dung chuyển khoản: bỏ dấu tiếng Việt; chỉ giữ chữ, số, dấu cách và “_ . -” như Odoo l10n_vn (nhiều app ngân hàng từ chối “/”, “#”, “&”…),
+// “/” trong số hoá đơn đổi thành “-” (INV/2026/00001 → INV-2026-00001) cho dễ đối chiếu; NAPAS giới hạn 25 ký tự cho trường 62-08
+const memoOf = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[\/\\]/g, '-').replace(/[^A-Za-z0-9 _.-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 25).trim();
 const accountOk = (a) => /^[0-9A-Za-z]{6,19}$/.test(String(a || ''));
 
 // payload VietQR. amount (số nguyên VND) bỏ trống → mã tĩnh (người trả tự nhập số tiền)
