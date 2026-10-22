@@ -64,7 +64,8 @@ function guardStep(step, out, { warn = () => WARN } = {}) {
   if (w && (w.hwnd != null || w.title)) step.win = { hwnd: w.hwnd ?? null, pid: w.pid ?? null, proc: w.proc || null, title: w.title || '', b: Array.isArray(w.b) ? w.b : undefined };
   const hits = scan({ title: w ? w.title : '', proc: w ? w.proc : '', text: [out.forModel, out.summary, out.detail].filter(x => typeof x === 'string').join('\n') });
   if (hits.length) {
-    step.sensitive = hits; step.thumb = undefined;
+    step.sensitive = hits;
+    for (const k of Object.keys(step)) if (/^(thumb|image|img|shot|screenshot|png|jpeg|jpg)$/i.test(k) || (typeof step[k] === 'string' && /^data:image\//.test(step[k]))) delete step[k]; // không còn trường ảnh nào để lưu (slimStep)
     const ts = w && w.title ? [w.title] : []; // tiêu đề cửa sổ nhạy cảm (vd. tên tệp mã kích hoạt) → che trong thẻ bước + nhật ký (logTool)
     if (typeof step.summary === 'string') step.summary = redactTitles(step.summary, ts);
     if (typeof step.detail === 'string') step.detail = redactTitles(step.detail, ts);

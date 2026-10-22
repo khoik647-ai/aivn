@@ -971,6 +971,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       steps.push(step); onStep({ ...step }); onStatus({ stage: 'tools', round: 0, pre: '' });
       let out; try { out = await exec('ensure_app', args, ctx); } catch (e) { const msg = (e && e.message) || String(e); out = { error: msg, forModel: `Lỗi: ${msg}`, summary: msg.split('\n')[0] }; }
       Object.assign(step, { status: out.ask ? 'asked' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, ms: Date.now() - step.startedAt });
+      SG.guardStep(step, out, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá') }); // B193: bước tự chạy (ensure_app/open_app/system_action) cũng che
       onStep({ ...step }); logTool(step); calls++;
       deps.log && deps.log(`[aivn agent] ensure_app “${ensureTarget}” → ${step.status}: ${String(out.summary || '').slice(0, 160)}`);
       const base = { steps, usage, finishReason: 'stop', urls: [], memories: sys.memories.map(m => m.text), tools: names, warning: null };
@@ -1010,6 +1011,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       try { out = await exec('open_app', call.arguments, ctx); }
       catch (e) { const msg = (e && e.message) || String(e); out = { error: msg, forModel: `Lỗi: ${msg}`, summary: String(msg).split(/\s(?=Bước tiếp:|Gần giống:)/)[0] }; /* B33b: thẻ bước chỉ hiện câu đầu; hướng dẫn cho mô hình vẫn ở chi tiết */ }
       Object.assign(step, { status: out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, ms: Date.now() - step.startedAt });
+      SG.guardStep(step, out, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá') }); // B193: bước tự chạy (ensure_app/open_app/system_action) cũng che
       onStep({ ...step }); logTool(step); calls++;
       seen.set('open_app:' + JSON.stringify(call.arguments), out);
       msgs.push({ role: 'assistant', content: '', tool_calls: [{ id: call.id, type: 'function', function: { name: 'open_app', arguments: JSON.stringify(call.arguments) } }] });
@@ -1029,6 +1031,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       steps.push(step); onStep({ ...step }); onStatus({ stage: 'tools', round: 0, pre: '' });
       let out; try { out = await exec('system_action', args, ctx); } catch (e) { const msg = (e && e.message) || String(e); out = { error: msg, forModel: `Lỗi: ${msg}`, summary: String(msg).split(/\s(?=Bước tiếp:|Gần giống:)/)[0] }; /* B33b: thẻ bước chỉ hiện câu đầu; hướng dẫn cho mô hình vẫn ở chi tiết */ }
       Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, ms: Date.now() - step.startedAt });
+      SG.guardStep(step, out, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá') }); // B193: bước tự chạy (ensure_app/open_app/system_action) cũng che
       onStep({ ...step }); logTool(step); calls++;
       deps.log && deps.log(`[aivn agent] lệnh hệ thống rõ ràng → làm ngay: ${JSON.stringify(args)} · ${step.status}`);
       const txt = out.refused ? 'Mình chưa làm vì bạn không cho phép.' : out.error ? `Mình chưa làm được: ${String(out.summary || out.error).slice(0, 160)}.` : `Đã làm: ${out.summary}.`;

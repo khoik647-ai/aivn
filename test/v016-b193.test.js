@@ -142,3 +142,32 @@ test('QA: ảnh cũ hơn 24 giờ trong thư mục shots bị dọn lúc bắt �
   const res = await Q.run({ task: 'x', out: path.join(d, 'r.json'), timeout: 5, shots }, deps);
   assert.strictEqual(res.shotsPruned, 1); assert.ok(!fs.existsSync(f)); assert.ok(fs.existsSync(shots));
 });
+
+// agent.js: bước nhạy cảm trả về (r.steps / onStep) KHÔNG còn trường ảnh nào → main.js slimStep không có gì để lưu vào cuộc trò chuyện
+function mkAgent(ensureOut, lookOut) {
+  const AG = require('../src/agent/agent'); const CT = require('../src/agent/computer-tools'); const { createMemoryStore } = require('../src/agent/memory');
+  const r0 = tmp(); let model = 0;
+  const engine = { status: () => ({ loaded: true, vision: true, contextSize: 8192 }), chatStep: async () => (++model === 1 ? { text: '', toolCalls: [{ id: 'c1', name: 'screen_look', arguments: {} }], finishReason: 'tool_calls', usage: {} } : { text: 'Xong.', toolCalls: [], finishReason: 'stop', usage: {} }) };
+  const names = ['open_app', 'screen_look', 'screen_act']; const defs = Object.fromEntries([...names, 'ensure_app'].map(n => [n, CT.DEFS[n]]));
+  const computer = { names: () => names, defs, has: (n) => n in defs, CompError: CT.CompError, exec: async (n) => (n === 'ensure_app' ? ensureOut : n === 'screen_look' ? lookOut : { forModel: 'ok', summary: 'ok' }) };
+  return AG.createAgent({ engine, computer, gateOk: () => true, getSettings: () => ({ agentFolders: [], agentMemory: true, agentComputer: true, agentScreen: true, uiLang: 'vi' }), memory: createMemoryStore(path.join(r0, 'm.json')), scheduler: {}, trash: async () => {}, extractFile: async () => ({}), embedForMemory: async () => ({}), log: () => {} });
+}
+const IMG = 'data:image/jpeg;base64,' + Buffer.from(MARK.repeat(20)).toString('base64');
+const imageFields = (st) => Object.entries(st).filter(([k, v]) => /thumb|image|img|shot|png|jpe?g/i.test(k) && v != null || (typeof v === 'string' && (/^data:image\//.test(v) || v.includes(IMG.slice(23, 60)))));
+test('agent: bước ensure_app tự chạy + bước screen_look trên cửa sổ mã kích hoạt → không trường ảnh nào, không mã, có cảnh báo', async () => {
+  const win = { hwnd: 42, pid: 7, proc: 'notepad', title: FAKE_TITLE };
+  const agent = mkAgent({ forModel: 'Google Docs sẵn sàng. Chữ thấy: ' + FAKE_CODE, summary: `Google Docs: cửa sổ “${FAKE_TITLE}”`, window: win, thumb: IMG },
+    { forModel: 'Màn hình: Mã kích hoạt ' + FAKE_CODE, summary: 'đã nhìn màn hình', thumb: IMG, window: win });
+  const seen = []; const r = await agent.run({ messages: [{ role: 'user', content: 'viết đoạn giới thiệu trên Google Docs' }], confirm: async () => false, onStep: (s) => seen.push(s) });
+  const ens = r.steps.find(s => s.name === 'ensure_app'); const look = r.steps.find(s => s.name === 'screen_look');
+  assert.ok(ens && ens.auto && look, JSON.stringify(r.steps.map(s => s.name)));
+  for (const st of [ens, look, ...seen.filter(s => s.status !== 'running')]) {
+    assert.deepStrictEqual(imageFields(st), [], st.name + ': không được còn trường ảnh'); assert.ok(!('thumb' in st), st.name + ': không có cả khoá thumb');
+    assert.ok(st.sensitive && st.sensitive.length, st.name); assert.match(st.summary, /đã ẩn ảnh chụp/);
+    assert.ok(!JSON.stringify(st).includes(FAKE_CODE), st.name + ': không lộ mã'); assert.ok(!String(st.summary).includes(FAKE_TITLE), st.name + ': tiêu đề đã che');
+  }
+  // bước thường vẫn giữ ảnh nhỏ như trước
+  const ok = mkAgent({ forModel: 'Google Docs sẵn sàng', summary: 'Google Docs: đã ở trước', window: { hwnd: 9, title: 'Tài liệu không có tiêu đề - Google Docs' } }, { forModel: 'Màn hình: trang trắng', summary: 'đã nhìn màn hình', thumb: IMG });
+  const r2 = await ok.run({ messages: [{ role: 'user', content: 'viết đoạn giới thiệu trên Google Docs' }], confirm: async () => false });
+  assert.strictEqual(r2.steps.find(s => s.name === 'screen_look').thumb, IMG);
+});
