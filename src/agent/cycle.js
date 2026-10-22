@@ -1,6 +1,6 @@
 // B66b (máy thật, soạn Gmail, 8B): mô hình quay vòng 4 thao tác xen kẽ (hiện màn hình chính → quan sát “Program Manager” →
 // thao tác lỗi → mở Cài đặt) ~10 vòng, 44 bước, 224 giây — bộ chặn lặp cũ chỉ bắt CÙNG một lời gọi lặp lại.
-// Ở đây: (1) chuỗi lời gọi lặp lại theo chu kỳ 2–6 bước (ít nhất 2 lượt liền), (2) N bước liền không có tiến triển mới.
+// Ở đây: (1) chuỗi lời gọi lặp lại theo chu kỳ 2–8 bước (B103) (ít nhất 2 lượt liền), (2) N bước liền không có tiến triển mới.
 const fold = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase();
 // chữ ký một bước: tên công cụ + tham số chính (bỏ id phần tử eN, toạ độ, số đếm) — hai lần “cùng việc” cho cùng chữ ký
 // B86 (máy thật, Zalo): chỉ có id “e#” + chữ mô hình ĐỊNH gõ thì “bấm ô tìm → gõ → bấm kết quả → gõ” trông như chu kỳ 2 bước.
@@ -15,10 +15,13 @@ function stepSig(name, args = {}, sig = null) {
 }
 // kết quả: bỏ số, id, giờ → hai kết quả giống nhau = không có gì mới
 const outSig = (summary) => fold(summary).replace(/^\(lap lai\)\s*/, '').replace(/\[e\d+\]|\d+/g, '#').replace(/\s+/g, ' ').trim().slice(0, 160);
-function findCycle(seq, { minP = 2, maxP = 6, reps = 2 } = {}) {
+// B103 (máy thật beta.2.4): chu kỳ 7 bước (bấm “Đóng” → bị chặn → nhìn → bấm “Tìm kiếm” → gõ bị chặn → nhìn → bấm chữ đã gõ) ×3 tới hết giờ
+// mà không bị bắt (chỉ xét tới 6 bước; dấu màn hình “@…” khác nhau mỗi vòng). Nay xét chu kỳ tới 8 bước; với chu kỳ ≥ 4 bước so
+// theo CHUỖI VIỆC (bỏ dấu màn hình) — 2 lượt liền cùng ≥ 4 việc giống hệt nhau thì gần như chắc chắn là quay vòng.
+function findCycle(seq, { minP = 2, maxP = 8, reps = 2, looseFrom = 4 } = {}) {
   for (let p = minP; p <= maxP; p++) {
     const need = p * reps; if (seq.length < need) break;
-    const tail = seq.slice(-need); const block = tail.slice(0, p);
+    const tail = seq.slice(-need).map(x => p >= looseFrom ? String(x).replace(/@[^@()]*$/, '') : x); const block = tail.slice(0, p);
     if (new Set(block).size < 2) continue; // chu kỳ 1 (cùng một lời gọi) do bộ chặn cũ lo
     if (tail.every((x, i) => x === block[i % p])) return { period: p, block };
   }
