@@ -2704,7 +2704,9 @@
     "Không tìm thấy tệp “{0}” trong thư mục được phép. Có tệp tên gần giống: “{1}”.": "在允许的文件夹里找不到文件“{0}”。有一个名称相近的文件：“{1}”。",
     "Không tìm thấy tệp “{0}”.": "找不到文件“{0}”。",
     "Kiểm tra lại đường dẫn, tên tệp, và xem thư mục đó có nằm trong thư mục được phép không.": "请检查路径、文件名，以及该文件夹是否在允许的文件夹中。",
-    "“{0}” là thư mục, không phải tệp.": "“{0}” 是文件夹，不是文件。"
+    "“{0}” là thư mục, không phải tệp.": "“{0}” 是文件夹，不是文件。",
+    "AGENT đang chạy — đợi xong hoặc sang AGENT bấm Dừng": "AGENT 正在运行 — 请等它结束，或切到 AGENT 点击停止",
+    "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "对话正在运行 — 请等它结束，或切到对话点击停止"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;
