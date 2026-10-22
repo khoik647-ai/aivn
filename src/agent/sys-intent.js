@@ -94,4 +94,14 @@ function directSys(query) {
   if (clauses(raw).filter(c => !Object.keys(RULES).some(a => clauseAsks(a, c)) && !/^(?:giup|ho|di|nhe|nha|voi|please|cho (?:toi|minh|em)|ok|nao|len|xuong|ngay|luon)(?:\s|$)/.test(c)).length) return null;
   return { action: hits[0] };
 }
-module.exports = { sysAsked, clauses, clauseAsks, RULES, volumeLevel, volumeDelta, volumeParse, directSys };
+// B157 (máy thật beta.2.7: việc “tìm giá vàng trên Chrome” lại mở Cài đặt hệ thống): thao tác hệ thống chỉ được XÉT khi việc có liên quan
+// tới nó (chủ đề). Không liên quan → từ chối ngay, không hiện thẻ xin phép (thẻ có thể bị “Tự làm không hỏi” tự đồng ý).
+const SYS_TOPIC = {
+  volume_up: /am luong|volume|loa|tieng|am thanh|sound|mute|nhac|music|音量|声音/, volume_down: null, volume_set: null, volume_change: null, mute: null,
+  open_settings: /cai dat|settings|thiet lap|wi-?fi|bluetooth|do sang|brightness|display|ket noi mang|network|windows update|cap nhat windows|ngon ngu|language|chuot|mouse|ban phim|keyboard|may in|printer|am thanh|sound|thong bao|notification|che do toi|dark mode|hinh nen|wallpaper|ngay gio|mui gio|time zone|pin|battery|设置/,
+  lock: /khoa|lock|锁/, sleep: /\bngu\b|sleep|睡眠/, shutdown: /tat may|shut ?down|关机/, restart: /khoi dong lai|restart|reboot|重启/,
+  show_desktop: /man hinh chinh|desktop|thu nho (het|tat ca|moi)|桌面/, empty_trash: /thung rac|trash|recycle|回收站/,
+};
+for (const k of ['volume_down', 'volume_set', 'volume_change', 'mute']) SYS_TOPIC[k] = SYS_TOPIC.volume_up;
+function sysRelated(action, query) { if (sysAsked(action, query)) return true; const re = SYS_TOPIC[action]; return !!re && re.test(fold(query)); }
+module.exports = { sysRelated, SYS_TOPIC, sysAsked, clauses, clauseAsks, RULES, volumeLevel, volumeDelta, volumeParse, directSys };

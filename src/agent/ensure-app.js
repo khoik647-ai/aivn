@@ -8,6 +8,7 @@
 // Ứng dụng web (Gmail, Google Docs…): bảo đảm trình duyệt (Chrome) rồi mở địa chỉ; gặp màn hình đăng nhập → DỪNG và hỏi người dùng (không tự đăng nhập).
 // Lõi không phụ thuộc hệ điều hành (mọi thao tác qua `d`) để kiểm thử bằng ứng dụng giả; phần Windows ở cuối tệp.
 const crypto = require('crypto');
+const BP = require('./browser-profile');
 
 const fold = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
 const key = (s) => fold(s).replace(/[^a-z0-9]/g, '');
@@ -27,6 +28,9 @@ const LOGIN_STRONG = /(enter your password|nhập mật khẩu|forgot (?:your )?
 const LOGIN_WEAK = /(sign in|đăng nhập|log ?in|password|mật khẩu|登录)/giu;
 // câu hỏi khi gặp màn hình đăng nhập (dùng chung cho ensure_app và screen_look giữa việc)
 const LOGIN_ASK_MSG = '{0} đang ở màn hình đăng nhập ({1}). Mình không tự đăng nhập — bạn đăng nhập giúp mình rồi bảo mình làm tiếp nhé.';
+// B153: câu hỏi khi trình duyệt dừng ở màn hình chọn hồ sơ
+const PICKER_ASK_MSG = '{0} đang hỏi chọn hồ sơ — bạn bấm vào hồ sơ của bạn giúp mình rồi giao lại việc nhé.';
+const pickerAsk = (name) => PICKER_ASK_MSG.replace('{0}', name);
 const loginAsk = (name, why) => LOGIN_ASK_MSG.replace('{0}', name).replace('{1}', why);
 function loginWall(title, text) {
   if (LOGIN_TITLE.test(String(title || ''))) return 'tiêu đề cửa sổ';
@@ -76,6 +80,7 @@ async function ensureApp(app, d, opt = {}) {
   }
 
   // ---- ứng dụng cài trên máy ----
+  const BR = BP.browserOfApp(app);
   const names = [...new Set([...procNames(app), ...((cache.get(key(app)) || {}).procs || [])])];
   let st = await state(names);
   const L = d.looseTitle ? app : null;
@@ -96,7 +101,10 @@ async function ensureApp(app, d, opt = {}) {
       if (!w) return fail('tray', `${app} đang chạy ẩn ở khay hệ thống nhưng mình chưa mở được cửa sổ (đã thử: ${steps.slice(1).join('; ')}). Bạn bấm vào biểu tượng ${app} ở góc phải thanh tác vụ giúp mình nhé.`);
     } else {
       how = 'launched'; note('chưa mở → khởi động');
-      let r; try { r = await d.launch(app); } catch (e) { r = { ok: false, tried: [String(e.message || e)] }; }
+      let r = null;
+      // B153: trình duyệt họ Chromium → chạy đúng .exe với --profile-directory = hồ sơ đang dùng (Local State → profile.last_used), tránh màn hình chọn hồ sơ
+      if (BR && d.launchBrowser) { try { r = await d.launchBrowser(BR); } catch (e) { r = { ok: false, tried: [String(e.message || e)] }; } if (r && r.ok) note(`B153: chạy ${r.how || BR.exe}`); else { if (r && r.tried) note(`B153: chưa chạy trực tiếp được ${BR.exe} (${r.tried.join('; ').slice(0, 120)}) → mở như ứng dụng thường`); r = null; } }
+      if (!r) { try { r = await d.launch(app); } catch (e) { r = { ok: false, tried: [String(e.message || e)] }; } }
       if (!r || !r.ok) return fail('not-found', `Không mở được ${app}${r && r.tried && r.tried.length ? ` (đã thử: ${r.tried.join('; ').slice(0, 300)})` : ''}. Kiểm tra ${app} đã cài trên máy chưa.`);
       note(`đã chạy qua ${r.how || 'lối tắt'}`);
       if (r.window && r.window.proc) { const pk = key(r.window.proc); if (!names.includes(pk)) { names.push(pk); cache.set(key(app), { ...(cache.get(key(app)) || {}), procs: [pk] }); } }
@@ -126,7 +134,8 @@ async function ensureApp(app, d, opt = {}) {
     }
     // B124 (máy thật beta.2.6: “đã ở trước” mất 22–41 giây vì 2 lần nhìn OCR + mô tả ảnh): cửa sổ ĐÃ ở trước, đang hiện, không thu nhỏ,
     // không treo → sẵn sàng ngay, không khởi động/không OCR (mục tiêu < 2 giây). Màn hình đăng nhập: chỉ kiểm theo tiêu đề.
-    if (how0 === 'already' && !opt.slowReady && w0 && w0.active && !w0.min && w0.vis !== false && !w0.hung) {
+    const BRf = title ? null : BP.browserOfApp(app); // B153: cửa sổ trình duyệt chỉ mang tên trình duyệt (màn hình chọn hồ sơ / cửa sổ trống) → không “sẵn sàng ngay”
+    if (how0 === 'already' && !opt.slowReady && w0 && w0.active && !w0.min && w0.vis !== false && !w0.hung && !(BRf && BP.bareTitle(BRf, w0.title))) {
       note('cửa sổ đang ở trước, đang hiện, không thu nhỏ, không treo → sẵn sàng ngay (bỏ bước nhìn chờ)');
       if (!opt.noLoginCheck) { const why = loginWall(w0.title, ''); if (why) { const ask = loginAsk(title || app, why); return { ...fail('login', ask, { window: w0 }), ask, stop: true }; } }
       return { ok: true, app, how: how0, window: w0, warn, steps, ms: now() - t0, fast: true };
@@ -146,9 +155,37 @@ async function ensureApp(app, d, opt = {}) {
       await sleep(opt.lookGapMs || 700);
     }
     note(`sẵn sàng sau ${looks} lần nhìn`);
+    if (BRf) { const g = await browserGate(BRf, w0, last); if (g.fail) return g.fail; w0 = g.win; }
     if (!opt.noLoginCheck) { const why = loginWall(w0.title, last && last.text); if (why) { const ask = loginAsk(title || app, why); return { ...fail('login', ask, { window: w0 }), ask, stop: true }; } }
     if (how0 === 'launched' && d.remember) { try { d.remember(app, w0); } catch {} }
     return { ok: true, app, how: how0, window: w0, warn, steps, ms: now() - t0 };
+  }
+  // B153: KHÔNG báo xong khi trình duyệt đang ở màn hình chọn hồ sơ hay cửa sổ trống. Màn hình chọn hồ sơ → bấm hồ sơ đang dùng
+  // (tên trong Local State) hoặc hồ sơ mặc định, rồi chờ cửa sổ trình duyệt thật (tiêu đề “… - Google Chrome”).
+  async function browserGate(b, win, lk) {
+    let w1 = win; let look = lk;
+    const realWin = async (ms) => { const end = now() + ms; for (;;) { const s2 = await state([b.proc]); const x = (s2.windows || []).filter(y => key(y.proc) === key(b.proc) && y.vis !== false && !y.min && y.title && !BP.bareTitle(b, y.title)); if (x.length) return pickMain(x, [b.proc], null, null) || x[0]; if (now() >= end) return null; await sleep(600); } };
+    for (let round = 0; round < 3; round++) {
+      const text = (look && look.text) || '';
+      if (!BP.bareTitle(b, w1.title)) return { win: w1 };
+      if (BP.pickerShown(b, w1.title, text)) {
+        const prof = d.profile ? (() => { try { return d.profile(b); } catch { return null; } })() : null;
+        const tg = BP.profileTarget(look && look.elements, prof);
+        note(`B153: ${b.name} đang hiện màn hình CHỌN HỒ SƠ${prof && prof.dir ? ` (hồ sơ dùng gần nhất: ${prof.dir}${prof.name ? ' “' + prof.name + '”' : ''})` : ''}`);
+        if (!tg || !d.clickEl) return { fail: { ...fail('profile-picker', `${b.name} đang hiện màn hình chọn hồ sơ và mình không tìm thấy hồ sơ để bấm. Bạn bấm chọn hồ sơ của bạn giúp mình rồi giao lại việc nhé.`, { window: w1 }), ask: pickerAsk(b.name), stop: true } };
+        note(`B153: bấm ${tg.why}`); try { await d.clickEl(tg.el); } catch (e) { note('bấm hồ sơ lỗi: ' + String(e.message || e).slice(0, 80)); }
+      } else if (BP.blankShown(b, w1.title, text) || round > 0) {
+        note(`B153: cửa sổ ${b.name} trống (chưa có thẻ/thanh địa chỉ)${round === 0 && d.launchBrowser ? ' → mở lại bằng hồ sơ đang dùng' : ''}`);
+        if (round === 0 && d.launchBrowser) { try { await d.launchBrowser(b); } catch {} }
+      } else return { win: w1 }; // tiêu đề trơn nhưng có giao diện đầy đủ (vd. thẻ mới chưa có tiêu đề) — chấp nhận
+      const x = await realWin(Math.min(8000, Math.max(0, deadline - now())));
+      if (x) { note(`B153: đã vào cửa sổ “${x.title}”`); if (!x.active && d.focus) { try { await d.focus(x); } catch {} } return { win: x }; }
+      let lk2 = null; try { lk2 = await d.look(w1); } catch {} look = lk2;
+      const s2 = await state([b.proc]); w1 = (s2.windows || []).find(y => String(y.hwnd) === String(w1.hwnd)) || w1;
+      if (now() >= deadline) break;
+    }
+    const pick = BP.pickerShown(b, w1.title, look && look.text);
+    return { fail: { ...fail(pick ? 'profile-picker' : 'blank', pick ? `${b.name} vẫn đang ở màn hình chọn hồ sơ sau khi mình bấm — bạn chọn hồ sơ giúp mình rồi giao lại việc nhé.` : `${b.name} chỉ hiện cửa sổ trống (không có thẻ nào) — mình chưa thể làm tiếp. Bạn đóng cửa sổ đó rồi giao lại việc nhé.`, { window: w1 }), ask: pick ? pickerAsk(b.name) : null, stop: true } };
   }
 }
 
@@ -286,4 +323,4 @@ function linuxDeps() {
   };
 }
 
-module.exports = { linuxDeps, ensureApp, loginWall, loginAsk, LOGIN_ASK_MSG, pickMain, procNames, PROC_ALIASES, BROWSER_PROCS, CS_SRC, CS_VER, PS_EA, PS_TRAY, winDeps, key };
+module.exports = { linuxDeps, ensureApp, loginWall, loginAsk, LOGIN_ASK_MSG, PICKER_ASK_MSG, pickerAsk, pickMain, procNames, PROC_ALIASES, BROWSER_PROCS, CS_SRC, CS_VER, PS_EA, PS_TRAY, winDeps, key };

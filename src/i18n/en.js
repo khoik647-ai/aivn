@@ -2611,7 +2611,15 @@
     "🧵 {0} luồng": "🧵 {0} threads",
     "🧾 Mở nhật ký": "🧾 Open log",
     "🧾 Mở thư mục nhật ký": "🧾 Open log folder",
-    "🪶 giao diện nhẹ": "🪶 lightweight UI"
+    "🪶 giao diện nhẹ": "🪶 lightweight UI",
+    "AIVN tự đọc trang": "AIVN reads the page itself",
+    "Bỏ qua “{0}” (không liên quan tới việc được giao)": "Skipped “{0}” (not related to the task)",
+    "Chưa mở được trong {0}": "Could not open it in {0}",
+    "Chưa đọc được trang: {0}": "Could not read the page: {0}",
+    "Truy cập mạng đang tắt": "Network access is off",
+    "không thấy trang trong trình duyệt": "no page found in the browser",
+    "Đã mở {0} trong {1}": "Opened {0} in {1}",
+    "{0} đang hỏi chọn hồ sơ — bạn bấm vào hồ sơ của bạn giúp mình rồi giao lại việc nhé.": "{0} is asking which profile to use — please click your profile, then give me the task again."
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.en = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

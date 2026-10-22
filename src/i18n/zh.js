@@ -2611,7 +2611,15 @@
     "🧵 {0} luồng": "🧵 {0} 线程",
     "🧾 Mở nhật ký": "🧾 打开日志",
     "🧾 Mở thư mục nhật ký": "🧾 打开日志文件夹",
-    "🪶 giao diện nhẹ": "🪶 轻量界面"
+    "🪶 giao diện nhẹ": "🪶 轻量界面",
+    "AIVN tự đọc trang": "AIVN 自动读取网页",
+    "Bỏ qua “{0}” (không liên quan tới việc được giao)": "已跳过“{0}”（与任务无关）",
+    "Chưa mở được trong {0}": "未能在 {0} 中打开",
+    "Chưa đọc được trang: {0}": "未能读取网页：{0}",
+    "Truy cập mạng đang tắt": "网络访问已关闭",
+    "không thấy trang trong trình duyệt": "浏览器中没有找到网页",
+    "Đã mở {0} trong {1}": "已在 {1} 中打开 {0}",
+    "{0} đang hỏi chọn hồ sơ — bạn bấm vào hồ sơ của bạn giúp mình rồi giao lại việc nhé.": "{0} 正在询问使用哪个个人资料——请点击你的个人资料，然后重新交给我这个任务。"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

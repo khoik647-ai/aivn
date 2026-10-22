@@ -18,6 +18,7 @@ const D = require('./agent/dpi');
 const PD = require('./agent/pixdiff');
 const SMALL_RE = /(?:^|[^0-9.])(?:0\.\d|[1-4](?:\.\d)?)\s*b(?:[^a-z]|$)/i; // mô hình ≤ 4B
 const U = require('./agent/uitree');
+const BP = require('./agent/browser-profile');
 const OB = require('./agent/ocr-boost');
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -547,17 +548,30 @@ function createDesktopAgent(deps) {
       ...plat, webApp: C.webApp, cache: eaCache, log: lg, sleep,
       launch: (q) => (deps.launchApp ? deps.launchApp(q) : Promise.resolve({ ok: false, tried: ['không có bộ mở ứng dụng'] })),
       openUrl: async (url, bw) => {
-        if (process.platform === 'win32' && bw && bw.path && /\.exe$/i.test(bw.path)) { const { spawn } = require('child_process'); const c = spawn(bw.path, [url], { detached: true, stdio: 'ignore' }); c.on('error', () => {}); c.unref(); return; }
+        if (process.platform === 'win32' && bw && bw.path && /\.exe$/i.test(bw.path)) { const { spawn } = require('child_process'); const b = BP.browserOfApp(bw.proc || ''); const c = spawn(bw.path, b ? BP.launchArgs(b, BP.readProfile(b), url) : [url], { detached: true, stdio: 'ignore' }); c.on('error', () => {}); c.unref(); return; }
         if (deps.openExternal) return deps.openExternal(url); throw new Error('không mở được địa chỉ web');
       },
       look: async (w) => {
         s.target = { hwnd: w.hwnd, pid: w.pid, proc: w.proc, title: w.title }; s.obs = null;
         const o = await observe(ctx, { thumb: false, vision: 'off' }); s.ensureObsText = o && o.text ? o.text : ''; // B124: chờ sẵn sàng chỉ cần OCR/cây, không mô tả ảnh (~4–5 giây/lần)
         const els = (s.obs && s.obs.elements) || [];
-        return { sig: els.length ? screenHash(s.obs) + '|' + U.fold((s.obs.win && s.obs.win.title) || w.title || '') : null, text: els.map(e => e.name || e.value || '').filter(Boolean).join(' · ').slice(0, 4000) };
+        return { sig: els.length ? screenHash(s.obs) + '|' + U.fold((s.obs.win && s.obs.win.title) || w.title || '') : null, text: els.map(e => e.name || e.value || '').filter(Boolean).join(' · ').slice(0, 4000), elements: els.slice(0, 400).map(e => ({ name: e.name, value: e.value, b: e.b })) };
       },
+      // B153: trình duyệt họ Chromium — chạy .exe với hồ sơ đang dùng; đọc hồ sơ; bấm một phần tử (màn hình chọn hồ sơ)
+      launchBrowser: async (b) => launchBrowserWith(b, null),
+      profile: (b) => (process.platform === 'win32' ? BP.readProfile(b) : null),
+      clickEl: async (el) => { const x = el.b[0] + el.b[2] / 2, y = el.b[1] + Math.min(el.b[3] / 2, 60); await performAt('click', x, y, { __el: el, __q: el.name || el.value, __notSend: true }); },
       ...(deps.ensureDeps ? deps.ensureDeps(s, ctx) : {}),
     };
+  }
+  // B153/B154: chạy trình duyệt người dùng nêu tên, ĐÚNG hồ sơ đang dùng, có thể kèm địa chỉ (không dùng “start <url>”/trình duyệt mặc định)
+  async function launchBrowserWith(b, url) {
+    if (process.platform !== 'win32') return { ok: false, tried: ['chỉ hỗ trợ chạy trực tiếp trên Windows'] };
+    const exe = BP.findExe(b); if (!exe) return { ok: false, tried: [`không thấy ${b.exe} trong thư mục cài`] };
+    const prof = BP.readProfile(b); const args = BP.launchArgs(b, prof, url);
+    const { spawn } = require('child_process'); const c = spawn(exe, args, { detached: true, stdio: 'ignore' }); c.on('error', () => {}); c.unref();
+    deps.log && deps.log('desk', `B153: chạy ${exe} ${args.join(' ')}${prof && prof.missing ? ' (không đọc được Local State → hồ sơ Default)' : ''}`);
+    return { ok: true, how: `${b.exe}${prof && prof.dir ? ' --profile-directory=' + prof.dir : ''}${url ? ' ' + url : ''}`, exe, profile: prof };
   }
   async function ensureApp(a, ctx) {
     const app = String(a.app || a.window || a.name || '').trim(); if (!app) throw new Error('Cần tên ứng dụng (app).');
@@ -1321,6 +1335,30 @@ function createDesktopAgent(deps) {
     deps.log && deps.log('desk', `B118: đọc trang trình duyệt: thanh địa chỉ ${url ? `“${url.slice(0, 120)}”` : 'không đọc được'} · chữ trang ${text.length} ký tự`);
     return { url, text: text.slice(0, 30000), title: W.title || '' };
   }
+  // B155: AIVN TỰ đọc trang trong trình duyệt cho việc “tìm X rồi cho biết” (mô hình nhỏ hay nói không có công cụ đọc trang)
+  async function navigateBrowser(url) {
+    await refocus(); const n = SC.libnut(); const mod = require('./agent/keys').primaryOf(process.platform);
+    n.keyTap('l', [mod]); await sleep(300); n.keyTap('a', [mod]); await sleep(80); n.typeString(new URL(url).href); await sleep(150); n.keyTap('enter');
+    if (session) { session.obs = null; session.lastAction = { kind: 'navigate', url }; }
+  }
+  async function browserRead(a, ctx) {
+    const W = require('./agent/web-read'); const web = require('./agent/web');
+    const st = (deps.getSettings && deps.getSettings()) || {}; const net = st.agentWeb === true;
+    const b = (a && a.browser && BP.byId(a.browser)) || BP.browserOf(a && a.query) || BP.byId('chrome');
+    const lg = (m) => deps.log && deps.log('desk', m);
+    const r = await W.autoRead({ query: a.query, browser: b }, {
+      log: lg, waitMs: deps.isTest ? 300 : 3500,
+      ensure: async (br) => { const e = await ensureApp({ app: br.name }, ctx); return e && !e.error ? { ok: true } : { ok: false, error: e && e.error }; },
+      read: async () => { const s = session; if (s && s.target) { try { await observe(ctx, { thumb: false, vision: 'off' }); } catch {} } return readBrowserPage({ page: true }); },
+      navigate: net ? (u) => navigateBrowser(u) : null,
+      fetch: net ? (u) => web.fetchPage(u, { maxChars: 12000, signal: ctx && ctx.signal }) : null,
+      search: net ? async (t) => { const x = await web.search(t, { signal: ctx && ctx.signal }); return (x && x.results) || []; } : null,
+      ocr: async () => { const o = await observe(ctx, { thumb: false, vision: 'off' }); return ((session && session.obs && session.obs.elements) || []).map(e => e.name || e.value || '').filter(Boolean).join('\n') || (o && o.text) || ''; },
+    });
+    lg(`B155: AIVN tự đọc trang: ${r.ok ? `${r.url} (${r.via}, ${r.text.length} ký tự)` : 'không đọc được — ' + (r.error || '')} · ${r.trail.join(' → ')}`);
+    return r;
+  }
+  async function openInBrowser(b, url) { return launchBrowserWith(b, url); }
   function actKey() {
     const s = session; if (!s || !s.obs) return '';
     const f = (s.obs.elements || []).find(e => e.focused && !e.ocr);
@@ -1328,7 +1366,7 @@ function createDesktopAgent(deps) {
     const names = (s.obs.elements || []).map(e => U.fold(String(e.name || ''))).filter(Boolean).sort().join('|');
     return focus + '#' + require('crypto').createHash('sha1').update(`${s.obs.win ? s.obs.win.title : ''}#${names}`).digest('hex').slice(0, 10);
   }
-  return { readBrowserPage, cleanupDraft, lastDraft: () => lastDraft, clearLastDraft: () => { lastDraft = null; }, hasDraft: () => !!(session && session.draftTyped), actKey, likely: (q) => (session && session.obs ? U.likelyTarget(session.obs.elements, q) : null), diag: () => ({ calib: { ...calib }, displays: session && session.diag ? session.diag.displays : SC.displayInfo().text }), searchFound, searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, ensureApp, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
+  return { readBrowserPage, browserRead, openInBrowser, cleanupDraft, lastDraft: () => lastDraft, clearLastDraft: () => { lastDraft = null; }, hasDraft: () => !!(session && session.draftTyped), actKey, likely: (q) => (session && session.obs ? U.likelyTarget(session.obs.elements, q) : null), diag: () => ({ calib: { ...calib }, displays: session && session.diag ? session.diag.displays : SC.displayInfo().text }), searchFound, searchTodo, needEyes: () => !!(session && session.needEyes), pending, look, act, ensureApp, readText, end, adoptApp, setBenchAnswer: (fn) => { benchAnswer = fn || null; }, active: () => !!session, riskOf, nativeToNorm };
 }
 
 module.exports = { createDesktopAgent, SEARCHY_ANY, webSearchTask, isBrowserWin };
