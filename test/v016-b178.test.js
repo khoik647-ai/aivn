@@ -67,6 +67,14 @@ test('B178: hết lượt thì lưu và chọn lại việc; đang ở Trò chuy
   const away = CS.selectAfterRun({ visibleMode: 'chat', current: chat, conv: live, convos: [saved] });
   assert.strictEqual(away.selected, false);
   assert.strictEqual(away.current, chat);
+  const fresh = CS.selectAfterRun({ visibleMode: 'agent', current: null, conv: live, convos: [saved], explicitNew: true });
+  assert.strictEqual(fresh.selected, false);
+  assert.strictEqual(fresh.current, null);
+  assert.strictEqual(fresh.saved, saved);
+  const mid = CS.listForMode({ mode: 'agent', convos: [], generatingByMode: { chat: null, agent: live } });
+  assert.strictEqual(mid.length, 1);
+  assert.strictEqual(mid[0], live);
+  assert.ok(mid[0].title, 'thanh bên vẫn có việc đang chạy, không phải “Chưa giao việc nào”');
   const both = { chat, agent: live };
   assert.strictEqual(CS.convoForMode({ mode: 'chat', id: 'c1', convos: [], generatingByMode: both }), chat);
   assert.strictEqual(CS.convoForMode({ mode: 'agent', id: 'a-new', convos: [], generatingByMode: both }), live);
@@ -87,7 +95,13 @@ test('B178: app.js theo dõi cuộc đang chạy của từng trang và chọn l
   assert.match(send, /state\.lastByMode\.agent = conv\.id/);
   assert.match(send, /state\.generatingByMode\.agent = null/);
   assert.match(send, /ChatStream\.selectAfterRun/);
+  assert.match(send, /explicitNew: state\.agentExplicitNew/);
+  assert.match(send, /renderConvos\(\)/);
   assert.match(send, /state\.lastByMode\.agent = picked\.current\.id/);
+  const neu = app.slice(app.indexOf("$('#newChat').addEventListener('click', () => {"), app.indexOf('// biểu tượng nút thao tác'));
+  assert.match(neu, /state\.agentExplicitNew = true/);
+  assert.match(neu, /delete state\.lastByMode\.agent/);
+  assert.match(app, /ChatStream\.listForMode\(/);
   assert.match(app, /ChatStream\.generatingFor\(state\.mode/);
   assert.match(app, /generatingByMode: \{ chat: null, agent: null \}/);
 });

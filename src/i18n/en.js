@@ -2201,7 +2201,6 @@
     "Đang suy nghĩ tiếp…": "Thinking further…",
     "Đang suy nghĩ…": "Thinking…",
     "Đang suy nghĩ… (bước {0})": "Thinking… (step {0})",
-    "Đang trả lời — bấm Dừng trước đã": "Answering — click Stop first",
     "Đang trả lời…": "Answering…",
     "Đang tìm trên Hugging Face…": "Searching Hugging Face…",
     "Đang tìm đoạn liên quan trong tài liệu…": "Finding relevant passages in the document…",
@@ -2706,7 +2705,9 @@
     "Kiểm tra lại đường dẫn, tên tệp, và xem thư mục đó có nằm trong thư mục được phép không.": "Check the path, the file name, and whether that folder is in the allowed folders.",
     "“{0}” là thư mục, không phải tệp.": "“{0}” is a folder, not a file.",
     "AGENT đang chạy — đợi xong hoặc sang AGENT bấm Dừng": "AGENT is running — wait until it finishes, or switch to AGENT and click Stop",
-    "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "Chat is running — wait until it finishes, or switch to Chat and click Stop"
+    "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "Chat is running — wait until it finishes, or switch to Chat and click Stop",
+    "AGENT đang chạy — bấm Dừng ở dưới": "AGENT is running — click Stop below",
+    "Trò chuyện đang chạy — bấm Dừng ở dưới": "Chat is running — click Stop below"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.en = D;
   if (typeof module === 'object' && module.exports) module.exports = D;
