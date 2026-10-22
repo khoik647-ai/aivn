@@ -16,6 +16,7 @@ const BOOL = new Set(['--qa-input-diag']); // cờ không nhận giá trị
 const LANGS = ['vi', 'en', 'zh'];
 // lệnh nói rõ “chỉ soạn, đừng gửi”: lời từ chối mang lý do đó để AIVN AGENT dừng trước bước gửi (vẫn KHÔNG cho phép)
 const DRAFT_RE = require('./agent/send-verify').DRAFT_ONLY; // một nguồn với desktop-agent (B101)
+const SG = require('./agent/shot-guard'); // B193: chụp đúng cửa sổ, che ảnh nhạy cảm, dọn ảnh cũ
 // thẻ xin phép của bước quan trọng — kể cả khi thiếu cờ risk, chữ trên thẻ nói tới các việc này cũng bị từ chối
 const RISK_RE = /(gửi|send|发送|xo[áa]|delete|删除|mua|thanh to[áa]n|purchase|buy|pay|购买|支付|kho[áa] m[áa]y|lock|锁|âm lượng|volume|音量|tắt máy|shutdown|restart|khởi động lại)/iu;
 
@@ -149,6 +150,13 @@ function statusOf(r, { denied = 0, draft = false, error = null, timedOut = false
   if (sendTask && !(r.steps || []).some(x => x && x.verify && x.verify.sent)) return { status: 'failed', reason: 'việc gửi tin nhưng không có bước nào kiểm chứng được là ĐÃ GỬI đúng người' };
   return { status: 'done' };
 }
+// B193: khung + chữ của cửa sổ đích lúc chụp (cây giao diện, chỉ Windows; nơi khác/lỗi/quá 8 giây → null)
+async function winInfoOf(deps, tgt) {
+  const get = deps.windowInfo !== undefined ? deps.windowInfo : (process.platform === 'win32' ? async (w) => { const r = await require('./agent/uitree').tree({ hwnd: w.hwnd || 0, max: 120 }); const els = r && Array.isArray(r.els) ? r.els : r && r.els ? [r.els] : [];
+    return r && r.win ? { b: r.win.b, title: r.win.title, proc: r.win.proc, text: els.map(e => [e.n, e.v].filter(Boolean).join(' ')).join('\n') } : null; } : null);
+  if (!get || !tgt || tgt.hwnd == null) return null;
+  try { return await Promise.race([get(tgt), new Promise(r => setTimeout(() => r(null), 8000).unref?.())]); } catch { return null; }
+}
 const exitCodeOf = (status) => status === 'done' ? 0 : status === 'asked_user' ? 3 : status === 'cancelled' ? 4 : 2;
 function writeJson(file, obj) { fs.mkdirSync(path.dirname(file), { recursive: true }); const tmp = file + '.tmp-' + process.pid; fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8'); fs.renameSync(tmp, file); }
 // dòng nhật ký có toạ độ bấm / mã phím (B62/B66c) → gắn vào bước
@@ -183,11 +191,24 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
     res.approvals.push({ kind, at: Date.now() - t0, title: req.title || req.label || req.kind || null, tool: req.tool || null, risk, send: !!req.send, recipient: req.recipient || null, shownChat: req.shown ? { header: req.shown.header || [], composer: req.shown.composer || null } : null, text: req.sendText != null ? String(req.sendText).slice(0, 300) : null, desc: String(req.desc || req.message || req.text || '').slice(0, 300), answer: self ? `allowed (--approve-send-to “${args.approveSendTo}”)` : a.ok ? 'allowed (không rủi ro)' : 'denied' });
     deps.LOG && deps.LOG.log('qa', `QA tự trả lời thẻ ${kind}: ${self ? 'CHO PHÉP (--approve-send-to)' : a.ok ? 'làm (không rủi ro)' : 'TỪ CHỐI'} — ${req.title || req.desc || req.kind || ''}${req.recipient ? ` · người nhận “${req.recipient}”` : ''}`); return a; };
   let n = 0; const pendingSteps = [];
+  let tgt = null; const titles = new Set(); // B193: cửa sổ đích gần nhất + các tiêu đề cần che trong log
   async function onStep1(s) {
           if (s.status === 'running' || s.status === 'pending') { open.set(s.id, { i0: lines.length, t: Date.now() }); return; }
           const o = open.get(s.id) || { i0: lines.length, t: Date.now() }; open.delete(s.id); n++;
           const step = { n, afterDeadline: timedOut || undefined, id: s.id, auto: !!s.auto, tool: s.name, args: s.args || null, status: s.status, summary: s.summary || null, verification: s.verify || s.check || null, draftIn: s.draftIn || undefined, durationMs: s.ms ?? (Date.now() - o.t), debug: lines.slice(o.i0).filter(l => DEBUG_LINE.test(l)).slice(0, 40), shot: null };
-          if (args.shots && deps.capture) { try { const c = await deps.capture({ maxW: 1920 }); const f = path.join(args.shots, `step-${String(n).padStart(2, '0')}-${String(s.name || 'step').replace(/[^\w-]/g, '_')}.jpg`); fs.writeFileSync(f, Buffer.from(c.dataUrl.split(',')[1], 'base64')); step.shot = f; } catch (e) { step.shot = null; step.shotError = String(e.message || e).slice(0, 200); } }
+          if (s.win) { tgt = { ...s.win, sensitive: [] }; if (s.win.title) titles.add(String(s.win.title)); } // B193: cửa sổ đích do ensure_app thao tác
+          if (Array.isArray(s.sensitive) && s.sensitive.length && tgt) tgt.sensitive = [...new Set([...tgt.sensitive, ...s.sensitive])];
+          step.summary = SG.redactTitles(step.summary, [...titles]); step.debug = step.debug.map(l => SG.redactTitles(l, [...titles]));
+          if (args.shots && deps.capture) { try { const f = path.join(args.shots, `step-${String(n).padStart(2, '0')}-${String(s.name || 'step').replace(/[^\w-]/g, '_')}.jpg`);
+            // B193: chỉ chụp cửa sổ đích (khi biết khung của nó); cửa sổ/chữ nhạy cảm → CHỈ ghi ảnh đã che, không bao giờ ghi ảnh gốc
+            const info = tgt ? await winInfoOf(deps, tgt) : null; if (info && info.title) titles.add(String(info.title));
+            const reasons = [...new Set([...(Array.isArray(s.sensitive) ? s.sensitive : []), ...(tgt ? tgt.sensitive : []), ...(tgt ? SG.scan({ title: info ? info.title : tgt.title, proc: info ? info.proc : tgt.proc, text: info ? info.text : '' }) : [])])];
+            if (tgt && reasons.length) tgt.sensitive = reasons; // còn nhạy cảm cho các bước sau trên cùng cửa sổ
+            const b = info && Array.isArray(info.b) ? info.b : tgt && Array.isArray(tgt.b) ? tgt.b : null;
+            const g = await SG.shot({ capture: deps.capture, target: b ? { b } : null, reasons, image: deps.image, maxW: 1920 });
+            step.shotScope = { scope: g.scope, rect: g.rect, window: !!b }; if (reasons.length) { step.shotRedacted = true; step.shotWarn = reasons; deps.LOG && deps.LOG.log('qa', `B193: bước ${n} — ảnh chụp có thể chứa nội dung nhạy cảm (${reasons.join(', ')}) → ${g.buf ? 'chỉ ghi ảnh đã che' : 'không ghi ảnh'}`); }
+            if (g.buf) { fs.writeFileSync(f, g.buf); step.shot = f; } else { step.shot = null; step.shotError = 'B193: không ghi ảnh (nội dung nhạy cảm, không che được)'; }
+          } catch (e) { step.shot = null; step.shotError = SG.redactTitles(String(e.message || e), [...titles]).slice(0, 200); } }
           res.steps.push(step);
   }
   try {
@@ -203,7 +224,7 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
     { const sc = deps.screenControl ? deps.screenControl() : null; if (sc && !sc.on) { const e = new Error(`Điều khiển màn hình đang TẮT trong hồ sơ này (${sc.why}). Bật trong Cài đặt → AIVN AGENT, hoặc chạy kèm --agent-settings-from main để chép cài đặt AIVN AGENT từ hồ sơ thật.`); e.code = 'SCREEN_OFF'; throw e; } }
     res.model = { id: st.id, file: st.path ? path.basename(st.path) : null, mode: st.mode || null, contextSize: st.contextSize || null, gpuLayers: st.gpuLayers ?? null, totalLayers: st.totalLayers ?? null, gpu: st.gpu || null };
     res.timings.modelLoadMs = Date.now() - tl;
-    if (args.shots) fs.mkdirSync(args.shots, { recursive: true });
+    if (args.shots) { fs.mkdirSync(args.shots, { recursive: true }); res.shotsPruned = SG.prune(args.shots, { log: (m) => deps.LOG && deps.LOG.log('qa', m) }).removed; } // B193: xoá ảnh cũ hơn 24 giờ / vượt dung lượng
     if (deps.desk && deps.desk.clearLastDraft) deps.desk.clearLastDraft();
     if (deps.desk && deps.desk.setBenchAnswer) deps.desk.setBenchAnswer((req) => ask('desk', req));
     const tr = Date.now();
@@ -235,7 +256,7 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
   else if (s.status === 'blocked' && denied > 0 && args.approveSendTo == null && res.approvals.some(x => x.send && x.answer === 'denied')) s.reason = 'bước GỬI bị tự TỪ CHỐI (chế độ QA không có --approve-send-to nên mọi bước gửi đều bị từ chối) — tin CHƯA được gửi';
   Object.assign(res, { sources: r && Array.isArray(r.sources) ? r.sources : [], grounding: r && r.grounding ? r.grounding : null, status: s.status, reason: s.reason || null, question: s.question || null, finalAnswer: finalAnswerOf(r, s, { timedOut, timeout: args.timeout, draft: deps.desk && deps.desk.lastDraft ? deps.desk.lastDraft() : null }), warning: r && r.warning && !(denied > 0 && /mô hình mạnh hơn/.test(r.warning)) ? r.warning : null, draftOnly: draft, deniedApprovals: denied, approvedSends: sendApproved, approveSendTo: args.approveSendTo || null, exitCode: exitCodeOf(s.status) });
   res.timings.totalMs = Date.now() - t0; res.timings.finishedAt = new Date().toISOString();
-  res.log = lines.slice(-600);
+  res.log = lines.slice(-600).map(l => SG.redactTitles(l, [...titles])); // B193: che tiêu đề cửa sổ + chuỗi trông như khoá trong log
   try { writeJson(args.out, res); } catch (e) { deps.LOG && deps.LOG.log('qa', 'Không ghi được result.json: ' + e.message); }
   deps.LOG && deps.LOG.log('qa', `QA runner xong: ${s.status} (thoát ${res.exitCode}) sau ${res.timings.totalMs} ms → ${args.out}`);
   return res;

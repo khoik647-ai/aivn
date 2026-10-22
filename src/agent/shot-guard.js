@@ -62,6 +62,9 @@ function guardStep(step, out, { warn = () => WARN } = {}) {
   const hits = scan({ title: w ? w.title : '', proc: w ? w.proc : '', text: [out.forModel, out.summary, out.detail].filter(x => typeof x === 'string').join('\n') });
   if (hits.length) {
     step.sensitive = hits; step.thumb = undefined;
+    const ts = w && w.title ? [w.title] : []; // tiêu đề cửa sổ nhạy cảm (vd. tên tệp mã kích hoạt) → che trong thẻ bước + nhật ký (logTool)
+    if (typeof step.summary === 'string') step.summary = redactTitles(step.summary, ts);
+    if (typeof step.detail === 'string') step.detail = redactTitles(step.detail, ts);
     step.summary = (step.summary ? String(step.summary) + ' · ' : '') + '⚠ ' + warn();
   }
   if (typeof step.detail === 'string') step.detail = redactSecrets(step.detail);
