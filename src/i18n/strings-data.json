@@ -467,6 +467,7 @@
  "Đã kiểm tra 0.14.3: đọc ảnh, chỉ đúng nút, gọi open_app thật.",
  "Đã lập hoá đơn đủ",
  "Đã nạp bằng {0} ({1}), ngữ cảnh {2}. Mô hình không vừa trọn VRAM nên phần còn lại chạy bằng CPU — chậm hơn nhưng vẫn dùng được.",
+ "Đã nạp bằng {0}, {1}, ngữ cảnh {2}. Mô hình không vừa trọn VRAM nên phần còn lại chạy bằng CPU — chậm hơn nhưng vẫn dùng được.",
  "Đã nạp bằng {0}{1}{2}. Mô hình không vừa trọn VRAM nên phần còn lại chạy bằng CPU — chậm hơn nhưng vẫn dùng được.",
  "Đã nạp trên GPU, ngữ cảnh {0}.",
  "Đã nạp trên GPU{0}.",

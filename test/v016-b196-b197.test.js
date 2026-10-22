@@ -114,17 +114,25 @@ test('B197: thông báo nạp dự phòng dịch đủ vi, en, zh', () => {
   const partial = { mode: 'gpu-partial', gpuLayers: 15, totalLayers: 25, contextSize: 16384 };
   const cpu = { mode: 'cpu-only', contextSize: 8192 };
   const gpu = { mode: 'gpu', contextSize: 16384 };
+  const manual = { mode: 'gpu-manual', gpuLayers: 10, totalLayers: 41, contextSize: 16384 };
   assert.match(L.loadNotice(partial), /GPU một phần \+ CPU \(15\/25 lớp trên GPU\), ngữ cảnh 16\.384/);
-  assert.strictEqual(L.loadNotice(partial, (s) => T.tr(s, 'en')), 'Loaded with Partial GPU + CPU (15/25 layers on GPU), context 16.384. The model doesn\'t fit entirely in VRAM, so the rest runs on the CPU — slower, but it works.');
-  const zhPartial = L.loadNotice(partial, (s) => T.tr(s, 'zh'));
-  assert.match(zhPartial, /部分 GPU \+ CPU/); assert.match(zhPartial, /15\/25 层在 GPU 上/); assert.ok(!/[àáảãạăâêôơưđ]/i.test(zhPartial));
-  assert.match(L.loadNotice(cpu, (s) => T.tr(s, 'en')), /switched to CPU \(no GPU\), context 8\.192/);
-  assert.match(L.loadNotice(cpu, (s) => T.tr(s, 'zh')), /CPU（不使用 GPU）/);
-  assert.strictEqual(L.loadNotice(gpu, (s) => T.tr(s, 'en')), 'Loaded on the GPU, context 16.384.');
-  assert.match(L.loadNotice(gpu, (s) => T.tr(s, 'zh')), /已在 GPU 上加载，上下文 16\.384。/);
+  assert.strictEqual(L.loadNotice(partial, (s) => T.tr(s, 'en'), 'en'), 'Loaded with Partial GPU + CPU (15/25 layers on GPU), context 16,384. The model doesn\'t fit entirely in VRAM, so the rest runs on the CPU — slower, but it works.');
+  const zhPartial = L.loadNotice(partial, (s) => T.tr(s, 'zh'), 'zh');
+  assert.match(zhPartial, /部分 GPU \+ CPU/); assert.match(zhPartial, /15\/25 层在 GPU 上/); assert.match(zhPartial, /16,384/); assert.ok(!/[àáảãạăâêôơưđ]/i.test(zhPartial));
+  assert.match(L.loadNotice(cpu, (s) => T.tr(s, 'en'), 'en'), /switched to CPU \(no GPU\), context 8,192/);
+  assert.match(L.loadNotice(cpu, (s) => T.tr(s, 'zh'), 'zh'), /CPU（不使用 GPU）/);
+  assert.strictEqual(L.loadNotice(gpu, (s) => T.tr(s, 'en'), 'en'), 'Loaded on the GPU, context 16,384.');
+  assert.match(L.loadNotice(gpu, (s) => T.tr(s, 'zh'), 'zh'), /已在 GPU 上加载，上下文 16,384。/);
+  assert.match(L.loadNotice(manual), /GPU \(số lớp tự chọn\), 10\/41 lớp trên GPU, ngữ cảnh 16\.384/);
+  const enManual = L.loadNotice(manual, (s) => T.tr(s, 'en'), 'en');
+  assert.strictEqual(enManual, 'Loaded with GPU (manual layer count), 10/41 layers on GPU, context 16,384. The model doesn\'t fit entirely in VRAM, so the rest runs on the CPU — slower, but it works.');
+  assert.ok(!/số lớp|tự chọn/.test(enManual));
+  const zhManual = L.loadNotice(manual, (s) => T.tr(s, 'zh'), 'zh');
+  assert.match(zhManual, /GPU（手动层数）/); assert.match(zhManual, /10\/41 层在 GPU 上/); assert.match(zhManual, /16,384/);
+  assert.ok(!/số lớp|tự chọn/.test(zhManual)); assert.ok(!/[àáảãạăâêôơưđ]/i.test(zhManual));
   assert.match(L.ctxReducedNote(16384, 8192), /8\.192/);
-  assert.match(L.ctxReducedNote(16384, 8192, (s) => T.tr(s, 'en')), /context 8\.192 instead of 16\.384/);
-  assert.match(L.ctxReducedNote(16384, 8192, (s) => T.tr(s, 'zh')), /上下文 8\.192/);
+  assert.match(L.ctxReducedNote(16384, 8192, (s) => T.tr(s, 'en'), 'en'), /context 8,192 instead of 16,384/);
+  assert.match(L.ctxReducedNote(16384, 8192, (s) => T.tr(s, 'zh'), 'zh'), /上下文 8,192/);
 });
 
 test('bộ nhớ offload: không ghim CPU, không xoá khi nạp một phần, ngữ cảnh đã hạ vẫn áp dụng', () => {

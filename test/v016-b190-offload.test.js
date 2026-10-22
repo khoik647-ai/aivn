@@ -5,7 +5,8 @@ const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
 const G = require('../src/gguf');
-const { loadPlans, oomSchedule } = require('../src/engine');
+const { loadPlans, oomSchedule, explicitFlash, flashForContext, contextTries } = require('../src/engine');
+const OM = require('../src/offload-memory');
 const VS = require('../src/vision-server');
 
 const GiB = 1024 ** 3;
@@ -164,11 +165,64 @@ test('B190: bộ đệm tính toán theo lô (mốc 1,9 GB ở lô 2048); VRAM t
   assert.ok(gpu.some(p => p.gpuLayers >= 10 && p.gpuLayers <= 16), 'còn một bước khoảng 10–15 lớp, không nhảy thẳng CPU');
 });
 
-test('B190: ngữ cảnh node-llama-cpp nhận batchSize ≤ 2048 và flash attention, không lấy lô 2048 của perf', () => {
+test('B190: ngữ cảnh node-llama-cpp nhận batchSize ≤ 2048 và flash attention auto, không lấy lô 2048 của perf', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/engine.js'), 'utf8');
   assert.match(src, /batchSize: Math\.max\(1, Math\.min\(batchCap, plan\.ctx\)\)/);
-  assert.match(src, /flashAttention: flashOff \? false : true/);
+  assert.match(src, /flashAttention: fa/);
+  assert.match(src, /contextTries\(userFlash/);
+  assert.doesNotMatch(src, /flashAttention: flashOff \? false : true/);
   assert.match(src, /const batchCap = Math\.max\(1, Math\.min\(Number\.isInteger\(opts\.batchSize\) \? opts\.batchSize : 512, 2048\)\)/);
-  assert.match(src, /kvUsed = plan\.kv === 'q8_0' \|\| kvType === 'q8_0'/);
   assert.match(src, /ignoreMemorySafetyChecks: true/);
+  assert.strictEqual(explicitFlash(undefined, 'auto'), null);
+  assert.strictEqual(explicitFlash(undefined, false), false);
+  assert.strictEqual(explicitFlash(true, false), true);
+  assert.strictEqual(flashForContext(null, false), 'auto');
+  assert.strictEqual(flashForContext(true, false), true);
+  assert.strictEqual(flashForContext(false, false), false);
+  assert.deepStrictEqual(contextTries(null, false), [{ fa: 'auto', kv: false }, { fa: false, kv: false }]);
+  assert.deepStrictEqual(contextTries(true, false), [{ fa: true, kv: false }, { fa: false, kv: false }]);
+  assert.deepStrictEqual(contextTries(false, false), [{ fa: false, kv: false }]);
+  assert.deepStrictEqual(contextTries(null, true), [{ fa: true, kv: true }, { fa: false, kv: false }]);
+  assert.deepStrictEqual(contextTries(false, true), [{ fa: true, kv: true }, { fa: false, kv: false }]);
+});
+
+test('B190: 4B trên 4 GB — OOM 37 q8 không được bước lại thành 37 confident sau 3 lần sạch', () => {
+  const model = MODELS['4B'];
+  const vram = { total: 4 * GiB, free: 4 * GiB };
+  const fit = G.chooseOffload(model, { ctx: 8192, vram, weightBytes: model.fileSize });
+  assert.deepStrictEqual([fit.gpuLayers, fit.kv, fit.confident], [37, 'q8_0', true]);
+  const eager = loadPlans({ gpu: 'vulkan', vram, fileSize: model.fileSize, geo: model, ctx: 8192, minCtx: 8192, weightBytes: model.fileSize });
+  assert.strictEqual(eager[0].gpuLayers, 37);
+  assert.strictEqual(eager[0].kv, 'q8_0');
+  assert.strictEqual(eager[0].confident, true);
+  const id = OM.identity({ file: '/m/4b.gguf', size: model.fileSize, mtime: 1, backend: 'vulkan', gpuName: 'dGPU 4GB', vramTotal: 4 * GiB, settings: 'true|null|null|null' });
+  const now = 1_700_000_000_000;
+  let rec = OM.note(null, { gpu: 33, totalLayers: 37, ctx: 8192, requestedCtx: 8192, oom: true, oomGpu: 37, freeAt: vram.free }, id, now);
+  assert.strictEqual(rec.oomGpu, 37);
+  assert.strictEqual(rec.gpu, 33);
+  for (let i = 0; i < 3; i++) rec = OM.note(rec, { gpu: 33, totalLayers: 37, ctx: 8192, requestedCtx: 8192, oom: false, freeAt: vram.free }, id, now + 10 + i);
+  assert.strictEqual(rec.oomGpu, 37, 'ba lần sạch không được quên số lớp đã OOM');
+  const mem = OM.recall(rec, { ctx: 8192, free: vram.free, identity: id, now: now + 20 });
+  assert.notStrictEqual(mem.capLayers, 37);
+  assert.ok(mem.capLayers < 37, 'cap sau 3 lần sạch = ' + mem.capLayers);
+  const again = loadPlans({ gpu: 'vulkan', vram, fileSize: model.fileSize, geo: model, ctx: 8192, minCtx: 8192, weightBytes: model.fileSize, capLayers: mem.capLayers });
+  assert.notStrictEqual(again[0].gpuLayers, 37);
+  assert.notStrictEqual(again[0].confident, true);
+  assert.ok(!again.some(p => p.gpuLayers === 37 && p.confident));
+  const sameCap = loadPlans({ gpu: 'vulkan', vram, fileSize: model.fileSize, geo: model, ctx: 8192, minCtx: 8192, weightBytes: model.fileSize, capLayers: 37 });
+  assert.strictEqual(sameCap[0].gpuLayers, 37);
+  assert.notStrictEqual(sameCap[0].confident, true, 'trần từ bộ nhớ bằng fitN vẫn không ignoreMemorySafetyChecks');
+  const rose = OM.recall(rec, { ctx: 8192, free: vram.free + OM.FREE_ROSE + 1, identity: id, now: now + 20 });
+  assert.ok(rose.capLayers == null, 'VRAM trống tăng ≥ FREE_ROSE thì được dò lại');
+  const shy = OM.recall(rec, { ctx: 8192, free: vram.free + OM.FREE_ROSE - 1, identity: id, now: now + 20 });
+  assert.ok(shy.capLayers < 37);
+  let lower = OM.note(null, { gpu: 20, totalLayers: 37, ctx: 8192, oom: true, oomGpu: 30, freeAt: vram.free }, id, now);
+  for (let i = 0; i < 3; i++) lower = OM.note(lower, { gpu: 20, totalLayers: 37, ctx: 8192, oom: false, freeAt: vram.free }, id, now + 10 + i);
+  assert.strictEqual(OM.recall(lower, { ctx: 8192, free: vram.free, identity: id, now: now + 20 }).capLayers, 24);
+  const crashed = OM.noteCrash(rec, id, { ctx: 8192, gpu: 37 }, now + 30);
+  assert.strictEqual(crashed.crashedGpu, 37);
+  assert.notStrictEqual(crashed.crashedGpu, rec.gpu);
+  const main = fs.readFileSync(path.join(__dirname, '../src/main.js'), 'utf8');
+  assert.match(main, /gpu: loadingGpu/);
+  assert.doesNotMatch(main, /noteCrash\([\s\S]{0,240}rec\.offload && rec\.offload\.gpu/);
 });

@@ -2731,7 +2731,8 @@
     "Đã nạp bằng {0} ({1}), ngữ cảnh {2}. Mô hình không vừa trọn VRAM nên phần còn lại chạy bằng CPU — chậm hơn nhưng vẫn dùng được.": "Loaded with {0} ({1}), context {2}. The model doesn't fit entirely in VRAM, so the rest runs on the CPU — slower, but it works.",
     "Đã nạp trên GPU, ngữ cảnh {0}.": "Loaded on the GPU, context {0}.",
     "GPU không nạp được mô hình này, AIVN đã chuyển sang {0}, ngữ cảnh {1} (chậm hơn nhưng vẫn dùng được).": "The GPU couldn't load this model, so AIVN switched to {0}, context {1} (slower, but it works).",
-    "Đã dùng ngữ cảnh {0} thay vì {1} vì lần nạp trước mô hình chỉ vừa ở ngữ cảnh đó.": "Using context {0} instead of {1} because the last load only fit at that context size."
+    "Đã dùng ngữ cảnh {0} thay vì {1} vì lần nạp trước mô hình chỉ vừa ở ngữ cảnh đó.": "Using context {0} instead of {1} because the last load only fit at that context size.",
+    "Đã nạp bằng {0}, {1}, ngữ cảnh {2}. Mô hình không vừa trọn VRAM nên phần còn lại chạy bằng CPU — chậm hơn nhưng vẫn dùng được.": "Loaded with {0}, {1}, context {2}. The model doesn't fit entirely in VRAM, so the rest runs on the CPU — slower, but it works."
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.en = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

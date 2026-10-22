@@ -31,6 +31,8 @@ function blank(id, now) { return { ...identity(id), at: now }; }
 function note(prev, event = {}, id, now = Date.now()) {
   const known = same(prev, id, now) ? { ...prev } : blank(id, now);
   known.at = now;
+  // Số lớp đã hết VRAM. Bước +4 sau này không được chạm lại đúng mức đó.
+  if (event.oomGpu > 0) known.oomGpu = known.oomGpu > 0 ? Math.min(known.oomGpu, event.oomGpu) : event.oomGpu;
   if (event.freeAt > 0) known.freeAt = event.freeAt;
   if (event.totalLayers > 0) known.totalLayers = event.totalLayers;
   if (!(event.gpu > 0)) {
@@ -76,7 +78,10 @@ function recall(rec, { ctx, free, identity: id, now = Date.now() } = {}) {
   if (rec.oom && (rec.clean || 0) >= STEP_AFTER && !rec.crash) {
     let up = cap + STEP;
     if (rec.totalLayers > 0 && up > rec.totalLayers) up = rec.totalLayers;
-    if (!(rec.crashedGpu > 0) || up < rec.crashedGpu) cap = up;
+    const underCrash = !(rec.crashedGpu > 0) || up < rec.crashedGpu;
+    // Chỉ bước lên khi còn dưới số lớp đã OOM. VRAM trống tăng ≥ FREE_ROSE thì nhánh rose ở trên đã bỏ trần để dò lại.
+    const underOom = !(rec.oomGpu > 0) || up < rec.oomGpu || rose;
+    if (underCrash && underOom) cap = up;
   }
   if (rec.oom && cap > 0) out.capLayers = cap;
   const rememberedCtx = rec.ctx;
