@@ -153,10 +153,19 @@ function validate(cfg) {
   if (bad) throw new Error(bad[1]);
   return cfg;
 }
+function expandSecrets(text, resolveSecret) {
+  if (typeof text !== 'string' || !text.includes('${secret:')) return text;
+  return text.replace(/\$\{secret:([^}]+)\}/g, (full, id) => {
+    let got;
+    try { got = typeof resolveSecret === 'function' ? resolveSecret(id) : undefined; } catch { got = undefined; }
+    if (typeof got !== 'string' || got === '') throw new Error(`Không giải được khoá bí mật “${String(id).split(':').pop() || id}”.`);
+    return encodeURIComponent(got);
+  });
+}
 function materializeValue(slot, v, resolveSecret) {
   const id = secretIdOf(v);
   if (!id) {
-    if (typeof v === 'string') return v;
+    if (typeof v === 'string') return v.includes('${secret:') ? expandSecrets(v, resolveSecret) : v;
     throw new Error(`Không giải được khoá bí mật “${slot}”.`);
   }
   let got;
@@ -292,7 +301,7 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
       else if (def.headers) headers = materializeMap(def.headers, resolveSecret);
       let transport;
       if (def.url) {
-        const u = new URL(def.url);
+        const u = new URL(expandSecrets(def.url, resolveSecret));
         const opts = headers ? { requestInit: { headers } } : undefined;
         transport = def.type === 'sse' || /\/sse\/?$/.test(u.pathname) ? new Sse(u, opts) : new Http(u, opts);
         addLog(name, clean(`Kết nối ${def.type === 'sse' ? 'SSE' : 'HTTP'} ${u.origin}${u.pathname}`));
@@ -414,4 +423,4 @@ function presets({ folder = null } = {}) {
     memory: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] }
   };
 }
-module.exports = { createMcpManager, validate, resolveCommand, toolName, safeName, resultText, presets, classifyUrl, excelCallError, isExcelServer, claimCatalogId, normCatalogUrl, ADVANCED_CATALOG, secretIdOf, secretPlaceholder, PROBE_TIMEOUT_RAW, PROBE_SLOW_RAW, PROBE_EXIT_RAW, PROBE_STOPPED_RAW };
+module.exports = { createMcpManager, validate, resolveCommand, toolName, safeName, resultText, presets, classifyUrl, excelCallError, isExcelServer, claimCatalogId, normCatalogUrl, ADVANCED_CATALOG, secretIdOf, secretPlaceholder, expandSecrets, PROBE_TIMEOUT_RAW, PROBE_SLOW_RAW, PROBE_EXIT_RAW, PROBE_STOPPED_RAW };

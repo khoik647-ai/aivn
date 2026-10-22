@@ -8,6 +8,7 @@ const os = require('os');
 const path = require('path');
 const M = require('../src/mcp');
 const PG = require('../src/plugins');
+const LOG = require('../src/logger');
 const AP = require('../src/agent/approval');
 const CORE = require('../src/i18n/core');
 const en = require('../src/i18n/en');
@@ -847,4 +848,139 @@ test('công tắc chủ tắt thì Sổ tay agent không hiện thẻ; nhật k�
     assert.equal(CORE.VI.test(trLog('14:32:01 LỖI: spawn x ENOENT', lang)), false);
     assert.equal(CORE.VI.test(trLog('(trống)', lang)), false);
   }
+});
+
+const P49_PAIR = 'mysecretpassword123';
+const P49_PLAIN = 'plainlowercasetoken';
+const P49_K = 'kvalue99xx';
+const P49_QUERY = 'Ab12Cd34Ef56Gh78';
+const P49_ARG_QUERY = 'TokQueryValue99zz';
+const P49_PASS = 's3cret-pass';
+const P49_APPID = 'shortid99';
+const P49_APPKEY = 'shortkey1';
+const P49_RAWS = [P49_PAIR, P49_PLAIN, P49_K, P49_QUERY, P49_ARG_QUERY, P49_PASS, P49_APPID, P49_APPKEY];
+function p49Config() {
+  return { mcpServers: {
+    flags: {
+      command: 'node',
+      args: ['a.js', '--api-key', P49_PAIR, '--token', P49_PLAIN, '-k', P49_K, `https://api.example.com/v1?token=${P49_ARG_QUERY}`],
+      env: { MY_APPID: P49_APPID, X_APP_KEY: P49_APPKEY, NODE_ENV: 'production' },
+    },
+    remote: { url: `https://alice:${P49_PASS}@example.com/mcp?api_key=${P49_QUERY}&x=1` },
+  } };
+}
+function assertNoRaw(label, text) {
+  const s = String(text);
+  for (const raw of P49_RAWS) assert.equal(s.includes(raw), false, label + ' còn ' + raw);
+}
+
+test('P49-2: cặp cờ, query URL và tên env ngắn dùng cùng một bộ phát hiện', async () => {
+  const { mcp, gate, secrets } = world();
+  const cfg = p49Config();
+  const text = JSON.stringify(cfg);
+  const peeked = gate.peekSecrets(text).count;
+  const bare = PG.extractSecrets(JSON.parse(text), null);
+  const moved = PG.extractSecrets(JSON.parse(text), secrets);
+  const names = Object.values(cfg.mcpServers).flatMap(d => PG.secretKeyNames(d));
+  assert.equal(names.length, peeked);
+  assert.equal(bare.count, peeked);
+  assert.equal(moved.count, peeked);
+  assert.ok(names.includes('arg2') && names.includes('arg4') && names.includes('arg6'), names.join(','));
+  assert.ok(names.includes('MY_APPID') && names.includes('X_APP_KEY'), names.join(','));
+  assert.ok(names.includes('userinfo') && names.includes('api_key') && names.includes('token'), names.join(','));
+  assert.equal(PG.secretFindings({ command: 'node', args: ['--api-key', '--verbose', 'ok'] }).length, 0);
+  const flags = moved.cfg.mcpServers.flags;
+  assert.equal(flags.args[1], '--api-key');
+  assert.equal(flags.args[2], '${secret:mcp:flags:arg2}');
+  assert.equal(flags.args[3], '--token');
+  assert.equal(flags.args[4], '${secret:mcp:flags:arg4}');
+  assert.equal(flags.args[5], '-k');
+  assert.equal(flags.args[6], '${secret:mcp:flags:arg6}');
+  assert.equal(flags.args[7], 'https://api.example.com/v1?token=${secret:mcp:flags:token}');
+  assert.equal(flags.env.MY_APPID, '${secret:mcp:flags:MY_APPID}');
+  assert.equal(flags.env.X_APP_KEY, '${secret:mcp:flags:X_APP_KEY}');
+  assert.equal(flags.env.NODE_ENV, 'production');
+  assert.equal(moved.cfg.mcpServers.remote.url, 'https://alice:${secret:mcp:remote:userinfo}@example.com/mcp?api_key=${secret:mcp:remote:api_key}&x=1');
+  assert.equal(secrets.get('mcp:flags:arg2'), P49_PAIR);
+  assert.equal(secrets.get('mcp:remote:api_key'), P49_QUERY);
+  assert.equal(secrets.get('mcp:remote:userinfo'), P49_PASS);
+  assert.equal(secrets.get('mcp:flags:MY_APPID'), P49_APPID);
+  assertNoRaw('bản chuyển', JSON.stringify(moved.cfg));
+  const saved = await gate.saveJson(text);
+  assert.equal(saved.ok, true);
+  assert.equal(saved.secretCount, peeked);
+  const disk = fs.readFileSync(mcp.file, 'utf8');
+  assertNoRaw('mcp.json', disk);
+  assert.match(disk, /\$\{secret:mcp:remote:api_key\}/);
+  assert.match(disk, /\$\{secret:mcp:flags:arg2\}/);
+  const savedCfg = JSON.parse(disk);
+  for (const [name, def] of Object.entries(savedCfg.mcpServers)) {
+    assert.deepEqual(PG.secretKeyNames(def), PG.secretKeyNames(cfg.mcpServers[name]));
+    const card = PG.cardMcpConnect(name, def, secrets);
+    const line = card.fields.find(r => r[0] === 'Khoá bí mật')[1];
+    assert.equal(line, PG.secretKeyNames(def).join(', '));
+    assertNoRaw('thẻ ' + name, PG.cardVisibleText(card));
+  }
+  const rawCard = PG.cardMcpConnect('remote', cfg.mcpServers.remote, secrets);
+  assert.equal(rawCard.fields.find(r => r[0] === 'Khoá bí mật')[1], 'userinfo, api_key');
+  assertNoRaw('thẻ trước khi lưu', PG.cardVisibleText(rawCard));
+  assertNoRaw('payload', gate.publicPayload().text);
+  assertNoRaw('danh sách', JSON.stringify(mcp.status()));
+});
+
+test('P49-2: redact, danh sách và nhật ký che query cùng userinfo, không che placeholder', async () => {
+  const raw = `https://alice:${P49_PASS}@example.com/mcp?api_key=${P49_QUERY}&token=${P49_ARG_QUERY}&x=1`;
+  const ph = 'https://alice:${secret:mcp:remote:userinfo}@example.com/mcp?api_key=${secret:mcp:remote:api_key}&x=1';
+  for (const out of [LOG.redact(raw), PG.maskUrlSecrets(raw), PG.createSecretStore({ dir: tmp(), safeStorage: fakeInsecure('off') }).mask(raw)]) {
+    assertNoRaw('che URL', out);
+    assert.match(out, /alice:••••@example\.com/);
+    assert.match(out, /api_key=••••/);
+    assert.match(out, /token=••••/);
+    assert.match(out, /[?&]x=1/);
+  }
+  assert.equal(LOG.redact(ph), ph);
+  assert.equal(PG.maskUrlSecrets(ph), ph);
+  assert.equal(LOG.redact('hf_abcdefghijklmnop'), 'hf_***');
+  assert.equal(LOG.redact({ api_key: P49_QUERY }).api_key, '***');
+
+  const seen = [];
+  const sdk = {
+    Client: class {
+      async connect() { throw new Error('down ' + seen[0]); }
+      async listTools() { return { tools: [] }; }
+      async close() {}
+    },
+    Stdio: class { constructor() { this.stderr = { on() {} }; } },
+    Http: class { constructor(u) { seen.push(String(u)); } },
+    Sse: class { constructor(u) { seen.push(String(u)); } },
+  };
+  const dir = tmp();
+  const logs = [];
+  const cards = [];
+  const secrets = PG.createSecretStore({ dir, safeStorage: fakeSecure() });
+  const mcp = M.createMcpManager({ dir, sdk, log: (sc, m) => logs.push(String(sc) + '\n' + String(m)), scrub: (s) => secrets.mask(s), resolveSecret: (id) => secrets.get(id) });
+  const gate = PG.createPluginGate({
+    dir, mcp, secrets,
+    approve: async (card) => { cards.push(card); return { ok: true, always: true }; },
+    agentEnabled: () => true,
+  });
+  const saved = await gate.saveJson(JSON.stringify(p49Config()));
+  assert.equal(saved.secretCount, 8);
+  const opened = await gate.startServer('remote');
+  assert.ok(seen[0] && seen[0].includes(P49_QUERY), seen[0]);
+  assert.ok(seen[0].includes(P49_PASS), seen[0]);
+  const st = mcp.status('remote');
+  assert.equal(String(st.command).includes('${secret:mcp:remote:api_key}'), true);
+  const joined = st.logs.join('\n');
+  assert.match(joined, /example\.com\/mcp/);
+  const connect = st.logs.find(l => /HTTP|SSE/.test(l));
+  assert.ok(connect, joined);
+  assert.equal(connect.includes('?'), false, connect);
+  assert.equal(connect.includes('@'), false, connect);
+  assert.match(joined, /api_key=••••/);
+  assert.match(joined, /alice:••••@/);
+  assertNoRaw('trạng thái', JSON.stringify(st));
+  assertNoRaw('nhật ký cổng', logs.join('\n'));
+  assertNoRaw('lỗi chạy thử', JSON.stringify(opened));
+  assertNoRaw('thẻ xin phép', cards.map(PG.cardVisibleText).join('\n'));
 });

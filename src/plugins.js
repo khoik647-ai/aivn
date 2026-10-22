@@ -8,8 +8,11 @@ const mcpMod = require('./mcp');
 
 const { safeName, classifyUrl, claimCatalogId, isExcelServer, validate, presets, secretIdOf, secretPlaceholder } = mcpMod;
 
-const SECRET_NAME = /TOKEN|KEY|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH/i;
+// KEY/TOKEN/… vẫn khớp trong tên (X_APP_KEY). APPID, SIG, SID, PASS, CRED chỉ khớp cả cụm,
+// để không nuốt APPLICATION, SIGNAL, SIDE, COMPASS.
+const SECRET_NAME = /TOKEN|API[-_]?KEY|APP[-_]?ID|KEY|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL|AUTH|SIGNATURE|(?:^|[^A-Za-z0-9])(?:SIG|SID|PASS|CRED)(?:[^A-Za-z0-9]|$)/i;
 const SECRET_VALUE = /^(?:sk-|ghp_|github_pat_|hf_|Bearer )/;
+const SECRET_QUERY = new Set(['apikey', 'key', 'token', 'accesstoken', 'auth', 'password', 'passwd', 'pwd', 'pass', 'secret', 'sig', 'signature', 'appid', 'appkey', 'sid', 'credential', 'credentials', 'apisecret', 'clientsecret', 'refreshtoken', 'idtoken', 'privatekey', 'accesskey', 'secretkey', 'authkey']);
 const SOON = ['zalo', 'gmail', 'drive', 'calendar', 'notion'];
 const BIZ_READ = ['listStock', 'getPicking', 'listPickings', 'getOrder', 'listOrders', 'getInvoice', 'listInvoices', 'salesReport', 'invoiceReport', 'stockReport', 'overview'];
 const BIZ_WRITE = ['createReceipt', 'setDone', 'validatePicking', 'adjustStock', 'sendQuote', 'confirmOrder', 'resetToQuote', 'saveInvoice', 'invoiceOrder', 'postInvoice', 'resetInvoice'];
@@ -126,20 +129,161 @@ function isSecret(name, value) {
   if (typeof value !== 'string' || value === '') return false;
   return isSecretName(name) || likelySecretValue(value);
 }
-function flagSecretValue(a) {
-  if (typeof a !== 'string' || secretIdOf(a) || !a.startsWith('-')) return null;
-  const eq = a.indexOf('=');
-  if (eq < 2) return null;
-  const value = a.slice(eq + 1);
-  if (!value || secretIdOf(value)) return null;
-  if (looksLikeSecretValue(value) || likelySecretValue(value)) return value;
-  return null;
+function queryNorm(name) { return String(name || '').replace(/[^A-Za-z0-9]/g, '').toLowerCase(); }
+function isSecretQueryName(name) {
+  const n = queryNorm(name);
+  return n !== '' && SECRET_QUERY.has(n);
 }
-function argCountsAsSecret(a, store) {
-  if (typeof a !== 'string' || secretIdOf(a)) return false;
-  if (likelySecretValue(a)) return true;
-  if (flagSecretValue(a)) return true;
-  return !!(store && store.mask(a) !== a);
+function decodePart(v) {
+  try { return decodeURIComponent(String(v)); } catch { return String(v); }
+}
+function isRedactedValue(v) {
+  return v == null || v === '' || String(v).includes('${secret:') || /^[•*]+$/.test(String(v));
+}
+function sanitizeSlot(name) {
+  const s = String(name || 'secret').replace(/:/g, '').replace(/[^A-Za-z0-9_-]/g, '');
+  return s || 'secret';
+}
+function slotFromPlaceholder(v, fallback) {
+  const m = /\$\{secret:([^}]+)\}/.exec(String(v || ''));
+  const slot = m ? String(m[1]).split(':').pop() : '';
+  return slot || fallback;
+}
+// Giá trị query và mật khẩu userinfo. Placeholder ${secret:} và dấu che giữ nguyên.
+function urlSecretSpans(text) {
+  const s = String(text || '');
+  const spans = [];
+  const userRe = /([a-z][a-z0-9+.-]*:\/\/)([^/?#@]*?):([^/?#@]*)@/gi;
+  let m;
+  while ((m = userRe.exec(s))) {
+    const value = m[3];
+    const start = m.index + m[1].length + m[2].length + 1;
+    const end = start + value.length;
+    if (!value) continue;
+    if (isRedactedValue(value)) spans.push({ start, end, already: true, slotHint: slotFromPlaceholder(value, 'userinfo') });
+    else {
+      const decoded = decodePart(value);
+      spans.push({ start, end, already: false, slotHint: 'userinfo', value: decoded, note: decoded === value ? [decoded] : [decoded, value] });
+    }
+  }
+  const qRe = /([?&])([^=&#]+)=([^&#]*)/g;
+  while ((m = qRe.exec(s))) {
+    const rawName = m[2];
+    const value = m[3];
+    const start = m.index + m[1].length + rawName.length + 1;
+    const end = start + value.length;
+    let name = rawName;
+    try { name = decodeURIComponent(rawName); } catch { /* giữ tên gốc */ }
+    if (!isSecretQueryName(name) || !value) continue;
+    if (isRedactedValue(value)) spans.push({ start, end, already: true, slotHint: slotFromPlaceholder(value, sanitizeSlot(name)) });
+    else {
+      const decoded = decodePart(value);
+      spans.push({ start, end, already: false, slotHint: sanitizeSlot(name), value: decoded, note: decoded === value ? [decoded] : [decoded, value] });
+    }
+  }
+  spans.sort((a, b) => a.start - b.start);
+  const out = [];
+  let last = -1;
+  for (const sp of spans) {
+    if (sp.start < last) continue;
+    out.push(sp);
+    last = sp.end;
+  }
+  return out;
+}
+function maskUrlSecrets(text) {
+  const s = text == null ? '' : String(text);
+  const spans = urlSecretSpans(s).filter(sp => !sp.already);
+  let out = s;
+  for (const sp of spans.sort((a, b) => b.start - a.start)) out = out.slice(0, sp.start) + '••••' + out.slice(sp.end);
+  return out;
+}
+function splitFlag(a) {
+  if (typeof a !== 'string' || secretIdOf(a) || !a.startsWith('-')) return null;
+  const body = a.replace(/^-+/, '');
+  const eq = body.indexOf('=');
+  if (eq < 0) return { name: body, value: null, hasEq: false };
+  return { name: body.slice(0, eq), value: body.slice(eq + 1), hasEq: true };
+}
+function isSecretFlagName(name) {
+  const n = String(name || '');
+  if (/^k$/i.test(n)) return true;
+  return isSecretQueryName(n) || isSecretName(n);
+}
+function isBareSecretFlag(a) {
+  const f = splitFlag(a);
+  return !!(f && !f.hasEq && f.name && isSecretFlagName(f.name));
+}
+// Một danh sách cho hộp thoại, lần chuyển, và dòng Khoá bí mật trên thẻ.
+function secretFindings(def) {
+  const out = [];
+  const used = new Set();
+  function claim(base) {
+    let s = sanitizeSlot(base);
+    if (!used.has(s)) { used.add(s); return s; }
+    let i = 2;
+    while (used.has(s + i)) i++;
+    const n = s + i;
+    used.add(n);
+    return n;
+  }
+  function addAlready(slot, loc) { out.push({ slot: claim(slot), already: true, loc }); }
+  function addNew(slot, value, loc, span, note) {
+    const notes = (note || [value]).filter(x => typeof x === 'string' && x !== '');
+    out.push({ slot: claim(slot), already: false, value, loc, span: span || null, note: notes });
+  }
+  function addSpans(text, loc) {
+    for (const sp of urlSecretSpans(text)) {
+      if (sp.already) addAlready(sp.slotHint, loc);
+      else addNew(sp.slotHint, sp.value, loc, { start: sp.start, end: sp.end }, sp.note);
+    }
+  }
+  for (const bag of ['env', 'headers']) {
+    const obj = def && def[bag];
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) continue;
+    for (const [k, v] of Object.entries(obj)) {
+      const loc = { type: bag === 'headers' ? 'header' : 'env', key: k };
+      if (secretIdOf(v)) { addAlready(k, loc); continue; }
+      if (typeof v !== 'string' || v === '') continue;
+      if (isSecret(k, v)) addNew(k, v, loc, null, [v]);
+      else addSpans(v, loc);
+    }
+  }
+  const args = def && Array.isArray(def.args) ? def.args : [];
+  args.forEach((a, i) => {
+    if (typeof a !== 'string') return;
+    const loc = { type: 'arg', index: i };
+    const whole = secretIdOf(a);
+    if (whole) {
+      const slot = String(whole).split(':').pop();
+      addAlready(/^arg\d+$/.test(slot) ? slot : 'arg' + i, loc);
+      return;
+    }
+    const flag = splitFlag(a);
+    if (flag && flag.hasEq) {
+      if (flag.value && String(flag.value).includes('${secret:')) {
+        addAlready(slotFromPlaceholder(flag.value, 'arg' + i), loc);
+        return;
+      }
+      if (flag.value && !isRedactedValue(flag.value) && (isSecretFlagName(flag.name) || looksLikeSecretValue(flag.value) || likelySecretValue(flag.value))) {
+        addNew('arg' + i, a, loc, null, flag.value === a ? [a] : [a, flag.value]);
+        return;
+      }
+    }
+    if (i > 0 && isBareSecretFlag(args[i - 1]) && !a.startsWith('-') && a !== '') {
+      addNew('arg' + i, a, loc, null, [a]);
+      return;
+    }
+    if (likelySecretValue(a)) { addNew('arg' + i, a, loc, null, [a]); return; }
+    addSpans(a, loc);
+  });
+  if (def && typeof def.url === 'string' && def.url) {
+    const loc = { type: 'url' };
+    const whole = secretIdOf(def.url);
+    if (whole) addAlready(String(whole).split(':').pop() || 'url', loc);
+    else addSpans(def.url, loc);
+  }
+  return out;
 }
 function pullTool(def) {
   if (!def || def.url) return '';
@@ -191,7 +335,7 @@ function createSecretStore({ dir, safeStorage = null } = {}) {
   const noted = new Set();
   const secure = () => storageSecure(safeStorage);
   function remember(v) {
-    if (typeof v !== 'string' || v.length < 8) return;
+    if (typeof v !== 'string' || v.length < 4) return;
     noted.add(v);
     if (v.startsWith('Bearer ') && v.length > 15) noted.add(v.slice(7));
   }
@@ -200,7 +344,7 @@ function createSecretStore({ dir, safeStorage = null } = {}) {
     const list = [...noted].sort((a, b) => b.length - a.length);
     for (const v of list) if (v && s.includes(v)) s = s.split(v).join('••••');
     s = s.replace(/(?:sk-|ghp_|github_pat_|hf_|Bearer )[A-Za-z0-9._~+/-]{8,}/g, '••••');
-    return s;
+    return maskUrlSecrets(s);
   }
   function maskDeep(value, seen = new WeakSet()) {
     if (typeof value === 'string') return mask(value);
@@ -320,25 +464,19 @@ function commandRaw(def) {
   if (def.url) return String(def.url);
   return [def.command, ...(Array.isArray(def.args) ? def.args : [])].filter(x => x != null && x !== '').join(' ');
 }
-function secretKeyNames(def) {
-  const names = [];
-  for (const bag of ['env', 'headers']) {
-    for (const [k, v] of Object.entries((def && def[bag]) || {})) {
-      if (secretRef(v) || (typeof v === 'string' && isSecret(k, v))) names.push(k);
-    }
+function scrubShown(def, secrets) {
+  let shown = secrets ? secrets.mask(commandRaw(def)) : maskUrlSecrets(commandRaw(def));
+  const notes = [];
+  for (const f of secretFindings(def)) {
+    if (f.already) continue;
+    for (const n of (f.note && f.note.length ? f.note : [f.value])) if (typeof n === 'string' && n.length >= 4) notes.push(n);
   }
-  const args = def && Array.isArray(def.args) ? def.args : [];
-  args.forEach((a, i) => {
-    if (typeof a !== 'string') return;
-    const id = secretIdOf(a);
-    if (id) {
-      const slot = String(id).split(':').pop();
-      names.push(/^arg\d+$/.test(slot) ? slot : 'arg' + i);
-      return;
-    }
-    if (argCountsAsSecret(a, null)) names.push('arg' + i);
-  });
-  return names;
+  notes.sort((a, b) => b.length - a.length);
+  for (const n of notes) if (shown.includes(n)) shown = shown.split(n).join('••••');
+  return shown;
+}
+function secretKeyNames(def) {
+  return secretFindings(def).map(f => f.slot);
 }
 function fingerprint(def) {
   const body = JSON.stringify({
@@ -379,7 +517,7 @@ function cardMcpConnect(name, def, secrets, { displayName = '' } = {}) {
   const pull = unpinnedLine(def);
   if (pull) fields.push(['Phiên bản', pull]);
   if (names.length && secrets && !secrets.secure()) fields.push(['Khoá', secrets.sentence()]);
-  const shown = secrets ? secrets.mask(commandRaw(def)) : commandRaw(def);
+  const shown = scrubShown(def, secrets);
   const auto = catalogTitle(name, def);
   const custom = typeof displayName === 'string' && displayName.trim() && displayName.trim() !== name ? displayName.trim() : '';
   const label = custom || auto || name;
@@ -437,7 +575,7 @@ function cardExcelFolders(folders) {
   };
 }
 function cardReplace(name, oldDef, newDef, secrets) {
-  const mask = (d) => secrets ? secrets.mask(commandRaw(d)) : commandRaw(d);
+  const mask = (d) => scrubShown(d, secrets);
   return {
     tool: 'mcp_replace', title: `Thay thế máy chủ “${name}”?`,
     allowAlways: false, fields: [],
@@ -446,6 +584,20 @@ function cardReplace(name, oldDef, newDef, secrets) {
   };
 }
 
+function locText(def, loc) {
+  if (!loc) return '';
+  if (loc.type === 'env') return def.env ? def.env[loc.key] : '';
+  if (loc.type === 'header') return def.headers ? def.headers[loc.key] : '';
+  if (loc.type === 'arg') return Array.isArray(def.args) ? def.args[loc.index] : '';
+  if (loc.type === 'url') return def.url;
+  return '';
+}
+function locWrite(def, loc, text) {
+  if (loc.type === 'env') def.env[loc.key] = text;
+  else if (loc.type === 'header') def.headers[loc.key] = text;
+  else if (loc.type === 'arg') def.args[loc.index] = text;
+  else if (loc.type === 'url') def.url = text;
+}
 function extractSecrets(cfg, store) {
   const next = JSON.parse(JSON.stringify(cfg || {}));
   let count = 0;
@@ -457,48 +609,68 @@ function extractSecrets(cfg, store) {
       if (!def[bag] || typeof def[bag] !== 'object' || Array.isArray(def[bag])) continue;
       for (const [k, v] of Object.entries(def[bag])) {
         const old = secretIdOf(v);
-        if (old && typeof v === 'object') { def[bag][k] = secretPlaceholder(old); rewritten++; continue; }
-        if (typeof v === 'string' && old) continue;
-        if (typeof v !== 'string' || !isSecret(k, v)) continue;
-        const id = `mcp:${safeName(name)}:${k}`;
-        if (store) store.put(id, v);
-        def[bag][k] = secretPlaceholder(id);
-        count++;
+        if (old && typeof v === 'object') { def[bag][k] = secretPlaceholder(old); rewritten++; }
       }
     }
-    if (Array.isArray(def.args)) {
-      def.args = def.args.map((a, i) => {
-        if (typeof a !== 'string' || secretIdOf(a)) return a;
-        if (!argCountsAsSecret(a, store)) return a;
-        const id = `mcp:${safeName(name)}:arg${i}`;
-        if (store) store.put(id, a);
-        count++;
-        return secretPlaceholder(id);
-      });
+    const findings = secretFindings(def);
+    const spans = new Map();
+    for (const f of findings) {
+      if (f.already) continue;
+      const id = `mcp:${safeName(name)}:${f.slot}`;
+      if (store) {
+        store.put(id, f.value);
+        for (const extra of f.note || []) if (extra !== f.value) store.note(extra);
+      }
+      count++;
+      if (f.span) {
+        const key = f.loc.type + ':' + (f.loc.key != null ? f.loc.key : f.loc.index != null ? f.loc.index : '');
+        if (!spans.has(key)) spans.set(key, []);
+        spans.get(key).push(f);
+      } else locWrite(def, f.loc, secretPlaceholder(id));
+    }
+    for (const list of spans.values()) {
+      list.sort((a, b) => b.span.start - a.span.start);
+      let text = String(locText(def, list[0].loc) || '');
+      for (const f of list) {
+        const id = `mcp:${safeName(name)}:${f.slot}`;
+        text = text.slice(0, f.span.start) + secretPlaceholder(id) + text.slice(f.span.end);
+      }
+      locWrite(def, list[0].loc, text);
     }
   }
   return { cfg: next, count, rewritten };
 }
 function secretStamp(def, secrets) {
   const parts = [];
-  const take = (slot, v) => {
+  const hash = (raw) => crypto.createHash('sha256').update(String(raw)).digest('hex');
+  const add = (slot, raw) => { if (raw != null && raw !== '') parts.push(slot + '=' + hash(raw)); };
+  const walk = (slot, v) => {
+    if (typeof v === 'string') {
+      const id = secretIdOf(v);
+      if (id) { add(slot, secrets && secrets.get(id)); return; }
+      const re = /\$\{secret:([^}]+)\}/g;
+      let m; let n = 0;
+      while ((m = re.exec(v))) { n++; add(slot + '#' + n, (secrets && secrets.get(m[1])) || m[1]); }
+      if (n) return;
+      if (isSecret(slot, v)) add(slot, v);
+      return;
+    }
     const id = secretIdOf(v);
-    const raw = id ? (secrets && secrets.get(id)) : (typeof v === 'string' && isSecret(slot, v) ? v : null);
-    if (raw == null || raw === '') return;
-    parts.push(slot + '=' + crypto.createHash('sha256').update(String(raw)).digest('hex'));
+    if (id) add(slot, secrets && secrets.get(id));
   };
-  for (const bag of ['env', 'headers']) for (const [k, v] of Object.entries((def && def[bag]) || {})) take(bag + ':' + k, v);
-  (def && Array.isArray(def.args) ? def.args : []).forEach((a, i) => take('arg' + i, a));
+  for (const bag of ['env', 'headers']) for (const [k, v] of Object.entries((def && def[bag]) || {})) walk(bag + ':' + k, v);
+  (def && Array.isArray(def.args) ? def.args : []).forEach((a, i) => walk('arg' + i, a));
+  if (def && def.url) walk('url', def.url);
   return crypto.createHash('sha256').update(parts.sort().join('\n')).digest('hex');
 }
 function observeSecrets(cfg, store) {
   if (!store) return;
   for (const def of Object.values((cfg && cfg.mcpServers) || {})) {
     if (!def || typeof def !== 'object') continue;
-    for (const bag of ['env', 'headers']) {
-      for (const [k, v] of Object.entries(def[bag] || {})) if (typeof v === 'string' && isSecret(k, v)) store.note(v);
+    for (const f of secretFindings(def)) {
+      if (f.already) continue;
+      for (const n of f.note && f.note.length ? f.note : [f.value]) store.note(n);
     }
-    for (const a of Array.isArray(def.args) ? def.args : []) if (typeof a === 'string' && (likelySecretValue(a) || flagSecretValue(a))) store.note(a);
   }
 }
 
@@ -918,5 +1090,6 @@ module.exports = {
   connectDanger, unpinned, kindOf, fingerprint, isSecret, isSecretName, looksLikeSecretValue, secretKeyNames,
   qaDenies, commandInDetails, CARD_STRINGS, KEYCHAIN_OK, KEYCHAIN_NO, MASTER_OFF, SAVED_PAUSED, MCP_WARN,
   explainProbeError, likelySecretValue, pullsCode, catalogTitle, NOT_MOVED, unpinnedLine,
+  secretFindings, maskUrlSecrets,
   BIZ_READ, BIZ_WRITE, BIZ_DANGER, EXCEL_WRITE, SOON, storageSecure,
 };
