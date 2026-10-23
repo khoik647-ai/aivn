@@ -301,3 +301,21 @@ exit 0
   assert.ok(injected.filter((h) => h.endsWith('/AIVN-Setup.exe')).length === exe.length);
   assert.ok(injected.length > exe.length, 'khối beta thêm link tải — publish-beta khi cờ bật không được làm vậy');
 });
+
+test('href tệp tải, sau new URL, phải thuộc https://github.com/khoik647-ai/aivn/releases/', () => {
+  const src = fs.readFileSync(path.join(root, 'tools/site_check.py'), 'utf8');
+  const start = src.indexOf('/*AIVN-DL-FN*/');
+  const end = src.indexOf('/*END-AIVN-DL-FN*/');
+  assert.ok(start > 0 && end > start, 'thiếu hàm aivnDl trong site_check');
+  const aivnDl = new Function(`${src.slice(start, end)}\nreturn aivnDl;`)();
+  const base = 'http://127.0.0.1:8765/index.html';
+  const other = 'https://github.com/other-user/not-aivn/releases/download/v1/Other.zip';
+  const trav = 'https://github.com/khoik647-ai/aivn/releases/../../../evil/x.zip';
+  assert.deepStrictEqual(aivnDl(other, base), { looks: true, ok: false }, 'zip tài khoản khác');
+  assert.deepStrictEqual(aivnDl(trav, base), { looks: true, ok: false }, 'href ../ thoát khỏi kho');
+  assert.strictEqual(new URL(trav).pathname, '/evil/x.zip');
+  const own = 'https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.3/AIVN-Setup-0.16.0-beta.3.exe';
+  assert.strictEqual(aivnDl(own, base).ok, true);
+  for (const leaf of ['AIVN-Setup.exe', 'AIVN-mac-arm64.zip', 'AIVN-mac-x64.zip']) assert.strictEqual(aivnDl(leaf, base).ok, true, leaf);
+  assert.strictEqual(aivnDl('https://github.com/khoik647-ai/aivn/releases', base).looks, false);
+});

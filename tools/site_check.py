@@ -26,9 +26,11 @@ D1280 = {'width': 1280, 'height': 800}
 def exercise_cta(pg):
     """Mở .mac-toggle nếu còn, bấm mọi nút nhìn thấy trong .cta, rồi bắt đường tải trùng.
     Cuộn mượt làm el.click chờ quá 3 giây; dispatch_event không chờ trang đứng yên.
-    Một href là đường tải khi nó kết thúc bằng exe/zip/dmg/msi/pkg/AppImage, bắt đầu bằng
-    https://github.com/khoik647-ai/aivn/releases/ , hoặc nằm trên phần tử có thuộc tính download.
-    Lỗi nếu cùng một đường tải xuất hiện hơn một lần, hoặc thuộc tính download nằm ngoài #tai-ve."""
+    Mọi href được chuẩn hoá bằng new URL(h, location.href). Href trông như tệp tải
+    (đuôi exe/zip/dmg/msi/pkg/AppImage, hoặc đường dẫn có /releases/) phải có origin
+    https://github.com và pathname bắt đầu bằng /khoik647-ai/aivn/releases/.
+    Tên tệp cùng trang, không scheme không / không .., vẫn là bản tĩnh dự phòng.
+    Lỗi nếu đường tải không thuộc kho, lặp lại, hoặc thuộc tính download nằm ngoài #tai-ve."""
     pg.evaluate("() => { document.documentElement.style.scrollBehavior = 'auto'; }")
     for sel in ('.mac-toggle', '.cta a', '.cta button:not(.mac-toggle)'):
         loc = pg.locator(sel)
@@ -37,16 +39,32 @@ def exercise_cta(pg):
             if el.is_visible():
                 el.dispatch_event('click', {'bubbles': True, 'cancelable': True})
     return pg.evaluate(r'''() => {
-      const ASSET = /\.(exe|zip|dmg|msi|pkg|AppImage)(\?|#|$)/i;
-      const REL = 'https://github.com/khoik647-ai/aivn/releases/';
-      const isDl = h => !!h && (ASSET.test(h) || h.indexOf(REL) === 0);
+      /*AIVN-DL-FN*/
+      function aivnDl(h, base) {
+        const ASSET = /\.(exe|zip|dmg|msi|pkg|AppImage)(\?|#|$)/i;
+        let u;
+        try { u = new URL(h, base); } catch (e) { return {looks: true, ok: false}; }
+        const raw = String(h || '');
+        const path = u.pathname || '';
+        const looks = ASSET.test(raw) || ASSET.test(path) || raw.indexOf('/releases/') >= 0 || path.indexOf('/releases/') >= 0;
+        if (!looks) return {looks: false, ok: true};
+        if (u.origin === 'https://github.com' && path.startsWith('/khoik647-ai/aivn/releases/')) return {looks: true, ok: true};
+        const file = raw.split(/[?#]/)[0];
+        const leaf = !/^[a-z][a-z0-9+.-]*:/i.test(raw) && raw.indexOf('//') !== 0 && file.indexOf('..') < 0 && file.indexOf('/') < 0 && file.indexOf('\\') < 0 && ASSET.test(file);
+        if (leaf && u.origin === new URL(base).origin) return {looks: true, ok: true};
+        return {looks: true, ok: false};
+      }
+      /*END-AIVN-DL-FN*/
       const shown = el => { for (let n = el; n; n = n.parentElement) { const cs = getComputedStyle(n); if (cs.display === 'none' || cs.visibility === 'hidden') return false; } return true; };
       const groups = {};
       const outside = [];
+      const foreign = [];
       document.querySelectorAll('a[href]').forEach(a => {
         const h = a.getAttribute('href') || '';
         const attr = a.hasAttribute('download');
-        if (!isDl(h) && !attr) return;
+        const v = aivnDl(h, location.href);
+        if (v.looks && !v.ok) { foreign.push(h); return; }
+        if (!v.looks && !attr) return;
         (groups[h] = groups[h] || []).push(a);
         if (!a.closest('#tai-ve')) outside.push(h || a.tagName);
       });
@@ -57,7 +75,7 @@ def exercise_cta(pg):
         return visible > 1 || outsideN > 1 || (outsideN > 0 && list.length > 1);
       });
       const attrOut = [...document.querySelectorAll('[download]')].filter(el => !el.closest('#tai-ve')).map(el => el.getAttribute('href') || el.tagName);
-      return {dup, outside, attr: attrOut};
+      return {dup, outside, attr: attrOut, foreign};
     }''')
 # (tên, Playwright context, init script, loại máy)
 CONF = [('fold-280', dict(viewport={'width': 280, 'height': 653}, user_agent=AND, is_mobile=True, has_touch=True, device_scale_factor=2), nav('Linux armv8l', 5), 'android'),  # B162
@@ -143,7 +161,7 @@ with sync_playwright() as p:
                 note = pg.locator('.dl-mnote').first
                 if note.count() and note.is_visible(): note.click()
             got = exercise_cta(pg)
-            r['outsideBin'] = got['outside']; r['dupUrls'] = got['dup']; r['outsideAttr'] = got['attr']
+            r['outsideBin'] = got['outside']; r['dupUrls'] = got['dup']; r['outsideAttr'] = got['attr']; r['foreign'] = got['foreign']
             r['afterUrl'] = pg.url; r['requests'] = list(reqs)
             if SHOTS: pg.locator('#tai-ve').scroll_into_view_if_needed(); pg.evaluate('()=>scrollTo(0,0)'); pg.screenshot(path=f'{SHOTS}/{name}-{lang}.png')
             res.append(r); c.close()
@@ -199,6 +217,7 @@ for r in res:
     if r.get('dupUrls'): bad.append(f'{k}: cùng một đường tải xuất hiện nhiều lần {r["dupUrls"]}')
     if r.get('outsideAttr'): bad.append(f'{k}: thuộc tính download nằm ngoài #tai-ve {r["outsideAttr"]}')
     if r.get('outsideBin'): bad.append(f'{k}: ngoài #tai-ve còn href tệp {r["outsideBin"]}')
+    if r.get('foreign'): bad.append(f'{k}: đường tải không thuộc khoik647-ai/aivn {r["foreign"]}')
     win_title = {'vi': 'Xem bản tải cho Windows', 'en': 'See the Windows download', 'zh-CN': '查看 Windows 版下载'}.get(r['lang'])
     if win_title and r.get('ctaWinTitle') != win_title: bad.append(f'{k}: gợi ý nút Windows cuối trang “{r.get("ctaWinTitle")}”')
     # B145: chỉ khi khối beta còn trên trang (INCLUDE_PRERELEASE=false vẫn chèn khối đó). Nút tự động không có dòng này.
