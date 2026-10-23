@@ -195,7 +195,7 @@ function abortGen(reqId, ac, reason) { if (!ac || ac.signal.aborted) return; sto
 const serverLog = [];
 
 let modelsDirProblem = null;
-function initStores() {
+async function initStores() {
   const ud = app.getPath('userData');
   paths = { userData: ud, models: QA_PROFILE ? QA_PROFILE.models : path.join(ud, 'models') }; // hồ sơ QA: dùng chung mô hình của hồ sơ thật
   fs.mkdirSync(paths.models, { recursive: true });
@@ -206,7 +206,7 @@ function initStores() {
   });
   // bản chuyển thư mục mô hình còn dở (sập máy giữa chừng): đủ tệp thì trỏ sang đích, thiếu thì hoàn tác — không để mô hình “biến mất”
   try {
-    const rec = require('./models-dir').recoverMove(path.join(ud, 'models-move.json'));
+    const rec = await require('./models-dir').recoverMove(path.join(ud, 'models-move.json'));
     if (rec && rec.resumed) { settings.data.modelsDir = rec.dir; settings.save(); LOG.log('app', 'Tiếp tục chuyển thư mục mô hình còn dở → ' + rec.dir); }
     else if (rec && rec.rolledBack) LOG.log('app', 'Đã hoàn tác chuyển thư mục mô hình còn dở; dữ liệu vẫn ở ' + rec.dir);
   } catch (e) { LOG.log('app', 'Không xử lý được bản chuyển mô hình còn dở: ' + e.message); }
@@ -3420,7 +3420,7 @@ else {
   });
   app.on('before-quit', () => { quitting = true; try { require('./models-dir').beforeQuitMove({ exit: (c) => { try { app.exit(c || 0); } catch { process.exit(c || 0); } } }); } catch {} });
   app.whenReady().then(async () => {
-    initStores();
+    await initStores();
     registerIpc();
     createWindow({ hidden: process.argv.includes('--hidden') && settings.data.keepInTray });
     if (activated()) startServices(); // chưa kích hoạt: không chạy lịch, API, mô hình

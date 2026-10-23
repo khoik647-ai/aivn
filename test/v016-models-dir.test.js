@@ -72,15 +72,60 @@ test('nhật ký chuyển: sập khi đang dở thì hoàn tác, đủ tệp th�
   const rels = MD.listFiles(a).map(f => ({ rel: f.rel, size: f.size })); const first = rels[0];
   fs.mkdirSync(path.dirname(path.join(b, first.rel)), { recursive: true }); fs.renameSync(path.join(a, first.rel), path.join(b, first.rel));
   fs.writeFileSync(j, JSON.stringify({ from: path.resolve(a), to: path.resolve(b), rels, phase: 'moving' }));
-  const back = MD.recoverMove(j);
+  const back = await MD.recoverMove(j);
   assert.strictEqual(back.rolledBack, true); assert.strictEqual(back.dir, path.resolve(a));
   assert.strictEqual(MD.listFiles(a).length, 3); assert.deepStrictEqual(MD.listFiles(b), []); assert.ok(!fs.existsSync(j));
   fill(a); const rels2 = MD.listFiles(a).map(f => ({ rel: f.rel, size: f.size }));
   for (const f of rels2) { fs.mkdirSync(path.dirname(path.join(b, f.rel)), { recursive: true }); fs.renameSync(path.join(a, f.rel), path.join(b, f.rel)); }
   fs.writeFileSync(j, JSON.stringify({ from: path.resolve(a), to: path.resolve(b), rels: rels2, phase: 'commit' }));
-  const go = MD.recoverMove(j);
+  const go = await MD.recoverMove(j);
   assert.strictEqual(go.resumed, true); assert.strictEqual(go.dir, path.resolve(b)); assert.strictEqual(MD.listFiles(b).length, 3); assert.ok(!fs.existsSync(j));
   fill(a); await MD.moveModels(a, b, { journal: j }); assert.ok(fs.existsSync(j), 'chưa xoá nhật ký trước khi lưu cấu hình'); MD.journalClear(j); assert.ok(!fs.existsSync(j));
+});
+test('hash lúc kiểm tra có tiến độ và không bị watchdog cắt giữa chừng', async () => {
+  const d = tmp(); const a = path.join(d, 'a'), b = path.join(d, 'b');
+  fs.mkdirSync(path.join(a, 'm'), { recursive: true });
+  fs.writeFileSync(path.join(a, 'm', 'big.gguf'), Buffer.alloc(512 * 1024, 11));
+  const orig = fs.createReadStream;
+  fs.createReadStream = function (...args) {
+    const s = orig.apply(this, args);
+    const read = s._read.bind(s);
+    s._read = function (n) { setTimeout(() => read(n), 50); };
+    return s;
+  };
+  const phases = [];
+  try {
+    const r = await MD.moveModels(a, b, { stallMs: 120, onProgress: (p) => { if (p.phase === 'check') phases.push(p.file); } });
+    assert.strictEqual(r.moved, 1);
+    assert.ok(phases.length >= 1, 'phải báo đang kiểm tra');
+    assert.strictEqual(fs.statSync(path.join(b, 'm', 'big.gguf')).size, 512 * 1024);
+    assert.strictEqual(MD.listFiles(a).length, 0);
+  } finally { fs.createReadStream = orig; }
+});
+test('probe 28: sau ESTALL đã rollback, thoát sau không còn bị coi là treo', async () => {
+  const d = tmp(); const a = path.join(d, 'a'), b = path.join(d, 'b'); fs.mkdirSync(a);
+  fs.writeFileSync(path.join(a, 'big.gguf'), Buffer.alloc(256 * 1024, 5));
+  const orig = fs.createReadStream;
+  fs.createReadStream = function (...args) {
+    const s = orig.apply(this, args);
+    const read = s._read.bind(s);
+    let n = 0;
+    s._read = function (size) { if (++n > 1) return; read(size); };
+    return s;
+  };
+  try {
+    await assert.rejects(MD.moveModels(a, b, { stallMs: 80 }), (e) => e.code === 'ESTALL');
+    assert.strictEqual(MD.listFiles(a).length, 1);
+    assert.strictEqual(MD.beforeQuitMove(), false);
+  } finally { fs.createReadStream = orig; }
+});
+test('đường chuyển không hash đồng bộ và không spawn lại Electron để SIGKILL', () => {
+  const s = fs.readFileSync(path.join(root, 'src/models-dir.js'), 'utf8');
+  assert.ok(!s.includes('hashFileSync'));
+  assert.ok(!s.includes('readSync'));
+  assert.ok(!s.includes('process.execPath'));
+  assert.match(s, /kill -9/);
+  assert.match(s, /taskkill \/F \/PID/);
 });
 test('trình tải: thư mục đích theo thư mục mô hình HIỆN TẠI, kiểm dung lượng trước khi tải', () => {
   const s = fs.readFileSync(path.join(root, 'src/downloader.js'), 'utf8');
@@ -89,6 +134,24 @@ test('trình tải: thư mục đích theo thư mục mô hình HIỆN TẠI, ki
   assert.match(m, /if \(QA_PROFILE\) return \{ ok: false, error: 'Hồ sơ QA/);
 });
 const hasX = spawnSync('which', ['xvfb-run']).status === 0 && fs.existsSync(path.join(root, 'node_modules/.bin/electron'));
+test('Electron: helper SIGKILL tắt tiến trình, không mở phiên thứ hai', { skip: !hasX && 'cần xvfb + electron', timeout: 20000 }, async () => {
+  const { spawn } = require('child_process');
+  const electron = path.join(root, 'node_modules/.bin/electron');
+  const script = path.join(__dirname, 'fixtures', 'mdir-hard-exit.js');
+  const child = spawn('xvfb-run', ['-a', '-s', '-screen 0 1280x800x24', electron, '--no-sandbox', script], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  const r = await new Promise((resolve, reject) => {
+    let watch = null;
+    const overall = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} reject(new Error('ALIVE_AFTER_OVERALL ' + out.slice(-500))); }, 15000);
+    const arm = () => { if (watch) return; watch = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} reject(new Error('ALIVE_AFTER_3S ' + out.slice(-400))); }, 3000); };
+    const take = (d) => { out += d; if (String(d).includes('READY') || out.includes('READY')) arm(); };
+    child.stdout.on('data', take); child.stderr.on('data', take);
+    child.on('error', (e) => { clearTimeout(overall); if (watch) clearTimeout(watch); reject(e); });
+    child.on('exit', (status, signal) => { clearTimeout(overall); if (watch) clearTimeout(watch); resolve({ status, signal, out }); });
+  });
+  assert.notStrictEqual(r.status, 0, 'Electron tự thoát, SIGKILL không chạy: ' + r.out);
+  assert.ok(r.signal === 'SIGKILL' || r.status === 137 || r.status === 9 || /exited with signal SIGKILL/.test(r.out), `signal=${r.signal} status=${r.status} out=${r.out.slice(-300)}`);
+});
 const runUi = (ud, script, out, extra) => spawnSync('timeout', ['200', 'nice', 'xvfb-run', '-a', '-s', '-screen 0 1280x800x24', path.join(root, 'node_modules/.bin/electron'), '.', '--no-sandbox', '--qa-ui', script, '--out', out], { cwd: root, encoding: 'utf8', env: { ...process.env, AIVN_QA_MODE: '1', AIVN_SKIP_ACTIVATION: '1', AIVN_USER_DATA: ud, ...(extra || {}) } });
 for (const mode of ['move', 'point']) test(`giao diện thật (Xvfb): Cài đặt → Chung → Đổi thư mục… (${mode === 'move' ? 'chuyển mô hình' : 'chỉ trỏ sang thư mục mới'})`, { skip: !hasX && 'cần xvfb', timeout: 240e3 }, () => {
   const d = tmp(); const ud = path.join(d, 'ud'), nd = path.join(d, 'D-models'); fill(path.join(ud, 'models')); fs.mkdirSync(nd);
