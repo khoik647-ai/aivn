@@ -2740,7 +2740,8 @@
     "Đích “{0}” không khớp sau khi đọc lại": "重新读取后，目标文件“{0}”不一致。",
     "Đổi tên “{0}” không khớp nội dung": "重命名“{0}”后内容不一致。",
     "Thư mục này trỏ tới chính thư mục mô hình hiện tại (đường tắt, liên kết, hoặc cùng một thư mục với tên khác). Hãy chọn thư mục khác.": "此文件夹指向当前的模型文件夹（快捷方式、链接，或同一文件夹的另一个名称）。请选择其他文件夹。",
-    "Không chuyển liên kết “{0}”. Đây là đường tắt, không phải tệp mô hình. Liên kết và tệp mà nó trỏ tới vẫn còn nguyên. Hãy thay bằng tệp thật hoặc dời liên kết đi rồi thử lại.": "无法移动链接“{0}”，因为它是快捷方式，不是模型文件。链接及其指向的文件均未改动。请换成真实文件，或先移走该链接再试。"
+    "Không chuyển liên kết “{0}”. Đây là đường tắt, không phải tệp mô hình. Liên kết và tệp mà nó trỏ tới vẫn còn nguyên. Hãy thay bằng tệp thật hoặc dời liên kết đi rồi thử lại.": "无法移动链接“{0}”，因为它是快捷方式，不是模型文件。链接及其指向的文件均未改动。请换成真实文件，或先移走该链接再试。",
+    "đã trừ giấy báo có khách hàng {0}": "已扣除客户贷项通知单 {0}"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;
