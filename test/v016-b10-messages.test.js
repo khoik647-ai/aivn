@@ -6,6 +6,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const { createApiServer } = require('../src/server');
+const { createJitGuard } = require('../src/jit-load');
 
 function parseSse(text) {
   const events = [];
@@ -61,9 +62,10 @@ async function withServer(fn, { engineExtra = {}, ensureModel = async () => {}, 
   finally { await api.stop(); }
 }
 
-const post = (url, body, headers = {}) => fetch(url + '/v1/messages', {
+const post = (url, body, headers = {}, signal) => fetch(url + '/v1/messages', {
   method: 'POST', headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', ...headers },
   body: typeof body === 'string' ? body : JSON.stringify(body),
+  signal: signal || AbortSignal.timeout(15000),
 });
 
 test('POST /v1/messages không stream: system, khối text, usage, tham số lấy mẫu', async () => {
@@ -335,12 +337,67 @@ test('client ngắt trong lúc ensureModel thì không nạp và không giữ m�
     }),
   });
   const main = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8');
-  const slice = main.slice(main.indexOf('async function ensureModel'), main.indexOf('async function ensureModel') + 1400);
-  const stopAt = slice.indexOf('signal.aborted');
-  const loadAt = slice.indexOf('loadById(m.id)');
-  const jitAt = slice.indexOf('apiJit =');
-  assert.ok(stopAt > 0 && loadAt > stopAt && jitAt > loadAt, 'ngắt kết nối thì không loadById và không giữ apiJit');
+  const start = main.indexOf('async function ensureModel');
+  const slice = main.slice(start, main.indexOf('function apiHost', start));
+  const stopAt = slice.indexOf('if (stopped()) return;');
+  const loadAt = slice.indexOf('await loadById(m.id)');
+  const dropAt = slice.indexOf('jitGuard.shouldUnload(');
+  const jitAt = slice.indexOf('apiJit = {');
+  assert.ok(stopAt > 0 && loadAt > stopAt, 'đã ngắt trước khi nạp thì không gọi loadById');
+  assert.ok(dropAt > loadAt && jitAt > dropAt, 'nạp xong mới xét gỡ; apiJit chỉ khi còn giữ mô hình');
+  assert.doesNotMatch(slice, /if \(stopped\(\)\) \{\s*try \{\s*await engine\.unloadModel\(\)/);
   assert.match(main, /signal: extra && extra\.signal/);
+});
+
+test('POST /v1/messages bình thường có phản hồi, không treo (không stream và stream)', async () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'anthropic-api.js'), 'utf8');
+  assert.doesNotMatch(src, /req\.destroyed/);
+  assert.match(src, /res\.on\('close'/);
+  await withServer(async ({ url }) => {
+    const r = await post(url, { model: 'm1', max_tokens: 8, messages: [{ role: 'user', content: 'x' }] }, {}, AbortSignal.timeout(4000));
+    assert.strictEqual(r.status, 200);
+    const j = await r.json();
+    assert.strictEqual(j.type, 'message');
+    assert.strictEqual(j.role, 'assistant');
+    assert.strictEqual(j.content[0].text, 'Xin chào');
+    const s = await post(url, { model: 'm1', max_tokens: 8, stream: true, messages: [{ role: 'user', content: 'x' }] }, {}, AbortSignal.timeout(4000));
+    assert.strictEqual(s.status, 200);
+    assert.match(s.headers.get('content-type'), /text\/event-stream/);
+    const ev = parseSse(await s.text());
+    assert.ok(ev.some((e) => e.event === 'message_stop'));
+    assert.strictEqual(ev.filter((e) => e.event === 'content_block_delta').map((e) => e.data.delta.text).join(''), 'Xin chào');
+  });
+});
+
+const loaded = (id) => ({ loaded: true, loading: false, id });
+
+test('ngắt khi chính yêu cầu này nạp và không còn ai dùng thì gỡ mô hình', () => {
+  const g = createJitGuard();
+  g.enter('m1');
+  assert.strictEqual(g.shouldUnload('m1', { triggered: true, uiSelected: false, busy: false, status: loaded('m1') }), true);
+  g.leave('m1');
+  const both = createJitGuard();
+  both.enter('m1');
+  both.enter('m1');
+  assert.strictEqual(both.shouldUnload('m1', { triggered: true, uiSelected: false, busy: false, status: loaded('m1') }), false);
+  both.leave('m1');
+  assert.strictEqual(both.shouldUnload('m1', { triggered: true, uiSelected: false, busy: false, status: loaded('m1') }), true);
+});
+
+test('ngắt khi giao diện đã chọn hoặc còn yêu cầu khác thì giữ mô hình', () => {
+  const ui = createJitGuard();
+  ui.enter('m1');
+  assert.strictEqual(ui.shouldUnload('m1', { triggered: true, uiSelected: true, busy: false, status: loaded('m1') }), false);
+  const peer = createJitGuard();
+  peer.enter('m1');
+  peer.enter('m1');
+  assert.strictEqual(peer.shouldUnload('m1', { triggered: true, uiSelected: false, busy: false, status: loaded('m1') }), false);
+  const joined = createJitGuard();
+  joined.enter('m1');
+  assert.strictEqual(joined.shouldUnload('m1', { triggered: false, uiSelected: false, busy: false, status: loaded('m1') }), false);
+  assert.strictEqual(joined.shouldUnload('m1', { triggered: true, uiSelected: false, busy: true, status: loaded('m1') }), false);
+  assert.strictEqual(joined.shouldUnload('m1', { triggered: true, uiSelected: false, busy: false, status: { loaded: true, loading: true, id: 'm1' } }), false);
+  assert.strictEqual(joined.shouldUnload('m1', { triggered: true, uiSelected: false, busy: false, status: loaded('m-khac') }), false);
 });
 
 test('đường không có và mô hình không có trả 404 kiểu Anthropic', async () => {

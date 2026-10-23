@@ -553,6 +553,8 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
   } catch (e) { send('model:status', engine.status()); throw e; }
 }
 
+const { createJitGuard } = require('./jit-load');
+const jitGuard = createJitGuard();
 async function ensureModel(requested, { api = false, signal = null } = {}) {
   const stopped = () => !!(signal && signal.aborted);
   if (stopped()) return;
@@ -563,8 +565,25 @@ async function ensureModel(requested, { api = false, signal = null } = {}) {
     const m = listModels().find(x => x.id === req) || listModels().find(x => x.id.includes(req));
     if (m) {
       if (stopped()) return;
-      await loadById(m.id);
-      if (stopped()) { try { await engine.unloadModel(); } catch {} return; }
+      // loadById không huỷ được. Chỉ gỡ khi chính yêu cầu này bắt đầu nạp và không còn ai khác dùng.
+      const triggered = !st.loading;
+      const uiSelected = settings.data.lastModel === m.id;
+      if (api) jitGuard.enter(m.id);
+      try {
+        await loadById(m.id);
+        if (stopped()) {
+          if (api) {
+            await Promise.resolve();
+            const drop = jitGuard.shouldUnload(m.id, { triggered, uiSelected, busy: busy > 0 || generations.size > 0, status: engine.status() });
+            if (drop) {
+              try { await engine.unloadModel(); } catch {}
+              if (apiJit && apiJit.id === m.id) apiJit = null;
+              try { send('model:status', engine.status()); } catch {}
+            }
+          }
+          return;
+        }
+      } finally { if (api) jitGuard.leave(m.id); }
       if (api) { apiJit = { id: m.id, at: Date.now() }; log(`Nạp theo yêu cầu API (JIT): ${m.id}${settings.data.apiTtlMin > 0 ? ` · tự gỡ sau ${settings.data.apiTtlMin} phút không dùng` : ''}`); }
       return;
     }

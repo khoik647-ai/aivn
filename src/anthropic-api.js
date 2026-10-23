@@ -238,6 +238,14 @@ async function runEngine(engine, req, signal, onToken) {
   return engine.generate(req.messages, { ...opts, stop: req.stops });
 }
 
+// IncomingMessage bật autoDestroy: đọc hết body thì cờ destroyed của req thành true dù client còn chờ phản hồi.
+// Ngắt thật: sự kiện close của res khi chưa ghi xong, res.writableEnded, hoặc socket đã chết.
+function clientGone(req, res) {
+  if (res.writableEnded || res.destroyed || res.closed) return true;
+  const socket = res.socket || (req && req.socket);
+  return !!(socket && socket.destroyed);
+}
+
 async function handleMessages({ req, res, engine, ensureModel, log, cors, readBody }) {
   const headers = cors();
   const fail = (status, type, message) => { if (status !== 401) log(`  → ${status} ${String(message).slice(0, 200)}`); return anthropicError(res, status, type, message, headers); };
@@ -248,14 +256,14 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
   const ac = new AbortController();
   const onClose = () => { if (!res.writableEnded) ac.abort(); };
   res.on('close', onClose);
-  if (ac.signal.aborted || req.destroyed) return;
+  if (ac.signal.aborted || clientGone(req, res)) return;
   try { await ensureModel(translated.model, { signal: ac.signal }); }
   catch (e) {
-    if (ac.signal.aborted) return;
+    if (ac.signal.aborted || clientGone(req, res)) return;
     if (missingModel(e)) return fail(404, 'not_found_error', e.message);
     return fail(e.status || 400, 'invalid_request_error', e.message);
   }
-  if (ac.signal.aborted || res.writableEnded || req.destroyed) return;
+  if (ac.signal.aborted || clientGone(req, res)) return;
   const st = engine.status ? engine.status() : {};
   const id = 'msg_' + crypto.randomBytes(12).toString('hex');
   const model = translated.model || (st && st.id) || '';
