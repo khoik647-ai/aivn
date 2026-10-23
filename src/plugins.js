@@ -798,13 +798,23 @@ function maskAssignments(text, depth = 0) {
   });
   return s;
 }
-// Hết độ sâu: quét tuyến tính, không đệ quy, từng cặp nhãn: một token.
+// Hết độ sâu: quét tuyến tính, không đệ quy. Nhận "tên:", "tên :" và "tên:giá trị"; xem 1–3 token kế.
 function maskLabelTail(text) {
   const parts = String(text).split(/([ \t]+)/);
-  for (let k = 0; k + 2 < parts.length; k += 2) {
-    const lab = /(?:^|[^\w"'-])([A-Za-z][A-Za-z0-9_-]*):$/.exec(parts[k]);
-    const value = parts[k + 2];
-    if (lab && value && !value.endsWith(':') && !isRedactedValue(value) && headerValueIsSecret(lab[1], value)) parts[k + 2] = '••••';
+  for (let k = 0; k < parts.length; k += 2) {
+    let name = null, j = -1, m;
+    if ((m = /(?:^|[^\w"'-])([A-Za-z][A-Za-z0-9_-]*):$/.exec(parts[k]))) { name = m[1]; j = k + 2; }
+    else if (parts[k + 2] === ':' && (m = /(?:^|[^\w"'-])([A-Za-z][A-Za-z0-9_-]*)$/.exec(parts[k]))) { name = m[1]; j = k + 4; }
+    else if ((m = /(?:^|[^\w"'-])([A-Za-z][A-Za-z0-9_-]*):([^\s:]+)$/.exec(parts[k])) && headerValueIsSecret(m[1], m[2])) {
+      parts[k] = parts[k].slice(0, parts[k].length - m[2].length) + '••••'; continue;
+    }
+    if (name == null || j >= parts.length) continue;
+    const value = parts[j];
+    if (!value || value.endsWith(':') || isRedactedValue(value)) continue;
+    if (headerValueIsSecret(name, value) || headerValueIsSecret(name, parts.slice(j, j + 3).join(''))) {
+      parts.length = j; parts.push('••••');
+      break;
+    }
   }
   return parts.join('');
 }

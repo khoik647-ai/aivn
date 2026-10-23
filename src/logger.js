@@ -51,7 +51,7 @@ function redact(v, depth = 0, seen) {
     let s = v.replace(/\bhf_[A-Za-z0-9]{8,}\b/g, 'hf_***').replace(/\b(gh[pousr]_)[A-Za-z0-9]{10,}\b/g, '$1***');
     const PG = plugins();
     try { return PG ? PG.maskKnownSecrets(s) : s; }
-    catch { return s; }
+    catch { return '••••'; }
   }
   if (typeof v !== 'object') return v;
   if (!seen) seen = new WeakSet();
