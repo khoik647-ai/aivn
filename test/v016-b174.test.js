@@ -83,7 +83,7 @@ test('B174: publish-beta-site.sh dựng khối từ tài sản thật (beta + La
   assert.match(p, /site_beta\.py" --html "\$W\/ghp\/index\.html" --version "\$VER" --assets "\$W\/beta\.json" --stable "\$W\/stable\.json"/);
   assert.match(p, /for N in "\$\{CHECK\[@\]\}"/); assert.match(p, /grep -q 'beta-gk'/); assert.match(p, /latest\.\*\\\\\.yml/);
   const c = fs.readFileSync(path.join(root, 'tools/site_check.py'), 'utf8');
-  for (const n of ["'mac-safari-arm64-1280'", "'mac-safari-intel-1280'", "'mac-chrome-arm64-1280'", "'iphone-375'", "'desktop-1280'", "'linux-1280'"]) assert.ok(c.includes(n), n);
+  for (const n of ["'mac-safari-arm64-1280'", "'mac-safari-intel-1280'", "'mac-chrome-arm64-1280'", "'iphone-375'", "'desktop-1280'", "'linux-1280'", "'ipad-810'", "'ipados-mac-820'"]) assert.ok(c.includes(n), n);
   assert.match(c, /vẫn được mời tải \.exe/);
   assert.match(c, /kind in \('mac', 'mac-arm64'\)/); assert.ok(!/kind in \('mac', 'mac-arm64', 'ios'\)/.test(c), 'site_check vẫn đòi iPhone hiện link Mac');
 });
