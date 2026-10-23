@@ -97,9 +97,9 @@ test('B192: effectOf (thuần)', () => {
   assert.strictEqual(RT.effectOf([st('click', 'không thấy phần tử'), st('hotkey', null, 'ok', { keys: 'Enter' })], 'mở Cài đặt').why, 'last', 'Enter không che bước hỏng trước nó');
   assert.strictEqual(RT.effectOf([st('click'), { name: 'screen_act', args: { action: 'click' }, status: 'refused' }], 'mở Cài đặt').ok, true, 'người dùng từ chối: không phải lỗi cách làm');
   // review #68: chữ vào ô không qua type_text
-  assert.strictEqual(RT.effectOf([st('click'), st('hotkey', null, 'ok', { keys: 'ctrl+v' })], 'mở Notepad và gõ abc').ok, true, 'dán bằng ctrl+v');
+  assert.strictEqual(RT.effectOf([st('click'), { ...st('hotkey', null, 'ok', { keys: 'ctrl+v' }), detail: 'Đã thấy chữ vừa gõ trên màn hình.' }], 'mở Notepad và gõ abc').ok, true, 'dán bằng ctrl+v CÓ kiểm chứng chữ');
   assert.strictEqual(RT.effectOf([st('click'), st('hotkey', 'màn hình không thay đổi', 'ok', { keys: 'ctrl+v' })], 'mở Notepad và gõ abc').why, 'typed', 'dán mà chưa có tác dụng');
-  assert.strictEqual(RT.effectOf([{ name: 'write_file', status: 'ok' }, { name: 'open_path', status: 'ok' }, st('click')], 'mở Notepad và gõ abc').ok, true, 'write_file rồi mở tệp');
+  assert.strictEqual(RT.effectOf([{ name: 'write_file', args: { path: 'tho.txt' }, status: 'ok' }, { name: 'open_path', args: { path: 'C:\\Users\\A\\Documents\\tho.txt' }, status: 'ok' }, st('click')], 'mở Notepad và gõ abc').ok, true, 'write_file rồi mở tệp');
   assert.strictEqual(RT.effectOf([{ name: 'write_file', status: 'ok' }, st('click')], 'mở Notepad và gõ abc').why, 'typed', 'ghi tệp mà không mở');
   assert.strictEqual(RT.effectOf([st('click', null, 'ok', { then: [{ action: 'type_text', text: 'abc' }] })], 'mở Notepad và gõ abc').ok, true, 'type_text trong chuỗi then');
   // review #68: TYPE_TASK chỉ khi thật sự là việc gõ
@@ -122,4 +122,48 @@ test('B192 review #68: FAIL_CLAIM không bắt nhầm câu hỏi lịch sự cu�
     'What would you like me to do next?', 'How would you like to proceed with saving?', 'The error message did not appear again.', 'The popup did not show up.',
     '您希望我怎么做下一步？', '您希望我怎么做？', '没有出现错误。', '广告没有显示。'])
     assert.strictEqual(QA.statusOf({ outcome: 'done', text: t, steps: [] }, { task: 'mở Notepad và gõ abc' }).status, 'done', t);
+});
+
+// ===== re-review #68 (ff9a965): các luật miễn không được che lỗi gõ/gửi thật =====
+const st2 = (action, check = null, status = 'ok', extra = {}) => ({ name: 'screen_act', args: { action, ...extra }, status, check });
+test('B192 re-review #68 (1): phím Enter/Tab/Esc cuối có check CHẮC CHẮN (chưa kiểm chứng gửi, hộp thoại vẫn mở…) → không bị bỏ qua, failed', () => {
+  assert.strictEqual(RT.effectOf([st2('type_text'), st2('hotkey', 'chưa kiểm chứng được là đã gửi', 'ok', { keys: 'enter' })], 'gõ xin chào rồi gửi').why, 'last');
+  assert.strictEqual(RT.effectOf([st2('type_text'), st2('hotkey', 'hộp thoại vẫn đang mở', 'ok', { keys: 'esc' })], 'gõ abc').why, 'last');
+  assert.strictEqual(RT.effectOf([st2('click'), st2('hotkey', 'không thấy phần tử', 'ok', { keys: 'tab' })], 'mở Cài đặt').why, 'last');
+  // phím lưu/đóng không check hoặc chỉ check yếu → vẫn bỏ qua như cũ
+  assert.strictEqual(RT.effectOf([st2('type_text'), st2('hotkey', 'màn hình không thay đổi', 'ok', { keys: 'enter' })], 'gõ abc').ok, true);
+  assert.strictEqual(RT.effectOf([st2('type_text'), st2('hotkey', null, 'ok', { keys: 'ctrl+s' })], 'gõ abc').ok, true);
+});
+test('B192 re-review #68 (2): write_file rồi open_app mở ứng dụng TRỐNG (không phải tệp vừa ghi) → chưa tính là đã gõ', () => {
+  const wf = { name: 'write_file', args: { path: 'xin-chao.txt' }, status: 'ok' };
+  assert.strictEqual(RT.effectOf([wf, { name: 'open_app', args: { name: 'Notepad' }, status: 'ok' }, st2('click')], 'mở Notepad và gõ xin chào').why, 'typed');
+  assert.strictEqual(RT.effectOf([wf, { name: 'open_path', args: { path: 'khac.txt' }, status: 'ok' }, st2('click')], 'mở Notepad và gõ xin chào').why, 'typed', 'mở tệp khác');
+  assert.strictEqual(RT.effectOf([{ name: 'open_path', args: { path: 'xin-chao.txt' }, status: 'ok' }, wf, st2('click')], 'mở Notepad và gõ xin chào').why, 'typed', 'mở TRƯỚC khi ghi');
+  assert.strictEqual(RT.effectOf([wf, { name: 'open_path', args: { path: '~/Documents/Xin-Chao.txt' }, status: 'ok' }, st2('click')], 'mở Notepad và gõ xin chào').ok, true, 'open_path đúng tệp');
+  assert.strictEqual(RT.effectOf([wf, { name: 'open_app', args: { name: 'notepad "C:\\Users\\A\\xin-chao.txt"' }, status: 'ok' }, st2('click')], 'mở Notepad và gõ xin chào').ok, true, 'open_app với tệp làm đối số');
+});
+test('B192 re-review #68 (3): typeTask bắt các câu gõ thường gặp; vẫn không bắt nhầm các câu đã loại', () => {
+  for (const q of ['mở Word viết bài thơ', 'mở Notepad viết một bài thơ', 'mở notepad gõ xin chào', 'copy this and type it in notepad', 'open notepad typing hello', '在记事本里写"你好"', '在记事本里写你好'])
+    assert.strictEqual(RT.typeTask(q), true, q);
+  for (const q of ['mở bài viết mới nhất trên Facebook', 'tra giá nhập khẩu', 'đăng nhập Zalo', 'what type of file is this', 'open input settings', '去写字楼', '切换输入法'])
+    assert.strictEqual(RT.typeTask(q), false, q);
+  // và có tác dụng: việc gõ mà chỉ bấm menu → failed
+  assert.strictEqual(RT.effectOf([st2('click')], 'mở Word viết bài thơ').why, 'typed');
+  assert.strictEqual(RT.effectOf([st2('click')], '在记事本里写你好').why, 'typed');
+});
+test('B192 re-review #68 (4): FAIL_CLAIM bắt thêm câu báo chữ chưa hiện / không gõ được (vi/en/zh), không bắt nhầm câu hỏi lịch sự', () => {
+  for (const t of ['Chữ chưa hiện trong Notepad. Bạn muốn mình làm gì?', 'Mình không thấy chữ hiện ra', 'Notepad vẫn trống, chưa có chữ nào', 'Gõ không được vì cửa sổ bị khoá', "I don't see the text", 'Nothing was typed', '记事本里没有看到文字'])
+    assert.ok(QA.FAIL_CLAIM.test(t), t);
+  for (const t of ['Bạn muốn mình làm gì tiếp theo?', 'What would you like me to do next?', '您希望我怎么做？', 'Kết quả: không xuất hiện lỗi nào', 'Mình đã thấy chữ hiện ra.', 'Đã gõ xong, chữ hiện rõ trong Notepad.'])
+    assert.ok(!QA.FAIL_CLAIM.test(t), t);
+});
+test('B192 re-review #68 (5): dán ctrl+v KHÔNG có kiểm chứng chữ → chưa tính là đã gõ', () => {
+  assert.strictEqual(RT.effectOf([st2('click'), st2('hotkey', null, 'ok', { keys: 'ctrl+v' })], 'mở Notepad và gõ abc').why, 'typed');
+  assert.strictEqual(RT.effectOf([st2('click'), { ...st2('hotkey', null, 'ok', { keys: 'ctrl+v' }), detail: 'Đã thấy chữ vừa gõ trên màn hình.' }], 'mở Notepad và gõ abc').ok, true);
+});
+test('B192 re-review #68 (1) agent: gõ rồi Enter “CHƯA kiểm chứng được là đã gửi” → outcome failed (không done), vẫn giữ câu trung thực “CHƯA xác nhận…”', async () => {
+  const act = (a) => a.keys === 'enter' ? { forModel: 'Đã bấm phím enter. CHƯA kiểm chứng được là đã gửi', summary: 'bấm phím enter · CHƯA kiểm chứng', verify: { sent: false, why: 'không thấy tên người nhận “trần quỳnh anh” trên màn hình' } } : { forModel: `Đã gõ "${a.text}".\nKiểm tra: Đã thấy chữ vừa gõ trên màn hình.`, summary: 'gõ chữ' };
+  const r = await run(mkAgent([call('screen_act', { action: 'type_text', text: 'Chào buổi sáng!' }), call('screen_act', { action: 'hotkey', keys: 'enter' }), say('Tin nhắn đã được gửi thành công.'), say('Tin nhắn đã được gửi.')], 'vi', act), 'gửi tin nhắn chúc buổi sáng ở zalo cho trần quỳnh anh không cần hỏi lại');
+  assert.strictEqual(r.outcome, 'failed', r.text);
+  assert.match(r.text, /CHƯA xác nhận/); assert.ok(!/thành công/.test(r.text), r.text);
 });

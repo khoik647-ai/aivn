@@ -103,10 +103,10 @@ function blamesApp(text) { return BLAME_RE.test(String(text || '')); }
 //   (b) bước màn hình cuối cùng (bỏ qua phím lưu/đóng/Enter) báo lỗi hoặc có dấu hiệu CHẮC CHẮN chưa có tác dụng → 'last'
 // review #68: chỉ coi là việc GÕ khi động từ ở đầu mệnh đề (mệnh lệnh: “…và gõ”, “then type”) hoặc có tân ngữ/chuỗi trích dẫn đi kèm;
 // không tính “bài viết”, “nhập khẩu”, “what type”, “input settings”, “写字楼”, “输入法”…
-const TYPE_NOT = /bài\s+viết|người\s+viết|nhà\s+văn|nhập\s+(?:khẩu|cảnh|học|viện|ngũ|môn|tâm|vai|gia)|đăng\s+nhập|(?:what|which|this|that|file|data|any|the)\s+type\b|type\s+(?:of|is|it|was)\b|\binput\s+(?:settings?|methods?|devices?|sources?|languages?|lag)\b|写字楼|输入法|输入设置|描写|写真/giu;
-const TYPE_VI = /(?:^|[,.;:!?\n]\s*|(?:^|[^\p{L}])(?:và|rồi|sau đó|xong|hãy|giúp|cho|để|thì|vào|lên|mình|tôi|em|bạn)\s+)(?:gõ|viết|nhập|điền|soạn)(?![\p{L}])|(?:^|[^\p{L}])(?:gõ|viết|nhập|điền|soạn)(?:\s+(?:vào|lên|thêm|lại|một|1|hai|vài|mấy|các|những))*\s+(?:["“'«]|(?:chữ|câu|dòng|nội dung|văn bản|đoạn|thư|tin|lời|số|tên|địa chỉ|ghi chú|tiêu đề|từ)(?![\p{L}]))/iu;
-const TYPE_EN = /(?:^|[,.;:!?\n]\s*|\b(?:and|then|please|to|also|now)\s+)(?:type|write|enter|input|jot)\b|\b(?:type|write|enter|input|jot)\s+(?:(?:in|into|down|out)\s+)?(?:["“']|(?:a|an|the|some|this|my)\s+(?:line|sentence|text|note|message|word|paragraph|letter|list|poem)\b|(?:hello|hi)\b)/iu;
-const TYPE_ZH = /输入|键入|写(?:一|下|上|入|几|段|句|行|个|封|首|篇|点)|填写/u;
+const TYPE_NOT = /bài\s+viết|người\s+viết|nhà\s+văn|nhập\s+(?:khẩu|cảnh|học|viện|ngũ|môn|tâm|vai|gia)|đăng\s+nhập|(?:what|which|this|that|file|data|any|the)\s+type\b|type\s+(?:of|is|was)\b|\binput\s+(?:settings?|methods?|devices?|sources?|languages?|lag)\b|写字楼|输入法|输入设置|描写|写真/giu;
+const TYPE_VI = /(?:^|[,.;:!?\n]\s*|(?:^|[^\p{L}])(?:và|rồi|sau đó|xong|hãy|giúp|cho|để|thì|vào|lên|mình|tôi|em|bạn)\s+)(?:gõ|viết|nhập|điền|soạn)(?![\p{L}])|(?:^|[^\p{L}])(?:gõ|viết|nhập|điền|soạn)(?:\s+(?:vào|lên|thêm|lại|một|1|hai|vài|mấy|các|những))*\s+(?:["“'«]|(?:chữ|câu|dòng|nội dung|văn bản|đoạn|thư|tin|lời|số|tên|địa chỉ|ghi chú|tiêu đề|từ|thơ|bài thơ|bài văn|bài luận|email|e-mail|mail|đoạn văn)(?![\p{L}]))|(?:^|[^\p{L}])(?:notepad|word|wordpad|sổ tay|ghi chú|notes|textedit|gedit|google docs|docs)\s+(?:(?:và|rồi|để|lên|ra|vào)\s+)?(?:gõ|viết|nhập|soạn|điền)(?![\p{L}])/iu;
+const TYPE_EN = /(?:^|[,.;:!?\n]\s*|\b(?:and|then|please|to|also|now)\s+)(?:type|write|enter|input|jot)\b|\b(?:notepad|word|wordpad|textedit|gedit|docs|notes)\s+(?:and\s+|then\s+|to\s+)?(?:type|typing|write|writing)\b|\b(?:type|typing|write|writing|enter|input|jot)\s+(?:(?:in|into|down|out)\s+)?(?:["“']|(?:a|an|the|some|this|my)\s+(?:line|sentence|text|note|message|word|paragraph|letter|list|poem)\b|(?:hello|hi)\b)/iu;
+const TYPE_ZH = /输入|键入|写(?:一|下|上|入|几|段|句|行|个|封|首|篇|点)|填写|写\s*["“'「『]|在[^。，,.!?！？\n]{0,12}?(?:里|中|上)(?:面)?写|(?:记事本|文档|备忘录|写字板|notepad|word)[^。，,.!?！？\n]{0,3}?写/iu;
 function typeTask(q) { const t = String(q || '').replace(TYPE_NOT, ' '); return TYPE_VI.test(t) || TYPE_EN.test(t) || TYPE_ZH.test(t); }
 const TYPE_TASK = { test: typeTask }; // giữ tên cũ (.test) cho chỗ gọi cũ
 const actOf = (x) => String((x && x.args && x.args.action) || '').toLowerCase();
@@ -123,13 +123,23 @@ function effectOf(steps = [], query = '') {
   if (!acts.length) return { ok: true };
   const okStep = (x) => x.status === 'ok' && !x.check;
   const typed = acts.filter(x => chainActs(x).includes('type_text'));
-  const pasted = acts.some(x => actOf(x) === 'hotkey' && PASTE.test(keysOf(x)) && okStep(x));
-  const wfAt = all.findIndex(x => x.name === 'write_file' && x.status === 'ok');
-  const fileOpened = wfAt >= 0 && all.slice(wfAt + 1).some(x => ['open_path', 'open_app'].includes(x.name) && x.status === 'ok');
+  // re-review #68 (5): dán ctrl+v KHÔNG có kiểm chứng chữ (bước hotkey không đọc lại chữ) → không tính là đã gõ; chỉ tính khi bước có dấu đã thấy chữ
+  const SEEN_TXT = /Đã thấy chữ vừa gõ/;
+  const pasted = acts.some(x => actOf(x) === 'hotkey' && PASTE.test(keysOf(x)) && okStep(x) && ((x.verify && x.verify.typed) || SEEN_TXT.test(String(x.detail || '') + ' ' + String(x.summary || ''))));
+  // re-review #68 (2): ghi tệp rồi MỞ ĐÚNG tệp đó (open_path đường dẫn đã ghi, hoặc open_app có tên tệp làm đối số) mới tính; mở ứng dụng trống thì không
+  const norm = (v) => String(v || '').trim().replace(/^["']|["']$/g, '').replace(/\\/g, '/').toLowerCase();
+  const baseOf = (v) => norm(v).split('/').filter(Boolean).pop() || '';
+  let fileOpened = false;
+  all.forEach((w, i) => {
+    if (fileOpened || w.name !== 'write_file' || w.status !== 'ok') return;
+    const base = baseOf(w.args && w.args.path);
+    if (!base) return;
+    fileOpened = all.slice(i + 1).some(x => x.status === 'ok' && ((x.name === 'open_path' && baseOf(x.args && x.args.path) === base) || (x.name === 'open_app' && norm(x.args && x.args.name).split(/[\s/"']+/).includes(base))));
+  });
   const typedOk = typed.some(okStep) || pasted || fileOpened || all.some(x => x.draftIn || (x.verify && x.verify.sent));
   if (typeTask(query) && !typedOk) return { ok: false, why: 'typed', n: typed.length };
   let k = acts.length - 1;
-  while (k > 0 && actOf(acts[k]) === 'hotkey' && SAVE_KEYS.test(keysOf(acts[k])) && acts[k].status !== 'error') k--;
+  while (k > 0 && actOf(acts[k]) === 'hotkey' && SAVE_KEYS.test(keysOf(acts[k])) && acts[k].status !== 'error' && (!acts[k].check || WEAK_CHECK.has(acts[k].check))) k--; // re-review #68 (1): phím có check CHẮC CHẮN (vd. chưa kiểm chứng gửi) không được bỏ qua
   const last = acts[k];
   if (last.status === 'error') return { ok: false, why: 'last', step: last };
   if (last.status === 'ok' && last.check && !WEAK_CHECK.has(last.check)) return { ok: false, why: 'last', step: last };
