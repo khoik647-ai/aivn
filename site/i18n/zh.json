@@ -189,6 +189,8 @@
   "dl.22": "下载 Windows 版 AIVN",
   "dl.23": "下载 Apple 芯片 Mac 版 AIVN",
   "dl.24": "下载 Intel Mac 版 AIVN",
+  "dl.25": "Apple 芯片 Mac？下载 Apple 芯片版",
+  "dl.26": "Intel 芯片 Mac？下载 Intel 版",
   "hero.26": "开源模型，离线对话，数据留在你的电脑上。",
   "hero.27": "离线",
   "hero.28": "无需账号",

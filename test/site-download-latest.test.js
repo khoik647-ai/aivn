@@ -195,7 +195,7 @@ test('không có tệp cho máy này: không lấy phiên bản từ newest(); n
   assert.strictEqual(vi, 'Tải AIVN bản ổn định'); assert.ok(!/\blink\b/i.test(vi), 'tiếng Việt không dùng chữ link');
   assert.strictEqual(D.en['dl.21'], 'Download the stable AIVN'); assert.strictEqual(D.zh['dl.21'], '下载稳定版 AIVN');
   assert.match(html, /\.dl\[data-fb="1"\] \.dl-l-latest\{display:none\}\.dl\[data-fb="1"\] \.dl-l-stable\{display:inline\}/);
-  assert.match(html, /DLX\.viewFor\(mobile\?null:os,macArch,staticHref\)/);
+  assert.match(html, /DLX\.viewFor\(mobile\?null:pickOs,pickArch,staticHref\)/);
 });
 
 test('INCLUDE_PRERELEASE=true: publish-beta chỉ --clear, không chèn khối beta và không thêm link tải thứ hai', () => {
@@ -327,7 +327,7 @@ test('huy hiệu phiên bản bằng đúng bản nút tải đã chọn: cờ b
   const fb = (html.match(/class="pill-ver" data-fb="([^"]+)"/) || [])[1];
   assert.ok(fb && !/__/.test(fb), 'số tĩnh không được là chữ giữ chỗ');
   assert.strictEqual((html.match(/DLX\.resolve\(/g) || []).length, 1, 'huy hiệu không được gọi API lần hai');
-  assert.match(html, /DLX\.viewFor\(mobile\?null:os,macArch,staticHref\)/);
+  assert.match(html, /DLX\.viewFor\(mobile\?null:pickOs,pickArch,staticHref\)/);
   assert.match(html, /DLX\.applyVersion\(\{button:row\.querySelector\('\.dl-ver'\),pill:pv,badge:badge\},view\.state==='ok'\?rel:null,pv&&pv\.getAttribute\('data-fb'\)\)/);
   assert.match(html, /\.badge\.is-empty\{display:none\}/);
   const viBeta = html.match(/<span class="pill-beta">([^<]*)<\/span>/)[1];

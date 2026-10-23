@@ -167,6 +167,24 @@ with sync_playwright() as p:
             pg.on('pageerror', lambda e, bucket=errs: bucket.append(str(e)))
             pg.goto(URL + ('&' if '?' in URL else '?') + 'lang=' + lang, wait_until='load'); pg.wait_for_timeout(900)
             r = pg.evaluate(JS); r['conf'] = name; r['kind'] = kind; r['apifail'] = name.endswith('apifail'); r['jsErrors'] = errs
+            if kind not in ('ios', 'android'):
+                pg.emulate_media(reduced_motion='reduce')
+                r['osPickProbe'] = pg.evaluate(r'''() => {
+                  const row=document.getElementById('tai-ve');
+                  const shown=e=>{if(!e)return false;for(let n=e;n;n=n.parentElement){const cs=getComputedStyle(n);if(cs.display==='none'||cs.visibility==='hidden')return false;}const b=e.getBoundingClientRect();return b.width>0&&b.height>=24;};
+                  const hit=e=>{e.scrollIntoView({block:'center',inline:'nearest'});const b=e.getBoundingClientRect();const x=Math.min(innerWidth-2,Math.max(2,b.left+b.width/2));const y=Math.min(innerHeight-2,Math.max(2,b.top+b.height/2));const n=document.elementFromPoint(x,y);return !!(n&&(n===e||e.contains(n)));};
+                  const kindOf=h=>{h=h||'';if(/AIVN-Setup(?:-[^/?#]+)?\.exe(?:$|[?#])/.test(h)||/(?:^|\/)AIVN-Setup\.exe(?:$|[?#])/.test(h))return 'win';if(/arm64-mac\.zip|AIVN-mac-arm64\.zip/.test(h))return 'arm64';if(/x64-mac\.zip|AIVN-mac-x64\.zip/.test(h))return 'x64';return '';};
+                  const links=()=>[...row.querySelectorAll('a[href]')].filter(shown).map(a=>({k:kindOf(a.getAttribute('href')),href:a.getAttribute('href'),h:Math.round(a.getBoundingClientRect().height),hit:hit(a)}));
+                  const out={before:links()};
+                  ['win','arm64','x64'].forEach(k=>{
+                    const card=document.querySelector('#os-row a.os-pick[data-k="'+k+'"]');
+                    if(!card){out[k]={missing:true};return;}
+                    card.click();
+                    const main=row.querySelector('a.dl-main'), sw=row.querySelector('.dl-switch-a');
+                    out[k]={t:row.getAttribute('data-t'),href:main.getAttribute('href'),h:Math.round(main.getBoundingClientRect().height),vis:shown(main),hit:shown(main)&&hit(main),swVis:shown(sw),swHref:sw?sw.getAttribute('href'):'',swHit:shown(sw)&&hit(sw)};
+                  });
+                  return out;
+                }''')
             # M8: nút “Tải miễn phí” ở đầu trang chỉ cuộn tới #tai-ve (không tải gì)
             hb = pg.locator('header .nav-cta a.btn')
             if hb.count() and hb.is_visible():
@@ -448,6 +466,21 @@ for r in res:
     small = [c for c in r['ctrls'] if c['h'] < 24]
     if small: bad.append(f'{k}: nút/link trong khối tải thấp hơn 24 px: {small}')
     if r.get('otherLine'): bad.append(f'{k}: dòng “Các bản khác” vẫn hiện dưới nút chính')
+    if not phone:
+        probe = r.get('osPickProbe') or {}
+        want_pick = ASSET[bool(fail)]
+        for key in ('win', 'arm64', 'x64'):
+            p = probe.get(key) or {}
+            if p.get('t') != key or not ends_asset(p.get('href'), want_pick[key]) or not p.get('vis') or not p.get('hit') or (p.get('h') or 0) < 44:
+                bad.append(f'{k}: bấm thẻ {key} không đưa nút chính tới tệp hiện, bấm được: {p}')
+            if key in ('arm64', 'x64'):
+                other = 'x64' if key == 'arm64' else 'arm64'
+                if not p.get('swVis') or not p.get('swHit') or not ends_asset(p.get('swHref'), want_pick[other]):
+                    bad.append(f'{k}: nút chính là bản Mac mà không có link hiện tới bản {other}: {p}')
+        if kind in ('mac', 'mac-arm64', 'mac-x64'):
+            got = {x.get('k') for x in (probe.get('before') or []) if x.get('hit')}
+            if 'arm64' not in got or 'x64' not in got:
+                bad.append(f'{k}: máy Mac phải thấy cả bản arm64 và x64 qua link hiện: {probe.get("before")}')
     soon = r.get('linuxSoonStyle') or []
     if len(soon) != 2 or any(s.get('op') != '0.55' or s.get('cur') != 'not-allowed' or s.get('dis') != 'true' for s in soon):
         bad.append(f'{k}: nút Linux “sắp ra mắt” (hero và CTA) phải opacity 0.55, cursor not-allowed, aria-disabled: {soon}')
