@@ -171,7 +171,7 @@
   "footer.sub": "（文郎大学学生）",
   "dl.2": "下载最新版 AIVN",
   "dl.3": "正在查找最新版本…",
-  "dl.4": "选择适合你电脑的版本",
+  "dl.4": "在 GitHub 查看 AIVN 各版本",
   "dl.5": "Beta · 测试版",
   "dl.6": "暂时无法获取最新版本信息，上面的按钮将下载稳定版。<a href=\"https://github.com/khoik647-ai/aivn/releases\" rel=\"noopener\">在 GitHub 上查看所有版本</a>",
   "dl.7": "适用于 Windows 10/11",

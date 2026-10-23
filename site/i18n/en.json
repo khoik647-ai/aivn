@@ -171,7 +171,7 @@
   "footer.sub": "(student at Van Lang University)",
   "dl.2": "Download the latest AIVN",
   "dl.3": "Looking up the latest version…",
-  "dl.4": "Choose your version",
+  "dl.4": "See AIVN releases on GitHub",
   "dl.5": "Beta · pre-release",
   "dl.6": "Could not look up the latest version, so the button downloads the stable release. <a href=\"https://github.com/khoik647-ai/aivn/releases\" rel=\"noopener\">See all versions on GitHub</a>",
   "dl.7": "for Windows 10/11",

@@ -1,7 +1,7 @@
 """Kiểm bố cục trang web AIVN (B143–B150, B162, B174, B183, B185, B186) ở 280/320/375/810/820/1280 px và dải 768–900 px × vi/en/zh bằng Playwright + Chrome. Thoát 1 nếu có lỗi.
 Một nút “Tải AIVN bản mới nhất” (#tai-ve .dl): API GitHub /releases được giả bằng dữ liệu thật trong test/fixtures/site-releases-api.json
 (bỏ bản nháp như khi khách không đăng nhập xem). Kiểm: chọn đúng tệp theo máy (Windows → .exe, Mac → .zip đúng chip, không biết chip → Apple Silicon
-+ link “Mac dùng chip Intel?”, Linux → “Chọn bản cho máy của bạn”), điện thoại/máy tính bảng không thấy link .exe/.zip nào (chỉ nút “Gửi link”),
++ link “Mac dùng chip Intel?”, Linux → nút chính trỏ trang Releases + ghi chú “chưa có bản Linux”, không có .exe), điện thoại/máy tính bảng không thấy link .exe/.zip nào (chỉ nút “Gửi link”),
 hướng dẫn mở lần đầu trên Mac (Gatekeeper “Vẫn mở”/“Open Anyway”, 4 bước) vẫn còn, và khi API lỗi (403/giới hạn) nút giữ link tĩnh + link trang releases.
 Dùng: python tools/site_check.py URL out.json [thư-mục-ảnh]"""
 import sys, json, re, os
@@ -37,6 +37,7 @@ CONF = [('fold-280', dict(viewport={'width': 280, 'height': 653}, user_agent=AND
         ('desktop-1280', dict(viewport=D1280, user_agent=WIN), nav('Win32', 0, ('Windows', 'x86')), 'win'),
         ('desktop-1280-apifail', dict(viewport=D1280, user_agent=WIN), nav('Win32', 0, ('Windows', 'x86')), 'win'),      # API 403 → link tĩnh
         ('mac-safari-1280-apifail', dict(viewport=D1280, user_agent=SAF), nav('MacIntel'), 'mac'),
+        ('linux-1280-apifail', dict(viewport=D1280, user_agent=LNX), nav('Linux x86_64'), 'linux'),
         ('android-390-apifail', dict(viewport={'width': 390, 'height': 844}, user_agent=AND, is_mobile=True, has_touch=True), nav('Linux armv8l', 5), 'android')]
 JS = r'''() => {
  const d=document.documentElement, cw=d.clientWidth, off=[];
@@ -49,7 +50,7 @@ JS = r'''() => {
  const gk=document.querySelector('#mo-tren-mac details.dl-gk'), foot=document.querySelector('footer').innerText;
  const hdr=document.querySelector('header .nav-cta a.btn');
  return {lang:d.lang, sw:d.scrollWidth, cw, overflow:d.scrollWidth>cw, off:off.slice(0,8), mobileCls:d.classList.contains('is-mobile'),
-  single:document.querySelectorAll('.dl-main').length, betaBlock:!!document.querySelector('.beta-dl,#tai-beta'),
+  single:document.querySelectorAll('a.dl-main').length, betaBlock:!!document.querySelector('.beta-dl,#tai-beta'),
   state:row.dataset.state, os:row.dataset.os, t:row.dataset.t, arch:row.dataset.arch, pre:row.dataset.pre,
   mainVis:vis(main), mainH:vis(main)?H(main):null, mainHref:main.getAttribute('href'), mainText:vis(main)?main.innerText.trim():'',
   sub:vis(row.querySelector('.dl-sub'))?row.querySelector('.dl-sub').innerText.trim():'', ver:row.querySelector('.dl-ver').textContent,
@@ -97,9 +98,6 @@ with sync_playwright() as p:
                 r['gkOpen'] = pg.evaluate('()=>{const g=document.querySelector("#mo-tren-mac details");return g.open&&[...g.querySelectorAll("li")].filter(e=>e.getClientRects().length).length}')
                 r['gkSummaryH'] = pg.evaluate('()=>Math.round(document.querySelector("#mo-tren-mac summary").getBoundingClientRect().height)')
                 pg.evaluate('()=>scrollTo(0,0)'); pg.wait_for_timeout(300)
-            if kind == 'linux' and r['mainVis']:
-                pg.locator('#tai-ve a.dl-main').click(); pg.wait_for_timeout(1000)
-                r['chooseScroll'] = pg.evaluate('()=>{const b=document.getElementById("tai-ve-khac").getBoundingClientRect();return b.top>=0&&b.bottom<=innerHeight}')
             if kind in ('ios', 'android'):
                 if kw['viewport']['width'] <= 760:  # trên iPad nút menu đang ẩn (chỉ hiện ≤ 760 px)
                     pg.click('#burger'); pg.wait_for_timeout(500); r['menuOpen'] = pg.evaluate('()=>({sw:document.documentElement.scrollWidth,mw:Math.round(document.querySelector("#mobileMenu").scrollWidth),cw:document.documentElement.clientWidth})'); pg.click('#burger'); pg.wait_for_timeout(400)
@@ -196,7 +194,11 @@ for r in res:
         if not fail and not any(o.startswith('x64 ') and o.endswith('/v0.16.0-beta.3/AIVN-0.16.0-beta.3-x64-mac.zip') for o in r['other']): bad.append(f'{k}: Mac: thiếu link bản Intel đúng release {r["other"]}')
     elif kind == 'linux':
         if re.search(r'\.(exe|zip)$', r['mainHref']): bad.append(f'{k}: {kind} vẫn được mời tải .exe: {r["mainHref"]}')  # B174
-        if r['mainHref'] != '#tai-ve-khac' or not r['lnx'] or not r.get('chooseScroll'): bad.append(f'{k}: Linux: nút “Chọn bản cho máy của bạn” {r["mainHref"]} lnx={r["lnx"]} cuộn={r.get("chooseScroll")}')
+        # M2/QA2: Linux không bao giờ được mời tải .exe; nút chính → trang Releases, có ghi chú “chưa có bản Linux”, vẫn giữ link nhỏ Windows/Mac
+        if r['mainHref'] != 'https://github.com/khoik647-ai/aivn/releases' or not r['lnx']: bad.append(f'{k}: Linux: nút chính phải trỏ trang Releases và hiện ghi chú chưa có bản Linux: {r["mainHref"]} lnx={r["lnx"]}')
+        if not re.search(r'Xem các bản AIVN trên GitHub|See AIVN releases on GitHub|在 GitHub 查看 AIVN 各版本', r['mainText']): bad.append(f'{k}: Linux: nhãn nút chính “{r["mainText"]}”')
+        if sorted(o.split(' ')[0] for o in r['other']) != ['arm64', 'win', 'x64']: bad.append(f'{k}: Linux: thiếu link nhỏ Windows/Mac {r["other"]}')
+        if r['gkLink'] or r['intelq']: bad.append(f'{k}: Linux mà hiện phần Mac')
 bad.extend(bad_band)
 for line in band_log: print(line)
 print('\n'.join(bad) if bad else f'KIỂM BỐ CỤC OK: {len(res)} lần chạy ({len(CONF)} cấu hình × vi/en/zh); dải 768–900 px × vi/en/zh ({len(BAND)} bề rộng) không tràn')

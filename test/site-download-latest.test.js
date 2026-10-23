@@ -112,3 +112,25 @@ test('một đường tải duy nhất: không còn khối beta riêng; nút đ�
   const gk = html.match(/<details class="dl-gk" data-i18n="dl\.20">([\s\S]*?)<\/details>/)[1];
   assert.strictEqual((gk.match(/<li>/g) || []).length, 4); assert.match(gk, /Vẫn mở/); assert.match(D.en['dl.20'], /Open Anyway/);
 });
+
+test('Linux / máy tính không rõ hệ điều hành: nút chính không bao giờ là .exe mà trỏ trang Releases, có ghi chú “chưa có bản Linux”, giữ link nhỏ Windows/Mac, không còn link Linux chết href="#"', async () => {
+  assert.match(html, /else if\(kind==='linux'\|\|kind==='other'\)main\.href=DLX\.FALLBACK;/);
+  assert.ok(!html.includes("main.href='#tai-ve-khac'"), 'nút chính Linux không còn chỉ cuộn trong trang');
+  const L = lib(); assert.strictEqual(L.FALLBACK, 'https://github.com/khoik647-ai/aivn/releases');
+  await L.resolve(ok(API)); assert.strictEqual(L.state.state, 'ok');
+  assert.strictEqual(L.target('linux', null), null, 'Linux không bao giờ nhận tệp cài'); assert.strictEqual(L.target(null, null), null);
+  assert.strictEqual(L.target('windows', null).asset.name, 'AIVN-Setup-0.16.0-beta.3.exe');
+  // nhãn nút chính và ghi chú, đủ vi/en/zh
+  assert.match(html, /<span class="dl-l-choose" data-i18n="dl\.4">Xem các bản AIVN trên GitHub<\/span>/);
+  assert.strictEqual(D.en['dl.4'], 'See AIVN releases on GitHub'); assert.strictEqual(D.zh['dl.4'], '在 GitHub 查看 AIVN 各版本');
+  assert.match(html, /<p class="dl-lnx" data-i18n="dl\.14">AIVN chưa có bản Linux\./); assert.match(D.en['dl.14'], /not available for Linux/); assert.match(D.zh['dl.14'], /Linux/);
+  assert.match(html, /\.dl\[data-os=other\] \.dl-l-latest\{display:none\}\.dl\[data-os=other\] \.dl-l-choose\{display:inline\}/);
+  assert.match(html, /\.dl\[data-os=linux\] \.dl-lnx,\.dl\[data-os=other\]\.is-linux \.dl-lnx\{display:block;/);
+  // link nhỏ Windows/Mac vẫn còn (link tĩnh release.sh viết lại); link “bản Intel” chỉ hiện cho Mac không rõ chip
+  const other = html.match(/<p class="dl-other" id="tai-ve-khac">([\s\S]*?)<\/p>/)[1];
+  for (const h of ['AIVN-Setup.exe', 'AIVN-mac-arm64.zip', 'AIVN-mac-x64.zip']) assert.ok(other.includes(`href="${h}"`), h);
+  assert.match(html, /\.dl-other a\.o-intelq\{display:none\}\n\.dl\[data-os=mac\]\[data-arch=unknown\] \.o-intelq\{display:inline-flex\}/);
+  // hàng nút cuối trang: Linux là chữ “sắp ra mắt”, không phải link chết
+  assert.match(html, /<span aria-disabled="true" class="btn dl-btn soon" data-i18n="cta\.5"[^>]*data-os="linux"/);
+  assert.ok(!/<a[^>]*data-os="linux"[^>]*>/.test(html) && !/<a[^>]*href="#"[^>]*data-os="linux"/.test(html), 'còn link Linux href="#"');
+});
