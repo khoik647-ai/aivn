@@ -105,21 +105,36 @@ function assertPending(rec, from, to) {
   assert.strictEqual(rec.dir, path.resolve(from), 'cài đặt giữ thư mục cũ');
   assert.strictEqual(rec.to, path.resolve(to));
   assert.match(rec.log, /chờ ổ đích/);
+  assert.match(rec.log, /chỉ còn ở ổ đích đang thiếu/);
   assert.match(rec.log, /Sẽ thử lại khi thư mục này truy cập được/);
   assert.ok(rec.log.includes(path.resolve(to)), 'nhật ký liệt kê thư mục đích');
   assert.doesNotMatch(rec.log, /Đã hoàn tác/);
+  assert.doesNotMatch(rec.log, /Chưa xoá hay dời/);
   assert.match(rec.notice, /chờ ổ đích/);
+  assert.match(rec.notice, /chỉ còn ở ổ đích đang thiếu/);
+  assert.match(rec.notice, /sẽ được phục hồi khi ổ này có lại/);
   assert.doesNotMatch(rec.notice, /Đã hoàn tác/);
+  assert.doesNotMatch(rec.notice, /Chưa xoá hay dời/);
   assert.ok(!rec.notice.includes(path.resolve(to)), 'thông báo không kèm đường dẫn riêng');
   const en = tr.tr(rec.log, 'en'), zh = tr.tr(rec.log, 'zh');
   assert.match(en, /waiting for the destination drive/);
+  assert.match(en, /may currently exist only on the missing destination drive/);
+  assert.doesNotMatch(en, /Nothing was deleted/);
   assert.ok(en.includes(path.resolve(to)));
   assert.doesNotMatch(en, /Đã hoàn tác/);
   assert.match(zh, /等待目标磁盘/);
+  assert.match(zh, /可能只在缺失的目标磁盘上/);
+  assert.doesNotMatch(zh, /尚未删除或移动/);
   assert.ok(zh.includes(path.resolve(to)));
-  const enN = tr.tr(rec.notice, 'en');
+  const enN = tr.tr(rec.notice, 'en'), zhN = tr.tr(rec.notice, 'zh');
   assert.match(enN, /waiting for destination drive/);
+  assert.match(enN, /may currently exist only on the missing destination drive/);
+  assert.match(enN, /will be recovered when this drive is back/);
+  assert.doesNotMatch(enN, /Nothing was deleted/);
   assert.ok(!enN.includes(path.resolve(to)));
+  assert.match(zhN, /可能只在缺失的目标磁盘上/);
+  assert.match(zhN, /重新连接后会恢复/);
+  assert.doesNotMatch(zhN, /尚未删除或移动/);
 }
 function logPending(rec) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b218-log-'));
@@ -127,9 +142,11 @@ function logPending(rec) {
   LOG.log('app', rec.log);
   const text = fs.readFileSync(LOG.file, 'utf8');
   assert.match(text, /chờ ổ đích/);
+  assert.match(text, /chỉ còn ở ổ đích đang thiếu/);
   assert.match(text, /Sẽ thử lại khi thư mục này truy cập được/);
   assert.ok(text.includes(path.resolve(rec.to)));
   assert.doesNotMatch(text, /Đã hoàn tác/);
+  assert.doesNotMatch(text, /Chưa xoá hay dời/);
   rmAll(dir);
 }
 
@@ -147,10 +164,21 @@ if (process.argv.includes('--child')) {
   function fresh(cross) {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b218-'));
     const from = path.join(d, 'from');
-    const parent = cross ? fs.mkdtempSync(path.join(SHM, 'aivn-b218-')) : d;
-    const to = path.join(parent, 'to');
+    const vol = cross ? fs.mkdtempSync(path.join(SHM, 'aivn-b218-')) : path.join(d, 'vol');
+    const to = path.join(vol, 'to');
     fs.mkdirSync(from, { recursive: true }); fs.mkdirSync(to, { recursive: true });
-    return { d, parent: cross ? parent : null, from, to, journal: path.join(d, 'move.json') };
+    return { d, parent: vol, from, to, journal: path.join(d, 'move.json'), away: null };
+  }
+  // Ổ vắng thật: cả thư mục cha của đích cũng mất (không chỉ xoá đúng thư mục đích).
+  function hideDrive(box) {
+    const away = box.parent + '-away';
+    fs.renameSync(box.parent, away);
+    box.away = away;
+    return path.join(away, path.basename(box.to));
+  }
+  function showDrive(box) {
+    fs.renameSync(box.away, box.parent);
+    box.away = null;
   }
   function handCommit(box) {
     const srcBefore = seed(box.from);
@@ -163,14 +191,13 @@ if (process.argv.includes('--child')) {
     return srcBefore;
   }
 
-  test('B218 đổi tên đích: giữ nhật ký, không xoá, trạng thái pending, log không nói đã hoàn tác', async () => {
+  test('B218 ổ đích vắng (cha cũng mất): giữ nhật ký, không xoá, trạng thái pending, không nói chưa xoá tệp nào', async () => {
     const box = fresh(false);
     try {
       const srcBefore = handCommit(box);
       const fromBefore = tree(box.from), toBefore = tree(box.to);
-      const away = box.to + '-away';
       const raw = fs.readFileSync(box.journal);
-      fs.renameSync(box.to, away);
+      const parked = hideDrive(box);
       let rec;
       const hits = await countMutations(async () => {
         const reads = await countReads(async () => {
@@ -191,9 +218,9 @@ if (process.argv.includes('--child')) {
       assert.ok(fs.existsSync(box.journal));
       assert.deepStrictEqual(fs.readFileSync(box.journal), raw);
       sameTree(fromBefore, tree(box.from), 'from');
-      sameTree(toBefore, tree(away), 'away');
-      assertNoLoss(srcBefore, box.from, away);
-      fs.renameSync(away, box.to);
+      sameTree(toBefore, tree(parked), 'away');
+      assertNoLoss(srcBefore, box.from, parked);
+      showDrive(box);
       const done = await MD.recoverMove(box.journal);
       assert.strictEqual(done.resumed, true);
       assert.ok(!done.pending);
@@ -201,7 +228,7 @@ if (process.argv.includes('--child')) {
       assertNoLoss(srcBefore, box.from, box.to);
       assert.strictEqual(tree(box.to).size, 5);
       assert.strictEqual(tree(box.from).size, 0);
-    } finally { rmAll(box.d, box.parent); }
+    } finally { rmAll(box.d, box.parent, box.away); }
   });
 
   test('B218 lỗi fs trên đích: giữ nhật ký, không đụng tệp cũ', async () => {
@@ -210,7 +237,7 @@ if (process.argv.includes('--child')) {
       const srcBefore = handCommit(box);
       const fromBefore = tree(box.from), toBefore = tree(box.to);
       const raw = fs.readFileSync(box.journal);
-      for (const code of ['EIO', 'EACCES', 'ENODEV', 'EPERM', 'ENOENT']) {
+      for (const code of ['EIO', 'EACCES', 'ENODEV', 'EPERM']) {
         const hits = await countMutations(() => mockDestError(code, (p) => under(box.to, p), async () => {
           const reads = await countReads(async () => {
             const rec = await MD.recoverMove(box.journal);
@@ -236,7 +263,23 @@ if (process.argv.includes('--child')) {
       } finally { fs.promises.lstat = readsOnly; }
       sameTree(fromBefore, tree(box.from), 'lstat from');
       sameTree(toBefore, tree(box.to), 'lstat to');
-    } finally { rmAll(box.d, box.parent); }
+    } finally { rmAll(box.d, box.parent, box.away); }
+  });
+
+  test('B218 ENOENT khi cha cũng mất: vẫn pending, không đụng tệp', async () => {
+    const box = fresh(false);
+    try {
+      handCommit(box);
+      const raw = fs.readFileSync(box.journal);
+      const parent = path.resolve(box.parent);
+      const hits = await countMutations(() => mockDestError('ENOENT', (p) => under(box.to, p) || path.resolve(p) === parent, async () => {
+        const rec = await MD.recoverMove(box.journal);
+        assertPending(rec, box.from, box.to);
+        assert.strictEqual(rec.fsCode, 'ENOENT');
+      }));
+      assert.deepStrictEqual(hits, [], hits.join(','));
+      assert.deepStrictEqual(fs.readFileSync(box.journal), raw);
+    } finally { rmAll(box.d, box.parent, box.away); }
   });
 
   test('B218 main: log pending, không đổi modelsDir, thử lại khi mở thư mục mô hình', () => {
@@ -251,6 +294,13 @@ if (process.argv.includes('--child')) {
     assert.match(main, /await finishPendingMove\(false\)/);
     assert.match(main, /setInterval\(\(\) => \{ retryPendingMove\(\)/);
     assert.match(main, /models:dir-info', async \(\) => \{ if \(!dirMove\)/);
+    assert.match(main, /if \(dirMove \|\| modelInUse\(\)\) return Promise\.resolve\(null\)/);
+    assert.match(main, /recoverChain\.then\(\(\) => \{ if \(dirMove\) return null; return finishPendingMove\(true\); \}\)/);
+    assert.match(main, /dirMove = hold/);
+    assert.match(main, /await recoverChain/);
+    assert.match(main, /T\('Đang chờ ổ đích của lần chuyển trước\.'\)/);
+    assert.strictEqual(tr.tr('Đang chờ ổ đích của lần chuyển trước.', 'en'), 'Waiting for the destination drive of the previous move.');
+    assert.strictEqual(tr.tr('Đang chờ ổ đích của lần chuyển trước.', 'zh'), '正在等待上一次移动的目标磁盘。');
   });
 
   async function crashRepro(name, { copy, cross, point, resumed }) {
@@ -263,9 +313,8 @@ if (process.argv.includes('--child')) {
       assert.strictEqual(r.signal, 'SIGKILL', `${name} signal=${r.signal} status=${r.status} stderr=${(r.stderr || '').slice(-400)}`);
       assert.ok(fs.existsSync(box.journal), name + ' nhật ký');
       const fromBefore = tree(box.from), toBefore = tree(box.to);
-      const away = box.to + '-away';
       const raw = fs.readFileSync(box.journal);
-      fs.renameSync(box.to, away);
+      const parked = hideDrive(box);
       let rec;
       const hits = await countMutations(async () => {
         const reads = await countReads(async () => {
@@ -280,17 +329,56 @@ if (process.argv.includes('--child')) {
       logPending(rec);
       assert.deepStrictEqual(hits, [], name + ' đổi tệp khi vắng');
       sameTree(fromBefore, tree(box.from), name + ' from');
-      sameTree(toBefore, tree(away), name + ' away');
-      assertNoLoss(srcBefore, box.from, away);
-      fs.renameSync(away, box.to);
+      sameTree(toBefore, tree(parked), name + ' away');
+      assertNoLoss(srcBefore, box.from, parked);
+      showDrive(box);
       const done = await MD.recoverMove(box.journal);
       assert.strictEqual(!!done.resumed, resumed, name + ' resumed=' + !!done.resumed);
       assert.ok(!fs.existsSync(box.journal), name + ' xoá nhật ký sau khi xong');
       assertNoLoss(srcBefore, box.from, box.to);
       if (resumed) { assert.strictEqual(tree(box.from).size, 0); assert.strictEqual(tree(box.to).size, 5); }
       else { assert.strictEqual(tree(box.from).size, 5); assert.strictEqual(tree(box.to).size, 0); assert.strictEqual(done.rolledBack, true); }
-    } finally { rmAll(box.d, box.parent); }
+    } finally { rmAll(box.d, box.parent, box.away); }
   }
+
+  test('B218 P7: recover không xoá nhật ký của lần chuyển mới ghi đè giữa lúc băm', async () => {
+    const box = fresh(false);
+    try {
+      handCommit(box);
+      const newer = JSON.stringify({ from: path.resolve(box.from), to: path.resolve(box.to) + '-new', rels: [{ rel: 'n.gguf', size: 1, sha256: 'ab' }], created: [], temps: [], moveId: 'new-move', phase: 'moving' });
+      const orig = fs.createReadStream;
+      let swapped = false;
+      fs.createReadStream = function (...a) {
+        if (!swapped) { swapped = true; fs.writeFileSync(box.journal, newer); }
+        return orig.apply(this, a);
+      };
+      try {
+        await MD.recoverMove(box.journal);
+        assert.ok(swapped, 'đã băm nên mới có cửa sổ ghi đè');
+      } finally { fs.createReadStream = orig; }
+      assert.strictEqual(fs.readFileSync(box.journal, 'utf8'), newer, 'nhật ký lần chuyển mới còn nguyên');
+      assert.strictEqual(JSON.parse(fs.readFileSync(box.journal, 'utf8')).moveId, 'new-move');
+    } finally { rmAll(box.d, box.parent, box.away); }
+  });
+
+  test('B218 P9: xoá thư mục đích nhưng cha còn thì không kẹt pending', async () => {
+    const box = fresh(false);
+    try {
+      const srcBefore = seed(box.from);
+      const rels = RELS.map((rel) => ({ rel, size: fs.statSync(path.join(box.from, rel)).size, sha256: srcBefore.get(rel) }));
+      fs.writeFileSync(box.journal, JSON.stringify({ from: path.resolve(box.from), to: path.resolve(box.to), rels, created: rels.map((r) => ({ ...r, kind: 'copy' })), temps: [], moveId: 'p9', phase: 'moving' }));
+      const fromBefore = tree(box.from);
+      fs.rmSync(box.to, { recursive: true, force: true });
+      assert.ok(fs.existsSync(box.parent), 'cha của đích còn');
+      assert.ok(!fs.existsSync(box.to));
+      const rec = await MD.recoverMove(box.journal);
+      assert.ok(rec && !rec.pending, 'không kẹt chờ ổ');
+      assert.strictEqual(rec.rolledBack, true);
+      assert.ok(!fs.existsSync(box.journal), 'xoá nhật ký sau khi hoàn tác');
+      sameTree(fromBefore, tree(box.from), 'nguồn không đổi');
+      assertNoLoss(srcBefore, box.from, box.to);
+    } finally { rmAll(box.d, box.parent, box.away); }
+  });
 
   test('B218 QA cùng ổ commit:2', { timeout: 30000 }, () => crashRepro('same commit:2', { copy: false, point: 'commit:2', resumed: true }));
   test('B218 QA cùng ổ after:3', { timeout: 30000 }, () => crashRepro('same after:3', { copy: false, point: 'after:3', resumed: false }));

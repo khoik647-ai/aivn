@@ -198,6 +198,7 @@ let modelsDirProblem = null;
 let recoverChain = Promise.resolve();
 let pendingAnnounced = false;
 let moveRetryTimer = null;
+let dirMove = null; // { ac } khi đang chuyển; timer thử lại phải bỏ qua
 function modelInUse() { try { const st = engine && engine.status && engine.status(); return !!(st && (st.loaded || st.loading)); } catch { return false; } }
 function noteRecover(rec, live) {
   if (!rec) return;
@@ -222,8 +223,8 @@ async function finishPendingMove(live) {
 }
 function retryPendingMove() {
   try { if (!fs.existsSync(path.join(paths.userData, 'models-move.json'))) return Promise.resolve(null); } catch { return Promise.resolve(null); }
-  if (modelInUse()) return Promise.resolve(null);
-  const run = recoverChain.then(() => finishPendingMove(true));
+  if (dirMove || modelInUse()) return Promise.resolve(null);
+  const run = recoverChain.then(() => { if (dirMove) return null; return finishPendingMove(true); });
   recoverChain = run.then(() => {}, () => {});
   return run;
 }
@@ -1284,7 +1285,6 @@ function registerIpc() {
     return listModels();
   });
   // ---------- Đổi thư mục mô hình (beta.3) ----------
-  let dirMove = null; // { ac } khi đang chuyển
   const defaultModelsDir = () => path.join(paths.userData, 'models');
   const dirInfo = () => { const MD = require('./models-dir'); const files = MD.listFiles(paths.models); return { dir: paths.models, isDefault: path.resolve(paths.models) === path.resolve(defaultModelsDir()), default: defaultModelsDir(), free: MD.freeBytes(paths.models), drive: MD.driveOf(paths.models), bytes: files.reduce((s, f) => s + f.size, 0), files: files.length, extra: (settings.data.modelDirsExtra || []).filter(d => fs.existsSync(d)), problem: modelsDirProblem, moving: !!dirMove, qaProfile: !!QA_PROFILE }; };
   // Runtime CUDA/Vulkan (tab Runtime trong Cài đặt)
@@ -1309,29 +1309,36 @@ function registerIpc() {
     const MD = require('./models-dir');
     if (QA_PROFILE) return { ok: false, error: 'Hồ sơ QA: không đổi thư mục mô hình.' };
     if (dirMove) return { ok: false, error: 'Đang chuyển mô hình, hãy đợi xong.' };
-    const v = MD.validateTarget(dir, { from: paths.models }); if (!v.ok) return v;
-    if (downloader.list().some(j => j.status === 'downloading' || j.status === 'queued')) return { ok: false, error: 'Đang tải mô hình: hãy tạm dừng hoặc đợi tải xong rồi đổi thư mục.' };
-    const old = paths.models;
-    if (mode === 'move') {
-      const st = engine.status(); if (st.loaded && st.path && path.resolve(st.path).startsWith(path.resolve(old) + path.sep)) { await engine.unloadModel(); send('model:status', engine.status()); }
-      dirMove = { ac: new AbortController() }; LOG.log('app', `Chuyển mô hình: ${old} → ${v.dir}`);
+    const hold = { ac: null };
+    dirMove = hold; // chặn timer trước mọi await — recover đang băm không được chạy chồng lần chuyển mới
+    try {
+      const v = MD.validateTarget(dir, { from: paths.models }); if (!v.ok) return v;
+      if (downloader.list().some(j => j.status === 'downloading' || j.status === 'queued')) return { ok: false, error: 'Đang tải mô hình: hãy tạm dừng hoặc đợi tải xong rồi đổi thư mục.' };
+      try { await recoverChain; } catch {}
       const journal = path.join(paths.userData, 'models-move.json');
-      try { const r = await MD.moveModels(old, v.dir, { signal: dirMove.ac.signal, journal, onProgress: (p) => { try { send('models:dir-progress', p); } catch (err) { LOG.log('app', 'Tiến độ chuyển mô hình: ' + err.message); } } });
-        paths.models = v.dir; settings.data.modelsDir = v.dir; settings.data.modelDirsExtra = (settings.data.modelDirsExtra || []).filter(d => path.resolve(d) !== path.resolve(v.dir)); settings.save();
-        try { MD.journalClear(journal); } catch {}
-        LOG.log('app', `Đã chuyển ${r.moved} tệp (${(r.bytes / 1024 ** 3).toFixed(2)} GB)${r.sameDrive ? ' (cùng ổ, đổi tên)' : ''} → ${v.dir}`); send('models:dir-progress', { finished: true, ...r });
-        // B189: gửi thêm một sự kiện tiến độ SAU khi invoke đã trả — tái hiện thanh kẹt khi IPC đến muộn (chỉ QA)
-        if (String(process.env.AIVN_QA_MODE || '') === '1' && process.env.AIVN_MDIR_LATE_PROGRESS === '1') setTimeout(() => { try { send('models:dir-progress', { done: 1, total: 1, file: 'late.gguf', bytesDone: 1, bytesTotal: 1 }); } catch {} }, 400);
-        return { ok: true, ...r, info: dirInfo() };
-      } catch (e) { LOG.log('app', 'Chuyển mô hình dừng: ' + e.message); try { send('models:dir-progress', { finished: true, error: e.message, code: e.code || '' }); } catch {} return { ok: false, error: e.message, code: e.code || '', info: dirInfo() }; }
-      finally { dirMove = null; }
-    }
-    // chỉ trỏ sang thư mục mới: thư mục cũ vẫn được quét
-    const extra = new Set(settings.data.modelDirsExtra || []); if (MD.listFiles(old).length) extra.add(old); extra.delete(v.dir);
-    paths.models = v.dir; settings.data.modelsDir = v.dir; settings.data.modelDirsExtra = [...extra]; settings.save(); modelsDirProblem = null;
-    LOG.log('app', `Thư mục mô hình mới: ${v.dir} (mô hình ở ${old} vẫn dùng được)`); return { ok: true, moved: 0, info: dirInfo() };
+      let journalLeft = false; try { journalLeft = fs.existsSync(journal); } catch { journalLeft = true; }
+      if (journalLeft) return { ok: false, error: T('Đang chờ ổ đích của lần chuyển trước.') };
+      const old = paths.models;
+      if (mode === 'move') {
+        const st = engine.status(); if (st.loaded && st.path && path.resolve(st.path).startsWith(path.resolve(old) + path.sep)) { await engine.unloadModel(); send('model:status', engine.status()); }
+        dirMove = { ac: new AbortController() }; LOG.log('app', `Chuyển mô hình: ${old} → ${v.dir}`);
+        try { const r = await MD.moveModels(old, v.dir, { signal: dirMove.ac.signal, journal, onProgress: (p) => { try { send('models:dir-progress', p); } catch (err) { LOG.log('app', 'Tiến độ chuyển mô hình: ' + err.message); } } });
+          paths.models = v.dir; settings.data.modelsDir = v.dir; settings.data.modelDirsExtra = (settings.data.modelDirsExtra || []).filter(d => path.resolve(d) !== path.resolve(v.dir)); settings.save();
+          try { MD.journalClear(journal); } catch {}
+          LOG.log('app', `Đã chuyển ${r.moved} tệp (${(r.bytes / 1024 ** 3).toFixed(2)} GB)${r.sameDrive ? ' (cùng ổ, đổi tên)' : ''} → ${v.dir}`); send('models:dir-progress', { finished: true, ...r });
+          // B189: gửi thêm một sự kiện tiến độ SAU khi invoke đã trả — tái hiện thanh kẹt khi IPC đến muộn (chỉ QA)
+          if (String(process.env.AIVN_QA_MODE || '') === '1' && process.env.AIVN_MDIR_LATE_PROGRESS === '1') setTimeout(() => { try { send('models:dir-progress', { done: 1, total: 1, file: 'late.gguf', bytesDone: 1, bytesTotal: 1 }); } catch {} }, 400);
+          return { ok: true, ...r, info: dirInfo() };
+        } catch (e) { LOG.log('app', 'Chuyển mô hình dừng: ' + e.message); try { send('models:dir-progress', { finished: true, error: e.message, code: e.code || '' }); } catch {} return { ok: false, error: e.message, code: e.code || '', info: dirInfo() }; }
+        finally { dirMove = null; }
+      }
+      // chỉ trỏ sang thư mục mới: thư mục cũ vẫn được quét
+      const extra = new Set(settings.data.modelDirsExtra || []); if (MD.listFiles(old).length) extra.add(old); extra.delete(v.dir);
+      paths.models = v.dir; settings.data.modelsDir = v.dir; settings.data.modelDirsExtra = [...extra]; settings.save(); modelsDirProblem = null;
+      LOG.log('app', `Thư mục mô hình mới: ${v.dir} (mô hình ở ${old} vẫn dùng được)`); return { ok: true, moved: 0, info: dirInfo() };
+    } finally { if (dirMove === hold) dirMove = null; }
   });
-  ipcMain.handle('models:dir-cancel', () => { if (dirMove) dirMove.ac.abort(); return true; });
+  ipcMain.handle('models:dir-cancel', () => { if (dirMove && dirMove.ac) dirMove.ac.abort(); return true; });
   ipcMain.handle('models:dir-reset', () => { if (QA_PROFILE || dirMove) return { ok: false }; settings.data.modelsDir = null; paths.models = defaultModelsDir(); fs.mkdirSync(paths.models, { recursive: true }); settings.save(); return { ok: true, info: dirInfo() }; });
   ipcMain.handle('models:reveal', (_e, p) => { shell.showItemInFolder(p || paths.models); return true; });
   ipcMain.handle('model:status', () => engine.status());

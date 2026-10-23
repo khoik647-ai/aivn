@@ -173,11 +173,14 @@ async function rollbackJournal(j) {
 }
 // Nhật ký cũ không có created (chỉ có ở commit chưa phát hành). Chỉ hoàn tác.
 // Không bao giờ xoá nguồn còn tồn tại — cùng kích thước không chứng minh cùng nội dung.
-function recoverMoveLegacy(j, file) {
+// Chỉ xoá nhật ký khi đĩa vẫn đúng bản đã đọc. Lần chuyển mới có thể ghi đè models-move.json trong lúc recover đang băm.
+function journalSame(file, raw) { try { return fs.readFileSync(file, 'utf8') === raw; } catch { return false; } }
+function journalClearIfSame(file, raw) { if (journalSame(file, raw)) journalClear(file); }
+function recoverMoveLegacy(j, file, raw) {
   const destFile = (f) => { const st = lstatOrNull(path.join(j.to, f.rel)); return !!(st && st.isFile() && !st.isSymbolicLink() && st.size === f.size); };
   const sourceThere = (f) => !!lstatOrNull(path.join(j.from, f.rel));
   if (j.phase === 'commit' && j.rels.length && j.rels.every(destFile) && j.rels.every((f) => !sourceThere(f))) {
-    journalClear(file); return { resumed: true, dir: path.resolve(j.to) };
+    journalClearIfSame(file, raw); return { resumed: true, dir: path.resolve(j.to) };
   }
   for (const f of j.rels) {
     const src = path.join(j.from, f.rel), dst = path.join(j.to, f.rel);
@@ -188,7 +191,7 @@ function recoverMoveLegacy(j, file) {
       catch { fs.copyFileSync(dst, src); const back = lstatOrNull(src); if (back && back.isFile() && !back.isSymbolicLink() && back.size === f.size) { try { fs.unlinkSync(dst); } catch {} } }
     } catch {}
   }
-  pruneEmpty(j.to); journalClear(file); return { rolledBack: true, dir: path.resolve(j.from) };
+  pruneEmpty(j.to); journalClearIfSame(file, raw); return { rolledBack: true, dir: path.resolve(j.from) };
 }
 // B218: ổ / thư mục đích chưa truy cập được thì KHÔNG xoá nhật ký, KHÔNG xoá hay dời tệp.
 const DEST_BLOCK = new Set(['ENOENT', 'EACCES', 'EIO', 'ENODEV', 'EPERM']);
@@ -197,7 +200,11 @@ function isDestBlock(e) { return !!(e && DEST_BLOCK.has(e.code)); }
 function destRootBlocked(dir) {
   let st = null;
   try { st = fs.lstatSync(dir); }
-  catch (e) { return isDestBlock(e) ? e : null; }
+  catch (e) {
+    // ENOENT của chính thư mục đích mà cha còn: người dùng đã xoá thư mục, không phải ổ rút. Đi tiếp luật cũ.
+    if (e && e.code === 'ENOENT') { try { fs.lstatSync(path.dirname(dir)); return null; } catch { /* cha cũng mất: ổ vắng */ } }
+    return isDestBlock(e) ? e : null;
+  }
   if (st.isSymbolicLink() || st.isDirectory()) {
     try { fs.readdirSync(dir); return null; }
     catch (e) { return isDestBlock(e) ? e : null; }
@@ -220,8 +227,8 @@ function pendingOf(j, err) {
   return {
     pending: true, state: 'pending', reason: 'destination missing', code: 'EDEST', dir: from, to, drive,
     fsCode: (err && err.code) || 'ENOENT',
-    log: `Chuyển mô hình đang chờ ổ đích. Chưa xoá hay dời tệp nào. Sẽ thử lại khi thư mục này truy cập được: ${to}`,
-    notice: `Chuyển mô hình đang chờ ổ đích ${drive}, thư mục “${base}”. Chưa xoá hay dời tệp nào. Sẽ thử lại khi ổ này có lại.`,
+    log: `Chuyển mô hình đang chờ ổ đích. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu. Sẽ thử lại khi thư mục này truy cập được: ${to}`,
+    notice: `Chuyển mô hình đang chờ ổ đích ${drive}, thư mục “${base}”. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu, và sẽ được phục hồi khi ổ này có lại.`,
   };
 }
 // Bản chuyển dở (sập giữa chừng). Nhật ký mới (có created): chỉ đụng tệp lần chuyển này tạo ra.
@@ -231,7 +238,7 @@ async function recoverMove(file) {
   if (moveActive && moveActive.journal && path.resolve(String(moveActive.journal)) === path.resolve(file)) return null;
   let raw; try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }
   let j; try { j = JSON.parse(raw); } catch { return null; }
-  if (!j || !j.from || !j.to || !Array.isArray(j.rels)) { journalClear(file); return null; }
+  if (!j || !j.from || !j.to || !Array.isArray(j.rels)) { journalClearIfSame(file, raw); return null; }
   const rootErr = destRootBlocked(j.to);
   if (rootErr) return pendingOf(j, rootErr);
   const childErr = await destChildBlocked(j);
@@ -252,7 +259,7 @@ async function recoverMove(file) {
   };
   const finish = (result) => { try { if (!fs.existsSync(file)) heavyRecover.delete(id); } catch {} return result; };
   try {
-    if (!Array.isArray(j.created)) return finish(recoverMoveLegacy(j, file));
+    if (!Array.isArray(j.created)) return finish(recoverMoveLegacy(j, file, raw));
     let verified = j.rels.length > 0;
     if (verified) {
       for (const f of j.rels) {
@@ -273,12 +280,12 @@ async function recoverMove(file) {
       cleanTemps(j);
       const still = destRootBlocked(j.to);
       if (still) return pendingOf(j, still);
-      pruneEmpty(j.from); journalClear(file); return finish({ resumed: true, dir: path.resolve(j.to) });
+      pruneEmpty(j.from); journalClearIfSame(file, raw); return finish({ resumed: true, dir: path.resolve(j.to) });
     }
     await rollbackJournal(j);
     const after = destRootBlocked(j.to);
     if (after) return pendingOf(j, after);
-    pruneEmpty(j.to); journalClear(file); return finish({ rolledBack: true, dir: path.resolve(j.from) });
+    pruneEmpty(j.to); journalClearIfSame(file, raw); return finish({ rolledBack: true, dir: path.resolve(j.from) });
   } catch (e) {
     if (e && (e.aivnDestBlock || (isDestBlock(e) && e.code !== 'ENOENT'))) return pendingOf(j, e);
     heavyRecover.delete(id); throw e;
