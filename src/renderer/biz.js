@@ -71,11 +71,18 @@
   const btn = (act, label, primary = false, tip = '') => `<button type="button" class="btn sm${primary ? ' primary' : ''}" data-biz-act="${act}"${tip ? ` title="${esc(tip)}"` : ''}>${esc(label)}</button>`;
   const smart = (act, icon, n, label) => `<button type="button" class="biz-smart" data-biz-act="${act}"><span>${icon}</span><b>${n}</b> ${esc(label)}</button>`;
 
+  // #74 (B204): show('crm') tự vẽ lại (bất đồng bộ) với chứng từ đang mở; nếu cùng tick lại đổi B.form và gọi renderCrm(), lượt vẽ CŨ
+  // chờ xong sau có thể gán B.edit của chứng từ trước (rồi lượt mới dùng nhầm B.edit đó) hoặc ghi đè màn hình. Mỗi lượt vẽ có số phiên;
+  // sau mỗi lần chờ dữ liệu, lượt nào không còn là lượt mới nhất thì bỏ, không đụng B.edit hay #crmBody.
+  let renderGen = 0;
+  const STALE = Symbol('stale');
+  const live = (gen) => { if (gen !== renderGen || !Object.hasOwn(APPS, crm.tab)) throw STALE; }; // đã chuyển sang thẻ CRM thường (Tổng quan, Liên hệ…) cũng là cũ
   async function render(app) {
+    const gen = ++renderGen;
     const el = body(); const q = $('#crmQ').value.trim();
     $('#crmAdd').textContent = app === 'sales' ? (B.sub.sales === 'products' ? '＋ Sản phẩm' : '＋ Báo giá') : app === 'stock' ? '＋ Phiếu nhập kho' : app === 'purchase' ? '＋ Yêu cầu báo giá' : app === 'invoices' ? (['bills', 'topay'].includes(B.sub.invoices) ? '＋ Hoá đơn nhà cung cấp' : '＋ Hoá đơn') : '⬇ Xuất CSV';
     try {
-      if (B.form) return await renderForm();
+      if (B.form) return await renderForm(gen);
       let html = subnav(app);
       const s = B.sub[app];
       if (app === 'sales') html += s === 'products' ? await productList(q) : await orderList(s, q);
@@ -83,8 +90,8 @@
       else if (app === 'purchase') html += await purchaseList(s, q);
       else if (app === 'invoices') html += await invoiceList(s, q);
       else html += await reportView(s);
-      el.innerHTML = html;
-    } catch (e) { el.innerHTML = `<div class="empty-state">⚠ ${esc(e.message)}</div>`; }
+      live(gen); el.innerHTML = html;
+    } catch (e) { if (e !== STALE && gen === renderGen) el.innerHTML = `<div class="empty-state">⚠ ${esc(e.message)}</div>`; }
   }
   const empty = (icon, text) => `<div class="empty-state"><div class="big">${icon}</div>${esc(text)}</div>`;
 
@@ -105,9 +112,9 @@
       ${rows.map(p => `<tr data-biz-open="product:${esc(p.id)}" tabindex="0"><td><b>${esc(p.name)}</b>${p.category ? `<div class="small muted">${esc(p.category)}</div>` : ''}</td><td>${esc(p.sku || '')}</td><td>${esc(TYPE[p.type] || '')}</td><td class="num">${vnd(p.price)}</td><td class="num">${vnd(p.cost)}</td><td class="num">${by[p.id] ? qn(by[p.id].on_hand) + ' ' + esc(uomL(p.unit, by[p.id].on_hand)) : '—'}</td><td class="num">${by[p.id] ? qn(by[p.id].forecast) : '—'}</td><td><button type="button" class="btn sm" data-biz-act="archiveProduct" data-id="${esc(p.id)}" title="Lưu trữ (ẩn khỏi danh sách, giữ lịch sử)">Lưu trữ</button></td></tr>`).join('')}</tbody></table>`;
   }
   function newOrder() { return { id: null, status: 'draft', contact_id: '', date: today(), valid_until: '', payment_days: 0, commitment_date: '', vat_pct: defVat(), notes: '', lines: [], owner: '' }; }
-  async function orderForm() {
+  async function orderForm(gen) {
     const id = B.form.id; await loadRefs();
-    const o = id ? await C('getOrder', id) : null;
+    const o = id ? await C('getOrder', id) : null; live(gen);
     if (!B.edit) B.edit = o ? { ...o, lines: o.lines.map(l => ({ ...l })) } : newOrder();
     const e = B.edit; const st = o ? o.status : 'draft'; const editable = ['draft', 'sent'].includes(st);
     const lines = e.lines;
@@ -224,9 +231,9 @@
       ${rows.map(r => `<tr data-biz-open="invoice:${esc(r.id)}" tabindex="0"><td><b>${esc(r.display_number)}</b>${r.is_refund ? ' ' + badge('Giấy báo có', 'muted') : ''}</td><td>${esc(r.partner_name)}</td>${vendor ? `<td>${esc(r.ref || '')}</td>` : ''}<td>${dt(r.invoice_date)}</td><td class="${r.overdue ? 'neg' : ''}">${dt(r.due_date)}</td><td class="num">${vnd(r.amount_total)}</td><td class="num">${r.state === 'posted' ? vnd(r.residual) : ''}</td><td>${badge(r.state_vi, TONE[r.state])}</td><td>${r.state === 'posted' ? badge(r.payment_state_vi, TONE[r.payment_state]) : ''}</td></tr>`).join('')}
       </tbody><tfoot><tr><td colspan="${vendor ? 5 : 4}">${rows.length} dòng</td><td class="num"><b>${vnd(sum('amount_total'))}</b></td><td class="num"><b>${vnd(rows.filter(r => r.state === 'posted').reduce((a, r) => a + sg(r) * r.residual, 0))}</b></td><td colspan="2"></td></tr></tfoot></table>`;
   }
-  async function invoiceForm() {
+  async function invoiceForm(gen) {
     const id = B.form.id; await loadRefs();
-    const inv = id ? await C('getInvoice', id) : null;
+    const inv = id ? await C('getInvoice', id) : null; live(gen);
     if (!B.edit) B.edit = inv ? { ...inv, lines: inv.lines.map(l => ({ ...l })) } : { kind: B.form.kind || 'out_invoice', partner_id: '', invoice_date: '', due_date: '', ref: '', vat_pct: defVat(), notes: '', lines: [] };
     const e = B.edit; const kind = inv ? inv.kind : e.kind; const vendor = kind.startsWith('in_'); const refund = kind.endsWith('_refund');
     const st = inv ? inv.state : 'draft'; const editable = st === 'draft';
@@ -282,9 +289,9 @@
       </tbody><tfoot><tr><td colspan="5">${rows.length} dòng</td><td class="num"><b>${vnd(sum)}</b></td><td colspan="${rfq ? 1 : 3}"></td></tr></tfoot></table>`;
   }
   const newPurchase = () => ({ id: null, state: 'draft', partner_id: '', partner_ref: '', date_order: today(), date_planned: '', payment_days: 0, vat_pct: defVat(), notes: '', lines: [] });
-  async function purchaseForm() {
+  async function purchaseForm(gen) {
     const id = B.form.id; await loadRefs();
-    const o = id ? await C('getPurchase', id) : null;
+    const o = id ? await C('getPurchase', id) : null; live(gen);
     if (!B.edit) B.edit = o ? { ...o, lines: o.lines.map(l => ({ ...l })) } : newPurchase();
     const e = B.edit; const st = o ? o.state : 'draft'; const editable = ['draft', 'sent'].includes(st); const confirmed = ['purchase', 'done'].includes(st);
     const acts = [];
@@ -430,9 +437,12 @@
   }
   function open(type, id, app) { B.form = { type, id }; B.edit = null; if (app && crm.tab !== app) crm.tab = app; renderCrm(); }
   const rerender = () => renderCrm();
-  async function renderForm() {
+  async function renderForm(gen = ++renderGen) {
     const t = B.form.type; const el = body();
-    el.innerHTML = t === 'order' ? await orderForm() : t === 'purchase' ? await purchaseForm() : t === 'picking' ? await pickingForm() : t === 'invoice' ? await invoiceForm() : t === 'receipt' ? receiptForm() : '';
+    try {
+      const html = t === 'order' ? await orderForm(gen) : t === 'purchase' ? await purchaseForm(gen) : t === 'picking' ? await pickingForm() : t === 'invoice' ? await invoiceForm(gen) : t === 'receipt' ? receiptForm() : '';
+      live(gen); el.innerHTML = html;
+    } catch (e) { if (e !== STALE) throw e; }
   }
   // thêm: nút “＋”
   async function add(app) {
