@@ -274,7 +274,7 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
   }
   function getQuote(id) {
     const q = db.get('SELECT * FROM quotes WHERE id = ?', [id]); if (!q) throw new CrmError('Không tìm thấy báo giá.');
-    q.lines = db.all('SELECT * FROM quote_lines WHERE quote_id = ? ORDER BY pos', [id]).map(l => ({ ...l, amount: TAX.lineSubtotal(l), tax: TAX.lineTax(l) }));
+    q.lines = db.all('SELECT * FROM quote_lines WHERE quote_id = ? ORDER BY pos', [id]).map(l => ({ ...l, amount: TAX.lineSubtotal(l, TAX.roundingOf(q.tax_rounding)), tax: TAX.lineTax(l, TAX.roundingOf(q.tax_rounding)) }));
     Object.assign(q, quoteTotals(q)); q.status_vi = QUOTE_STATUS[q.status]; q.total_words = T.vndWords(q.total);
     q.contact = q.contact_id ? pubContact(db.get('SELECT * FROM contacts WHERE id = ?', [q.contact_id])) : null;
     if (q.contact && q.contact.company_id) q.company = pubContact(db.get('SELECT * FROM contacts WHERE id = ?', [q.contact.company_id]));

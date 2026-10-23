@@ -27,10 +27,11 @@ function createPurchase({ db, crm, now, today, log = () => {}, h }) {
   const qtyReceived = (lid) => db.get("SELECT COALESCE(SUM(qty_done), 0) AS q FROM moves WHERE po_line_id = ? AND kind = 'in' AND state = 'done'", [lid]).q;
   const qtyBilled = (lid) => db.get("SELECT COALESCE(SUM(CASE i.kind WHEN 'in_refund' THEN -l.qty ELSE l.qty END), 0) AS q FROM invoice_lines l JOIN invoices i ON i.id = l.invoice_id WHERE l.po_line_id = ? AND i.state != 'cancel'", [lid]).q;
   function poLines(poId, state) {
+    const rd = TAX.roundingOf((db.get('SELECT tax_rounding FROM purchase_orders WHERE id = ?', [poId]) || {}).tax_rounding);
     return db.all('SELECT l.*, p.type AS product_type FROM purchase_lines l LEFT JOIN products p ON p.id = l.product_id WHERE l.po_id = ? ORDER BY l.pos', [poId]).map(l => {
       const rcv = T.round3(qtyReceived(l.id)), billed = T.round3(qtyBilled(l.id)); const policy = byReceipt(l.product_type) && l.product_id ? 'receive' : 'order';
       const base = ['purchase', 'done'].includes(state) ? (policy === 'receive' ? rcv : l.qty) : 0;
-      return { ...l, amount: TAX.lineSubtotal(l), tax: TAX.lineTax(l), qty_received: rcv, qty_billed: billed, bill_policy: policy, qty_to_bill: T.round3(Math.max(0, base - billed)), receivable: !!l.product_id && byReceipt(l.product_type) };
+      return { ...l, amount: TAX.lineSubtotal(l, rd), tax: TAX.lineTax(l, rd), qty_received: rcv, qty_billed: billed, bill_policy: policy, qty_to_bill: T.round3(Math.max(0, base - billed)), receivable: !!l.product_id && byReceipt(l.product_type) };
     });
   }
   function statusOf(po, lines) {

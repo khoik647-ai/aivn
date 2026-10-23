@@ -17,7 +17,9 @@
   const NUM = window.AIVN_NUM, UOM = window.AIVN_UOM;
   const parseQty = (v) => NUM.parseQty(v);
   const parseMoney = (v) => { const n = NUM.parseMoney(v); return Number.isFinite(n) ? n : 0; };
-  const amt = (l) => Math.round((parseQty(l.qty) || 0) * parseMoney(l.price) * (1 - (NUM.parsePct(l.discount_pct) || 0) / 100));
+  // #41: thành tiền dòng như src/crm/tax.js lineSubtotal — 'line' = Odoo round_per_line (float_round(giá × (1 − CK/100) × SL)); 'global' = công thức cũ
+  const amt = (l, rounding) => { const q = parseQty(l.qty) || 0, p = parseMoney(l.price), d = NUM.parsePct(l.discount_pct) || 0;
+    return rounding === 'global' ? Math.round(q * p * (1 - d / 100)) : NUM.floatRound((p * (1 - d / 100.0)) * q); };
   // ô số: hiện theo ngôn ngữ (vi “1.234,5”, en/zh “1,234.5”) và giữ số gốc ở data-num — người dùng không sửa thì gửi đúng số gốc (kể cả 1,125 mơ hồ)
   const nv = (v, max = 3) => typeof v === 'number' && Number.isFinite(v) ? `value="${esc(NUM.fmtInput(v, UIL(), max))}" data-num="${v}"` : `value="${esc(v ?? '')}"`;
   const rv = (x) => (x.dataset.num != null && x.value === x.defaultValue ? Number(x.dataset.num) : x.value);
@@ -35,7 +37,7 @@
   const lineVat = (l) => (l.vat_pct === '' || l.vat_pct == null ? defVat() : Number(l.vat_pct));
   function totalsOf(lines, rounding) {
     const g = new Map(); let un = 0, tx = 0;
-    for (const l of lines) { const a = amt(l), r = lineVat(l); un += a; const x = g.get(r) || { rate: r, base: 0, tax: 0 }; x.base += a; if (rounding !== 'global') { const t = Math.round(a * r / 100); x.tax += t; tx += t; } g.set(r, x); }
+    for (const l of lines) { const a = amt(l, rounding), r = lineVat(l); un += a; const x = g.get(r) || { rate: r, base: 0, tax: 0 }; x.base += a; if (rounding !== 'global') { const t = NUM.floatRound(a * r / 100); x.tax += t; tx += t; } g.set(r, x); }
     const groups = [...g.values()].sort((a, b) => a.rate - b.rate); if (rounding === 'global') { for (const x of groups) x.tax = Math.round(x.base * x.rate / 100); tx = groups.reduce((a, x) => a + x.tax, 0); }
     return { untaxed: un, tax: tx, total: un + tx, groups };
   }
@@ -46,10 +48,10 @@
   }
   const vatSel = (v, attrs, aria = 'Thuế GTGT') => `<select ${attrs} aria-label="${esc(aria)}">${VATS.map(x => `<option value="${x}" ${Number(v) === x ? 'selected' : ''}>${x}%</option>`).join('')}</select>`;
   // bảng dòng dùng chung (báo giá/đơn bán, hoá đơn, đơn mua): sửa trực tiếp khi còn nháp
-  function linesTable(lines, editable, { note = () => '', products = B.products } = {}) {
+  function linesTable(lines, editable, { note = () => '', products = B.products, rounding = 'line' } = {}) {
     const head = `<thead><tr><th>Sản phẩm</th><th>Mô tả</th><th class="num">SL</th><th>ĐVT</th><th class="num">Đơn giá</th><th class="num">CK %</th><th class="num">Thuế</th><th class="num">Thành tiền</th><th></th></tr></thead>`;
-    const row = (l, i) => editable ? `<tr data-line="${i}"><td><select data-lf="product_id" aria-label="Sản phẩm">${opt(products.map(p => [p.id, p.name]), l.product_id, '(dòng tự ghi)')}</select></td><td><input data-lf="name" value="${esc(l.name || '')}" aria-label="Mô tả"></td><td class="num"><input data-lf="qty" inputmode="decimal" ${nv(l.qty ?? 1)} class="biz-num" aria-label="Số lượng"></td><td><input data-lf="unit" list="bizUoms" value="${esc(uomL(l.unit || 'cái', l.qty))}" class="biz-unit" aria-label="Đơn vị"></td><td class="num"><input data-lf="price" inputmode="numeric" ${nv(l.price ?? 0, 0)} class="biz-money" aria-label="Đơn giá"></td><td class="num"><input data-lf="discount_pct" inputmode="decimal" ${nv(l.discount_pct || 0)} class="biz-num" aria-label="Chiết khấu %"></td><td class="num">${vatSel(lineVat(l), 'data-lf="vat_pct" class="biz-vat"')}</td><td class="num">${vnd(amt(l))}</td><td><button type="button" class="btn sm" data-biz-act="delLine" data-i="${i}" aria-label="Xoá dòng">✕</button></td></tr>`
-      : `<tr><td colspan="2">${esc(l.name)}</td><td class="num">${qn(l.qty)}</td><td>${esc(uomL(l.unit || '', l.qty))}</td><td class="num">${vnd(l.price)}</td><td class="num">${l.discount_pct ? qn(l.discount_pct) + '%' : ''}</td><td class="num">${lineVat(l)}%</td><td class="num">${vnd(l.amount ?? amt(l))}</td><td class="small muted">${note(l)}</td></tr>`;
+    const row = (l, i) => editable ? `<tr data-line="${i}"><td><select data-lf="product_id" aria-label="Sản phẩm">${opt(products.map(p => [p.id, p.name]), l.product_id, '(dòng tự ghi)')}</select></td><td><input data-lf="name" value="${esc(l.name || '')}" aria-label="Mô tả"></td><td class="num"><input data-lf="qty" inputmode="decimal" ${nv(l.qty ?? 1)} class="biz-num" aria-label="Số lượng"></td><td><input data-lf="unit" list="bizUoms" value="${esc(uomL(l.unit || 'cái', l.qty))}" class="biz-unit" aria-label="Đơn vị"></td><td class="num"><input data-lf="price" inputmode="numeric" ${nv(l.price ?? 0, 0)} class="biz-money" aria-label="Đơn giá"></td><td class="num"><input data-lf="discount_pct" inputmode="decimal" ${nv(l.discount_pct || 0)} class="biz-num" aria-label="Chiết khấu %"></td><td class="num">${vatSel(lineVat(l), 'data-lf="vat_pct" class="biz-vat"')}</td><td class="num">${vnd(amt(l, rounding))}</td><td><button type="button" class="btn sm" data-biz-act="delLine" data-i="${i}" aria-label="Xoá dòng">✕</button></td></tr>`
+      : `<tr><td colspan="2">${esc(l.name)}</td><td class="num">${qn(l.qty)}</td><td>${esc(uomL(l.unit || '', l.qty))}</td><td class="num">${vnd(l.price)}</td><td class="num">${l.discount_pct ? qn(l.discount_pct) + '%' : ''}</td><td class="num">${lineVat(l)}%</td><td class="num">${vnd(l.amount ?? amt(l, rounding))}</td><td class="small muted">${note(l)}</td></tr>`;
     return `<table class="crm-table biz-lines">${head}<tbody>${lines.map(row).join('') || '<tr><td colspan="9" class="muted">Chưa có dòng nào.</td></tr>'}</tbody></table>${editable ? uomList() : ''}`;
   }
   // PDF thật (Chromium printToPDF ở tiến trình chính) thay cho hộp thoại in của trình duyệt
@@ -132,7 +134,7 @@
           ${o && st === 'sale' ? `<div class="biz-ro"><span class="muted small">Giao hàng · Hoá đơn</span><div>${badge(o.delivery_status_vi, TONE[o.delivery_status])} ${badge(o.invoice_status_vi, TONE[o.invoice_status])}</div></div>` : ''}
         </div>
         <h3>Dòng đơn hàng</h3>
-        ${linesTable(lines, editable, { note: (l) => st === 'sale' ? `giao ${qn(l.qty_delivered)} · HĐ ${qn(l.qty_invoiced)}` : '' })}
+        ${linesTable(lines, editable, { rounding: roundingOf(e), note: (l) => st === 'sale' ? `giao ${qn(l.qty_delivered)} · HĐ ${qn(l.qty_invoiced)}` : '' })}
         ${editable ? `<div class="row">${btn('addLine', '＋ Thêm dòng')}</div>` : ''}
         ${totalsBox(lines, roundingOf(e))}
         <label class="biz-notes">Điều khoản và ghi chú<textarea data-f="notes" rows="2" ${editable ? '' : 'disabled'}>${esc(e.notes || '')}</textarea></label>
@@ -259,7 +261,7 @@
           <label>Hạn thanh toán<input type="date" data-f="due_date" value="${esc(e.due_date || '')}" ${editable ? '' : 'disabled'}></label>
           ${editable ? `<label title="Áp cho mọi dòng; từng dòng vẫn chọn được mức riêng ở cột “Thuế”"><span>Thuế GTGT mặc định</span>${vatSel(e.vat_pct ?? defVat(), 'data-f="vat_pct"')}</label>` : ''}
           ${inv && inv.so_number ? `<div class="biz-ro"><span class="muted small">Đơn bán hàng</span><div>${esc(inv.so_number)}</div></div>` : ''}${inv && inv.po_number ? `<div class="biz-ro"><span class="muted small">Đơn mua hàng</span><div>${esc(inv.po_number)}</div></div>` : ''}${inv && inv.reversed_number ? `<div class="biz-ro"><span class="muted small">Đảo của</span><div>${esc(inv.reversed_number)}</div></div>` : ''}</div>
-        ${linesTable(lines, editable, { products: B.products })}
+        ${linesTable(lines, editable, { products: B.products, rounding: roundingOf(e) })}
         ${editable ? `<div class="row">${btn('addLine', '＋ Thêm dòng')}</div>` : ''}
         ${totalsBox(lines, roundingOf(e), pays + due)}
         ${inv && inv.total_words && UIL() === 'vi' ? `<p class="small muted">Bằng chữ: ${esc(inv.total_words)}</p>` : ''}
@@ -312,7 +314,7 @@
           ${o && o.amount_due ? `<div class="biz-ro"><span class="muted small">Còn phải trả</span><div><b>${vnd(o.amount_due)}</b></div></div>` : ''}
         </div>
         <h3>Sản phẩm</h3>
-        ${linesTable(e.lines, editable, { note: (l) => !confirmed ? '' : l.receivable ? `nhận ${qn(l.qty_received)} · HĐ ${qn(l.qty_billed)}` : `HĐ ${qn(l.qty_billed)}` })}
+        ${linesTable(e.lines, editable, { rounding: roundingOf(e), note: (l) => !confirmed ? '' : l.receivable ? `nhận ${qn(l.qty_received)} · HĐ ${qn(l.qty_billed)}` : `HĐ ${qn(l.qty_billed)}` })}
         ${editable ? `<div class="row">${btn('addLine', '＋ Thêm dòng')}</div>` : ''}
         ${totalsBox(e.lines, roundingOf(e))}
         ${confirmed ? '<p class="small muted">Hàng lưu kho và hàng tiêu dùng được lập hoá đơn theo số đã nhận; dịch vụ theo số đã đặt (như Odoo).</p>' : ''}

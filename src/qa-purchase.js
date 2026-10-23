@@ -7,6 +7,7 @@ const fs = require('fs'); const path = require('path');
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 async function qaPurchase({ win, app, VI }) {
+  if (process.env.AIVN_QA_TAX41) return qaTax41({ win, app, VI });
   const dir = process.env.AIVN_QA_PURCHASE; fs.mkdirSync(dir, { recursive: true });
   process.env.AIVN_QA_PDF_DIR = process.env.AIVN_QA_PDF_DIR || path.join(dir, 'pdf');
   const wc = win.webContents; const js = (c) => wc.executeJavaScript(c);
@@ -108,5 +109,71 @@ async function qaPurchase({ win, app, VI }) {
     out.toasts = await js(`[...document.querySelectorAll('.toast-stack .toast-item')].map(t => t.innerText.trim())`);
   } catch (e) { out.error = e.message; }
   fs.writeFileSync(path.join(dir, `qapurchase-${lang}.json`), JSON.stringify(out, null, 2)); app.exit(0);
+}
+// #41 (C4): thuế GTGT theo dòng trên MÀN HÌNH thật — AIVN_QA_TAX41=tệp JSON [{ key, doc, lines }] (mẫu Odoo round_per_line).
+// Tạo đủ 6 loại chứng từ (báo giá, đơn bán, hoá đơn, giấy báo có, đơn mua, hoá đơn NCC), mở từng biểu mẫu ở vi/en/zh, đọc ô tổng
+// (tiền trước thuế, thuế theo từng mức + phần “trên”, tổng cộng) và thành tiền từng dòng; thêm một hoá đơn GÕ TAY trên biểu mẫu nháp
+// (giao diện tự tính trước khi lưu) rồi lưu. Ghi ra qatax41.json để test so với số Odoo.
+async function qaTax41({ win, app, VI }) {
+  const dir = process.env.AIVN_QA_PURCHASE; fs.mkdirSync(dir, { recursive: true });
+  const docs = JSON.parse(fs.readFileSync(process.env.AIVN_QA_TAX41, 'utf8'));
+  const wc = win.webContents; const js = (c) => wc.executeJavaScript(c);
+  const errs = []; wc.on('console-message', (ev) => { const m = ev && ev.message; if (m && /error|lỗi|uncaught/i.test(m)) errs.push(String(m).slice(0, 300)); });
+  const until = async (c, ms = 60000) => { const t = Date.now(); while (Date.now() - t < ms) { try { if (await js(c)) return true; } catch {} await sleep(150); } return false; };
+  win.setBounds({ x: 0, y: 0, width: 1366, height: 900 });
+  const out = { docs: [], screens: {}, typed: {}, errs };
+  const C = (fn, ...a) => js(`(async () => { const r = await A.crm(${JSON.stringify(fn)}, ...${JSON.stringify(a)}); if (!r.ok) throw new Error(${JSON.stringify(fn)} + ': ' + r.error); return r.data; })()`);
+  const click = (sel) => `(() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b) throw new Error('không thấy ' + ${JSON.stringify(sel)}); b.click(); })()`;
+  // ô tổng + thành tiền từng dòng (ô cuối cùng có “₫” của mỗi dòng)
+  const read = () => js(`(() => { const box = document.querySelector('#crmBody .biz-totals'); if (!box) return null;
+    const rows = [...box.querySelectorAll(':scope > div')].map(d => ({ label: (d.querySelector('span') || d).innerText.replace(/\\s+/g, ' ').trim(), value: (d.querySelector('b') || {}).innerText || '' }));
+    const lines = [...document.querySelectorAll('#crmBody .biz-lines tbody tr')].map(tr => { const c = [...tr.querySelectorAll('td')].filter(td => /₫/.test(td.innerText)); return c.length ? c[c.length - 1].innerText.trim() : ''; });
+    const VI = ${VI}; const left = []; const w = document.createTreeWalker(box, NodeFilter.SHOW_TEXT); for (let n = w.nextNode(); n; n = w.nextNode()) { const t = n.nodeValue.trim(); if (t && VI.test(t)) left.push(t); }
+    return { rows, lines, left, title: (document.querySelector('.biz-title') || {}).innerText || '' }; })()`);
+  try {
+    await until('typeof show === "function" && !!state.settings && !!window.BIZ', 60000);
+    await js(`localStorage.setItem('aivn.onboarded', '1'); document.querySelector('#onboard') && (document.querySelector('#onboard').hidden = true)`);
+    const cus = await C('saveContact', { name: 'Công ty TNHH Sen Vàng', kind: 'company', tax_id: '0312345678' });
+    const ven = await C('saveContact', { name: 'Công ty Gỗ Bình Dương', kind: 'company', tax_id: '3701234567' });
+    for (const d of docs) {
+      const lines = d.lines.map(l => ({ name: l.name, unit: 'cái', qty: l.qty, price: l.price, discount_pct: l.discount_pct, vat_pct: l.vat_pct }));
+      let form, app2, id;
+      if (d.doc === 'quote' || d.doc === 'sale_order') { const q = await C('saveQuote', { contact_id: cus.id, lines }); id = q.id; if (d.doc === 'sale_order') await C('confirmOrder', id); form = 'order'; app2 = 'sales'; }
+      else if (d.doc === 'purchase_order') { const o = await C('savePurchase', { partner_id: ven.id, lines }); id = o.id; await C('confirmPurchase', id); form = 'purchase'; app2 = 'purchase'; }
+      else { const inv = await C('saveInvoice', { partner_id: d.doc === 'vendor_bill' ? ven.id : cus.id, kind: d.doc === 'vendor_bill' ? 'in_invoice' : 'out_invoice', lines }); id = inv.id; await C('postInvoice', id);
+        if (d.doc === 'credit_note') { const r = await C('creditNote', id, {}); id = r.id; await C('postInvoice', id); } form = 'invoice'; app2 = 'invoices'; }
+      out.docs.push({ key: d.key, doc: d.doc, form, app: app2, id });
+    }
+    for (const lang of ['vi', 'en', 'zh']) {
+      await js(`I18N.setLang(${JSON.stringify(lang)}); BIZ.reset(); show('crm')`); await sleep(1200);
+      out.screens[lang] = {};
+      for (const d of out.docs) {
+        // một lần vẽ cho mỗi chứng từ: show('crm') cũng tự vẽ lại (bất đồng bộ) với form cũ → nếu gọi cùng lúc, lần vẽ cũ gán B.edit của chứng từ trước
+        await js(`crm.tab = ${JSON.stringify(d.app)}; BIZ.reset(); document.querySelector('#crmBody').innerHTML = ''; BIZ.state.form = { type: ${JSON.stringify(d.form)}, id: ${JSON.stringify(d.id)} }; renderCrm()`);
+        await until(`!!document.querySelector('#crmBody .biz-totals')`, 8000); await sleep(450);
+        out.screens[lang][d.key] = await read();
+        if (['S1', 'S3'].includes(d.key) || d.key.startsWith('T-')) fs.writeFileSync(path.join(dir, `${lang}-${d.key}.png`), (await wc.capturePage()).toPNG());
+      }
+      // hoá đơn gõ tay trên biểu mẫu nháp: giao diện tự tính (NUM.floatRound) trước khi lưu; số gõ theo thói quen của ngôn ngữ
+      const typed = docs.find(x => x.typed); if (typed) {
+        await js('crm.tab = "invoices"; BIZ.reset(); BIZ.state.sub.invoices = "inv"; renderCrm()'); await sleep(700);
+        await js(click('#crmAdd')); await sleep(800);
+        await js(`(async () => { const c = document.querySelector('[data-f=partner_id]'); c.value = [...c.options].find(o => o.text.includes('Sen Vàng')).value; c.dispatchEvent(new Event('change', { bubbles: true })); await new Promise(r => setTimeout(r, 350)); })()`);
+        for (let i = 0; i < typed.lines.length; i++) {
+          const l = typed.lines[i]; await js(click('[data-biz-act=addLine]')); await sleep(350);
+          for (const [f, v] of [['name', l.name], ['qty', l.qty], ['price', l.price], ['discount_pct', l.discount_pct], ['vat_pct', l.vat_pct]]) {
+            await js(`(async () => { const i = document.querySelector('tr[data-line="${i}"] [data-lf=${f}]'); i.value = ${f === 'name' || f === 'vat_pct' ? JSON.stringify(String(v)) : `window.AIVN_NUM.fmtInput(${JSON.stringify(v)}, UIL(), 3)`}; i.dispatchEvent(new Event('change', { bubbles: true })); await new Promise(r => setTimeout(r, 300)); })()`);
+          }
+        }
+        await sleep(400); const draft = await read();
+        fs.writeFileSync(path.join(dir, `${lang}-go-tay-nhap.png`), (await wc.capturePage()).toPNG());
+        await js(click('[data-biz-act=saveInvoice]')); await until(`!document.querySelector('[data-biz-act=saveInvoice]')`, 8000); await sleep(600);
+        const saved = await read(); const id = await js('BIZ.state.form && BIZ.state.form.id');
+        out.typed[lang] = { key: typed.key, draft, saved, stored: id ? await C('getInvoice', id) : null };
+      }
+    }
+    await js(`I18N.setLang('vi')`);
+  } catch (e) { out.error = e.message; }
+  fs.writeFileSync(path.join(dir, 'qatax41.json'), JSON.stringify(out, null, 2)); app.exit(0);
 }
 module.exports = { qaPurchase };

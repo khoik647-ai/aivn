@@ -69,6 +69,20 @@
   const LOCALE = { vi: 'vi-VN', en: 'en-US', zh: 'zh-CN' };
   // số → chuỗi đặt vào ô nhập theo ngôn ngữ giao diện (đọc lại đúng bằng parseNumber khi không mơ hồ; giao diện giữ số gốc ở data-num)
   const fmtInput = (n, lang = 'vi', max = 3) => Number.isFinite(Number(n)) ? Number(n).toLocaleString(LOCALE[lang] || 'vi-VN', { maximumFractionDigits: max, useGrouping: true }) : '';
-  const api = { parseNumber, parseQty, parsePct, parseMoney, round3, fmtInput, LOCALE };
+  // #41: float_round của Odoo (odoo/tools/float_utils.py, HALF-UP) — dùng cho thuế làm tròn từng dòng (src/crm/tax.js) và tổng tạm
+  // trên màn hình (renderer/biz.js), để hai nơi ra cùng một đồng. Chia cho bước làm tròn (1 ₫), cộng epsilon = 2^(log2|x| − 52)
+  // cùng dấu, rồi round() kiểu Python 2 (nửa ra xa số 0) như hàm float_utils.round của Odoo.
+  const pyRound = (f) => {
+    const even = (x) => { const r = Math.round(x); return r - x === 0.5 && r % 2 !== 0 ? r - 1 : r; }; // builtins.round của Python 3
+    const r = even(f); if (even(f + 1) - r !== 1) return f + (f < 0 ? -0.5 : 0.5);
+    return r === 0 ? 0 : r;
+  };
+  function floatRound(value, rounding = 1) {
+    if (!rounding || !value) return 0;
+    let n = value / rounding; const eps = 2 ** (Math.log(Math.abs(n)) / Math.log(2) - 52);
+    n += n < 0 ? -eps : eps;
+    return pyRound(n) * rounding;
+  }
+  const api = { parseNumber, parseQty, parsePct, parseMoney, round3, fmtInput, floatRound, LOCALE };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.AIVN_NUM = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -36,7 +36,8 @@ const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
 const addDays = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return ymd(d); };
 const daysBetween = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
-const lineAmount = (l) => Math.round(num(l.qty) * num(l.price) * (1 - num(l.discount_pct) / 100));
+// #41: thành tiền dòng theo cách làm tròn của chứng từ ('line' = Odoo round_per_line; 'global' = công thức cũ trước 0.16)
+const lineAmount = (l, rounding) => TAX.lineSubtotal(l, TAX.roundingOf(rounding));
 const EPS = 1e-9;
 // B52 (QA lượt 6): thuế suất không hợp lệ (vd. 7%) → báo lỗi, không tự đổi thành 10% — dùng chung src/crm/tax.js (thuế theo từng dòng)
 const vatOf = (x, d = 10) => TAX.vatOf(x, d);
@@ -205,8 +206,9 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
   const qtyDelivered = (lineId) => db.get(`SELECT COALESCE(SUM(qty_done), 0) AS q FROM moves WHERE so_line_id = ? AND kind = 'out' AND state = 'done'`, [lineId]).q;
   const qtyInvoiced = (lineId) => db.get(`SELECT COALESCE(SUM(CASE i.kind WHEN 'out_refund' THEN -l.qty ELSE l.qty END), 0) AS q FROM invoice_lines l JOIN invoices i ON i.id = l.invoice_id WHERE l.so_line_id = ? AND i.state != 'cancel'`, [lineId]).q;
   function orderLines(soId) {
+    const rd = TAX.roundingOf((db.get('SELECT tax_rounding FROM quotes WHERE id = ?', [soId]) || {}).tax_rounding);
     return db.all('SELECT l.*, p.type AS product_type FROM quote_lines l LEFT JOIN products p ON p.id = l.product_id WHERE l.quote_id = ? ORDER BY l.pos', [soId])
-      .map(l => { const d = qtyDelivered(l.id), i = qtyInvoiced(l.id); return { ...l, amount: lineAmount(l), tax: TAX.lineTax(l), qty_delivered: d, qty_invoiced: i, qty_to_invoice: Math.max(0, +(l.qty - i).toFixed(6)), deliverable: !!l.product_id && ['product', 'consu'].includes(l.product_type) }; });
+      .map(l => { const d = qtyDelivered(l.id), i = qtyInvoiced(l.id); return { ...l, amount: lineAmount(l, rd), tax: TAX.lineTax(l, rd), qty_delivered: d, qty_invoiced: i, qty_to_invoice: Math.max(0, +(l.qty - i).toFixed(6)), deliverable: !!l.product_id && ['product', 'consu'].includes(l.product_type) }; });
   }
   function orderStatus(so, lines) {
     if (so.status !== 'sale') return { invoice_status: 'no', delivery_status: 'none' };
@@ -339,7 +341,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
   }
   function getInvoice(id) {
     const inv = pubInvoice(db.get('SELECT * FROM invoices WHERE id = ?', [id])); if (!inv) throw new CrmError('Không tìm thấy hoá đơn.');
-    inv.lines = db.all('SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY pos', [id]).map(l => ({ ...l, amount: lineAmount(l), tax: TAX.lineTax(l) }));
+    inv.lines = db.all('SELECT * FROM invoice_lines WHERE invoice_id = ? ORDER BY pos', [id]).map(l => ({ ...l, amount: lineAmount(l, inv.tax_rounding), tax: TAX.lineTax(l, TAX.roundingOf(inv.tax_rounding)) }));
     inv.tax_groups = TAX.totals(inv.lines, TAX.roundingOf(inv.tax_rounding)).tax_groups;
     inv.po_number = inv.po_id ? (db.get('SELECT number FROM purchase_orders WHERE id = ?', [inv.po_id]) || {}).number || '' : '';
     inv.payments = db.all('SELECT * FROM payments WHERE invoice_id = ? ORDER BY date, created_at', [id]).map(p => ({ ...p, method_vi: PAY_METHOD[p.method] || p.method }));
@@ -473,7 +475,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
     const orders = db.all("SELECT q.*, c.name AS contact_name FROM quotes q LEFT JOIN contacts c ON c.id = q.contact_id WHERE q.status = 'sale'").filter(o => inRange(ymd(new Date(o.confirmed_at || o.updated_at)), from, to));
     const m = new Map(); const add = (k, label, qty, un, tot, oid) => { const g = m.get(k) || { key: k, label, orders: new Set(), qty: 0, untaxed: 0, total: 0 }; g.orders.add(oid); g.qty += qty; g.untaxed += un; g.total += tot; m.set(k, g); };
     for (const o of orders) for (const l of db.all('SELECT l.*, p.category FROM quote_lines l LEFT JOIN products p ON p.id = l.product_id WHERE l.quote_id = ?', [o.id])) {
-      const un = lineAmount(l); const tot = un + TAX.lineTax({ ...l, vat_pct: l.vat_pct == null ? o.vat_pct : l.vat_pct });
+      const rd = TAX.roundingOf(o.tax_rounding); const un = lineAmount(l, rd); const tot = un + TAX.lineTax({ ...l, vat_pct: l.vat_pct == null ? o.vat_pct : l.vat_pct }, rd);
       const [k, label] = groupBy === 'customer' ? [o.contact_id || '-', o.contact_name || '(không rõ)'] : groupBy === 'product' ? [l.product_id || 'name:' + l.name, l.name] : groupBy === 'category' ? [l.category || '-', l.category || '(chưa phân nhóm)'] : groupBy === 'owner' ? [o.owner || '-', o.owner || '(chưa giao)'] : [monthOf(o.confirmed_at || o.updated_at), monthOf(o.confirmed_at || o.updated_at)];
       add(k, label, l.qty, un, tot, o.id);
     }
