@@ -101,27 +101,36 @@ function firstVerb(t) {
   return best;
 }
 const CUT = /[\r\n]|[:：﹕∶꞉˸︓](?![\\/]|\d)|["“”„«»‹「『‘’`(（\[【{<＜《〈]|(?<![\p{L}\d])'|\s[-–—]+\s/u;
+// review #64 vòng 6 (M1′): nội dung có thể ở DÒNG ĐẦU, câu lệnh ở dòng dưới (“<đoạn văn>\nmở Notepad và gõ đoạn trên”) →
+// dòng lệnh = dòng ĐẦU TIÊN có động từ ghi; dòng không có động từ ghi là nội dung. Không dòng nào có → '' (bảo vệ bật).
+const linesOf = (q) => String(q || '').replace(/(\d)[:：﹕∶](?=\d)/gu, '$1\u2009').split(/\r\n|[\r\n]/); // giờ 10:30 không phải dấu phân cách
 function commandPart(q) {
-  let t = String(q || '');
-  t = t.replace(/(\d)[:：﹕∶](?=\d)/gu, '$1\u2009'); // giờ 10:30 không phải dấu phân cách
-  const i = t.search(CUT); if (i >= 0) t = t.slice(0, i);
-  return t;
+  const line = linesOf(q).find(l => writeTask(l)); if (line == null) return '';
+  const i = line.search(CUT); return i >= 0 ? line.slice(0, i) : line;
 }
 const URL_RE = /(?:[a-z][a-z\d+.-]*:\/\/|www\.)\S*/giu;
 // cụm đích NGAY sau động từ ghi (không có nội dung xen giữa)
-const TARGET_AFTER = /^\s*(?:(?:tiếp(?!\s+theo)|thêm)\s*)?(?:(?:vào|into|to|in|on)\s+(?:(?:the|my|cái)\s+)?(?:(?:tài liệu|tệp|tập tin|file|thẻ)\s+(?:đang mở|hiện tại|hiện có|có sẵn|sẵn có|cũ|này|đó)|(?:current|existing|already[- ]open|same|this|that)\s+(?:file|document|doc|tab)|cuối|the end of))(?![\p{L}])|^\s*tiếp(?!\s+theo)(?![\p{L}])|^\s*(?:at the end of|vào cuối)(?![\p{L}])/iu;
+const TARGET_AFTER = /^\s*(?:(?:tiếp(?!\s+(?:theo|tục))|thêm)\s*)?(?:(?:vào|into|to|in|on)\s+(?:(?:the|my|cái)\s+)?(?:(?:tài liệu|tệp|tập tin|file|thẻ)\s+(?:đang mở|hiện tại|hiện có|có sẵn|sẵn có|cũ|này|đó)|(?:current|existing|already[- ]open|same|this|that)\s+(?:file|document|doc|tab)|cuối|the end of))(?![\p{L}])|^\s*tiếp(?!\s+(?:theo|tục))(?![\p{L}])|^\s*(?:at the end of|vào cuối)(?![\p{L}])/iu;
 const TARGET_END = /(?:^|[^\p{L}])(?:vào|into)\s+(?:(?:tệp|tập tin|file)\s+)?((?:[a-z]:)?[^\s]*?[\p{L}\d_\-]+\.(?:txt|md|docx?|rtf|odt|log|csv|ini))[\s.!]*$/iu;
-function freshDocTask(q) {
-  const t = String(q || ''); if (!t.trim() || !writeTask(t)) return false;
-  const c = commandPart(t); const v = firstVerb(c);
-  const head = (v ? c.slice(0, v.end) : c).replace(URL_RE, ' '); // tới HẾT động từ (“continue typing”, “继续输入”)
-  if (EXISTING.test(head) || namesExistingFile(head)) return false;
-  if (v && TARGET_AFTER.test(c.slice(v.end))) return false;
+// → { fresh: có bật bảo vệ, file: tên tệp nêu ở “gõ X vào <tệp>” (ngoại lệ 2) hoặc null }
+function taskMode(q) {
+  const t = String(q || ''); const ON = { fresh: true, file: null }; if (!t.trim() || !writeTask(t)) return { fresh: false, file: null };
+  // nhiều dòng có động từ ghi → không rõ dòng nào là lệnh → bảo vệ (fail closed)
+  if (linesOf(t).filter(l => writeTask(l)).length !== 1) return ON;
+  const c = commandPart(t); const v = firstVerb(c); if (!v) return ON; // động từ nằm sau dấu phân cách (trong nội dung) → bảo vệ
+  const head = c.slice(0, v.end).replace(URL_RE, ' '); // tới HẾT động từ (“continue typing”, “继续输入”)
+  if (EXISTING.test(head) || namesExistingFile(head)) return { fresh: false, file: null };
+  if (TARGET_AFTER.test(c.slice(v.end))) return { fresh: false, file: null };
   // “gõ X vào D:\\…\\named.txt” / “type X into notes.txt”: dòng lệnh KẾT THÚC bằng vào/into + tên tệp/đường dẫn (không phải URL, không phải nơi lưu)
-  const m = v && TARGET_END.exec(c);
-  if (m && m.index >= v.end && !/:\/\/|^www\./i.test(m[1]) && !SAVE_BEFORE.test(c.slice(0, m.index))) return false;
-  return true;
+  // review #64 vòng 6 (X7): ngoại lệ này chỉ dùng khi tài liệu đang hiện ĐÚNG là tệp đó (sameFile) — desktop-agent kiểm
+  const m = TARGET_END.exec(c);
+  if (m && m.index >= v.end && !/:\/\/|^www\./i.test(m[1]) && !SAVE_BEFORE.test(c.slice(0, m.index))) return { fresh: false, file: m[1].split(/[\\/]/).pop() };
+  return ON;
 }
+const freshDocTask = (q) => taskMode(q).fresh;
+const namedTarget = (q) => taskMode(q).file;
+// tài liệu đang hiện có đúng là tệp đã nêu không (tên trong tiêu đề, bỏ dấu sửa đổi; không phân biệt hoa thường — tên tệp Windows)
+const sameFile = (file, title) => !!file && docName(title).toLowerCase() === String(file).toLowerCase();
 
 // vùng soạn thảo chính: phần tử soạn được lớn nhất (không phải OCR, không phải ô mật khẩu/hộp chọn)
 function docEl(obs) {
@@ -208,4 +217,4 @@ function sameDoc(rec, obs) {
   if (el && el.value != null && (rec.texts || []).some(t => norm(t) && !norm(el.value).includes(norm(t)))) return { ok: false, why: 'content' };
   return proven ? { ok: true } : { ok: false, why: 'unsure' };
 }
-module.exports = { EDITORS, editorOf, untitled, dirty, docName, tabsOf, docPrint, newDocEvidence, newDocAt, ownTitle, TABBED, freshDocTask, commandPart, docEl, blankState, ensureFresh, sameDoc };
+module.exports = { EDITORS, editorOf, untitled, dirty, docName, tabsOf, docPrint, newDocEvidence, newDocAt, ownTitle, TABBED, freshDocTask, commandPart, namedTarget, sameFile, docEl, blankState, ensureFresh, sameDoc };

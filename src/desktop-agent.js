@@ -587,7 +587,9 @@ function createDesktopAgent(deps) {
   }
   // B191 (QA beta.3, Windows 11 Notepad khôi phục thẻ cũ có nội dung nhạy cảm): việc “mở/tạo X rồi gõ” trong trình soạn thảo →
   // mở TÀI LIỆU MỚI (Ctrl+N / ⌘N) và KIỂM là tài liệu chưa đặt tên, trống trước khi gõ. Không chứng minh được → không gõ.
-  const freshDocWanted = (ctx, win) => !!(ctx && ctx.userQuery && FD.freshDocTask(ctx.userQuery) && FD.editorOf(win));
+  // review #64 vòng 6 (X7): “gõ X vào notes.txt” chỉ bỏ bảo vệ khi tài liệu đang hiện ĐÚNG là notes.txt (hoặc đang gõ trong hộp thoại Mở/Lưu);
+  // còn lại (vd. “gõ hello vào Untitled.txt” khi đang ở thẻ “*Untitled” cũ) → vẫn bảo vệ (tài liệu mới)
+  const freshDocWanted = (ctx, win) => { if (!(ctx && ctx.userQuery && FD.editorOf(win))) return false; if (FD.freshDocTask(ctx.userQuery)) return true; const nf = FD.namedTarget(ctx.userQuery); return !!nf && !(session && session.dialog) && !FD.sameFile(nf, win.title); };
   async function freshDoc(ctx) {
     const s = session; let text = '';
     const r = await FD.ensureFresh({

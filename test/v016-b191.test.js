@@ -477,3 +477,38 @@ test('review #64 vòng 5 M2 (probe C1): không biết thẻ đang chọn, thẻ 
   const out2 = await DK.run(ag2, 'mở Notepad và gõ hello', [T('hello'), T('line2')]);
   assert.ok(!w2.oldTouched()); assert.strictEqual(w2.st.tabs[1].text, 'hello'); assert.ok(out2[1].refused && out2[1].stop);
 });
+
+// ── review #64 vòng 6 ──
+test('review #64 vòng 6 M1′ (X1/X2/X3) + X4: nội dung ở dòng đầu, “tiếp tục” → bảo vệ bật — hành vi: thẻ cũ nguyên, chữ vào thẻ mới', async () => {
+  for (const [name, q, text] of [
+    ['X1', 'Đừng xoá tệp này\nmở Notepad và gõ dòng trên', 'Đừng xoá tệp này'],
+    ['X2', 'Meeting notes from the current file\nopen Notepad and type the above', 'Meeting notes from the current file'],
+    ['X3 (nhiều dòng có động từ ghi)', 'Hãy thêm sữa vào notes.txt\n(mở notepad gõ dòng trên)', 'Hãy thêm sữa vào notes.txt'],
+    ['X3b', 'Đừng gõ vào tài liệu đang mở\nmở Notepad và gõ dòng trên', 'Đừng gõ vào tài liệu đang mở'],
+    ['X4', 'mở Notepad gõ tiếp tục cố gắng', 'tiếp tục cố gắng'],
+    ['X4b', 'mở Notepad và gõ tiếp theo là phần kết', 'tiếp theo là phần kết'],
+    ['động từ chỉ trong nội dung', 'Meeting notes from the current file: type it', 'Meeting notes from the current file']]) {
+    assert.strictEqual(FD.freshDocTask(q), true, name);
+    const w = OLD_DIRTY(); const ag = DK.make(w);
+    await DK.run(ag, q, [T(text)]);
+    assert.ok(!w.oldTouched(), name); assert.strictEqual(w.st.tabs.length, 2, name); assert.strictEqual(w.st.tabs[1].text, text, name);
+  }
+  // câu lệnh thật vẫn giữ ngoại lệ
+  for (const q of ['xin chào\n\ngõ vào tài liệu đang mở', 'gõ tiếp', 'mở Notepad và gõ tiếp vào cuối']) assert.strictEqual(FD.freshDocTask(q), false, q);
+});
+
+test('review #64 vòng 6 X6/X7: “gõ X vào <tệp>” chỉ bỏ bảo vệ khi tài liệu đang hiện ĐÚNG là tệp đó — hành vi', async () => {
+  for (const [name, q, text] of [['X7', 'mở Notepad và gõ hello vào Untitled.txt', 'hello'], ['X6', 'open Notepad and type a reminder into notes.txt\nbuy milk', 'buy milk']]) {
+    const w = OLD_DIRTY(); const ag = DK.make(w);
+    await DK.run(ag, q, [T(text)]);
+    assert.ok(!w.oldTouched(), name + ': thẻ *Untitled cũ không bị gõ'); assert.strictEqual(w.st.tabs.length, 2, name); assert.strictEqual(w.st.tabs[1].text, text, name);
+  }
+  // đúng tệp đã nêu đang mở → gõ vào đó (không Ctrl+N)
+  for (const [q, name] of [['open Notepad and type a reminder into notes.txt\nbuy milk', 'notes.txt'], ['mở Notepad và gõ hello vào Untitled.txt', 'Untitled.txt'], ['gõ X vào D:\\AIVN-QA\\Named.TXT', 'named.txt']]) {
+    const w = DK.notepad({ tabs: [{ name, text: 'a' }] }); const ag = DK.make(w);
+    await DK.run(ag, q, [T('b')]);
+    assert.strictEqual(w.st.tabs.length, 1, q); assert.strictEqual(w.st.tabs[0].text, 'ab', q);
+  }
+  assert.strictEqual(FD.sameFile('notes.txt', '*notes.txt - Notepad'), true);
+  assert.strictEqual(FD.sameFile('Untitled.txt', '*Untitled - Notepad'), false);
+});
