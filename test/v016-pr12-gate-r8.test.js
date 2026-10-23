@@ -13,7 +13,15 @@ function mixKey() {
   if (!/[a-z]/.test(s) || !/[A-Z]/.test(s) || !/\d/.test(s)) throw new Error('mix');
   return s;
 }
+function hexKey() {
+  const h = '0123456789abcdef';
+  let s = '';
+  for (let i = 0; i < 40; i++) s += h[i % 16];
+  if (!/^[0-9a-f]{40}$/.test(s)) throw new Error('hex');
+  return s;
+}
 const KEY = mixKey();
+const HEX = hexKey();
 // redactText: đường che chữ mà LOG.redact gọi cho chuỗi.
 function redactText(s) { return P.maskKnownSecrets(s); }
 
@@ -30,14 +38,16 @@ function leading(n) {
 test('[r8] từ nhãn thứ 9, khoá không tiền tố sau password / x-api-key / api_key bị che', () => {
   for (const n of [9, 10, 12, 16]) {
     for (const name of ['password', 'x-api-key', 'api_key']) {
-      const line = leading(n) + name + ': ' + KEY;
-      const err = new Error(line);
-      for (const out of [LOG.redact(line), redactText(line), LOG.redact(err.message)]) {
-        assert.equal(typeof out, 'string');
-        assert.ok(!out.includes(KEY), 'LEAK ' + n + ' ' + name);
-        assert.ok(out.includes('••••'), 'không che ' + n + ' ' + name);
-        assert.ok(out.includes('Error:'), 'mất nhãn ' + n);
-        assert.ok(out.includes(name + ':'), 'mất ' + name);
+      for (const key of [KEY, HEX]) {
+        const line = leading(n) + name + ': ' + key;
+        const err = new Error(line);
+        for (const out of [LOG.redact(line), redactText(line), LOG.redact(err.message)]) {
+          assert.equal(typeof out, 'string');
+          assert.ok(!out.includes(key), 'LEAK ' + n + ' ' + name);
+          assert.ok(out.includes('••••'), 'không che ' + n + ' ' + name);
+          assert.ok(out.includes('Error:'), 'mất nhãn ' + n);
+          assert.ok(out.includes(name + ':'), 'mất ' + name);
+        }
       }
     }
   }
