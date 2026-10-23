@@ -216,29 +216,55 @@ async function fillWindowText(wins, read, { timeoutMs = 8000 } = {}) {
   }
   return out;
 }
-// Khung cửa sổ không phải nội dung. 0 phần tử, không có chữ, hoặc chỉ có khung → chưa đọc được.
-const CHROME_ROLE = /^(window|pane|titlebar|menubar|menu|scrollbar|thumb|separator|grip|tooltip)$/i;
+// Nút, mục menu, thanh tiêu đề và khung cửa sổ không phải nội dung đã đọc.
+const SKIP_ROLE = /^(window|pane|titlebar|menubar|menu|menuitem|button|splitbutton|scrollbar|thumb|separator|grip|tooltip|toolbar|statusbar|group|custom|image|menubaritem|axbutton|axmenuitem|axmenubaritem|axmenubutton|aximage|axgroup|axtoolbar)$/i;
+// Ô chữ: v null (không phải ô mật khẩu) nghĩa là Value/TextPattern không đọc được.
+const VALUE_ROLE = /^(edit|document|combobox|axtextfield|axtextarea|axcombobox|axsearchfield)$/i;
+// Phần tử mang chữ thật (tên hoặc giá trị). Nút/menu không nằm ở đây.
+const TEXT_NAME_ROLE = /^(text|hyperlink|listitem|dataitem|treeitem|header|headeritem|tabitem|axstatictext|axlink|axrow|axcell)$/i;
+function roleOf(e) { return String((e && (e.r || e.role)) || ''); }
+function nameOf(e) { return String((e && (e.n != null ? e.n : e.name)) || '').trim(); }
+function valueOf(e) { if (!e || typeof e !== 'object') return undefined; if (e.v !== undefined) return e.v; if (e.value !== undefined) return e.value; return undefined; }
+function isPassword(e) { return !!(e && (e.p === true || e.password === true || /secure/i.test(roleOf(e)))); }
+// Có phần tử mang chữ (giá trị khác rỗng, hoặc vai trò chữ có tên). Nút/menu/khung không tính.
 function uiaHasContent(els) {
   if (!Array.isArray(els) || !els.length) return false;
   for (const e of els) {
-    if (!e || typeof e !== 'object') continue;
-    const v = e.v != null ? e.v : e.value;
+    if (!e || typeof e !== 'object' || isPassword(e)) continue;
+    const role = roleOf(e);
+    if (SKIP_ROLE.test(role)) continue;
+    const v = valueOf(e);
     if (v != null && String(v).trim()) return true;
-    const role = String(e.r || e.role || '');
-    const name = String(e.n || e.name || '').trim();
-    if (name && !CHROME_ROLE.test(role)) return true;
+    if (TEXT_NAME_ROLE.test(role) && nameOf(e)) return true;
   }
   return false;
 }
-// Kết quả UIA → chuỗi chữ, hoặc { unread: true } khi đọc rỗng / lỗi. Chuỗi rỗng không phải “đã đọc, không có mã”.
+// Edit/Document/ComboBox không phải ô mật khẩu mà v null → mới đọc được một phần.
+function uiaValueMissing(els) {
+  for (const e of els) {
+    if (!e || typeof e !== 'object' || isPassword(e)) continue;
+    if (VALUE_ROLE.test(roleOf(e)) && valueOf(e) == null) return true;
+  }
+  return false;
+}
+// Kết quả UIA → chuỗi chữ, hoặc { unread: true } khi đọc rỗng, đọc một phần, cây bị cắt, hoặc lỗi.
 function uiaRead(raw) {
   if (raw == null) return { unread: true };
   if (typeof raw === 'string') return raw.trim() ? raw : { unread: true };
   if (typeof raw !== 'object') return { unread: true };
-  if (raw.unread || raw.error || raw.noTree) return { unread: true };
+  if (raw.unread || raw.error || raw.noTree || raw.truncated || raw.timedOut) return { unread: true };
   const els = Array.isArray(raw.els) ? raw.els : (Array.isArray(raw) ? raw : null);
-  if (!els || !uiaHasContent(els)) return { unread: true };
-  const text = els.map(e => [e && (e.n || e.name), e && (e.v != null ? e.v : e.value)].filter(x => x != null && String(x).trim()).join(' ')).filter(Boolean).join('\n');
+  if (!els || uiaValueMissing(els) || !uiaHasContent(els)) return { unread: true };
+  const text = els.map(e => {
+    if (!e || typeof e !== 'object' || isPassword(e)) return '';
+    const role = roleOf(e);
+    if (SKIP_ROLE.test(role)) return '';
+    const v = valueOf(e);
+    const parts = [];
+    if (TEXT_NAME_ROLE.test(role) && nameOf(e)) parts.push(nameOf(e));
+    if (v != null && String(v).trim()) parts.push(String(v).trim());
+    return parts.join(' ');
+  }).filter(Boolean).join('\n');
   return text.trim() ? text : { unread: true };
 }
 // Danh sách cửa sổ + chữ, đã đọc xong. Lỗi hoặc quá hạn → ok:false (không được coi là “không có cửa sổ”).
