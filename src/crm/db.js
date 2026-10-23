@@ -56,6 +56,10 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS purchase_lines (id TEXT PRIMARY KEY, po_id TEXT NOT NULL, product_id TEXT, name TEXT, unit TEXT, qty REAL DEFAULT 1, price INTEGER DEFAULT 0, discount_pct REAL DEFAULT 0,
     vat_pct REAL DEFAULT 10, pos INTEGER DEFAULT 0)`,
   `CREATE INDEX IF NOT EXISTS ix_pol ON purchase_lines(po_id)`,
+  // #42 K1: bảng giá nhà cung cấp theo sản phẩm (Odoo product.supplierinfo): giá theo số lượng tối thiểu, số ngày giao
+  `CREATE TABLE IF NOT EXISTS vendor_prices (id TEXT PRIMARY KEY, product_id TEXT NOT NULL, partner_id TEXT NOT NULL, min_qty REAL DEFAULT 0, price INTEGER DEFAULT 0, delay INTEGER DEFAULT 0,
+    sequence INTEGER DEFAULT 10, created_at INTEGER, updated_at INTEGER)`,
+  `CREATE INDEX IF NOT EXISTS ix_vp_prod ON vendor_prices(product_id, partner_id)`,
 ];
 // cột thêm cho bảng cũ (CSDL tạo từ 0.15.x): thêm nếu chưa có, giữ nguyên dữ liệu
 const ADD_COLUMNS = {

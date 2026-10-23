@@ -19,6 +19,7 @@ const EPS = 1e-9;
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const daysBetween = (a, b) => Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
 const fmtQ = (q) => (Math.round(q * 1000) / 1000).toLocaleString('vi-VN');
+const addDays = (s, n) => { const d = new Date(s + 'T00:00:00'); d.setDate(d.getDate() + n); return ymd(d); };
 
 function createPurchase({ db, crm, now, today, log = () => {}, h }) {
   const product = h.product; const partner = h.partner;
@@ -64,6 +65,42 @@ function createPurchase({ db, crm, now, today, log = () => {}, h }) {
     return rows;
   }
   function nextNumber() { const r = db.get("SELECT number FROM purchase_orders WHERE number LIKE 'P%' ORDER BY length(number) DESC, number DESC LIMIT 1"); const n = r ? (parseInt(String(r.number).slice(1), 10) || 0) + 1 : 1; return 'P' + String(n).padStart(5, '0'); }
+  // ---------- #42 K1: bảng giá nhà cung cấp (Odoo product.supplierinfo) ----------
+  // Mỗi dòng: sản phẩm × NCC × số lượng tối thiểu → đơn giá + số ngày giao. Chọn giá như Odoo _select_seller: dòng của NCC đó có
+  // số lượng tối thiểu ≤ số lượng đặt, lấy giá thấp nhất; không có dòng nào → giá vốn sản phẩm, 0 ngày.
+  const pubVp = (r) => ({ ...r, partner_name: (partner(r.partner_id) || {}).name || '', product_name: (product(r.product_id) || {}).name || '' });
+  function listVendorPrices({ productId = '', partnerId = '' } = {}) {
+    const where = [], p = []; if (productId) { where.push('product_id = ?'); p.push(productId); } if (partnerId) { where.push('partner_id = ?'); p.push(partnerId); }
+    return db.all(`SELECT * FROM vendor_prices ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY sequence, min_qty, created_at`, p).map(pubVp);
+  }
+  // lưu cả bảng giá NCC của một sản phẩm (thay toàn bộ, giữ thứ tự)
+  function saveVendorPrices(productId, rows = []) {
+    const pr = product(productId); if (!pr) throw new CrmError('Không tìm thấy sản phẩm.');
+    if (!Array.isArray(rows) || rows.length > 200) throw new CrmError('Bảng giá nhà cung cấp không hợp lệ.');
+    const seen = new Set();
+    const clean = rows.filter(r => r && (r.partner_id || String(r.price ?? '').trim() !== '')).map((r, i) => {
+      if (!partner(r.partner_id)) throw new CrmError('Hãy chọn nhà cung cấp cho mọi dòng giá.');
+      const mq = T.parseQty(r.min_qty); if (r.min_qty != null && String(r.min_qty).trim() !== '' && !Number.isFinite(mq)) throw new CrmError(`Số lượng “${r.min_qty}” không phải là số.`);
+      const dl = String(r.delay ?? '').trim() === '' ? 0 : Number(String(r.delay).trim()); if (!Number.isInteger(dl) || dl < 0 || dl > 365) throw new CrmError(`Số ngày giao “${r.delay}” phải là số nguyên từ 0 đến 365.`);
+      const row = { id: newId('vp'), product_id: pr.id, partner_id: r.partner_id, min_qty: T.round3(Math.max(0, Number.isFinite(mq) ? mq : 0)), price: Math.max(0, TAX.moneyIn(r.price, 0)), delay: dl, sequence: i + 1 };
+      const k = row.partner_id + '|' + row.min_qty; if (seen.has(k)) throw new CrmError(`Nhà cung cấp “${(partner(row.partner_id) || {}).name}” có hai dòng giá cùng số lượng tối thiểu ${fmtQ(row.min_qty)}.`); seen.add(k);
+      return row;
+    });
+    db.tx(() => { db.run('DELETE FROM vendor_prices WHERE product_id = ?', [pr.id]); for (const r of clean) db.run('INSERT INTO vendor_prices(id, product_id, partner_id, min_qty, price, delay, sequence, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)', [r.id, r.product_id, r.partner_id, r.min_qty, r.price, r.delay, r.sequence, now(), now()]); });
+    return listVendorPrices({ productId: pr.id });
+  }
+  function deleteVendorPrice(id) { return db.run('DELETE FROM vendor_prices WHERE id = ?', [id]) > 0; }
+  function sellerOf(productId, partnerId, qty) {
+    if (!productId || !partnerId) return null; const q = Number.isFinite(Number(qty)) ? Number(qty) : 0;
+    const rows = db.all('SELECT * FROM vendor_prices WHERE product_id = ? AND partner_id = ? ORDER BY sequence, min_qty DESC', [productId, partnerId]).filter(r => (r.min_qty || 0) <= q + EPS);
+    return rows.reduce((b, r) => (!b || r.price < b.price ? r : b), null);
+  }
+  // giá + ngày giao gợi ý cho một dòng đơn mua (giao diện gọi khi chọn sản phẩm / đổi số lượng / đổi NCC)
+  function vendorPrice({ productId = '', partnerId = '', qty = 1, dateOrder = '' } = {}) {
+    const pr = productId ? product(productId) : null; if (!pr) return { price: 0, delay: 0, source: 'none', date_planned: null };
+    const q = T.parseQty(qty); const s = sellerOf(pr.id, partnerId, Number.isFinite(q) ? q : 0); const d0 = isDate(dateOrder) ? dateOrder : today();
+    return s ? { price: s.price, delay: s.delay || 0, source: 'vendor', vendor_price_id: s.id, min_qty: s.min_qty, date_planned: addDays(d0, s.delay || 0) } : { price: pr.cost || 0, delay: 0, source: 'cost', date_planned: null };
+  }
   // tạo / sửa yêu cầu báo giá (dòng khoá sau khi xác nhận, như Bán hàng)
   function savePurchase(input = {}) {
     const old = input.id ? db.get('SELECT * FROM purchase_orders WHERE id = ?', [input.id]) : null;
@@ -78,14 +115,17 @@ function createPurchase({ db, crm, now, today, log = () => {}, h }) {
     o.payment_days = Math.max(0, Math.min(365, parseInt(o.payment_days, 10) || 0));
     o.vat_pct = TAX.vatOf(o.vat_pct, h.company().default_vat); o.tax_rounding = old ? TAX.roundingOf(old.tax_rounding) : h.company().tax_rounding;
     const docVatGiven = input.vat_pct !== undefined && input.vat_pct !== null && input.vat_pct !== '';
+    const delays = []; // #42 K1: số ngày giao của các dòng có giá NCC → ngày nhận dự kiến khi chưa nhập
     const lines = Array.isArray(input.lines) ? input.lines.map((l, i) => {
       const pr = l.product_id ? product(l.product_id) : null; if (l.product_id && (!pr || !pr.active)) throw new CrmError('Dòng đơn mua có sản phẩm không tồn tại hoặc đã lưu trữ.');
       const qty = T.parseQty(l.qty); if (l.qty != null && String(l.qty).trim() !== '' && !Number.isFinite(qty)) throw new CrmError(`Số lượng “${l.qty}” không phải là số.`);
       const given = l.vat_pct !== undefined && l.vat_pct !== null && l.vat_pct !== '';
-      return { id: newId('pol'), product_id: pr ? pr.id : null, name: str(l.name || (pr && pr.name), 300), unit: UOM.canon(str(l.unit || (pr && pr.unit), 30)) || 'cái', qty: Math.max(0, Number.isFinite(qty) ? qty : 0),
-        price: Math.max(0, TAX.moneyIn(l.price, pr ? pr.cost || 0 : 0)), discount_pct: TAX.pctIn(l.discount_pct),
+      const q = Math.max(0, Number.isFinite(qty) ? qty : 0); const seller = pr ? sellerOf(pr.id, o.partner_id, q) : null; if (seller) delays.push(seller.delay || 0);
+      return { id: newId('pol'), product_id: pr ? pr.id : null, name: str(l.name || (pr && pr.name), 300), unit: UOM.canon(str(l.unit || (pr && pr.unit), 30)) || 'cái', qty: q,
+        price: Math.max(0, TAX.moneyIn(l.price, seller ? seller.price : pr ? pr.cost || 0 : 0)), discount_pct: TAX.pctIn(l.discount_pct),
         vat_pct: given ? TAX.vatOf(l.vat_pct) : !docVatGiven && pr && pr.vat_pct != null ? TAX.vatOf(pr.vat_pct) : o.vat_pct, pos: i };
     }).filter(l => l.name) : null;
+    if (!o.date_planned && delays.length) o.date_planned = addDays(o.date_order, Math.min(...delays)); // như Odoo: ngày đặt + số ngày giao (dòng sớm nhất)
     db.tx(() => {
       if (old) db.run('UPDATE purchase_orders SET partner_id=?, partner_ref=?, date_order=?, date_planned=?, payment_days=?, vat_pct=?, owner=?, notes=?, updated_at=? WHERE id=?', [o.partner_id, o.partner_ref, o.date_order, o.date_planned, o.payment_days, o.vat_pct, o.owner, o.notes, now(), o.id]);
       else { o.id = newId('po'); o.number = nextNumber(); db.run('INSERT INTO purchase_orders(id, number, partner_id, partner_ref, state, date_order, date_planned, payment_days, vat_pct, tax_rounding, owner, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [o.id, o.number, o.partner_id, o.partner_ref, 'draft', o.date_order, o.date_planned, o.payment_days, o.vat_pct, o.tax_rounding, o.owner, o.notes, now(), now()]); }
@@ -115,6 +155,28 @@ function createPurchase({ db, crm, now, today, log = () => {}, h }) {
     });
     h.hist(po.partner_id, `Xác nhận đơn mua hàng ${po.number}`);
     return getPurchase(id);
+  }
+  // #42 K1: sau khi xác nhận, đơn giá trên đơn khác bảng giá NCC (hoặc NCC chưa có trong bảng giá sản phẩm) → gợi ý cập nhật (Odoo tự thêm NCC mới vào sản phẩm khi xác nhận)
+  function vendorPriceChanges(poId) {
+    const po = need(poId); const out = [];
+    for (const l of poLines(poId, po.state)) {
+      if (!l.product_id || !(l.qty > EPS) || !(l.price > 0)) continue;
+      const mine = db.all('SELECT * FROM vendor_prices WHERE product_id = ? AND partner_id = ?', [l.product_id, po.partner_id]);
+      const s = sellerOf(l.product_id, po.partner_id, l.qty);
+      if (!mine.length) out.push({ line_id: l.id, product_id: l.product_id, name: l.name, action: 'add', old_price: null, price: l.price, min_qty: 0, delay: isDate(po.date_planned) ? Math.max(0, Math.min(365, daysBetween(po.date_order || today(), po.date_planned))) : 0 });
+      else if (s && s.price !== l.price) out.push({ line_id: l.id, product_id: l.product_id, name: l.name, action: 'update', vendor_price_id: s.id, old_price: s.price, price: l.price, min_qty: s.min_qty, delay: s.delay });
+    }
+    return out;
+  }
+  function applyVendorPrices(poId, lineIds = null) {
+    const po = need(poId); const want = Array.isArray(lineIds) ? new Set(lineIds) : null; const todo = vendorPriceChanges(poId).filter(c => !want || want.has(c.line_id)); const seenAdd = new Set();
+    db.tx(() => { for (const c of todo) {
+      if (c.action === 'update') db.run('UPDATE vendor_prices SET price = ?, updated_at = ? WHERE id = ?', [c.price, now(), c.vendor_price_id]);
+      else if (!seenAdd.has(c.product_id)) { seenAdd.add(c.product_id); const seq = (db.get('SELECT COALESCE(MAX(sequence), 0) AS m FROM vendor_prices WHERE product_id = ?', [c.product_id]).m || 0) + 1;
+        db.run('INSERT INTO vendor_prices(id, product_id, partner_id, min_qty, price, delay, sequence, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)', [newId('vp'), c.product_id, po.partner_id, 0, c.price, c.delay, seq, now(), now()]); }
+    } });
+    if (todo.length) h.hist(po.partner_id, `Cập nhật bảng giá nhà cung cấp theo đơn mua ${po.number}: ${todo.length} dòng`);
+    return todo;
   }
   function cancelPurchase(id) {
     const po = need(id); if (po.state === 'cancel') return getPurchase(id);
@@ -192,7 +254,8 @@ function createPurchase({ db, crm, now, today, log = () => {}, h }) {
     const orders = listPurchases({ kind: 'orders' });
     return { rfqOpen: db.get("SELECT count(*) AS n FROM purchase_orders WHERE state IN ('draft','sent')").n, poToReceive: orders.filter(o => ['pending', 'partial'].includes(o.receipt_status)).length, poToBill: orders.filter(o => o.invoice_status === 'to_invoice').length };
   }
-  return { PO_STATE, RECEIPT_STATUS, BILL_STATUS, listPurchases, getPurchase, savePurchase, sendRfq, confirmPurchase, cancelPurchase, resetPurchase, lockPurchase, deletePurchase, createBill, purchaseReport, payablesReport, purchaseOverview };
+  return { PO_STATE, RECEIPT_STATUS, BILL_STATUS, listVendorPrices, saveVendorPrices, deleteVendorPrice, vendorPrice, vendorPriceChanges, applyVendorPrices, listPurchases, getPurchase, savePurchase, sendRfq, confirmPurchase, cancelPurchase, resetPurchase, lockPurchase, deletePurchase, createBill, purchaseReport, payablesReport, purchaseOverview };
 }
-const PURCHASE_CALLS = ['listPurchases', 'getPurchase', 'savePurchase', 'sendRfq', 'confirmPurchase', 'cancelPurchase', 'resetPurchase', 'lockPurchase', 'deletePurchase', 'createBill', 'purchaseReport', 'payablesReport'];
+const PURCHASE_CALLS = ['listPurchases', 'getPurchase', 'savePurchase', 'sendRfq', 'confirmPurchase', 'cancelPurchase', 'resetPurchase', 'lockPurchase', 'deletePurchase', 'createBill', 'purchaseReport', 'payablesReport',
+  'listVendorPrices', 'saveVendorPrices', 'deleteVendorPrice', 'vendorPrice', 'vendorPriceChanges', 'applyVendorPrices']; // #42 K1
 module.exports = { createPurchase, PURCHASE_CALLS, PO_STATE };

@@ -109,7 +109,7 @@
     if (!rows.length) return empty('📦', q ? 'Không có sản phẩm nào khớp.' : 'Chưa có sản phẩm. Bấm “＋ Sản phẩm”.');
     const TYPE = { product: 'Hàng lưu kho', consu: 'Hàng tiêu dùng', service: 'Dịch vụ' };
     return `<table class="crm-table biz-list"><thead><tr><th>Sản phẩm</th><th>Mã</th><th>Loại</th><th class="num">Giá bán</th><th class="num">Giá vốn</th><th class="num">Tồn thực tế</th><th class="num">Dự báo</th><th></th></tr></thead><tbody>
-      ${rows.map(p => `<tr data-biz-open="product:${esc(p.id)}" tabindex="0"><td><b>${esc(p.name)}</b>${p.category ? `<div class="small muted">${esc(p.category)}</div>` : ''}</td><td>${esc(p.sku || '')}</td><td>${esc(TYPE[p.type] || '')}</td><td class="num">${vnd(p.price)}</td><td class="num">${vnd(p.cost)}</td><td class="num">${by[p.id] ? qn(by[p.id].on_hand) + ' ' + esc(uomL(p.unit, by[p.id].on_hand)) : '—'}</td><td class="num">${by[p.id] ? qn(by[p.id].forecast) : '—'}</td><td><button type="button" class="btn sm" data-biz-act="archiveProduct" data-id="${esc(p.id)}" title="Lưu trữ (ẩn khỏi danh sách, giữ lịch sử)">Lưu trữ</button></td></tr>`).join('')}</tbody></table>`;
+      ${rows.map(p => `<tr data-biz-open="product:${esc(p.id)}" tabindex="0"><td><b>${esc(p.name)}</b>${p.category ? `<div class="small muted">${esc(p.category)}</div>` : ''}</td><td>${esc(p.sku || '')}</td><td>${esc(TYPE[p.type] || '')}</td><td class="num">${vnd(p.price)}</td><td class="num">${vnd(p.cost)}</td><td class="num">${by[p.id] ? qn(by[p.id].on_hand) + ' ' + esc(uomL(p.unit, by[p.id].on_hand)) : '—'}</td><td class="num">${by[p.id] ? qn(by[p.id].forecast) : '—'}</td><td><button type="button" class="btn sm" data-biz-act="vendorPrices" data-id="${esc(p.id)}" title="Giá mua và số ngày giao theo từng nhà cung cấp">Nhà cung cấp</button> <button type="button" class="btn sm" data-biz-act="archiveProduct" data-id="${esc(p.id)}" title="Lưu trữ (ẩn khỏi danh sách, giữ lịch sử)">Lưu trữ</button></td></tr>`).join('')}</tbody></table>`;
   }
   function newOrder() { return { id: null, status: 'draft', contact_id: '', date: today(), valid_until: '', payment_days: 0, commitment_date: '', vat_pct: defVat(), notes: '', lines: [], owner: '' }; }
   async function orderForm(gen) {
@@ -158,7 +158,29 @@
   async function productDialog(p = {}) {
     if (!B.company) B.company = await C('getCompany');
     const F = [['name', 'Tên sản phẩm *'], ['type', 'Loại sản phẩm', [['product', 'Hàng lưu kho (theo dõi tồn kho)'], ['consu', 'Hàng tiêu dùng (không theo dõi tồn)'], ['service', 'Dịch vụ']]], ['sku', 'Mã nội bộ'], ['barcode', 'Mã vạch'], ['category', 'Nhóm sản phẩm'], ['unit', 'Đơn vị tính'], ['price', 'Giá bán (₫)'], ['cost', 'Giá vốn (₫)'], ['vat_pct', 'Thuế GTGT', VATS.map(v => [v, v + '%'])], ['min_qty', 'Tồn tối thiểu (cảnh báo khi thấp hơn)'], ['description', 'Mô tả', 'area']];
-    return dialog(p.id ? 'Sửa sản phẩm' : 'Thêm sản phẩm', F, { unit: 'cái', type: 'product', vat_pct: defVat(), ...p }, async (o) => { await C('saveProduct', { ...o, id: p.id || undefined }); toast('Đã lưu ✓'); render('sales'); });
+    dialog(p.id ? 'Sửa sản phẩm' : 'Thêm sản phẩm', F, { unit: 'cái', type: 'product', vat_pct: defVat(), ...p }, async (o) => { await C('saveProduct', { ...o, id: p.id || undefined }); toast('Đã lưu ✓'); render('sales'); });
+    if (p.id) vendorSection(p); // #42 K1: phần “Nhà cung cấp” trên form sản phẩm (Odoo: tab Mua hàng)
+  }
+  async function vendorSection(p) {
+    const host = $('#bizFields'); if (!host) return; const rows = await C('listVendorPrices', { productId: p.id }).catch(() => []);
+    const box = document.createElement('div'); box.className = 'biz-vp';
+    box.innerHTML = `<h4>Nhà cung cấp</h4>${rows.length ? `<table class="crm-table biz-list"><thead><tr><th>Nhà cung cấp</th><th class="num">Từ SL</th><th class="num">Đơn giá</th><th class="num">Giao trong</th></tr></thead><tbody>${rows.map(r => `<tr><td>${esc(r.partner_name)}</td><td class="num">${qn(r.min_qty)}</td><td class="num">${vnd(r.price)}</td><td class="num">${r.delay} ngày</td></tr>`).join('')}</tbody></table>` : '<p class="small muted">Chưa có giá nhà cung cấp: đơn mua dùng giá vốn.</p>'}
+      <button type="button" class="btn sm" data-vp-edit>Sửa giá nhà cung cấp…</button>`;
+    host.appendChild(box);
+    box.querySelector('[data-vp-edit]').addEventListener('click', () => { $('#bizModal').hidden = true; B.form = { type: 'vprices', id: p.id }; B.edit = null; crm.tab = 'sales'; renderCrm(); });
+  }
+  // #42 K1: bảng giá nhà cung cấp của một sản phẩm (Odoo product.supplierinfo)
+  async function vendorPricesForm(gen) {
+    await loadRefs(); const p = B.products.find(x => x.id === B.form.id); if (!p) throw new Error('Không tìm thấy sản phẩm.');
+    if (!B.edit) { const rows = await C('listVendorPrices', { productId: p.id }); live(gen); B.edit = { lines: rows.map(r => ({ partner_id: r.partner_id, min_qty: r.min_qty, price: r.price, delay: r.delay })) }; }
+    const vendors = B.contacts.map(c => [c.id, c.name + (c.company_name ? ' — ' + c.company_name : '')]);
+    const row = (l, i) => `<tr data-line="${i}"><td><select data-lf="partner_id" aria-label="Nhà cung cấp">${opt(vendors, l.partner_id, '— chọn nhà cung cấp —')}</select></td><td class="num"><input data-lf="min_qty" inputmode="decimal" ${nv(l.min_qty ?? 0)} class="biz-num" aria-label="Số lượng tối thiểu"></td><td class="num"><input data-lf="price" inputmode="numeric" ${nv(l.price ?? 0)} class="biz-num" aria-label="Đơn giá"></td><td class="num"><input data-lf="delay" inputmode="numeric" value="${esc(l.delay ?? 0)}" class="biz-num" aria-label="Số ngày giao"></td><td><button type="button" class="btn sm" data-biz-act="delLine" data-i="${i}" aria-label="Xoá dòng">✕</button></td></tr>`;
+    return `${crumbs(['Bán hàng', 'Sản phẩm', p.name, 'Nhà cung cấp'])}
+      <div class="biz-bar"><div class="biz-actions">${btn('saveVendorPrices', 'Lưu', true)}${btn('discard', 'Bỏ')}</div></div>
+      <div class="biz-sheet"><h2 class="biz-title">${esc(p.name)} · Nhà cung cấp</h2>
+        <p class="small muted">Đơn mua lấy giá theo nhà cung cấp và số lượng đặt: dòng có “Từ SL” lớn nhất mà không vượt số lượng đặt (giá thấp nhất nếu trùng). Ngày nhận dự kiến = ngày đặt + số ngày giao. Không có dòng nào cho nhà cung cấp → dùng giá vốn ${vnd(p.cost || 0)}.</p>
+        <table class="crm-table biz-lines"><thead><tr><th>Nhà cung cấp</th><th class="num">Từ SL</th><th class="num">Đơn giá</th><th class="num">Giao trong (ngày)</th><th></th></tr></thead><tbody>${B.edit.lines.map(row).join('') || '<tr><td colspan="5" class="muted">Chưa có dòng nào.</td></tr>'}</tbody></table>
+        <div class="row">${btn('addVendorPrice', '＋ Thêm dòng')}</div></div>`;
   }
   // hộp thoại biểu mẫu dùng chung (theo kiểu crmForm)
   function dialog(title, fields, data, onSave) {
@@ -381,6 +403,9 @@
       if (a === 'discard') { B.form = null; B.edit = null; return rerender(); }
       if (a === 'addLine') { readForm(); if (f.type === 'receipt') { const p = B.products.find(x => x.type === 'product'); B.edit.lines.push({ product_id: p ? p.id : '', qty: 1, unit_cost: p ? p.cost : 0 }); } else B.edit.lines.push({ product_id: '', name: '', qty: 1, unit: 'cái', price: 0, discount_pct: 0, vat_pct: B.edit.vat_pct ?? defVat() }); return rerender(); }
       if (a === 'delLine') { readForm(); B.edit.lines.splice(Number(el.dataset.i), 1); return rerender(); }
+      if (a === 'vendorPrices') { B.form = { type: 'vprices', id: el.dataset.id }; B.edit = null; return rerender(); }
+      if (a === 'addVendorPrice') { readForm(); B.edit.lines.push({ partner_id: '', min_qty: 0, price: (B.products.find(x => x.id === f.id) || {}).cost || 0, delay: 0 }); return rerender(); }
+      if (a === 'saveVendorPrices') { readForm(); await C('saveVendorPrices', f.id, B.edit.lines.map(l => ({ partner_id: l.partner_id, min_qty: l.min_qty, price: parseMoney(l.price), delay: l.delay }))); B.form = null; B.edit = null; B.sub.sales = 'products'; toast('Đã lưu giá nhà cung cấp ✓'); return rerender(); }
       if (a === 'archiveProduct') { if (await modalAsk({ icon: '📦', title: 'Lưu trữ sản phẩm?', message: 'Sản phẩm sẽ ẩn khỏi danh sách và không chọn được cho đơn mới. Đơn, hoá đơn và lịch sử kho cũ vẫn giữ nguyên.', okLabel: 'Lưu trữ', noLabel: 'Giữ lại' })) { const r = await A.crm('deleteProduct', el.dataset.id); if (!r.ok && r.code === 'stock') { if (!await modalAsk({ icon: '⚠', title: 'Sản phẩm còn tồn kho', message: r.error, okLabel: 'Vẫn lưu trữ', noLabel: 'Giữ lại' })) return rerender(); const r2 = await A.crm('deleteProduct', el.dataset.id, { force: true }); if (!r2.ok) throw new Error(r2.error); } else if (!r.ok) throw new Error(r.error); toast('Đã lưu trữ ✓'); } return rerender(); }
       if (a === 'count') { return dialog(`Kiểm kê: ${el.dataset.name}`, [['counted', 'Số lượng đếm được thực tế'], ['note', 'Ghi chú (vd. Kiểm kê cuối tháng)']], { counted: Number(el.dataset.qty) }, async (o) => { const r = await C('adjustStock', el.dataset.id, o.counted, o.note); toast(r.changed ? `Đã điều chỉnh tồn: ${r.diff > 0 ? '+' : ''}${qn(r.diff)}` : 'Tồn kho đã đúng, không cần điều chỉnh.'); rerender(); }); }
       // Bán hàng
@@ -425,7 +450,8 @@
       if (a === 'openCompany') { show('settings'); setTab('company'); return renderCompany(); }
       // Mua hàng
       if (a === 'savePurchase') { readForm(); const o = await C('savePurchase', poPayload()); B.form = { type: 'purchase', id: o.id }; B.edit = null; toast('Đã lưu ✓'); return rerender(); }
-      if (a === 'sendRfq' || a === 'confirmPurchase') { readForm(); if (['draft', 'sent'].includes(B.edit.state)) await C('savePurchase', poPayload()); const o = await C(a, f.id); B.edit = null; toast(a === 'confirmPurchase' ? (o.pickings.length ? `Đã xác nhận đơn mua ${o.number} · đã tạo phiếu nhập kho` : `Đã xác nhận đơn mua ${o.number}`) : 'Đã đánh dấu yêu cầu báo giá đã gửi'); return rerender(); }
+      if (a === 'sendRfq' || a === 'confirmPurchase') { readForm(); if (['draft', 'sent'].includes(B.edit.state)) await C('savePurchase', poPayload()); const o = await C(a, f.id); B.edit = null; toast(a === 'confirmPurchase' ? (o.pickings.length ? `Đã xác nhận đơn mua ${o.number} · đã tạo phiếu nhập kho` : `Đã xác nhận đơn mua ${o.number}`) : 'Đã đánh dấu yêu cầu báo giá đã gửi');
+        if (a === 'confirmPurchase') await askVendorPrices(o); return rerender(); }
       if (a === 'receivePurchase' || a === 'openPoPickings') { const o = await C('getPurchase', f.id); const ready = o.pickings.filter(p => ['draft', 'ready'].includes(p.state)); const list = a === 'receivePurchase' && ready.length ? ready : o.pickings; return list.length === 1 ? open('picking', list[0].id, 'stock') : (crm.tab = 'stock', B.sub.stock = 'in', B.form = null, $('#crmQ').value = o.number, renderCrm()); }
       if (a === 'createBill') { const inv = await C('createBill', f.id); toast('Đã tạo hoá đơn nhà cung cấp nháp'); return open('invoice', inv.id, 'invoices'); }
       if (a === 'openBills') { const o = await C('getPurchase', f.id); return o.bills.length === 1 ? open('invoice', o.bills[0].id, 'invoices') : (crm.tab = 'invoices', B.sub.invoices = 'bills', B.form = null, $('#crmQ').value = o.number, renderCrm()); }
@@ -435,12 +461,26 @@
       if (a === 'openPo') { const id = f.type === 'picking' ? (await C('getPicking', f.id)).po_id : (await C('getInvoice', f.id)).po_id; return open('purchase', id, 'purchase'); }
     } catch (e) { toast(e.message, true); }
   }
+  // #42 K1: xác nhận đơn với giá khác bảng giá NCC → hỏi có cập nhật bảng giá không
+  async function askVendorPrices(o) {
+    const ch = await C('vendorPriceChanges', o.id).catch(() => []); if (!ch.length) return;
+    const msg = ch.map(c => c.action === 'add' ? `${c.name}: thêm ${o.partner_name || 'nhà cung cấp'} với giá ${vnd(c.price)}` : `${c.name}: ${vnd(c.old_price)} → ${vnd(c.price)} (từ SL ${qn(c.min_qty)})`).join('\n');
+    if (await modalAsk({ icon: '🏷', title: 'Cập nhật bảng giá nhà cung cấp?', message: msg, okLabel: 'Cập nhật', noLabel: 'Không' })) { await C('applyVendorPrices', o.id); toast('Đã cập nhật giá nhà cung cấp ✓'); }
+  }
+  // #42 K1: đơn mua — lấy giá + ngày giao theo bảng giá NCC khi chọn sản phẩm, đổi số lượng, đổi NCC / ngày đặt
+  async function refreshVendorPrices(idx) {
+    const e = B.edit; let planned = null;
+    for (const i of idx) { const l = e.lines[i]; if (!l || !l.product_id) continue;
+      const r = await C('vendorPrice', { productId: l.product_id, partnerId: e.partner_id, qty: l.qty, dateOrder: e.date_order });
+      if (r.source === 'vendor') { l.price = r.price; l._vp = 'vendor'; if (!planned || r.date_planned < planned) planned = r.date_planned; } else if (l._vp === 'vendor' || l._vp === 'new') { l.price = r.price; l._vp = 'cost'; } }
+    if (planned && (!e.date_planned || e._autoPlanned)) { e.date_planned = planned; e._autoPlanned = true; }
+  }
   function open(type, id, app) { B.form = { type, id }; B.edit = null; if (app && crm.tab !== app) crm.tab = app; renderCrm(); }
   const rerender = () => renderCrm();
   async function renderForm(gen = ++renderGen) {
     const t = B.form.type; const el = body();
     try {
-      const html = t === 'order' ? await orderForm(gen) : t === 'purchase' ? await purchaseForm(gen) : t === 'picking' ? await pickingForm() : t === 'invoice' ? await invoiceForm(gen) : t === 'receipt' ? receiptForm() : '';
+      const html = t === 'order' ? await orderForm(gen) : t === 'purchase' ? await purchaseForm(gen) : t === 'vprices' ? await vendorPricesForm(gen) : t === 'picking' ? await pickingForm() : t === 'invoice' ? await invoiceForm(gen) : t === 'receipt' ? receiptForm() : '';
       live(gen); el.innerHTML = html;
     } catch (e) { if (e !== STALE) throw e; }
   }
@@ -473,8 +513,12 @@
     const lf = e.target.closest('[data-lf]'); const f = e.target.closest('[data-f]'); if (!lf && !f) return;
     readForm();
     const buying = B.form.type === 'purchase' || (B.form.type === 'invoice' && String(B.edit.kind || '').startsWith('in_'));
-    if (lf && lf.dataset.lf === 'product_id') { const l = B.edit.lines[Number(lf.closest('tr').dataset.line)]; const p = B.products.find(x => x.id === lf.value); if (p && l) { if (B.form.type === 'receipt') l.unit_cost = p.cost || 0; else { l.name = p.name; l.unit = p.unit; l.price = buying ? (p.cost || 0) : p.price; if (p.vat_pct != null) l.vat_pct = p.vat_pct; } } }
+    if (B.form.type === 'vprices') return;
+    if (lf && lf.dataset.lf === 'product_id') { const l = B.edit.lines[Number(lf.closest('tr').dataset.line)]; const p = B.products.find(x => x.id === lf.value); if (p && l) { if (B.form.type === 'receipt') l.unit_cost = p.cost || 0; else { l.name = p.name; l.unit = p.unit; l.price = buying ? (p.cost || 0) : p.price; if (p.vat_pct != null) l.vat_pct = p.vat_pct; if (B.form.type === 'purchase') l._vp = 'new'; } } }
     if (f && f.dataset.f === 'vat_pct') B.edit.lines.forEach(l => { l.vat_pct = Number(f.value); });
+    if (f && f.dataset.f === 'date_planned') B.edit._autoPlanned = false;
+    const vpIdx = B.form.type !== 'purchase' ? [] : lf && ['product_id', 'qty'].includes(lf.dataset.lf) ? [Number(lf.closest('tr').dataset.line)] : f && ['partner_id', 'date_order'].includes(f.dataset.f) ? B.edit.lines.map((_, i) => i) : [];
+    if (vpIdx.length) return refreshVendorPrices(vpIdx).catch(x => toast(x.message, true)).then(() => renderForm());
     if ((lf && ['product_id', 'qty', 'price', 'discount_pct', 'vat_pct'].includes(lf.dataset.lf)) || (f && f.dataset.f === 'vat_pct')) renderForm();
   });
   el.addEventListener('change', (e) => { const r = e.target.closest('[data-rep]'); if (r && crm.tab === 'reports') { B.rep[r.dataset.rep] = r.value; renderCrm(); } });
