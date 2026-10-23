@@ -7,8 +7,10 @@ const L = require('./license');
 function createLicenseState({ file, isPackaged, log = () => {}, fetchJson }) {
   // Biến môi trường chỉ để kiểm thử, KHÔNG có hiệu lực trong bản đóng gói
   const dev = !isPackaged;
-  const publicX = dev && process.env.AIVN_TEST_PUBKEY ? process.env.AIVN_TEST_PUBKEY : L.PUBLIC_KEY_X;
-  const url = dev && process.env.AIVN_REVOKED_URL ? process.env.AIVN_REVOKED_URL : L.REVOKED_URL;
+  const publicX = dev && process.env.AIVN_TEST_PUBKEY ? process.env.AIVN_TEST_PUBKEY : L.TRUSTED_KEYS;
+  // Bản mới đọc revoked-v2.json trước. Chưa có (hoặc lỗi mạng) thì dùng revoked.json cũ — tệp đó vẫn chữ ký khoá cũ,
+  // nên lần kiểm tra vẫn thành công và không làm hết 14 ngày ân hạn. Không ghi vào URL cũ.
+  const urls = dev && process.env.AIVN_REVOKED_URL ? [process.env.AIVN_REVOKED_URL] : [L.REVOKED_URL_NEXT, L.REVOKED_URL];
   const now = () => dev && process.env.AIVN_FAKE_NOW ? Number(process.env.AIVN_FAKE_NOW) + (Date.now() - startedAt) : Date.now();
   const startedAt = Date.now();
   let st = {};
@@ -39,14 +41,16 @@ function createLicenseState({ file, isPackaged, log = () => {}, fetchJson }) {
   }
   // Kiểm tra danh sách thu hồi trên mạng; lỗi mạng không làm mất kích hoạt (còn thời gian ân hạn)
   async function checkOnline() {
-    try {
-      const doc = await fetchJson(url + (url.includes('?') ? '&' : '?') + 't=' + Math.floor(now() / 60000));
-      st = L.applyRevoked(st, doc, { now: now(), publicX }); save();
-      return { ok: true, status: evaluate() };
-    } catch (e) {
-      log('[kích hoạt] chưa kiểm tra được danh sách thu hồi: ' + e.message);
-      return { ok: false, error: e.message, status: evaluate() };
+    let lastErr = null;
+    for (const base of urls) {
+      try {
+        const doc = await fetchJson(base + (base.includes('?') ? '&' : '?') + 't=' + Math.floor(now() / 60000));
+        st = L.applyRevoked(st, doc, { now: now(), publicX }); save();
+        return { ok: true, status: evaluate() };
+      } catch (e) { lastErr = e; }
     }
+    log('[kích hoạt] chưa kiểm tra được danh sách thu hồi: ' + (lastErr ? lastErr.message : ''));
+    return { ok: false, error: lastErr ? lastErr.message : '', status: evaluate() };
   }
   function publicInfo() {
     const s = evaluate();

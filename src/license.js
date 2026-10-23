@@ -7,13 +7,34 @@ const fs = require('fs');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
-const PUBLIC_KEY_X = 'QMWzpffqj1QHIv0WNPnZqTlSMF7eeoDc_mI55kpas_A'; // Ed25519, JWK "x" (base64url)
+const PUBLIC_KEY_X = 'cyvZ7yP6hn1Uj--cJ-j5m4mryExZEikTuPd0SqD31Eg'; // Ed25519, JWK "x" (base64url) — khoá ký hiện tại
+// Bản đã phát hành (v0.15.3, 0.16.0-beta.2.8, beta.3) chỉ nhúng khoá này. Khoá riêng tương ứng đã mất.
+const LEGACY_PUBLIC_KEYS = ['QMWzpffqj1QHIv0WNPnZqTlSMF7eeoDc_mI55kpas_A'];
+const TRUSTED_KEYS = [PUBLIC_KEY_X, ...LEGACY_PUBLIC_KEYS];
+// Bản cũ chỉ tải URL này và chỉ tin khoá cũ. Chữ ký sai → checkOnline không ghi lastCheckOk → sau GRACE_DAYS
+// evaluate trả 'offline' và khoá máy. Không bao giờ ghi đè tệp này bằng chữ ký khoá mới (khoá riêng cũ đã mất, cũng không ký lại được).
 const REVOKED_URL = 'https://khoik647-ai.github.io/aivn/revoked.json';
+// Bản mới tải và đăng danh sách thu hồi tại đây. Bản cũ không đọc URL này.
+const REVOKED_URL_NEXT = 'https://khoik647-ai.github.io/aivn/revoked-v2.json';
 const GRACE_DAYS = 14;
 const CHECK_EVERY_MS = 4 * 3600e3;
 const OWNER = 'NGUYỄN NGỌC KHÔI SINH VIÊN VLU';
+// Nhập tệp khoá quản trị không trùng khoá chính của bản build này (bản cũ không nhập được khoá mới).
+const ADMIN_KEY_MISMATCH = 'Khoá này không khớp với bản AIVN này. Bạn có thể cần bản AIVN mới hơn.';
 
 const pubKey = (x = PUBLIC_KEY_X) => crypto.createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x }, format: 'jwk' });
+// publicX bỏ trống → mọi TRUSTED_KEYS; một chuỗi → chỉ khoá đó (kiểm thử); một mảng → bất kỳ khoá nào trong mảng.
+function acceptedKeys(publicX) {
+  if (publicX == null) return TRUSTED_KEYS;
+  const list = Array.isArray(publicX) ? publicX : [publicX];
+  return list.length ? list : TRUSTED_KEYS;
+}
+function verifySig(payload, sig, publicX) {
+  for (const x of acceptedKeys(publicX)) {
+    try { if (crypto.verify(null, payload, pubKey(x), sig)) return true; } catch { /* khoá hoặc chữ ký không đọc được */ }
+  }
+  return false;
+}
 
 // --- Base32 Crockford (không dùng I, L, O, U để dễ đọc/gõ) ---
 const B32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -87,7 +108,7 @@ function parseCode(code, publicX) {
   let raw; try { raw = b32decode(code); } catch (e) { throw new Error('Mã kích hoạt không hợp lệ (' + e.message + ')'); }
   if (raw.length < 23 + 64) throw new Error('Mã kích hoạt quá ngắn hoặc bị thiếu ký tự');
   const payload = raw.subarray(0, raw.length - 64), sig = raw.subarray(raw.length - 64);
-  if (!crypto.verify(null, payload, pubKey(publicX), sig)) throw new Error('Mã kích hoạt không đúng (chữ ký không hợp lệ). Hãy sao chép lại đầy đủ mã.');
+  if (!verifySig(payload, sig, publicX)) throw new Error('Mã kích hoạt không đúng (chữ ký không hợp lệ). Hãy sao chép lại đầy đủ mã.');
   return unpackPayload(payload);
 }
 
@@ -99,7 +120,7 @@ function signRevoked(privateKeyPem, ids, now = Date.now()) {
 function verifyRevoked(doc, publicX) {
   if (!doc || typeof doc.payload !== 'string' || typeof doc.sig !== 'string') throw new Error('Danh sách thu hồi sai định dạng');
   const payload = Buffer.from(doc.payload, 'base64');
-  if (!crypto.verify(null, payload, pubKey(publicX), Buffer.from(doc.sig, 'base64'))) throw new Error('Chữ ký danh sách thu hồi không hợp lệ');
+  if (!verifySig(payload, Buffer.from(doc.sig, 'base64'), publicX)) throw new Error('Chữ ký danh sách thu hồi không hợp lệ');
   const j = JSON.parse(payload.toString('utf8'));
   if (j.v !== 1 || !Array.isArray(j.revoked) || !Number.isFinite(j.issuedAt)) throw new Error('Danh sách thu hồi sai định dạng');
   return j;
@@ -136,4 +157,4 @@ const REASON_VI = {
   clock: 'Đồng hồ máy có vẻ bị chỉnh lùi. Hãy chỉnh lại giờ và kết nối Internet một lần.',
 };
 
-module.exports = { PUBLIC_KEY_X, REVOKED_URL, GRACE_DAYS, CHECK_EVERY_MS, OWNER, REASON_VI, b32encode, b32decode, group, rawMachineId, machineCodeFrom, fmtMachine, normMachine, issueCode, parseCode, signRevoked, verifyRevoked, evaluate, applyRevoked, packPayload, unpackPayload };
+module.exports = { PUBLIC_KEY_X, LEGACY_PUBLIC_KEYS, TRUSTED_KEYS, REVOKED_URL, REVOKED_URL_NEXT, ADMIN_KEY_MISMATCH, GRACE_DAYS, CHECK_EVERY_MS, OWNER, REASON_VI, b32encode, b32decode, group, rawMachineId, machineCodeFrom, fmtMachine, normMachine, issueCode, parseCode, signRevoked, verifyRevoked, evaluate, applyRevoked, packPayload, unpackPayload };
