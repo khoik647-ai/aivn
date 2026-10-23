@@ -364,7 +364,9 @@ function negatedBefore(s, index) {
 // Cấm gửi khi BẤT KỲ từ phủ định hoặc cụm “chỉ nhìn” nằm trong câu lệnh.
 // Không tính chữ trong ngoặc kép, và không tính nội dung tin không có ngoặc đứng sau dấu hai chấm
 // (“Gửi tin cho An: đừng quên họp”). Phần sau ngoặc kép (“…: "nháp", đừng gửi”) vẫn tính.
+// Riêng trong nội dung sau dấu hai chấm: lời rút lại (“À thôi, đừng gửi”, “never mind, don't send”, “算了别发”) vẫn cấm.
 const isSpace = (c) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\u00a0' || c === '\u3000';
+const quoteClose = (c) => c === '"' ? '"' : c === '\u201c' ? '\u201d' : c === '\u00ab' ? '\u00bb' : '';
 function commandSurface(q) {
   const s = String(q || '');
   let out = '';
@@ -372,19 +374,59 @@ function commandSurface(q) {
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (quote) { if (c === quote) quote = ''; continue; }
-    if (c === '"' || c === '\u201c' || c === '\u00ab') { quote = c === '"' ? '"' : c === '\u201c' ? '\u201d' : '\u00bb'; out += ' '; continue; }
+    if (quoteClose(c)) { quote = quoteClose(c); out += ' '; continue; }
     if (c === ':' || c === '\uff1a') {
       let j = i + 1; while (j < s.length && isSpace(s[j])) j++;
-      const nxt = s[j];
-      if (nxt === '"' || nxt === '\u201c' || nxt === '\u00ab') { out += ' '; continue; }
+      if (quoteClose(s[j])) { out += ' '; continue; }
       break;
     }
     out += c;
   }
   return out;
 }
+// Phần tin không ngoặc sau dấu hai chấm đầu tiên. Dấu hai chấm mở ngoặc kép thì đó là tin trong ngoặc, không phải đoạn này.
+function messageTail(q) {
+  const s = String(q || '');
+  let quote = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote) { if (c === quote) quote = ''; continue; }
+    if (quoteClose(c)) { quote = quoteClose(c); continue; }
+    if (c === ':' || c === '\uff1a') {
+      let j = i + 1; while (j < s.length && isSpace(s[j])) j++;
+      if (quoteClose(s[j])) continue;
+      let out = '';
+      quote = '';
+      for (let k = j; k < s.length; k++) {
+        const d = s[k];
+        if (quote) { if (d === quote) quote = ''; continue; }
+        if (quoteClose(d)) { quote = quoteClose(d); out += ' '; continue; }
+        out += d;
+      }
+      return out;
+    }
+  }
+  return '';
+}
 const BLOCK_SEND = /(?:^|[^\p{L}])(?:tuyệt\s+nhiên|không|chẳng|chưa|đừng|ko|khỏi|cấm|thôi|don['’]t|do\s+not|never|without|refrain|hold\s+off|no\s+need|not|no)(?![\p{L}])|(?:^|[^\p{L}])(?:xem\s+thôi|chỉ\s+xem|chỉ\s+nhìn|just\s+look|only\s+look)(?![\p{L}])|不要|不用|禁止|别|別|勿|不|看看就行|只看/iu;
-function blocksSend(q) { return BLOCK_SEND.test(commandSurface(q)); }
+// Lời rút lại trong nội dung tin: từ cấm chi phối đúng động từ gửi, hoặc một mệnh đề huỷ (“never mind”, “算了”, “À thôi,”).
+// “đừng quên họp” / “别忘了开会” / “chỉ xem thôi nhé” không có động từ gửi bị cấm → vẫn là nội dung tin.
+const TAIL_SEND = /(?:^|[^\p{L}])(?:gửi|gui|nhắn|nhan|send(?:ing)?)(?![\p{L}])|发送|发给|发出|發送|發給|发(?!现|展|生|票)|發(?!現|展|生)/giu;
+const TAIL_GOVERN = /(?:(?:^|[^\p{L}])(?:never\s+mind|do\s+not|don['’]t|thôi|đừng|khỏi|không|ko|wait|cancel)|算了|取消|不要|别|別)\s*(?:(?:được|bấm|nhấn|ấn|nút|có|mà|please|just|press|hit|on|the|a|an)\s+){0,3}$/iu;
+const CANCEL_CLAUSE = /(?:^|[^\p{L}])never\s+mind(?![\p{L}])|算了|(?:^|[.!?。！？,，—–])\s*(?:à\s+)?thôi\s*[,，.!?。！？]/iu;
+function tailRetracts(tail) {
+  if (!tail) return false;
+  if (CANCEL_CLAUSE.test(tail)) return true;
+  const re = new RegExp(TAIL_SEND.source, 'giu');
+  let m;
+  while ((m = re.exec(tail))) {
+    const at = m.index + (/^[^\p{L}]/u.test(m[0]) ? 1 : 0);
+    if (TAIL_GOVERN.test(tail.slice(Math.max(0, at - 48), at))) return true;
+    if (!m[0]) re.lastIndex++;
+  }
+  return false;
+}
+function blocksSend(q) { return BLOCK_SEND.test(commandSurface(q)) || tailRetracts(messageTail(q)); }
 function keepAside(inner) { return REAL_SEND.test(inner) || KEEP_ASIDE.test(inner); }
 function intentText(q) {
   let s = String(q || '');
@@ -423,8 +465,8 @@ function lookOnly(q) {
   if (!LOOK_ASK.test(raw)) return false; // dấu ? một mình không đủ (“…send it to An?” vẫn là gửi)
   return true;
 }
-// Chỉ cho gửi khi có động từ gửi không bị phủ định, và không có từ cấm / cụm chỉ-nhìn ở bất kỳ đâu
-// trong phần lệnh (ngoài ngoặc kép và ngoài nội dung tin sau dấu hai chấm).
+// Chỉ cho gửi khi có động từ gửi không bị phủ định, và phần lệnh không có từ cấm.
+// Nội dung tin sau dấu hai chấm được bỏ qua, trừ lời rút lại việc gửi.
 function allowsSend(q) {
   if (blocksSend(q) || lookOnly(q)) return false;
   if (hasSendVerb(q)) return true;
