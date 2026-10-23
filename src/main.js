@@ -1131,8 +1131,8 @@ function registerIpc() {
       // không giết bộ máy khi đang trả lời: áp dụng ở lần nạp mô hình tới / khi rảnh
       if ((engine.busy && engine.busy()) || generations.size) { pendingEngineRestart = env; LOG.log('engine', 'Đổi cài đặt GPU trong lúc đang chạy: sẽ khởi động lại bộ máy khi xong lượt hiện tại'); }
       else engine.restart(env, 'đổi cài đặt GPU').then(() => send('model:status', engine.status())).catch(() => {}); }
-    // B179: nạp lại cài đặt không được tự spawn MCP. Chỉ dừng khi công tắc vừa tắt, hoặc startEnabled khi vừa bật.
-    if ('agentMcp' in rest) { try { await require('./mcp').syncMasterFlag(mcp, { prevOn: prevMaster, nextOn: settings.data.agentMcp !== false }); } catch (e) { LOG.log('mcp', e.message); } }
+    // B179: nạp lại cài đặt không tự spawn. Tắt thì dừng. Bật thì start do người gọi đưa vào (ở đây startEnabled; sau #12 là plugins.startAuto).
+    if ('agentMcp' in rest) { try { await require('./mcp').syncMasterFlag(mcp, { prevOn: prevMaster, nextOn: settings.data.agentMcp !== false, start: (o) => mcp.startEnabled(o) }); } catch (e) { LOG.log('mcp', e.message); } }
     return publicSettings();
   });
 
@@ -1357,7 +1357,7 @@ function registerIpc() {
   ipcMain.handle('mcp:master', async (_e, on) => {
     const prev = settings.data.agentMcp !== false;
     settings.data.agentMcp = !!on; settings.save();
-    try { await require('./mcp').syncMasterFlag(mcp, { prevOn: prev, nextOn: !!on }); } catch (e) { LOG.log('mcp', e.message); }
+    try { await require('./mcp').syncMasterFlag(mcp, { prevOn: prev, nextOn: !!on, start: (o) => mcp.startEnabled(o) }); } catch (e) { LOG.log('mcp', e.message); }
     return true;
   });
   setTimeout(() => { if (settings.data.agentMcp === false) return; mcp.startEnabled().catch(() => {}); }, 4000);

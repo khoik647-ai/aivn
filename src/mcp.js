@@ -228,6 +228,7 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
   const servers = new Map(); // tên → { state, client, transport, tools, error, logs[] }
   const gen = new Map(); // tên → số lần stop, để huỷ lần start đang dở
   const inflight = new Map(); // tên → { client } khi connect chưa xong
+  const retiring = new Map(); // tên → Promise đang đóng client đã rút khỏi inflight
   const bump = (name) => { const n = (gen.get(name) || 0) + 1; gen.set(name, n); return n; };
   function masterAllowed() {
     if (typeof masterOn !== 'function') return true;
@@ -269,15 +270,16 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
     const loaded = load();
     const def = loaded.mcpServers[name];
     if (!def) throw new Error(`Không có máy chủ "${name}" trong mcp.json.`);
-    await stop(name, { quiet: true });
+    const ticket = bump(name);
+    await stop(name, { quiet: true, keepGen: true });
+    if (gen.get(name) !== ticket) return status(name);
     // Công tắc chính tắt: không dựng stdio/http/SSE, kể cả khi đường gọi là preset, kết nối lại, tải plugin hay nạp lại cài đặt.
     if (!masterAllowed()) {
       log('mcp', `${name}: bỏ qua vì công tắc chính đang tắt`);
       onChange();
       return pausedStatus(name);
     }
-    const ticket = gen.get(name);
-    const e = entry(name); e.state = 'starting'; e.error = null; e.tools = []; onChange();
+    const e = entry(name); e.owner = ticket; e.state = 'starting'; e.error = null; e.tools = []; onChange();
     if (loaded.fileError) return fail(name, loaded.fileError);
     if (loaded.problems[name]) return fail(name, loaded.problems[name]);
     if (def.auth != null) return fail(name, `AIVN chưa hỗ trợ đăng nhập OAuth (trường auth) của máy chủ "${name}".`);
@@ -311,8 +313,8 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
       await Promise.race([client.connect(transport), closed, new Promise((_, rej) => { tmo = setTimeout(() => rej(new Error('Quá 60 giây chưa kết nối được (lần đầu npx có thể phải tải gói).')), 60000); })]).finally(() => clearTimeout(tmo));
       if (gen.get(name) !== ticket || !masterAllowed()) {
         try { await client.close(); } catch { /* công tắc tắt giữa chừng */ }
-        inflight.delete(name);
-        if (e.state === 'starting' || e.client === client) Object.assign(e, { client: null, transport: null, state: 'off', tools: [] });
+        if (inflight.get(name) && inflight.get(name).client === client) inflight.delete(name);
+        if (e.owner === ticket || e.client === client) Object.assign(e, { client: null, transport: null, state: 'off', tools: [] });
         onChange();
         return pausedStatus(name);
       }
@@ -329,20 +331,20 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
       }
       if (gen.get(name) !== ticket || !masterAllowed()) {
         try { await client.close(); } catch { /* công tắc tắt giữa chừng */ }
-        inflight.delete(name);
-        if (e.state === 'starting' || e.client === client) Object.assign(e, { client: null, transport: null, state: 'off', tools: [] });
+        if (inflight.get(name) && inflight.get(name).client === client) inflight.delete(name);
+        if (e.owner === ticket || e.client === client) Object.assign(e, { client: null, transport: null, state: 'off', tools: [] });
         onChange();
         return pausedStatus(name);
       }
-      inflight.delete(name);
+      if (inflight.get(name) && inflight.get(name).client === client) inflight.delete(name);
       Object.assign(e, { client, transport, state: 'on', tools });
       addLog(name, `Đã kết nối · ${e.tools.length} công cụ: ${e.tools.map(t => t.name).join(', ')}`);
       log('mcp', `${name}: đã kết nối, ${e.tools.length} công cụ`);
     } catch (err) {
       if (client) { try { await client.close(); } catch { /* đã lỗi */ } }
-      inflight.delete(name);
+      if (inflight.get(name) && inflight.get(name).client === client) inflight.delete(name);
       if (gen.get(name) !== ticket || !masterAllowed()) {
-        if (e.state === 'starting' || e.client === client) Object.assign(e, { client: null, transport: null, state: 'off', tools: [], error: null });
+        if (e.owner === ticket || e.client === client) Object.assign(e, { client: null, transport: null, state: 'off', tools: [], error: null });
         onChange();
         return pausedStatus(name);
       }
@@ -351,19 +353,25 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
     }
     onChange(); return status(name);
   }
-  async function stop(name, { quiet = false } = {}) {
-    bump(name);
+  async function stop(name, { quiet = false, keepGen = false } = {}) {
+    if (!keepGen) bump(name);
     const fly = inflight.get(name);
     if (fly) inflight.delete(name);
     const e = servers.get(name);
-    if (!e && !(fly && fly.client)) return;
+    const prev = retiring.get(name);
+    if (!e && !(fly && fly.client) && !prev) return;
     const c = e && e.client;
     const list = [];
     if (fly && fly.client) list.push(fly.client);
     if (c && c !== (fly && fly.client)) list.push(c);
     // Đóng khi state còn "starting" để onclose huỷ connect đang chờ, không để tiến trình sống thêm 60 giây.
-    for (const client of list) { try { await client.close(); } catch { /* đóng */ } }
-    if (e) Object.assign(e, { client: null, transport: null, state: 'off', tools: [] });
+    // stop sau phải chờ lần đóng đang dở: client đã rời inflight nên lần stop mới không thấy nó.
+    const mine = (async () => { for (const client of list) { try { await client.close(); } catch { /* đóng */ } } })();
+    const joined = prev ? Promise.all([prev, mine]) : mine;
+    retiring.set(name, joined);
+    try { await joined; }
+    finally { if (retiring.get(name) === joined) retiring.delete(name); }
+    if (e && (!c || e.client === c)) Object.assign(e, { client: null, transport: null, state: 'off', tools: [] });
     if (c && !quiet) addLog(name, 'Đã tắt');
     if (e && !quiet) onChange();
   }
@@ -436,18 +444,21 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
   }
   async function stopAll() {
     const names = [...servers.keys()];
-    for (const n of names) await stop(n, { quiet: true });
+    await Promise.all(names.map((n) => stop(n, { quiet: true })));
     if (names.length) onChange();
   }
   return { file, readText, config, fileError, status, start, stop, startEnabled, saveText, setEnabled, names, defs: defsMap, has: (n) => /^mcp__/.test(n) && names().includes(n), exec, stopAll, masterAllowed };
 }
-// B179: đổi công tắc chính (hoặc nạp lại cài đặt có agentMcp). Tắt thì dừng ngay. Bật thì startEnabled. Không đổi thì không spawn.
-async function syncMasterFlag(mcp, { prevOn, nextOn, wait = false } = {}) {
+// B179: đổi công tắc chính (hoặc nạp lại cài đặt có agentMcp). Tắt thì dừng ngay.
+// Bật thì gọi start do người gọi đưa vào — không gọi startEnabled() tại đây.
+// Nhánh này truyền mcp.startEnabled. Sau khi gộp #12, người gọi truyền plugins.startAuto để không bỏ cổng duyệt.
+async function syncMasterFlag(mcp, { prevOn, nextOn, wait = false, start = null } = {}) {
   const prev = !!prevOn; const next = !!nextOn;
   if (prev === next) return { changed: false, started: [] };
   if (!next) { await mcp.stopAll(); return { changed: true, started: [] }; }
-  const started = await mcp.startEnabled({ wait });
-  return { changed: true, started };
+  if (typeof start !== 'function') return { changed: true, started: [] };
+  const started = await start({ wait });
+  return { changed: true, started: Array.isArray(started) ? started : [] };
 }
 // Mẫu dựng sẵn
 function presets({ folder = null } = {}) {
