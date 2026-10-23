@@ -150,18 +150,40 @@ function statusOf(r, { denied = 0, draft = false, error = null, timedOut = false
   if (sendTask && !(r.steps || []).some(x => x && x.verify && x.verify.sent)) return { status: 'failed', reason: 'việc gửi tin nhưng không có bước nào kiểm chứng được là ĐÃ GỬI đúng người' };
   return { status: 'done' };
 }
-// B193: khung + chữ của cửa sổ đích lúc chụp (cây giao diện, chỉ Windows; nơi khác/lỗi/quá 8 giây → null)
+// B193: khung + chữ của cửa sổ đích. Không có bộ đọc / không có hwnd → không phải lỗi.
+// Lỗi hoặc quá 8 giây → ok:false (người gọi KHÔNG được giữ ảnh gốc).
 async function winInfoOf(deps, tgt) {
   const get = deps.windowInfo !== undefined ? deps.windowInfo : (process.platform === 'win32' ? async (w) => { const r = await require('./agent/uitree').tree({ hwnd: w.hwnd || 0, max: 120 }); const els = r && Array.isArray(r.els) ? r.els : r && r.els ? [r.els] : [];
     return r && r.win ? { b: r.win.b, title: r.win.title, proc: r.win.proc, text: els.map(e => [e.n, e.v].filter(Boolean).join(' ')).join('\n') } : null; } : null);
-  if (!get || !tgt || tgt.hwnd == null) return null;
-  try { return await Promise.race([get(tgt), new Promise(r => setTimeout(() => r(null), 8000).unref?.())]); } catch { return null; }
+  if (!get || !tgt || tgt.hwnd == null) return { ok: true, info: null };
+  let timer;
+  const job = Promise.resolve().then(() => get(tgt)).then(v => ({ ok: true, v }), () => ({ ok: false }));
+  const got = await Promise.race([job, new Promise(res => { timer = setTimeout(() => res({ ok: false }), 8000); })]);
+  if (timer) clearTimeout(timer);
+  return got && got.ok ? { ok: true, info: got.v || null } : { ok: false, info: null };
 }
-// B193: mọi cửa sổ đang hiện (không chỉ cửa sổ đích). Linux/mac không tự gọi uitree trừ khi deps.windows được truyền.
+// B193: mọi cửa sổ đang hiện. Không có bộ liệt kê (Linux/mac, trừ khi deps.windows được truyền) → danh sách rỗng, không phải lỗi.
+// Lỗi, kết quả không phải mảng, hoặc quá 8 giây → ok:false.
 async function windowsOf(deps) {
   const get = deps.windows !== undefined ? deps.windows : (process.platform === 'win32' ? () => require('./agent/uitree').windows() : null);
-  if (!get) return [];
-  try { const r = await Promise.race([Promise.resolve(get()), new Promise(res => setTimeout(() => res([]), 8000).unref?.())]); return Array.isArray(r) ? r : []; } catch { return []; }
+  if (!get) return { ok: true, windows: [] }; // không có bộ liệt kê (Linux/mac): không phải lỗi
+  if (typeof get !== 'function') return { ok: false, windows: [] };
+  let timer;
+  const job = Promise.resolve().then(() => get()).then(v => ({ ok: true, v }), () => ({ ok: false }));
+  const got = await Promise.race([job, new Promise(res => { timer = setTimeout(() => res({ ok: false }), 8000); })]);
+  if (timer) clearTimeout(timer);
+  return got && got.ok && Array.isArray(got.v) ? { ok: true, windows: got.v } : { ok: false, windows: [] };
+}
+// Chữ của từng cửa sổ đang hiện (không chỉ tiêu đề). deps.windowText nếu có; nếu không, Windows đọc cây UIA. Lỗi → ném (fail-closed).
+function windowTextReader(deps) {
+  if (deps.windowText !== undefined) return deps.windowText;
+  if (process.platform !== 'win32') return null;
+  return async (w) => {
+    if (!w || w.hwnd == null) return '';
+    const r = await require('./agent/uitree').tree({ hwnd: w.hwnd, max: 100 });
+    const els = r && Array.isArray(r.els) ? r.els : [];
+    return els.map(e => [e && e.n, e && e.v].filter(Boolean).join(' ')).join('\n');
+  };
 }
 const exitCodeOf = (status) => status === 'done' ? 0 : status === 'asked_user' ? 3 : status === 'cancelled' ? 4 : 2;
 function writeJson(file, obj) { fs.mkdirSync(path.dirname(file), { recursive: true }); const tmp = file + '.tmp-' + process.pid; fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8'); fs.renameSync(tmp, file); }
@@ -196,9 +218,10 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
     const a = self ? { ok: true, reason: '' } : risk ? { ...answerFor({ ...req, risk: true }, { draft }), final: true } : { ok: true, reason: '' }; if (!a.ok) denied++; if (self) sendApproved++;
     res.approvals.push({ kind, at: Date.now() - t0, title: req.title || req.label || req.kind || null, tool: req.tool || null, risk, send: !!req.send, recipient: req.recipient || null, shownChat: req.shown ? { header: req.shown.header || [], composer: req.shown.composer || null } : null, text: req.sendText != null ? String(req.sendText).slice(0, 300) : null, desc: String(req.desc || req.message || req.text || '').slice(0, 300), answer: self ? `allowed (--approve-send-to “${args.approveSendTo}”)` : a.ok ? 'allowed (không rủi ro)' : 'denied' });
     deps.LOG && deps.LOG.log('qa', `QA tự trả lời thẻ ${kind}: ${self ? 'CHO PHÉP (--approve-send-to)' : a.ok ? 'làm (không rủi ro)' : 'TỪ CHỐI'} — ${req.title || req.desc || req.kind || ''}${req.recipient ? ` · người nhận “${req.recipient}”` : ''}`); return a; };
-  let n = 0; const pendingSteps = [];
+  let n = 0; const pendingSteps = []; let stepChain = Promise.resolve(); // B193: onStep xếp hàng — bước sau thấy ảnh bước trước đã ghi trước khi quyết định xoá
   let tgt = null; const titles = new Set(); // B193: cửa sổ đích gần nhất + các tiêu đề cần che trong log
   async function onStep1(s) {
+          if (s && s.revise) return; // B193: gửi lại thẻ bước đã bỏ ảnh — không chụp thêm
           if (s.status === 'running' || s.status === 'pending') { open.set(s.id, { i0: lines.length, t: Date.now() }); return; }
           const o = open.get(s.id) || { i0: lines.length, t: Date.now() }; open.delete(s.id); n++;
           const step = { n, afterDeadline: timedOut || undefined, id: s.id, auto: !!s.auto, tool: s.name, args: s.args || null, status: s.status, summary: s.summary || null, verification: s.verify || s.check || null, draftIn: s.draftIn || undefined, durationMs: s.ms ?? (Date.now() - o.t), debug: lines.slice(o.i0).filter(l => DEBUG_LINE.test(l)).slice(0, 40), shot: null };
@@ -206,18 +229,24 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
           if (Array.isArray(s.sensitive) && s.sensitive.length && tgt) tgt.sensitive = [...new Set([...tgt.sensitive, ...s.sensitive])];
           step.summary = SG.redactTitles(step.summary, [...titles]); step.debug = step.debug.map(l => SG.redactTitles(l, [...titles]));
           if (args.shots && deps.capture) { try { const f = path.join(args.shots, `step-${String(n).padStart(2, '0')}-${String(s.name || 'step').replace(/[^\w-]/g, '_')}.jpg`);
-            // B193: chỉ chụp cửa sổ đích (khi biết khung của nó); tệp mã kích hoạt đang hiện ở BẤT KỲ cửa sổ nào, hoặc chữ nhạy cảm → CHỈ ghi ảnh đã che, không bao giờ ghi ảnh gốc
-            const [info, wins] = await Promise.all([tgt ? winInfoOf(deps, tgt) : null, windowsOf(deps)]); if (info && info.title) titles.add(String(info.title));
-            const sec = SG.screenSecrets({ title: info ? info.title : (tgt && tgt.title) || '', proc: info ? info.proc : (tgt && tgt.proc) || '', text: info && info.text ? info.text : '', windows: wins });
-            for (const t of sec.titles) titles.add(t);
-            const reasons = [...new Set([...SG.reasonList(s.sensitive), ...(tgt ? SG.reasonList(tgt.sensitive) : []), ...sec.reasons])];
+            // B193: chỉ chụp cửa sổ đích (khi biết khung của nó). Lỗi/quá hạn khi liệt kê cửa sổ hoặc đọc chữ → coi là không an toàn (không ghi ảnh gốc).
+            // Nội dung mọi cửa sổ đang hiện (không chỉ tiêu đề) được quét; tệp mã kích hoạt mở bên cạnh vẫn làm ảnh bị che.
+            const [infoR, winR] = await Promise.all([tgt ? winInfoOf(deps, tgt) : { ok: true, info: null }, windowsOf(deps)]);
+            let unsafe = !infoR.ok || !winR.ok; let wins = winR.windows || [];
+            const info = infoR.info; if (info && info.title) titles.add(String(info.title));
+            if (!unsafe) { try { const reader = windowTextReader(deps); if (reader) wins = await SG.fillWindowText(wins, reader); } catch { unsafe = true; } }
+            let sec = { reasons: [], titles: [] };
+            if (!unsafe) { try { sec = SG.screenSecrets({ title: info ? info.title : (tgt && tgt.title) || '', proc: info ? info.proc : (tgt && tgt.proc) || '', text: info && info.text ? info.text : '', windows: wins }); } catch { unsafe = true; } }
+            if (unsafe) sec = { reasons: ['text:unreadable'], titles: [] };
+            for (const t of sec.titles || []) titles.add(t);
+            const reasons = [...new Set([...SG.reasonList(s.sensitive), ...(tgt ? SG.reasonList(tgt.sensitive) : []), ...SG.reasonList(sec.reasons), ...(unsafe ? ['text:unreadable'] : [])])];
             if (tgt && reasons.length) tgt.sensitive = reasons; // còn nhạy cảm cho các bước sau trên cùng cửa sổ
             if (reasons.length) { const gone = SG.forgetShots(res.steps, args.shots); if (gone.removed) deps.LOG && deps.LOG.log('qa', `B193: xoá ${gone.removed} ảnh đã chụp trước đó trong lượt này (màn hình có nội dung nhạy cảm)`); }
             const b = info && Array.isArray(info.b) ? info.b : tgt && Array.isArray(tgt.b) ? tgt.b : null;
             const g = await SG.shot({ capture: deps.capture, target: b ? { b } : null, reasons, image: deps.image, maxW: 1920 });
             step.shotScope = { scope: g.scope, rect: g.rect, window: !!b }; if (reasons.length) { step.shotRedacted = true; step.shotWarn = reasons; deps.LOG && deps.LOG.log('qa', `B193: bước ${n} — ảnh chụp có thể chứa nội dung nhạy cảm (${reasons.join(', ')}) → ${g.buf ? 'chỉ ghi ảnh đã che' : 'không ghi ảnh'}`); }
             if (g.buf) { fs.writeFileSync(f, g.buf); step.shot = f; } else { step.shot = null; step.shotError = 'B193: không ghi ảnh (nội dung nhạy cảm, không che được)'; }
-          } catch (e) { step.shot = null; step.shotError = SG.redactTitles(String(e.message || e), [...titles]).slice(0, 200); } }
+          } catch (e) { step.shot = null; step.shotError = SG.redactTitles(String(e.message || e), [...titles]).slice(0, 200); try { SG.forgetShots(res.steps, args.shots); } catch {} } }
           res.steps.push(step);
   }
   try {
@@ -240,7 +269,7 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
     const turn0 = (messages) => deps.runAgentTurn({ reqId: null, convoId: 'qa-' + runId, messages, headless: false, signal: ac.signal,
       qa: { confirm: async (req) => { ask('confirm', req); return false; }, confirmScreen: async (req) => { ask('screen', req); return { ok: false }; },
         approve: async (card) => { const x = ask('approve', card); return { ok: false, reason: x.reason }; },
-        onStep: (s) => { const p = onStep1(s); pendingSteps.push(p); return p; } } });
+        onStep: (s) => { const p = stepChain.then(() => onStep1(s)); stepChain = p.then(() => {}, () => {}); pendingSteps.push(p); return p; } } });
     // B117: hạn chót CỨNG — hết giờ thì huỷ lượt (signal), chờ tối đa DEADLINE_GRACE_MS cho bước dọn ô soạn (B104) rồi ghi kết quả, dù lượt chưa trả về
     const hard = new Promise((resolve) => { const fire = () => setTimeout(() => resolve(HARD_STOP), deps.deadlineGraceMs ?? DEADLINE_GRACE_MS); if (ac.signal.aborted) fire(); else ac.signal.addEventListener('abort', fire, { once: true }); });
     const turn = (messages) => Promise.race([turn0(messages), hard]).then(x => { if (x === HARD_STOP) { res.hardStop = true; deps.LOG && deps.LOG.log('qa', `B117: lượt không dừng kịp sau hạn chót — ghi kết quả ngay (chờ thêm ${deps.deadlineGraceMs ?? DEADLINE_GRACE_MS} ms)`); return null; } return x; });

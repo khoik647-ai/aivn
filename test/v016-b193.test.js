@@ -37,6 +37,7 @@ test('scan: tiêu đề / chữ nhạy cảm → chỉ TÊN loại, không có g
   assert.ok(SG.scan({ text: bare }).includes('text:aivn-code'));
   assert.ok(!JSON.stringify(SG.scan({ text: fake6 })).includes(fake6));
   assert.ok(SG.scan({ title: 'license.json - Notepad' }).includes('title:activation'));
+  assert.deepStrictEqual(SG.scan({ title: 'LICENSE - Notepad' }), [], 'tệp LICENSE nguồn mở không phải mã kích hoạt');
   assert.ok(SG.scan({ title: 'aivn-admin-key.json - Notepad' }).includes('title:key'));
   assert.deepStrictEqual(SG.screenSecrets({ title: 'Calculator', windows: [{ title: FAKE_TITLE, proc: 'notepad', min: true }] }).reasons, []);
   const bg = SG.screenSecrets({ title: 'Calculator', text: '12 + 30 = 42', windows: [{ title: 'license.json - Notepad', proc: 'notepad' }] });
@@ -64,7 +65,8 @@ test('guardStep (thẻ bước trong app): bỏ ảnh nhỏ, cảnh báo vi/en/z
 });
 test('agent.js gọi guardStep đúng chỗ (trước logTool / onStep) với khoá dịch có trong en/zh', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/agent/agent.js'), 'utf8');
-  assert.match(src, /SG\.guardStep\(step, out, \{ warn: \(\) => say\(LG, 'đã ẩn ảnh chụp[^']*'\) \}\);[^\n]*\n\s*logTool\(step\);/);
+  assert.match(src, /SG\.guardStep\(step, out, \{ warn: \(\) => say\(LG, 'đã ẩn ảnh chụp[^']*'\)[^}]*\}\);[^\n]*\n\s*logTool\(step\);/);
+  assert.match(src, /await onStep\(\{ \.\.\.step \}\)/);
   for (const f of ['en', 'zh']) assert.ok(require('../src/i18n/' + f)['đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá'], f);
 });
 test('shot: có cửa sổ đích → chỉ cắt cửa sổ; nhạy cảm → ảnh xám mới, không còn byte gốc; không xử lý ảnh được + nhạy cảm → không ghi gì', async () => {
@@ -191,9 +193,12 @@ test('forgetShots: không đi theo symlink ra ngoài thư mục shots, không đ
 });
 test('desktop-agent: quét và xoá điểm ảnh trước khi gửi cho mắt nhìn hoặc thẻ xin phép', () => {
   const src = fs.readFileSync(path.join(__dirname, '../src/desktop-agent.js'), 'utf8');
-  const seal = src.indexOf('SG.screenSecrets'); const desc = src.indexOf('SC.describe');
+  const seal = src.indexOf('sealShot('); const desc = src.indexOf('SC.describe');
   assert.ok(seal > 0 && seal < desc, 'phải quét trước khi gửi ảnh cho mô hình nhìn');
   assert.match(src, /dropShotPixels\(shot\)/); assert.match(src, /shotOk/);
+  assert.match(src, /const ShotGuard = require\('\.\/agent\/shot-guard'\)/);
+  assert.match(src, /const SendGate = require\('\.\/agent\/send-gate'\)/);
+  assert.ok(!/const SG = require\('\.\/agent\/send-gate'\)/.test(src), 'SG của send-gate không được che ShotGuard');
 });
 test('QA: cửa sổ thường → chỉ chụp khung cửa sổ đích (ghi rõ phạm vi), bước không có đích → cả màn hình như trước', async () => {
   const { res, files } = await qaRun({ title: 'Calculator', text: '12 + 30 = 42' });
@@ -202,6 +207,16 @@ test('QA: cửa sổ thường → chỉ chụp khung cửa sổ đích (ghi rõ
   const n = await qaRun({ title: 'x', text: '', steps: [{ id: 1, name: 'web_search', out: { summary: 'tìm xong' } }] });
   assert.strictEqual(n.res.steps[0].shotScope.scope, 'screen'); assert.strictEqual(n.res.steps[0].shotScope.window, false);
   assert.ok(fs.readFileSync(n.files[0], 'latin1').startsWith('JPG' + MARK));
+});
+test('reveal: liệt kê cửa sổ quá hạn → failed, không trả “không thấy gì”', async () => {
+  const r = await SG.reveal({ title: 'Calculator', text: '42', loadWindows: () => new Promise(() => {}), timeoutMs: 40 });
+  assert.strictEqual(r.failed, true); assert.deepStrictEqual(r.reasons, ['text:unreadable']); assert.deepStrictEqual(r.titles, []);
+  await assert.rejects(() => SG.fillWindowText([{ title: 'notes.txt - Notepad', proc: 'notepad' }], () => new Promise(() => {}), { timeoutMs: 40 }));
+});
+test('QA: liệt kê cửa sổ không trả lời trong 8 giây → không ghi ảnh gốc', { timeout: 20000 }, async () => {
+  const { files, res } = await qaRun({ title: 'Calculator', text: '12 + 30 = 42', windows: () => new Promise(() => {}), steps: [{ id: 1, name: 'screenshot', out: { summary: 'đã chụp màn hình' } }] });
+  for (const f of files) assert.ok(!fs.readFileSync(f, 'latin1').includes('ORIGINAL'), f);
+  assert.ok(res.steps.every(s => s.shotRedacted && s.shotWarn.includes('text:unreadable')));
 });
 test('QA: ảnh cũ hơn 24 giờ trong thư mục shots bị dọn lúc bắt đầu', async () => {
   const d = tmp(); const shots = path.join(d, 'shots'); fs.mkdirSync(shots); const f = path.join(shots, 'step-01-old.jpg'); fs.writeFileSync(f, 'x'); const t = (Date.now() - 48 * 3600e3) / 1000; fs.utimesSync(f, t, t);

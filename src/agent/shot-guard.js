@@ -11,7 +11,8 @@ const WARN = 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích ho�
 // tiêu đề / tên tiến trình: từ khoá (có dấu, để “khoa học” không bị tính)
 const TITLE_RE = [
   ['key', /khoá|khóa|\bkey(?:s|file|store|chain)?\b|\.pem\b|\.key\b|\.p12\b|\.pfx\b|id_rsa|id_ed25519|aivn-admin-key|admin-issued|密钥|钥匙/i],
-  ['activation', /kích[\s_-]*hoạt|kich[\s_-]*hoat|activat|licen[cs]e|serial|product key|激活|许可证|授权/i],
+  // “LICENSE” một mình (tệp giấy phép nguồn mở) không phải mã kích hoạt; license.json / license key thì có
+  ['activation', /kích[\s_-]*hoạt|kich[\s_-]*hoat|activat|licen[cs]e\.(?:json|txt|key|lic)|(?:license|licence)\s*(?:key|code)|serial|product key|激活|许可证|授权/i],
   ['password', /mật khẩu|password|passwd|\bpwd\b|keepass|bitwarden|1password|密码/i],
   ['env', /(?:^|[\s\\/"“])\.env\b|\.env\.|credential|secret|bí mật|凭据|机密/i],
   ['token', /token|mã truy cập|令牌/i],
@@ -20,9 +21,6 @@ const TITLE_RE = [
 // chuỗi nhiều đoạn ngắn nối bằng - / _ (vd. Bao-cao-cuoi-ky-2026) là tên tệp/slug, không phải khoá
 const wordy = (m) => { const p = m.split(/[-_]+/).filter(Boolean); return p.length >= 3 && p.every(x => x.length <= 12); };
 const SECRET_RE = [
-  // mã kích hoạt AIVN: Crockford base32, issueCode nhóm 6 (src/license.js). Nhóm 5 vẫn bắt (đề phòng bản cũ). Không có chữ thường.
-  ['aivn-code', /\b(?:[0-9A-Z]{5,6}-){5,}[0-9A-Z]{1,6}\b/g],
-  ['aivn-code', /\b[0-9A-HJKMNP-TV-Z]{80,}\b/g], // cùng mã khi mở không có dấu gạch (I/L/O/U không thuộc Crockford)
   ['sk', /\bsk-[A-Za-z0-9_-]{16,}/g],
   ['github', /\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}/g],
   ['private-key', /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g],
@@ -41,30 +39,125 @@ const reasonList = (xs) => (Array.isArray(xs) ? xs : []).filter(x => typeof x ==
 const hit = (re, s, skip) => { re.lastIndex = 0; let m; while ((m = re.exec(s))) { if (!skip || !skip(m[0])) { re.lastIndex = 0; return true; } if (!m[0]) re.lastIndex++; } re.lastIndex = 0; return false; };
 // cửa sổ thu nhỏ / ẩn không nằm trên ảnh chụp
 const onScreen = (w) => !!w && w.min !== true && w.minimized !== true && w.visible !== false;
+// Mã kích hoạt (license.issueCode): Crockford base32, nhóm 6. OCR hay viết thường, thay gạch bằng cách / en-dash,
+// đọc 0→O, 1→I hoặc L, và ngắt dòng giữa chừng. Khớp cả mã chỉ lộ một phần (≥5 nhóm, hoặc ≥70 ký tự).
+const DASH_RE = /[-\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/;
+function crockChar(ch) {
+  if (!ch) return false;
+  let u = ch.toUpperCase();
+  if (u === 'O') u = '0'; else if (u === 'I' || u === 'L') u = '1';
+  return (u >= '0' && u <= '9') || (u >= 'A' && u <= 'H') || u === 'J' || u === 'K' || u === 'M' || u === 'N' || (u >= 'P' && u <= 'T') || (u >= 'V' && u <= 'Z');
+}
+function crockLetter(ch) {
+  if (!crockChar(ch)) return false;
+  let u = ch.toUpperCase();
+  if (u === 'O') u = '0'; else if (u === 'I' || u === 'L') u = '1';
+  return u < '0' || u > '9';
+}
+// các đoạn [start, end) trong chuỗi gốc trông như mã kích hoạt (đã gồm dấu phân cách và chỗ ngắt dòng)
+function codeSpans(s) {
+  const spans = []; const n = s.length; let i = 0;
+  while (i < n) {
+    if (!crockChar(s[i])) { i++; continue; }
+    const start = i; let chars = 0; let letters = 0; const pieces = []; let cur = 0; let j = i;
+    const endGroup = () => { if (cur) { pieces.push(cur); cur = 0; } };
+    while (j < n && crockChar(s[j])) { if (crockLetter(s[j])) letters++; cur++; chars++; j++; }
+    while (j < n) {
+      let k = j; let dash = false; let newline = false; let space = false;
+      while (k < n) {
+        const ch = s[k];
+        if (DASH_RE.test(ch)) { dash = true; k++; continue; }
+        if (/\s|\u00a0/.test(ch)) { if (ch === '\n' || ch === '\r') newline = true; else space = true; k++; continue; }
+        break;
+      }
+      if (k === j || k >= n || !crockChar(s[k])) break;
+      let t = k; let nextLen = 0;
+      while (t < n && crockChar(s[t])) { nextLen++; t++; }
+      const incomplete = cur > 0 && cur < 5 && nextLen > 0 && nextLen < 5 && cur + nextLen <= 6 && !dash;
+      const bridge = dash || newline || incomplete || (space && cur >= 5 && nextLen >= 5);
+      if (!bridge) break;
+      if (!incomplete) endGroup();
+      while (j < k) j++;
+      while (j < n && crockChar(s[j])) { if (crockLetter(s[j])) letters++; cur++; chars++; j++; }
+    }
+    endGroup();
+    const grouped = pieces.length >= 5 && pieces.every(g => g >= 5 && g <= 6);
+    if ((chars >= 70 && letters >= 8) || grouped) spans.push([start, j]);
+    i = j > start ? j : start + 1;
+  }
+  return spans;
+}
+function hasCode(s) { return typeof s === 'string' && s && codeSpans(s).length > 0; }
+function redactCodes(s) {
+  const spans = codeSpans(s); if (!spans.length) return s;
+  let o = s; for (let i = spans.length - 1; i >= 0; i--) o = o.slice(0, spans[i][0]) + MASK + o.slice(spans[i][1]);
+  return o;
+}
 function scan({ title = '', proc = '', text = '' } = {}) {
   const out = new Set(); const t = String(title || '') + ' ' + String(proc || ''); const x = String(text || '');
   for (const [k, re] of TITLE_RE) if (re.test(t)) out.add('title:' + k);
+  if (hasCode(t)) out.add('title:aivn-code'); if (hasCode(x)) out.add('text:aivn-code');
   for (const [k, re, skip] of SECRET_RE) { if (hit(re, t, skip)) out.add('title:' + k); if (hit(re, x, skip)) out.add('text:' + k); }
   for (const [k, re] of TEXT_RE) if (re.test(x)) out.add('text:' + k);
   return [...out];
 }
-// Cả màn hình: tiêu đề/tiến trình/chữ của cửa sổ đích, cộng mọi cửa sổ KHÁC đang hiện (tệp mã kích hoạt mở bên cạnh vẫn lọt vào ảnh toàn màn hình).
+// Cả màn hình: chữ/tiêu đề cửa sổ đích, chữ OCR của cả ảnh, và NỘI DUNG (không chỉ tiêu đề) của mọi cửa sổ đang hiện.
 // titles chỉ để che log; không đưa vào tệp kết quả.
 function screenSecrets({ title = '', proc = '', text = '', windows = [] } = {}) {
   const reasons = new Set(scan({ title, proc, text })); const titles = [];
   for (const w of Array.isArray(windows) ? windows : []) {
     if (!onScreen(w)) continue;
-    const r = scan({ title: w.title || '', proc: w.proc || '' });
+    const body = [w.text, w.body, w.ocr].filter(x => typeof x === 'string' && x).join('\n');
+    const r = scan({ title: w.title || '', proc: w.proc || '', text: body });
     if (!r.length) continue;
     for (const x of r) reasons.add(x);
     if (w.title) titles.push(String(w.title));
   }
-  return { reasons: [...reasons], titles };
+  return { reasons: [...reasons], titles, failed: false };
+}
+// Đọc chữ từng cửa sổ đang hiện (UIA). Lỗi hoặc quá hạn của BẤT KỲ cửa sổ nào → ném lỗi (người gọi coi ảnh là không an toàn).
+async function fillWindowText(wins, read, { timeoutMs = 8000 } = {}) {
+  const out = [];
+  for (const w of Array.isArray(wins) ? wins : []) {
+    if (!onScreen(w) || typeof w.text === 'string' || typeof read !== 'function') { out.push(w); continue; }
+    let timer;
+    const job = Promise.resolve().then(() => read(w)).then(v => ({ ok: true, v }), () => ({ ok: false }));
+    const textR = await Promise.race([
+      job,
+      new Promise(res => { timer = setTimeout(() => res({ ok: false }), timeoutMs); }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (!textR || !textR.ok) throw new Error('window-text');
+    out.push({ ...w, text: textR.v == null ? '' : String(textR.v) });
+  }
+  return out;
+}
+// Quét, và nếu liệt kê cửa sổ / đọc chữ lỗi hoặc quá hạn thì KHÔNG trả “không thấy gì” — trả failed để người gọi xoá ảnh.
+async function reveal({ title = '', proc = '', text = '', windows = null, loadWindows = null, loadText = null, timeoutMs = 8000 } = {}) {
+  try {
+    let wins = windows;
+    if (typeof loadWindows === 'function') {
+      let timer;
+      const job = Promise.resolve().then(() => loadWindows()).then(v => ({ ok: true, v }), () => ({ ok: false }));
+      const got = await Promise.race([
+        job,
+        new Promise(res => { timer = setTimeout(() => res({ ok: false }), timeoutMs); }),
+      ]);
+      if (timer) clearTimeout(timer);
+      if (!got || !got.ok) throw new Error('windows');
+      wins = got.v;
+    }
+    if (wins != null && !Array.isArray(wins)) throw new Error('windows');
+    if (typeof loadText === 'function') wins = await fillWindowText(wins || [], loadText, { timeoutMs });
+    return screenSecrets({ title, proc, text, windows: wins || [] });
+  } catch {
+    return { reasons: ['text:unreadable'], titles: [], failed: true };
+  }
 }
 // che chuỗi trông như khoá (giữ phần chữ còn lại để vẫn đọc được bước đã làm gì)
 function redactSecrets(s) {
   if (typeof s !== 'string' || !s) return s;
-  let o = s; for (const [, re, skip] of SECRET_RE) { re.lastIndex = 0; o = o.replace(re, (m) => (skip && skip(m) ? m : MASK)); }
+  let o = redactCodes(s); for (const [, re, skip] of SECRET_RE) { re.lastIndex = 0; o = o.replace(re, (m) => (skip && skip(m) ? m : MASK)); }
   return o;
 }
 // log: che tiêu đề cửa sổ (“…” / "…" ngay sau “cửa sổ”, “Quan sát:”, “window”, “tiêu đề”) và mọi chuỗi trông như khoá
@@ -77,7 +170,14 @@ function redactTitles(s, titles = []) {
 }
 // thẻ bước trong app (agent.js): bước có chữ/cửa sổ nhạy cảm → bỏ ảnh nhỏ (khỏi lưu vào cuộc trò chuyện), cảnh báo trên thanh bước,
 // che chuỗi trông như khoá trong phần “Kết quả”. agent.js cũng che forModel trước khi gửi cho mô hình.
-function guardStep(step, out, { warn = () => WARN } = {}) {
+const IMAGE_KEY = /^(thumb|image|img|shot|screenshot|png|jpeg|jpg)$/i;
+function stripImages(step) {
+  if (!step || typeof step !== 'object') return false;
+  let had = false;
+  for (const k of Object.keys(step)) if (IMAGE_KEY.test(k) || (typeof step[k] === 'string' && /^data:image\//.test(step[k]))) { if (step[k] != null) had = true; delete step[k]; }
+  return had;
+}
+function guardStep(step, out, { warn = () => WARN, steps = null, republish = null } = {}) {
   if (!step || !out) return step;
   const w = out.window && typeof out.window === 'object' ? out.window : null;
   if (w && (w.hwnd != null || w.title)) step.win = { hwnd: w.hwnd ?? null, pid: w.pid ?? null, proc: w.proc || null, title: w.title || '', b: Array.isArray(w.b) ? w.b : undefined };
@@ -85,11 +185,15 @@ function guardStep(step, out, { warn = () => WARN } = {}) {
   if (hits.length) {
     step.sensitive = hits;
     out.thumb = null; if (typeof out.image === 'string') out.image = null; // đừng giữ ảnh gốc trong kết quả công cụ (bộ nhớ seen)
-    for (const k of Object.keys(step)) if (/^(thumb|image|img|shot|screenshot|png|jpeg|jpg)$/i.test(k) || (typeof step[k] === 'string' && /^data:image\//.test(step[k]))) delete step[k]; // không còn trường ảnh nào để lưu (slimStep)
+    stripImages(step);
     const ts = w && w.title ? [w.title] : []; // tiêu đề cửa sổ nhạy cảm (vd. tên tệp mã kích hoạt) → che trong thẻ bước + nhật ký (logTool)
     if (typeof step.summary === 'string') step.summary = redactTitles(step.summary, ts);
     if (typeof step.detail === 'string') step.detail = redactTitles(step.detail, ts);
     step.summary = (step.summary ? String(step.summary) + ' · ' : '') + '⚠ ' + warn();
+    if (Array.isArray(steps)) for (const prev of steps) {
+      if (!prev || prev === step) continue;
+      if (stripImages(prev) && typeof republish === 'function') { try { republish({ ...prev, revise: true }); } catch {} }
+    }
   }
   if (typeof step.detail === 'string') step.detail = redactSecrets(step.detail);
   if (typeof step.summary === 'string') step.summary = redactSecrets(step.summary);
@@ -177,4 +281,4 @@ function prune(dir, { maxAgeMs = 24 * 3600e3, maxBytes = 200 * 1024 * 1024, now 
   while (left.length && total > maxBytes) { const f = left.shift(); if (del(f)) total -= f.size; }
   res.kept = left.length; return res;
 }
-module.exports = { scan, screenSecrets, reasonList, redactSecrets, redactTitles, guardStep, rectInShot, shot, dropShotPixels, forgetShots, prune, electronImage, WARN, MASK, SHOT_NAME };
+module.exports = { scan, screenSecrets, reveal, fillWindowText, codeSpans, reasonList, redactSecrets, redactTitles, guardStep, rectInShot, shot, dropShotPixels, forgetShots, prune, electronImage, WARN, MASK, SHOT_NAME, onScreen };

@@ -812,6 +812,10 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     return REFUSED_SEND_MSG;
   }
   async function runInner({ messages, convoId = null, signal, onToken = () => {}, onStep = () => {}, onStatus = () => {}, headless = false, confirm, confirmScreen, approve = null, qa = false, lang: langArg = null }) {
+    { // B193: chờ lần báo bước trước xong rồi mới báo bước sau (ảnh bước 1 phải đã ghi trước khi bước 2 thấy tệp khoá)
+      let chain = Promise.resolve(); const rawStep = onStep;
+      onStep = (st) => { const p = chain.then(() => rawStep(st)); chain = p.then(() => {}, () => {}); return p; };
+    }
     const s = S_();
     const names = activeTools({ headless });
     const att = (runStore.getStore() || {}).attachments || [];
@@ -968,11 +972,11 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     if (ensureTarget && !/^trình duyệt$/i.test(ensureTarget)) {
       const def = defOf('ensure_app'); const id = 'auto_ensure_' + Date.now().toString(36); const args = { app: ensureTarget };
       const step = { id, name: 'ensure_app', label: def.label, icon: def.icon, args, status: 'running', startedAt: Date.now(), round: 0, pre: '', auto: true };
-      steps.push(step); onStep({ ...step }); onStatus({ stage: 'tools', round: 0, pre: '' });
+      steps.push(step); await onStep({ ...step }); onStatus({ stage: 'tools', round: 0, pre: '' });
       let out; try { out = await exec('ensure_app', args, ctx); } catch (e) { const msg = (e && e.message) || String(e); out = { error: msg, forModel: `Lỗi: ${msg}`, summary: msg.split('\n')[0] }; }
       Object.assign(step, { status: out.ask ? 'asked' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, ms: Date.now() - step.startedAt });
-      SG.guardStep(step, out, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá') }); // B193: bước tự chạy (ensure_app/open_app/system_action) cũng che
-      onStep({ ...step }); logTool(step); calls++;
+      SG.guardStep(step, out, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá'), steps, republish: (st) => onStep(st) }); // B193: bước tự chạy (ensure_app/open_app/system_action) cũng che
+      await onStep({ ...step }); logTool(step); calls++;
       deps.log && deps.log(`[aivn agent] ensure_app “${ensureTarget}” → ${step.status}: ${String(step.summary || '').slice(0, 160)}`);
       const base = { steps, usage, finishReason: 'stop', urls: [], memories: sys.memories.map(m => m.text), tools: names, warning: null };
       if (out.ask) return { ...base, text: out.ask, asked: out.code || 'login', outcome: 'asked_user' };
@@ -988,11 +992,11 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         if (rcpA && !SVa.CURRENT_CHAT.test(query) && CHAT_APP_RE.test(query) && (openChatTask(query) || launchedA) && deps.computer.has('screen_act')) {
           const id2 = 'auto_openchat_' + Date.now().toString(36); const args2 = { action: 'open_chat', window: ensureTarget, recipient: rcpA };
           const def2 = defOf('screen_act'); const st2 = { id: id2, name: 'screen_act', label: def2.label, icon: def2.icon, args: args2, status: 'running', startedAt: Date.now(), round: 0, pre: '', auto: true };
-          steps.push(st2); onStep({ ...st2 });
+          steps.push(st2); await onStep({ ...st2 });
           let o2; try { o2 = await exec('screen_act', args2, ctx); } catch (e) { const msg = (e && e.message) || String(e); o2 = { error: msg, forModel: `Lỗi: ${msg}`, summary: msg.split('\n')[0] }; }
           Object.assign(st2, { status: o2.ask ? 'asked' : o2.refused ? 'refused' : o2.error ? 'error' : 'ok', summary: o2.summary, detail: o2.detail ?? o2.forModel, thumb: o2.thumb, ms: Date.now() - st2.startedAt });
-          SG.guardStep(st2, o2, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá') }); // B193: open_chat tự chạy cũng che ảnh
-          onStep({ ...st2 }); logTool(st2); calls++;
+          SG.guardStep(st2, o2, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá'), steps, republish: (st) => onStep(st) }); // B193: open_chat tự chạy cũng che ảnh
+          await onStep({ ...st2 }); logTool(st2); calls++;
           deps.log && deps.log(`[aivn agent] open_chat tự động “${rcpA}” sau ensure_app (${launchedA ? 'vừa khởi động' : 'việc mở chat'}) → ${st2.status}: ${String(st2.summary || '').slice(0, 160)}`);
           if (o2.ask) return { ...base, text: o2.ask, asked: 'recipient', outcome: 'asked_user' };
           msgs.push({ role: 'assistant', content: '', tool_calls: [{ id: id2, type: 'function', function: { name: 'screen_act', arguments: JSON.stringify(args2) } }] });
@@ -1007,13 +1011,13 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       const call = { id: 'auto_open_' + Date.now().toString(36), name: 'open_app', arguments: { name: intent.name } };
       const def = defOf('open_app');
       const step = { id: call.id, name: 'open_app', label: def.label, icon: def.icon, args: call.arguments, status: 'running', startedAt: Date.now(), round: 0, pre: '', auto: true };
-      steps.push(step); onStep({ ...step }); onStatus({ stage: 'tools', round: 0, pre: '' });
+      steps.push(step); await onStep({ ...step }); onStatus({ stage: 'tools', round: 0, pre: '' });
       let out;
       try { out = await exec('open_app', call.arguments, ctx); }
       catch (e) { const msg = (e && e.message) || String(e); out = { error: msg, forModel: `Lỗi: ${msg}`, summary: String(msg).split(/\s(?=Bước tiếp:|Gần giống:)/)[0] }; /* B33b: thẻ bước chỉ hiện câu đầu; hướng dẫn cho mô hình vẫn ở chi tiết */ }
       Object.assign(step, { status: out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, ms: Date.now() - step.startedAt });
-      SG.guardStep(step, out, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá') }); // B193: bước tự chạy (ensure_app/open_app/system_action) cũng che
-      onStep({ ...step }); logTool(step); calls++;
+      SG.guardStep(step, out, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá'), steps, republish: (st) => onStep(st) }); // B193: bước tự chạy (ensure_app/open_app/system_action) cũng che
+      await onStep({ ...step }); logTool(step); calls++;
       seen.set('open_app:' + JSON.stringify(call.arguments), out);
       msgs.push({ role: 'assistant', content: '', tool_calls: [{ id: call.id, type: 'function', function: { name: 'open_app', arguments: JSON.stringify(call.arguments) } }] });
       msgs.push({ role: 'tool', tool_call_id: call.id, content: step.sensitive && step.sensitive.length ? SG.redactTitles(String(out.forModel || out.summary || ''), step.win && step.win.title ? [step.win.title] : []) : String(out.forModel || out.summary || '') });
@@ -1030,11 +1034,11 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       const args = sysD.level != null ? { action: sysD.action, level: sysD.level } : { action: sysD.action };
       const def = defOf('system_action'); const id = 'auto_sys_' + Date.now().toString(36);
       const step = { id, name: 'system_action', label: def.label, icon: def.icon, args, status: 'running', startedAt: Date.now(), round: 0, pre: '', auto: true };
-      steps.push(step); onStep({ ...step }); onStatus({ stage: 'tools', round: 0, pre: '' });
+      steps.push(step); await onStep({ ...step }); onStatus({ stage: 'tools', round: 0, pre: '' });
       let out; try { out = await exec('system_action', args, ctx); } catch (e) { const msg = (e && e.message) || String(e); out = { error: msg, forModel: `Lỗi: ${msg}`, summary: String(msg).split(/\s(?=Bước tiếp:|Gần giống:)/)[0] }; /* B33b: thẻ bước chỉ hiện câu đầu; hướng dẫn cho mô hình vẫn ở chi tiết */ }
       Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, ms: Date.now() - step.startedAt });
-      SG.guardStep(step, out, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá') }); // B193: bước tự chạy (ensure_app/open_app/system_action) cũng che
-      onStep({ ...step }); logTool(step); calls++;
+      SG.guardStep(step, out, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá'), steps, republish: (st) => onStep(st) }); // B193: bước tự chạy (ensure_app/open_app/system_action) cũng che
+      await onStep({ ...step }); logTool(step); calls++;
       deps.log && deps.log(`[aivn agent] lệnh hệ thống rõ ràng → làm ngay: ${JSON.stringify(args)} · ${step.status}`);
       const txt = out.refused ? 'Mình chưa làm vì bạn không cho phép.' : out.error ? `Mình chưa làm được: ${String(out.summary || out.error).slice(0, 160)}.` : `Đã làm: ${out.summary}.`;
       return { text: txt, steps, usage, finishReason: 'stop', urls: [], memories: sys.memories.map(m => m.text), tools: names, warning: null, outcome: out.refused ? 'blocked' : out.error ? 'failed' : 'done', fast: 'system_action' };
@@ -1045,7 +1049,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       autoReadTried = true;
       const id = 'auto_read_' + Date.now().toString(36);
       const step = { id, name: 'fetch_url', label: 'AIVN tự đọc trang', icon: '📄', args: {}, status: 'running', startedAt: Date.now(), round, pre, auto: true, autoRead: true };
-      steps.push(step); onStep({ ...step }); onStatus({ stage: 'tools', round, pre: '' });
+      steps.push(step); await onStep({ ...step }); onStatus({ stage: 'tools', round, pre: '' });
       deps.log && deps.log(`[aivn agent] B155: ${why} → AIVN tự đọc trang trong trình duyệt`);
       let ar = null; try { ar = await deps.computer.browserRead({ query, ...(settleMs ? { settleMs } : {}) }, ctx); } catch (e) { ar = { ok: false, error: (e && e.message) || String(e), trail: [] }; }
       if (ar && ar.ok) {
@@ -1055,9 +1059,9 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         Object.assign(step, { status: 'ok', summary: `${ar.title || ar.url} · ${ar.text.length.toLocaleString('vi-VN')} ký tự`, detail: ar.text.slice(0, 1200), ms: Date.now() - step.startedAt });
         msgs.push({ role: 'assistant', content: '', tool_calls: [{ id, type: 'function', function: { name: 'fetch_url', arguments: JSON.stringify({ url: ar.url }) } }] }, { role: 'tool', tool_call_id: id, content: body });
         msgs.push({ role: 'user', content: `(Kiểm tra tự động của AIVN) AIVN đã TỰ đọc trang đang mở trong ${ar.browser}: ${ar.url} — nội dung ở kết quả công cụ ngay trên. Trả lời câu hỏi của người dùng CHỈ dựa vào nội dung trang đó: nêu đúng con số/thông tin có trên trang và ghi nguồn là ${ar.url}. ĐỪNG nói là không có công cụ đọc trang. Nếu trang không có thông tin cần tìm thì nói rõ là trang không có.` });
-        onStep({ ...step }); logTool(step); calls++; return true;
+        await onStep({ ...step }); logTool(step); calls++; return true;
       }
-      Object.assign(step, { status: 'error', summary: `Chưa đọc được trang: ${String((ar && ar.error) || 'không thấy trang trong trình duyệt').slice(0, 160)}`, ms: Date.now() - step.startedAt }); onStep({ ...step }); logTool(step);
+      Object.assign(step, { status: 'error', summary: `Chưa đọc được trang: ${String((ar && ar.error) || 'không thấy trang trong trình duyệt').slice(0, 160)}`, ms: Date.now() - step.startedAt }); await onStep({ ...step }); logTool(step);
       return false;
     }
     // B167 + B164: “mở Chrome tìm X rồi cho biết” — đường nhanh bằng mã: trình duyệt đã sẵn sàng (ensure_app) → AIVN tự tìm, đi tới trang nguồn,
@@ -1178,7 +1182,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         const def = defOf(call.name);
         const args = call.arguments && typeof call.arguments === 'object' ? Object.fromEntries(Object.entries(call.arguments).filter(([, v]) => v !== null)) : {};
         const step = { id: call.id, name: call.name, label: def ? def.label : call.name, icon: def ? def.icon : '🔧', args, status: 'running', startedAt: Date.now(), round, pre: r.text || '' };
-        steps.push(step); onStep({ ...step });
+        steps.push(step); await onStep({ ...step });
         let out; let rctx = ''; // B95: ngữ cảnh trước thao tác
         const sig = call.name + ':' + JSON.stringify(args);
         try {
@@ -1191,7 +1195,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
             if (autoSkip) { step.auto = auto.why; ctxRun = { ...ctx, confirm: async () => true, preApproved: true }; deps.log && deps.log(`[aivn agent] tự làm không hỏi (${auto.why}): ${call.name}`); }
             else if (approve && !headless && AP.needsApproval(call.name) && !(AP.policy(call.name).allowAlways && (S_().agentAlwaysAllow || []).includes(call.name))) {
               const card = AP.buildCard(call.name, args, { label: step.label, icon: step.icon, resolvePath: (p, o) => resolvePath(p, o) });
-              step.status = 'asking'; onStep({ ...step }); onStatus({ stage: 'ask', round, tool: call.name });
+              step.status = 'asking'; await onStep({ ...step }); onStatus({ stage: 'ask', round, tool: call.name });
               deps.log && deps.log(`[aivn agent] xin phép (đã hỏi): ${call.name} · ${String(card.title || '').slice(0, 80)}`);
               const ans = await approve(card);
               deps.log && deps.log(`[aivn agent] xin phép: người dùng ${ans && ans.ok ? 'CHO PHÉP' : ans && ans.timeout ? 'không trả lời (hết giờ)' : 'TỪ CHỐI'} — ${call.name}${ans && ans.always ? ' (luôn cho phép)' : ''}`);
@@ -1200,7 +1204,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
               else {
                 if (ans.always && card.allowAlways && deps.allowAlways) deps.allowAlways(call.name);
                 ctxRun = { ...ctx, confirm: async () => true, preApproved: true };
-                step.status = 'running'; onStep({ ...step }); onStatus({ stage: 'act', round, tool: call.name });
+                step.status = 'running'; await onStep({ ...step }); onStatus({ stage: 'act', round, tool: call.name });
               }
             }
             rctx = call.name === 'screen_act' && deps.computer && deps.computer.actContext ? deps.computer.actContext() : ''; // B95
@@ -1231,10 +1235,10 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
           if (call.name === 'screen_act') { try { const rr = retry.after(args, out, rctx); if (rr.bad) { out = { ...out, forModel: String(out.forModel || '') + rr.hint }; step.check = rr.bad; } } catch {} }
         }
         Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok' /* B166: bước có step.check hiện “không có tác dụng” (màu hổ phách), không phải “xong” xanh */, check: step.check || null, summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, draftIn: out.draftIn || undefined, ms: Date.now() - step.startedAt });
-        SG.guardStep(step, out, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá') }); // B193: bước có cửa sổ/chữ nhạy cảm (mã kích hoạt, mật khẩu, khoá) → bỏ ảnh nhỏ, cảnh báo trên thanh bước, che chuỗi trông như khoá
+        SG.guardStep(step, out, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá'), steps, republish: (st) => onStep(st) }); // B193: bước có cửa sổ/chữ nhạy cảm (mã kích hoạt, mật khẩu, khoá) → bỏ ảnh nhỏ, cảnh báo trên thanh bước, che chuỗi trông như khoá
         logTool(step);
         cyc.push(call.name, args, { error: out.error, refused: out.refused, bad: !!step.check, summary: step.summary, verified: !!(out.verify && out.verify.sent), sig: out.sig || (out.raw && out.raw.sig) || null });
-        onStep({ ...step });
+        await onStep({ ...step });
         { const rawTool = typeof out.forModel === 'string' && out.forModel ? out.forModel : String(out.forModel ?? out.message ?? out.summary ?? '') || '(không có kết quả)';
           msgs.push({ role: 'tool', tool_call_id: call.id, content: step.sensitive && step.sensitive.length ? SG.redactTitles(rawTool, step.win && step.win.title ? [step.win.title] : []) : rawTool }); }
         // B164: vừa gõ + Enter (hoặc bấm Enter) trong trình duyệt cho việc “tìm rồi cho biết” → AIVN đọc trang NGAY, không chờ mô hình
