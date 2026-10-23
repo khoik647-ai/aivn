@@ -414,9 +414,18 @@ const BLOCK_SEND = /(?:^|[^\p{L}])(?:tuyệt\s+nhiên|không|chẳng|chưa|đừ
 const TAIL_SEND = /(?:^|[^\p{L}])(?:gửi|gui|nhắn|nhan|send(?:ing)?)(?![\p{L}])|发送|发给|发出|發送|發給|发(?!现|展|生|票)|發(?!現|展|生)/giu;
 const TAIL_GOVERN = /(?:(?:^|[^\p{L}])(?:never\s+mind|do\s+not|don['’]t|thôi|đừng|khỏi|không|ko|wait|cancel)|算了|取消|不要|别|別)\s*(?:(?:được|bấm|nhấn|ấn|nút|có|mà|please|just|press|hit|on|the|a|an)\s+){0,3}$/iu;
 const CANCEL_CLAUSE = /(?:^|[^\p{L}])never\s+mind(?![\p{L}])|算了|(?:^|[.!?。！？,，—–])\s*(?:à\s+)?thôi\s*[,，.!?。！？]/iu;
+// Mệnh đề CUỐI của nội dung sau dấu hai chấm, nếu chỉ là lời huỷ (“Mà thôi”, “Cancel.”, “khỏi”, “不了”).
+// “ăn thôi”, “xong rồi thôi về”, “không sao đâu”, “不去了” không phải lời huỷ.
+const FINAL_CANCEL = /^(?:(?:mà|à)\s+)?(?:thôi(?:\s+khỏi)?|khỏi|huỷ|hủy|cancel|never\s+mind|forget\s+it)$/iu;
+function finalClauseCancels(tail) {
+  const parts = String(tail || '').split(/[.!?。！？,，;；]+/u);
+  let last = '';
+  for (const p of parts) { const t = p.trim(); if (t) last = t; }
+  return FINAL_CANCEL.test(last) || /^(?:算了|不了|取消)$/u.test(last);
+}
 function tailRetracts(tail) {
   if (!tail) return false;
-  if (CANCEL_CLAUSE.test(tail)) return true;
+  if (CANCEL_CLAUSE.test(tail) || finalClauseCancels(tail)) return true;
   const re = new RegExp(TAIL_SEND.source, 'giu');
   let m;
   while ((m = re.exec(tail))) {
