@@ -271,19 +271,29 @@ function createDesktopAgent(deps) {
     const els = rawW && Array.isArray(rawW.els) ? rawW.els : [];
     return els.map(e => [e && e.n, e && e.v].filter(Boolean).join(' ')).join('\n');
   }
-  // B193: screenSecrets trên chữ đã có + chữ UIA của mọi cửa sổ đang hiện. mustOcr: OCR cả ảnh (không chỉ cửa sổ đích) trước khi kết luận.
-  // Cửa sổ hiện nhưng không đọc được chữ (mac không có hwnd, không có bộ đọc) → OCR đúng vùng điểm ảnh; không OCR được thì xoá ảnh.
+  // B193: một lần đọc mọi cửa sổ đang hiện + chữ, để so trước/sau ảnh chụp.
+  function windowsPrior() {
+    return ShotGuard.readWindows({ loadWindows: () => U.windows(), loadText: readWindowText });
+  }
+  // B193: screenSecrets trên HỢP chữ đọc trước và sau ảnh. Hai lần khác nhau → OCR ảnh hoặc xoá điểm ảnh, không giữ ảnh gốc chưa quét.
+  // mustOcr: OCR cả ảnh (không chỉ cửa sổ đích) trước khi kết luận. Cửa sổ không đọc được chữ → OCR; không OCR được thì xoá ảnh.
   // Bộ quét lỗi / quá hạn → failed, người gọi xoá điểm ảnh và không gửi cho mô hình.
-  async function sealShot(shot, { title = '', proc = '', text = '', mustOcr = false } = {}) {
+  async function sealShot(shot, { title = '', proc = '', text = '', mustOcr = false, prior = null } = {}) {
     let imageText = ''; let ocrDone = false;
     const canOcr = !!(shot && shot.dataUrl && deps.engine && typeof deps.engine.ocrLines === 'function');
     if (mustOcr && canOcr) {
       try { imageText = (await ocrShot(shot, null)).map(l => l && l.text).filter(Boolean).join('\n'); ocrDone = true; }
       catch { return { reasons: ['text:unreadable'], titles: [], failed: true, unread: [] }; }
     }
-    const sec = await ShotGuard.reveal({ title, proc, text: String(text || '') + (imageText ? '\n' + imageText : ''), loadWindows: () => U.windows(), loadText: readWindowText });
-    if (sec.failed || ocrDone || !sec.unread || !sec.unread.length) return sec;
+    const after = await ShotGuard.readWindows({ loadWindows: () => U.windows(), loadText: readWindowText });
+    const snapFail = !after.ok || (prior && prior.ok === false);
+    const torn = !snapFail && !!prior && (prior.torn || ShotGuard.snapshotsDiffer(prior, after));
+    if (snapFail) return { reasons: ['text:unreadable'], titles: [], failed: true, unread: [] };
+    const wins = [...((prior && prior.wins) || []), ...after.wins];
+    const sec = ShotGuard.screenSecrets({ title, proc, text: String(text || '') + (imageText ? '\n' + imageText : ''), windows: wins });
+    if (sec.failed || ocrDone || (!torn && (!sec.unread || !sec.unread.length))) return sec;
     const mergeFail = () => ({ reasons: [...new Set([...(sec.reasons || []), 'text:unreadable'])], titles: sec.titles || [], failed: true, unread: sec.unread });
+    if (sec.reasons && sec.reasons.length) return sec;
     if (!canOcr) return mergeFail();
     try {
       const more = (await ocrShot(shot, null)).map(l => l && l.text).filter(Boolean).join('\n');
@@ -298,13 +308,14 @@ function createDesktopAgent(deps) {
     // hộp thoại của chính ứng dụng (Lưu thành…, Mở…) đang ở trước: quan sát hộp thoại đó thay vì cửa sổ chính
     let hw = s.target && s.target.hwnd ? s.target.hwnd : 0; s.dialog = null;
     if (hw && process.platform !== 'darwin') { try { const d = U.activeDialogOf(await U.windows(), s.target); if (d) { hw = d.hwnd; s.dialog = d.title || 'hộp thoại'; deps.log && deps.log('desk', `Đang có hộp thoại “${logTitle(d.title)}” của cùng ứng dụng — quan sát hộp thoại`); } } catch {} }
+    let prior = await windowsPrior();
     let [shot, raw] = await Promise.all([capture(), U.tree({ hwnd: hw, app: s.target && s.target.proc ? s.target.proc : '' }).catch(e => ({ error: e.message, els: [] }))]);
     if (process.platform === 'win32' && raw && raw.dpi && !deps.fakeScreen) { // UIA trong PowerShell không nhận DPI → khung logic: đổi về vật lý
       const k = U.uiaScale(raw, D.primaryOf(SC.geos())); if (k !== 1) { U.rescaleTree(raw, k); if (!s.uiaWarned) { s.uiaWarned = true; deps.log && deps.log('desk', `Trợ năng (UIA) trả toạ độ logic (màn hình chính ${raw.dpi.cx}×${raw.dpi.cy}) — đã nhân ×${k.toFixed(3)} về điểm ảnh vật lý`); } }
     }
     // cửa sổ đích nằm ở màn hình khác ảnh vừa chụp (nhiều màn hình) → chụp lại đúng màn hình đó
     if (!deps.fakeScreen && raw && raw.win && Array.isArray(raw.win.b) && shot.geo) {
-      const G = SC.geos(); if (G.length > 1) { const g = D.displayForRect(G, raw.win.b); if (g && String(g.id) !== String(shot.geo.id)) { s.geo = g; shot = await capture(); deps.log && deps.log('desk', `Cửa sổ “${logTitle(raw.win.title)}” ở màn hình ${g.phys.width}×${g.phys.height} @${Math.round(g.scale * 100)}% — chụp màn hình đó`); } }
+      const G = SC.geos(); if (G.length > 1) { const g = D.displayForRect(G, raw.win.b); if (g && String(g.id) !== String(shot.geo.id)) { const mid = await windowsPrior(); s.geo = g; shot = await capture(); if (!prior.ok || !mid.ok) prior = { ok: false, wins: [...(prior.wins || []), ...(mid.wins || [])], torn: true }; else prior = { ok: true, wins: [...(prior.wins || []), ...mid.wins], torn: prior.torn || ShotGuard.snapshotsDiffer(prior, mid) }; deps.log && deps.log('desk', `Cửa sổ “${logTitle(raw.win.title)}” ở màn hình ${g.phys.width}×${g.phys.height} @${Math.round(g.scale * 100)}% — chụp màn hình đó`); } }
     }
     if (raw && raw.win && raw.win.hwnd && !s.target) s.target = { hwnd: raw.win.hwnd, pid: raw.win.pid, proc: raw.win.proc, title: raw.win.title };
     const named = (Array.isArray(raw.els) ? raw.els : []).filter(x => x && x.n && U.INTERACTIVE.has(x.r)).length;
@@ -327,7 +338,7 @@ function createDesktopAgent(deps) {
     // B193: khoá điểm ảnh TRƯỚC khi lưu / đưa cho mắt nhìn / thẻ bước. Quét chữ MỌI cửa sổ đang hiện và (khi OCR chỉ cắt cửa sổ đích) cả ảnh.
     // Lỗi hoặc quá hạn của bộ quét → coi ảnh là không an toàn, không gọi mắt nhìn, không tạo ảnh nhỏ.
     const rawText = (Array.isArray(raw.els) ? raw.els : []).map(e => [e && e.n, e && e.v].filter(Boolean).join(' ')).join('\n');
-    const sec = await sealShot(shot, { title: obs.win ? obs.win.title : '', proc: (obs.win && obs.win.proc) || proc, text: rawText + '\n' + ocrLines.map(l => l.text).join('\n'), mustOcr: !!(wantOcr && raw.win && Array.isArray(raw.win.b) && raw.win.b[2] > 100) });
+    const sec = await sealShot(shot, { title: obs.win ? obs.win.title : '', proc: (obs.win && obs.win.proc) || proc, text: rawText + '\n' + ocrLines.map(l => l.text).join('\n'), mustOcr: !!(wantOcr && raw.win && Array.isArray(raw.win.b) && raw.win.b[2] > 100), prior });
     if (sec.failed || sec.reasons.length) { ShotGuard.dropShotPixels(shot); s.sensitive = sec.reasons.length ? sec.reasons : ['text:unreadable']; deps.log && deps.log('desk', `B193: không giữ ảnh chụp (${s.sensitive.join(', ')})`); }
     else s.sensitive = null;
     s.obs = obs; s.shot = shot;
@@ -416,9 +427,10 @@ function createDesktopAgent(deps) {
     const modelId = g ? g.id : (st.path || st.id || ''); const eng = g ? g.engine : deps.engine;
     status(g ? `Đang tìm “${query}” bằng mô hình định vị…` : `Đang tìm “${query}” bằng mô hình nhìn ảnh…`);
     const fi = SC.familyInfo(modelId);
+    const prior = await windowsPrior();
     const shot = await withOverlayHidden(() => deps.fakeScreen ? deps.fakeScreen() : SC.capture({ maxW: 1280, align: fi.align, geo: session && session.geo }));
     // B193: screenSecrets trước SC.locate — ảnh đầy đủ không được gửi cho mô hình định vị khi có mã kích hoạt hoặc bộ quét lỗi
-    const sec = await sealShot(shot, { title: session && session.target ? session.target.title : '', proc: session && session.target ? session.target.proc : '', text: '', mustOcr: true });
+    const sec = await sealShot(shot, { title: session && session.target ? session.target.title : '', proc: session && session.target ? session.target.proc : '', text: '', mustOcr: true, prior });
     if (sec.failed || (sec.reasons && sec.reasons.length)) { ShotGuard.dropShotPixels(shot); deps.log && deps.log('desk', `B193: không giữ ảnh chụp (${(sec.reasons || ['text:unreadable']).join(', ')})`); return null; }
     const r = await SC.locate(eng, shot, query, { signal: ctx.signal, modelId });
     deps.log && deps.log('desk', `Định vị "${query}" bằng ${g ? 'mô hình định vị ' : ''}${modelId.split(/[\\/]/).pop()}: ${r.box && r.box.found ? 'thấy' : 'không thấy'} · ${String(r.raw || '').slice(0, 120)}`);
@@ -1317,8 +1329,9 @@ function createDesktopAgent(deps) {
     }
     let extra = '';
     if (a && a.question && deps.engine.status().vision && !(o.sensitive && o.sensitive.length)) {
+      const priorQ = await windowsPrior();
       const cap = await withOverlayHidden(() => SC.capture({ maxW: 1280 }));
-      const secQ = await sealShot(cap, { title: o.window && o.window.title, proc: o.window && o.window.proc, text: o.text, mustOcr: true });
+      const secQ = await sealShot(cap, { title: o.window && o.window.title, proc: o.window && o.window.proc, text: o.text, mustOcr: true, prior: priorQ });
       if (secQ.failed || (secQ.reasons && secQ.reasons.length)) ShotGuard.dropShotPixels(cap);
       else { try { extra = '\nMô tả của mô hình nhìn ảnh: ' + await SC.describe(deps.engine, cap, a.question, { signal: ctx.signal }); } catch (err) { deps.log && deps.log('desk', 'Mắt nhìn lỗi: ' + err.message); } }
     }
@@ -1336,12 +1349,13 @@ function createDesktopAgent(deps) {
   }
   async function readText(a, ctx) {
     await begin(ctx); status('Đang đọc chữ trên màn hình…');
+    const prior = await windowsPrior();
     const shot = await capture();
     let lines = [];
     try { lines = await ocrShot(shot, null); }
     catch { ShotGuard.dropShotPixels(shot); return { forModel: 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá', summary: 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá', thumb: null, sensitive: ['text:unreadable'], detail: '' }; }
     const text = lines.map(l => l.text).join('\n').slice(0, 6000);
-    const secR = await sealShot(shot, { text, mustOcr: false });
+    const secR = await sealShot(shot, { text, mustOcr: false, prior });
     if (secR.failed || secR.reasons.length) ShotGuard.dropShotPixels(shot);
     // Bộ quét lỗi / quá hạn: không trả lời bằng chữ vừa đọc từ ảnh (fail-closed). Có mã thì chỉ trả bản đã che.
     if (secR.failed) return { forModel: 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá', summary: 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá', thumb: null, sensitive: secR.reasons.length ? secR.reasons : ['text:unreadable'], detail: '' };

@@ -202,6 +202,16 @@ async function ocrCaptured(deps, captured) {
   if (Array.isArray(v)) return v.map(l => (l && l.text) || (typeof l === 'string' ? l : '')).filter(Boolean).join('\n');
   return '';
 }
+// B193: đọc cửa sổ + chữ MỘT lần. Lần đọc lỗi thì không đọc lại (tránh chờ 8 giây hai lần).
+async function snapState(deps, tgt) {
+  const [infoR, winR] = await Promise.all([tgt ? winInfoOf(deps, tgt) : { ok: true, info: null }, windowsOf(deps)]);
+  if (!infoR.ok || !winR.ok) return { ok: false, info: infoR.info || null, wins: [] };
+  let wins = winR.windows || [];
+  const reader = windowTextReader(deps);
+  if (reader) { try { wins = await SG.fillWindowText(wins, reader); } catch { return { ok: false, info: infoR.info, wins: [] }; } }
+  else wins = wins.map(w => (w && SG.onScreen(w) && typeof w.text !== 'string') ? { ...w, unread: true } : w);
+  return { ok: true, info: infoR.info, wins };
+}
 const exitCodeOf = (status) => status === 'done' ? 0 : status === 'asked_user' ? 3 : status === 'cancelled' ? 4 : 2;
 function writeJson(file, obj) { fs.mkdirSync(path.dirname(file), { recursive: true }); const tmp = file + '.tmp-' + process.pid; fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8'); fs.renameSync(tmp, file); }
 // dòng nhật ký có toạ độ bấm / mã phím (B62/B66c) → gắn vào bước
@@ -246,20 +256,21 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
           if (Array.isArray(s.sensitive) && s.sensitive.length && tgt) tgt.sensitive = [...new Set([...tgt.sensitive, ...s.sensitive])];
           step.summary = SG.redactTitles(step.summary, [...titles]); step.debug = step.debug.map(l => SG.redactTitles(l, [...titles]));
           if (args.shots && deps.capture) { try { const f = path.join(args.shots, `step-${String(n).padStart(2, '0')}-${String(s.name || 'step').replace(/[^\w-]/g, '_')}.jpg`);
-            // B193: chụp TRƯỚC, quét đúng ảnh đó, chỉ ghi tệp khi sạch. Ảnh gốc của bước này không bao giờ được ghi rồi mới xoá.
-            // Lỗi/quá hạn khi liệt kê cửa sổ hoặc đọc chữ → không ghi ảnh gốc. Cửa sổ hiện mà không đọc được chữ → OCR vùng điểm ảnh, không có OCR thì bỏ ảnh.
+            // B193: đọc cửa sổ TRƯỚC và SAU đúng ảnh đã chụp, quét HỢP của hai lần. Hai lần khác nhau (cửa sổ đóng / chữ đổi) → không tin UIA: OCR ảnh hoặc ghi ảnh trắng, không bao giờ ghi ảnh gốc chưa quét.
+            // Lần đọc trước lỗi thì không đọc lần sau (một lần chờ 8 giây, không phải hai). Cửa sổ hiện mà không đọc được chữ → OCR; không có OCR thì bỏ ảnh gốc.
+            const before = await snapState(deps, tgt);
             const captured = await deps.capture({ maxW: 1920 });
-            const [infoR, winR] = await Promise.all([tgt ? winInfoOf(deps, tgt) : { ok: true, info: null }, windowsOf(deps)]);
-            let unsafe = !infoR.ok || !winR.ok; let wins = winR.windows || [];
-            const info = infoR.info; if (info && info.title) titles.add(String(info.title));
-            if (!unsafe) {
-              const reader = windowTextReader(deps);
-              if (reader) { try { wins = await SG.fillWindowText(wins, reader); } catch { unsafe = true; } }
-              else wins = wins.map(w => (w && SG.onScreen(w) && typeof w.text !== 'string') ? { ...w, unread: true } : w);
-            }
+            const after = before.ok ? await snapState(deps, tgt) : { ok: false, info: null, wins: [] };
+            let unsafe = !before.ok || !after.ok;
+            const torn = !unsafe && SG.snapshotsDiffer(before, after);
+            const info = (after.ok && after.info) || before.info || null;
+            const bi = before.info || {}, ai = after.info || {};
+            for (const t of [bi.title, ai.title]) if (t) titles.add(String(t));
+            const wins = [...(before.wins || []), ...(after.wins || [])];
             let sec = { reasons: [], titles: [], unread: [] };
-            if (!unsafe) { try { sec = SG.screenSecrets({ title: info ? info.title : (tgt && tgt.title) || '', proc: info ? info.proc : (tgt && tgt.proc) || '', text: info && info.text ? info.text : '', windows: wins }); } catch { unsafe = true; } }
-            if (!unsafe && sec.unread && sec.unread.length) {
+            const join = (...xs) => xs.filter(x => typeof x === 'string' && x).join('\n');
+            try { sec = SG.screenSecrets({ title: join(bi.title, ai.title) || (tgt && tgt.title) || '', proc: join(bi.proc, ai.proc) || (tgt && tgt.proc) || '', text: join(bi.text, ai.text), windows: wins }); } catch { unsafe = true; }
+            if (!unsafe && (torn || (sec.unread && sec.unread.length)) && !(sec.reasons && sec.reasons.length)) {
               const ocrText = await ocrCaptured(deps, captured);
               if (ocrText == null) unsafe = true;
               else { const extra = SG.scan({ text: ocrText }).filter(x => String(x).startsWith('text:')); sec.reasons = [...(sec.reasons || []), ...extra]; }
@@ -267,13 +278,13 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
             for (const t of sec.titles || []) titles.add(t);
             const reasons = [...new Set([...SG.reasonList(s.sensitive), ...(tgt ? SG.reasonList(tgt.sensitive) : []), ...SG.reasonList(sec.reasons), ...(unsafe ? ['text:unreadable'] : [])])];
             if (tgt && reasons.length) tgt.sensitive = reasons; // còn nhạy cảm cho các bước sau trên cùng cửa sổ
-            if (reasons.length) { const gone = SG.forgetShots(res.steps, args.shots); if (gone.removed) deps.LOG && deps.LOG.log('qa', `B193: xoá ${gone.removed} ảnh đã chụp trước đó trong lượt này (màn hình có nội dung nhạy cảm)`); }
+            if (reasons.length) { const gone = SG.forgetShots(res.steps, args.shots, { sweep: true }); if (gone.removed) deps.LOG && deps.LOG.log('qa', `B193: xoá ${gone.removed} ảnh đã chụp trước đó trong lượt này (màn hình có nội dung nhạy cảm)`); }
             const b = info && Array.isArray(info.b) ? info.b : tgt && Array.isArray(tgt.b) ? tgt.b : null;
             const g = await SG.shot({ captured, capture: async () => captured, target: b ? { b } : null, reasons, image: deps.image, maxW: 1920 });
             step.shotScope = { scope: g.scope, rect: g.rect, window: !!b }; if (reasons.length) { step.shotRedacted = true; step.shotWarn = reasons; deps.LOG && deps.LOG.log('qa', `B193: bước ${n} — ảnh chụp có thể chứa nội dung nhạy cảm (${reasons.join(', ')}) → ${g.buf ? 'chỉ ghi ảnh đã che' : 'không ghi ảnh'}`); }
             if (g.buf) { fs.writeFileSync(f, g.buf); step.shot = f; }
             else { step.shot = null; step.shotError = 'B193: không ghi ảnh (nội dung nhạy cảm, không che được)'; }
-          } catch (e) { step.shot = null; step.shotError = SG.redactTitles(String(e.message || e), [...titles]).slice(0, 200); try { SG.forgetShots(res.steps, args.shots); } catch {} } }
+          } catch (e) { step.shot = null; step.shotError = SG.redactTitles(String(e.message || e), [...titles]).slice(0, 200); try { SG.forgetShots(res.steps, args.shots, { sweep: true }); } catch {} } }
           res.steps.push(step);
   }
   try {

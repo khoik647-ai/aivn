@@ -45,7 +45,11 @@ const onScreen = (w) => !!w && w.min !== true && w.minimized !== true && w.visib
 // bỏ ký tự định dạng (\p{Cf}, gồm ZWSP/ZWJ) và soft hyphen, chữ Kirin trông giống Latin → Latin, O/0 I/1 L/1.
 // Một dấu câu bất kỳ là dấu phân cách nhóm. Khoảng trắng chỉ nối khi có chữ số (mã thật) hoặc đoạn rất dài —
 // menu tiếng Anh mỗi mục một dòng không bị ghép thành mã. Khớp ≥5 nhóm (5–6) hoặc ≥70 ký tự.
-const CYR_LAT = new Map([[0x0410, 65], [0x0430, 65], [0x0412, 66], [0x0432, 66], [0x0415, 69], [0x0435, 69], [0x041A, 75], [0x043A, 75], [0x041C, 77], [0x043C, 77], [0x041D, 72], [0x043D, 72], [0x0420, 80], [0x0440, 80], [0x0421, 67], [0x0441, 67], [0x0422, 84], [0x0442, 84], [0x0425, 88], [0x0445, 88]]);
+const CYR_LAT = new Map([
+  [0x0410, 65], [0x0430, 65], [0x0412, 66], [0x0432, 66], [0x0415, 69], [0x0435, 69], [0x041A, 75], [0x043A, 75], [0x041C, 77], [0x043C, 77], [0x041D, 72], [0x043D, 72], [0x0420, 80], [0x0440, 80], [0x0421, 67], [0x0441, 67], [0x0422, 84], [0x0442, 84], [0x0425, 88], [0x0445, 88],
+  // Hy Lạp trông như Latin (hoa + thường): Αα Ββ Εε Ζζ Ηη Κκ Μμ Νν Ρρ Ττ Χχ
+  [0x0391, 65], [0x03B1, 65], [0x0392, 66], [0x03B2, 66], [0x0395, 69], [0x03B5, 69], [0x0396, 90], [0x03B6, 90], [0x0397, 72], [0x03B7, 72], [0x039A, 75], [0x03BA, 75], [0x039C, 77], [0x03BC, 77], [0x039D, 78], [0x03BD, 78], [0x03A1, 80], [0x03C1, 80], [0x03A4, 84], [0x03C4, 84], [0x03A7, 88], [0x03C7, 88],
+]);
 const ASCII_P = new Uint8Array(128);
 for (const c of '!"#%&\'()*,-./:;?@[\\]_{}') ASCII_P[c.charCodeAt(0)] = 1;
 function isFormatCp(cp) {
@@ -212,8 +216,8 @@ async function fillWindowText(wins, read, { timeoutMs = 8000 } = {}) {
   }
   return out;
 }
-// Quét, và nếu liệt kê cửa sổ / đọc chữ lỗi hoặc quá hạn thì KHÔNG trả “không thấy gì” — trả failed để người gọi xoá ảnh.
-async function reveal({ title = '', proc = '', text = '', windows = null, loadWindows = null, loadText = null, timeoutMs = 8000 } = {}) {
+// Danh sách cửa sổ + chữ, đã đọc xong. Lỗi hoặc quá hạn → ok:false (không được coi là “không có cửa sổ”).
+async function readWindows({ windows = null, loadWindows = null, loadText = null, timeoutMs = 8000 } = {}) {
   try {
     let wins = windows;
     if (typeof loadWindows === 'function') {
@@ -229,10 +233,31 @@ async function reveal({ title = '', proc = '', text = '', windows = null, loadWi
     }
     if (wins != null && !Array.isArray(wins)) throw new Error('windows');
     if (typeof loadText === 'function') wins = await fillWindowText(wins || [], loadText, { timeoutMs });
-    return screenSecrets({ title, proc, text, windows: wins || [] });
+    return { ok: true, wins: wins || [], info: null };
   } catch {
-    return { reasons: ['text:unreadable'], titles: [], failed: true, unread: [] };
+    return { ok: false, wins: [], info: null };
   }
+}
+// Khoá ổn định của một ảnh chụp cửa sổ: tập cửa sổ đang hiện + chữ/hash. Thứ tự cửa sổ không tính.
+function snapKey(wins, info) {
+  const rows = (Array.isArray(wins) ? wins : []).filter(onScreen).map(w => [
+    w && w.hwnd != null ? String(w.hwnd) : '', w && w.pid != null ? String(w.pid) : '',
+    String(w && w.title || ''), String(w && w.proc || ''), w && w.unread ? '1' : '0',
+    String(w && w.text || ''), String(w && w.body || ''), String(w && w.ocr || ''),
+  ].join('\u0001')).sort();
+  const inf = info && typeof info === 'object' ? [String(info.title || ''), String(info.proc || ''), String(info.text || '')].join('\u0001') : '';
+  return inf + '\u0002' + rows.join('\u0002');
+}
+// Hai lần đọc (trước và sau khi chụp) khác nhau → điểm ảnh có thể không khớp lần đọc nào.
+function snapshotsDiffer(a, b) {
+  if (!a || !b || !a.ok || !b.ok) return true;
+  return snapKey(a.wins, a.info) !== snapKey(b.wins, b.info);
+}
+// Quét, và nếu liệt kê cửa sổ / đọc chữ lỗi hoặc quá hạn thì KHÔNG trả “không thấy gì” — trả failed để người gọi xoá ảnh.
+async function reveal({ title = '', proc = '', text = '', windows = null, loadWindows = null, loadText = null, timeoutMs = 8000 } = {}) {
+  const snap = await readWindows({ windows, loadWindows, loadText, timeoutMs });
+  if (!snap.ok) return { reasons: ['text:unreadable'], titles: [], failed: true, unread: [] };
+  return screenSecrets({ title, proc, text, windows: snap.wins });
 }
 // che chuỗi trông như khoá (giữ phần chữ còn lại để vẫn đọc được bước đã làm gì)
 function redactSecrets(s) {
@@ -322,18 +347,36 @@ function dropShotPixels(shot) {
   for (const k of ['thumb', 'png', 'jpeg', 'jpg', 'image', 'bitmap']) if (k in shot) shot[k] = null;
   return shot;
 }
-// Ảnh đã ghi trong lượt này (chưa che) — xoá khi sau đó mới biết màn hình có mã. Chỉ tệp step-*.jpg đúng thư mục shots.
-function forgetShots(steps, dir) {
+// Ảnh đã ghi trong lượt này (chưa che) — xoá khi sau đó mới biết màn hình có mã.
+// sweep: cả thư mục shots (ảnh gốc của lượt QA trước), vẫn bỏ symlink / tên lạ / đường dẫn ra ngoài. Ảnh đã che của lượt này được giữ.
+function forgetShots(steps, dir, opt) {
+  const sweep = !!(opt && opt.sweep);
   const res = { removed: 0 };
   let real; try { real = fs.realpathSync(dir); } catch { return res; }
   if (isRootish(real)) { res.refused = true; return res; }
-  for (const s of Array.isArray(steps) ? steps : []) {
+  const list = Array.isArray(steps) ? steps : [];
+  const dropFile = (rp) => { try { fs.unlinkSync(rp); res.removed++; return true; } catch { return false; } };
+  const realFile = (p) => {
+    let st; try { st = fs.lstatSync(p); } catch { return null; }
+    if (st.isSymbolicLink() || !st.isFile()) return null;
+    let rp; try { rp = fs.realpathSync(p); } catch { return null; }
+    if (path.dirname(rp) !== real || !SHOT_NAME.test(path.basename(rp))) return null;
+    return rp;
+  };
+  for (const s of list) {
     if (!s || !s.shot || s.shotRedacted) continue;
-    let st; try { st = fs.lstatSync(s.shot); } catch { continue; }
-    if (st.isSymbolicLink() || !st.isFile()) continue;
-    let rp; try { rp = fs.realpathSync(s.shot); } catch { continue; }
-    if (path.dirname(rp) !== real || !SHOT_NAME.test(path.basename(rp))) continue;
-    try { fs.unlinkSync(rp); s.shot = null; s.shotRedacted = true; s.shotPurged = true; res.removed++; } catch {}
+    const rp = realFile(s.shot);
+    if (rp && dropFile(rp)) { s.shot = null; s.shotRedacted = true; s.shotPurged = true; }
+  }
+  if (!sweep) return res;
+  const keep = new Set();
+  for (const s of list) { if (!s || !s.shot || !s.shotRedacted) continue; const rp = realFile(s.shot); if (rp) keep.add(rp); }
+  let names = []; try { names = fs.readdirSync(real); } catch { return res; }
+  for (const n of names) {
+    if (!SHOT_NAME.test(n) || n.includes('..') || n.includes('/') || n.includes('\\')) continue;
+    const rp = realFile(path.join(real, n));
+    if (!rp || keep.has(rp)) continue;
+    dropFile(rp);
   }
   return res;
 }
@@ -361,4 +404,4 @@ function prune(dir, { maxAgeMs = 24 * 3600e3, maxBytes = 200 * 1024 * 1024, now 
   while (left.length && total > maxBytes) { const f = left.shift(); if (del(f)) total -= f.size; }
   res.kept = left.length; return res;
 }
-module.exports = { scan, screenSecrets, reveal, fillWindowText, codeSpans, reasonList, redactSecrets, redactTitles, guardStep, rectInShot, shot, dropShotPixels, forgetShots, prune, electronImage, WARN, MASK, SHOT_NAME, onScreen };
+module.exports = { scan, screenSecrets, reveal, readWindows, snapshotsDiffer, fillWindowText, codeSpans, reasonList, redactSecrets, redactTitles, guardStep, rectInShot, shot, dropShotPixels, forgetShots, prune, electronImage, WARN, MASK, SHOT_NAME, onScreen };

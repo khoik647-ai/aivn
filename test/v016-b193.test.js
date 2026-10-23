@@ -165,7 +165,8 @@ test('QA: tệp mã kích hoạt đang mở ở cửa sổ khác → ảnh bư�
   assert.ok(!json.includes('license.json') && !json.includes('ORIGINAL'));
 });
 test('QA: ảnh đã ghi trong lượt này bị xoá khi sau đó mới thấy tệp mã kích hoạt', async () => {
-  let n = 0; const windows = async () => (++n === 1 ? [] : [{ title: FAKE_TITLE, proc: 'notepad' }]);
+  // Mỗi bước đọc cửa sổ hai lần (trước và sau khi chụp): hai lần đầu sạch thì bước 1 mới ghi ảnh gốc.
+  let n = 0; const windows = async () => (++n <= 2 ? [] : [{ title: FAKE_TITLE, proc: 'notepad' }]);
   const { res, files, json } = await qaRun({ title: 'Calculator', text: '12 + 30 = 42', windows, steps: [{ id: 1, name: 'screenshot', out: { summary: 'đã chụp màn hình' } }, { id: 2, name: 'screenshot', out: { summary: 'đã chụp màn hình' } }] });
   assert.strictEqual(res.steps[0].shot, null); assert.ok(res.steps[0].shotPurged);
   assert.ok(res.steps[1].shotRedacted);
