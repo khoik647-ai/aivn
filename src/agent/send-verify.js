@@ -366,45 +366,52 @@ function negatedBefore(s, index) {
 // (“Gửi tin cho An: đừng quên họp”). Phần sau ngoặc kép (“…: "nháp", đừng gửi”) vẫn tính.
 // Riêng trong nội dung sau dấu hai chấm: lời rút lại (“À thôi, đừng gửi”, “never mind, don't send”, “算了别发”) vẫn cấm.
 const isSpace = (c) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\u00a0' || c === '\u3000';
-const quoteClose = (c) => c === '"' ? '"' : c === '\u201c' ? '\u201d' : c === '\u00ab' ? '\u00bb' : '';
-function commandSurface(q) {
-  const s = String(q || '');
-  let out = '';
-  let quote = '';
+const isColon = (c) => c === ':' || c === '\uff1a' || c === '\ufe55' || c === '\ufe13';
+const isAsciiLetter = (c) => { const u = c ? c.charCodeAt(0) : 0; return (u >= 65 && u <= 90) || (u >= 97 && u <= 122); };
+// Chỉ cặp ngoặc ĐÓNG cùng họ mới là lời trích: "" “” '' 「」 『』 «». Ngoặc không đóng không phải ngoặc.
+const QUOTE_OPEN = { '"': '"', '\u201c': '\u201d', "'": "'", '\u300c': '\u300d', '\u300e': '\u300f', '\u00ab': '\u00bb' };
+function intraApos(s, i) { return s[i] === "'" && isAsciiLetter(s[i - 1]) && isAsciiLetter(s[i + 1]); }
+function quoteSkip(s) {
+  const skip = new Uint8Array(s.length);
+  const stack = [];
   for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (quote) { if (c === quote) quote = ''; continue; }
-    if (quoteClose(c)) { quote = quoteClose(c); out += ' '; continue; }
-    if (c === ':' || c === '\uff1a') {
+    const top = stack.length ? stack[stack.length - 1] : null;
+    if (top && s[i] === top.close && !intraApos(s, i)) {
+      stack.pop();
+      for (let k = top.start; k <= i; k++) skip[k] = 1;
+      continue;
+    }
+    const close = QUOTE_OPEN[s[i]];
+    if (close && !(s[i] === "'" && isAsciiLetter(s[i - 1]))) stack.push({ close, start: i });
+  }
+  return skip;
+}
+function commandSurface(q, skip) {
+  const s = String(q || '');
+  if (!skip) skip = quoteSkip(s);
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    if (skip[i]) { if (out.charAt(out.length - 1) !== ' ') out += ' '; continue; }
+    if (isColon(s[i])) {
       let j = i + 1; while (j < s.length && isSpace(s[j])) j++;
-      if (quoteClose(s[j])) { out += ' '; continue; }
+      if (skip[j]) { out += ' '; continue; }
       break;
     }
-    out += c;
+    out += s[i];
   }
   return out;
 }
-// Phần tin không ngoặc sau dấu hai chấm đầu tiên. Dấu hai chấm mở ngoặc kép thì đó là tin trong ngoặc, không phải đoạn này.
-function messageTail(q) {
+// Phần tin không ngoặc sau dấu hai chấm đầu tiên. Dấu hai chấm mở ngoặc ĐÃ ĐÓNG thì đó là tin trong ngoặc.
+function messageTail(q, skip) {
   const s = String(q || '');
-  let quote = '';
+  if (!skip) skip = quoteSkip(s);
   for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (quote) { if (c === quote) quote = ''; continue; }
-    if (quoteClose(c)) { quote = quoteClose(c); continue; }
-    if (c === ':' || c === '\uff1a') {
-      let j = i + 1; while (j < s.length && isSpace(s[j])) j++;
-      if (quoteClose(s[j])) continue;
-      let out = '';
-      quote = '';
-      for (let k = j; k < s.length; k++) {
-        const d = s[k];
-        if (quote) { if (d === quote) quote = ''; continue; }
-        if (quoteClose(d)) { quote = quoteClose(d); out += ' '; continue; }
-        out += d;
-      }
-      return out;
-    }
+    if (skip[i] || !isColon(s[i])) continue;
+    let j = i + 1; while (j < s.length && isSpace(s[j])) j++;
+    if (skip[j]) continue;
+    let out = '';
+    for (let k = j; k < s.length; k++) { if (skip[k]) { if (out.charAt(out.length - 1) !== ' ') out += ' '; } else out += s[k]; }
+    return out;
   }
   return '';
 }
@@ -435,7 +442,11 @@ function tailRetracts(tail) {
   }
   return false;
 }
-function blocksSend(q) { return BLOCK_SEND.test(commandSurface(q)) || tailRetracts(messageTail(q)); }
+function blocksSend(q) {
+  const s = String(q || '');
+  const skip = quoteSkip(s);
+  return BLOCK_SEND.test(commandSurface(s, skip)) || tailRetracts(messageTail(s, skip));
+}
 function keepAside(inner) { return REAL_SEND.test(inner) || KEEP_ASIDE.test(inner); }
 function intentText(q) {
   let s = String(q || '');
