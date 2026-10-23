@@ -55,8 +55,10 @@ test('B147: dung lượng thật ở mọi nút/mục tải và title, đủ 3 n
   assert.match(D.en['@title.4'], /~240 MB/); assert.match(D.zh['@title.4'], /约 240 MB/); assert.match(D.en['@title.5'], /~260 MB.*~273 MB/); assert.match(D.zh['@title.5'], /约 260 MB.*约 273 MB/);
   assert.match(D.en['hero.6'], /~273 MB/); assert.match(D.zh['cta.3'], /约 273 MB/);
   const t = tmpl(); fixes(t.f, ['--i18n-dir', t.i18n]); const ht = fs.readFileSync(t.f, 'utf8');
-  assert.ok(!/(~|约 )\d+ MB\)?"? *(title|<\/small>)/.test(ht.replace(/~(806|605) MB/g, '')), 'trang mẫu không được ghi cứng dung lượng'); assert.match(ht, /Chip M1, M2, M3, M4… · ~__MB_ARM__ MB/); assert.match(ht, /Mac dùng bộ xử lý Intel · ~__MB_X64__ MB/); // site/: chỉ còn menu Mac ở cuối trang (đầu trang là một nút tải)
-  assert.ok(!('hero.arm' in dict(ht).en) && !('@title.5' in dict(ht).en), 'site_fixes thêm lại khoá của hàng nút đầu trang đã gỡ');
+  assert.ok(!/(~|约 )\d+ MB\)?"? *(title|<\/small>)/.test(ht.replace(/~(806|605) MB/g, '')), 'trang mẫu không được ghi cứng dung lượng');
+  assert.match(ht, /data-os="mac" href="#tai-ve"/); assert.match(ht, /title="Xem bản tải cho Windows"/);
+  assert.ok(!/href="[^"]*AIVN-mac-(arm64|x64)\.zip"/.test(ht.replace(/id="tai-ve"[\s\S]*?<!--\/AIVN-DL-LATEST-->/, '')), 'cuối trang không còn zip thứ hai');
+  assert.ok(!('hero.arm' in dict(ht).en) && !('@title.5' in dict(ht).en) && !('cta.arm' in dict(ht).en), 'site_fixes thêm lại khoá của menu đã gỡ');
 });
 test('B149: chân trang en/zh dịch nhãn và có phụ đề; dòng ghi công giữ nguyên văn ở mọi nơi', () => {
   for (const f of [live(), tmpl()]) {

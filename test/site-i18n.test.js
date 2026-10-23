@@ -71,7 +71,10 @@ test('bản dịch trong site/i18n/*.json đã được ghép vào index.html', 
 
 test('QA B10: dung lượng tải trên trang do release.sh điền từ tệp thật của bản phát hành', () => {
   assert.ok(!/~(233|251|264) MB/.test(html), 'còn dung lượng viết cứng cũ');
-  for (const t of ['__MB_WIN__', '__MB_ARM__', '__MB_X64__']) assert.ok(html.includes(t), t);
+  assert.match(html, /data-i18n-title="@title\.11"[^>]*title="Xem bản tải cho Windows"/);
+  assert.strictEqual(D.en['@title.11'], 'See the Windows download');
+  assert.strictEqual(D.zh['@title.11'], '查看 Windows 版下载');
+  assert.ok(!/Tải bộ cài/.test(html.split('/*I18N*/')[0]), 'nút cuối trang không còn tooltip dung lượng');
   const rel = fs.readFileSync(path.join(root, 'release.sh'), 'utf8');
   assert.match(rel, /MB_WIN="\$\(mb "\$OUT\/AIVN-Setup\.exe"\)"/); assert.match(rel, /grep -q "__MB_" "\$SITE\/index\.html" && die/);
 });

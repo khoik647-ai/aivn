@@ -56,7 +56,7 @@ test('B186: Playwright iPhone 13, iPad, iPadOS, Pixel, máy Windows và Mac', { 
         const notes = page.locator('.dl-mnote');
         assert.strictEqual(await notes.count(), 2, name);
         const wins = page.locator('.dl-row .dl-btn[data-os=windows]'); // đầu trang chỉ còn một nút tải: hàng nút theo hệ điều hành chỉ còn ở cuối trang
-        const macs = page.locator('.dl-row > .mac-wrap');
+        const macs = page.locator('.dl-row > a.dl-btn[data-os=mac]');
         if (kind === 'win' || kind === 'mac') {
           assert.strictEqual(dlos, kind, name + ' ' + cls);
           assert.ok(!cls.includes('is-mobile'), name + ' ' + cls);
@@ -87,13 +87,11 @@ test('B186: Playwright iPhone 13, iPad, iPadOS, Pixel, máy Windows và Mac', { 
       }
       if (kind === 'mac') {
         await page.goto(base + '?lang=en', { waitUntil: 'load' });
-        await page.locator('.cta .mac-toggle').click();
-        const zips = page.locator('.cta .mac-menu a[download]');
-        assert.strictEqual(await zips.count(), 2, name);
-        for (let i = 0; i < 2; i++) {
-          assert.strictEqual(await zips.nth(i).isVisible(), true, name);
-          assert.match(await zips.nth(i).getAttribute('href'), /\/AIVN-(mac-(arm64|x64)|[0-9][^/]*-(arm64|x64)-mac)\.zip$/, name);
-        }
+        const mac = page.locator('.cta a.dl-btn[data-os=mac]');
+        assert.strictEqual(await mac.count(), 1, name);
+        assert.strictEqual(await mac.getAttribute('href'), '#tai-ve', name);
+        assert.strictEqual(await mac.getAttribute('download'), null, name);
+        assert.strictEqual(await page.locator('.cta .mac-menu, .cta .mac-toggle').count(), 0, name);
       }
       await context.close();
     }

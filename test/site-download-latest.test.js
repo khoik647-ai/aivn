@@ -276,9 +276,14 @@ exit 0
     .replaceAll('href="AIVN-mac-x64.zip"', `href="${base}/AIVN-mac-x64.zip"`);
   assert.ok(!/AIVN-BETA|beta-link|data-beta-version|tai-beta|id="tai-beta"/.test(page));
   assert.match(page, /data-os="windows" href="#tai-ve"/);
+  assert.match(page, /data-os="mac" href="#tai-ve"/);
+  assert.match(page, /title="Xem bản tải cho Windows"/);
   assert.ok(!/\.cta \.dl-btn\[data-os="windows"\]/.test(page), 'nút Windows cuối trang không được tự đổi href thành bộ cài');
+  assert.ok(!/\.cta \.mac-menu a\[href\]/.test(page), 'menu macOS cuối trang không được tự đổi href thành zip');
+  assert.ok(!/\.cta \.mac-wrap \.mac-menu\{position:static/.test(page));
   const outside = page.replace(/id="tai-ve"[\s\S]*?<!--\/AIVN-DL-LATEST-->/, '');
   assert.ok(!/href="[^"]*AIVN-Setup[^"]*\.exe"/.test(outside), 'ngoài nút tự động không còn href bộ cài Windows');
+  assert.ok(!/href="[^"]*\.zip"/.test(outside), 'ngoài nút tự động không còn href zip');
   const exe = [...page.matchAll(/href="([^"]*AIVN-Setup[^"]*\.exe)"/g)].map((m) => m[1]);
   assert.ok(exe.length >= 1); assert.ok(exe.every((h) => h === `${base}/AIVN-Setup.exe`), exe.join('\n'));
   assert.ok(!exe.some((h) => /-beta/.test(h)), 'không chèn link beta.N');

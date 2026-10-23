@@ -48,10 +48,14 @@ page = page.replace("var mobile=/android|iphone|ipad|ipod|mobile/i.test(navigato
 # --- B147: mục Apple Silicon dịch được (có dung lượng), title nút macOS có dung lượng
 ARM_VI = '<b>Apple Silicon</b><small>Chip M1, M2, M3, M4… · ~'
 SINGLE = '<!--AIVN-DL-LATEST-->' in page   # site/ mới: đầu trang chỉ có MỘT nút “Tải AIVN bản mới nhất” (không còn menu Mac ở đầu trang)
-ARMK = ('cta.arm',) if SINGLE else ('hero.arm', 'cta.arm')
-_n = iter(ARMK)   # hai mục Apple Silicon (hàng nút đầu trang, hàng nút cuối trang) — khoá riêng, không trùng
-page = re.sub(r'<a download="" href="([^"]*AIVN-mac-arm64\.zip)" role="menuitem">', lambda m: f'<a data-i18n="{next(_n)}" download="" href="{m.group(1)}" role="menuitem">', page)
-if any(f'data-i18n="{k}"' not in page for k in ARMK): sys.exit('không thấy mục tải Apple Silicon')
+MENU = re.search(r'<a\b[^>]*href="[^"]*AIVN-mac-arm64\.zip"[^>]*role="menuitem"', page)
+if MENU:
+    ARMK = ('cta.arm',) if SINGLE else ('hero.arm', 'cta.arm')
+    _n = iter(ARMK)   # hai mục Apple Silicon (hàng nút đầu trang, hàng nút cuối trang) — khoá riêng, không trùng
+    page = re.sub(r'<a download="" href="([^"]*AIVN-mac-arm64\.zip)" role="menuitem">', lambda m: f'<a data-i18n="{next(_n)}" download="" href="{m.group(1)}" role="menuitem">', page)
+    if any(f'data-i18n="{k}"' not in page for k in ARMK): sys.exit('không thấy mục tải Apple Silicon')
+elif not SINGLE:
+    sys.exit('không thấy mục tải Apple Silicon')
 page = re.sub(r'title="Tải AIVN cho macOS 13 trở lên"', 'title="Tải AIVN cho macOS 13 trở lên (Apple Silicon ~__MB_ARM__ MB, Intel ~__MB_X64__ MB)"', page)
 
 # --- B149: nhãn điện thoại (trang đang chạy chưa có khoá dịch)
@@ -92,6 +96,8 @@ KEYS = {
 for l in KEYS:
     if SINGLE:  # khoá của hàng nút đầu trang cũ đã gỡ — không thêm lại
         for k in ('hero.arm', '@title.5'): KEYS[l].pop(k, None)
+    if not MENU:  # cuối trang cũng không còn menu zip: không chèn lại cta.arm
+        KEYS[l].pop('cta.arm', None)
     KEYS[l] = {k: sizes(v) for k, v in KEYS[l].items()}
 
 page = sizes(page)

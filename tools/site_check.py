@@ -23,6 +23,15 @@ def nav(platform, touch=0, uad=None):
             "Object.defineProperty(Navigator.prototype,'maxTouchPoints',{get:function(){return %d}});"
             "Object.defineProperty(Navigator.prototype,'userAgentData',{get:function(){return %s}});") % (json.dumps(platform), touch, u)
 D1280 = {'width': 1280, 'height': 800}
+def exercise_cta(pg):
+    """Mở .mac-toggle nếu còn, bấm mọi nút nhìn thấy trong .cta, rồi trả href .exe/.zip nằm ngoài #tai-ve."""
+    for sel in ('.mac-toggle', '.cta a', '.cta button:not(.mac-toggle)'):
+        loc = pg.locator(sel)
+        for i in range(loc.count()):
+            el = loc.nth(i)
+            if el.is_visible():
+                el.click(timeout=3000, no_wait_after=True)
+    return pg.evaluate(r'''() => [...document.querySelectorAll('a[href]')].filter(a => !a.closest('#tai-ve')).map(a => a.getAttribute('href')).filter(h => /\.(exe|zip)(\?|#|$)/i.test(h || ''))''')
 # (tên, Playwright context, init script, loại máy)
 CONF = [('fold-280', dict(viewport={'width': 280, 'height': 653}, user_agent=AND, is_mobile=True, has_touch=True, device_scale_factor=2), nav('Linux armv8l', 5), 'android'),  # B162
         ('iphoneSE-320', dict(viewport={'width': 320, 'height': 568}, user_agent=IPH, is_mobile=True, has_touch=True, device_scale_factor=2), nav('iPhone', 5), 'ios'),
@@ -62,7 +71,8 @@ JS = r'''() => {
   gk:!!gk, gkSteps:gk?gk.querySelectorAll('li').length:0, gkText:gk?gk.textContent:'', gkSummaryH:gk&&vis(gk.querySelector('summary'))?H(gk.querySelector('summary')):null,
   hdrHref:hdr?hdr.getAttribute('href'):null, raw:/__MB_|__SHA|__VER/.test(document.body.innerText)||[...document.querySelectorAll('[title]')].some(e=>/__MB_/.test(e.title)),
   stableWin:[...document.querySelectorAll('.dl-row .dl-btn[data-os=windows]')].filter(vis).map(a=>a.getAttribute('href')),
-  stableMac:[...document.querySelectorAll('.dl-row>.mac-wrap')].filter(vis).length,
+  stableMac:[...document.querySelectorAll('.cta .dl-btn[data-os=mac]')].filter(vis).length,
+  ctaWinTitle:((document.querySelector('.cta [data-os=windows]')||{}).getAttribute&&document.querySelector('.cta [data-os=windows]').getAttribute('title'))||'',
   dlNotes:[...document.querySelectorAll('.dl-mnote')].filter(vis).map(e=>e.innerText.trim()),
   outsideOverflow:[...document.querySelectorAll('body *')].some(e=>!e.closest('header')&&e.getBoundingClientRect().width&&e.getBoundingClientRect().right>cw+0.5&&getComputedStyle(e).position!=='fixed'&&getComputedStyle(e).display!=='none'),
   creditCount:(foot.match(/NGUYỄN NGỌC KHÔI SINH VIÊN VLU/g)||[]).length, footPhone:(foot.match(/(Điện thoại|Phone|电话)[:：]?\s*[^\n]*/)||[''])[0],
@@ -105,6 +115,7 @@ with sync_playwright() as p:
                     r['overflowAfter'] = pg.evaluate('()=>document.documentElement.scrollWidth>document.documentElement.clientWidth')
                 note = pg.locator('.dl-mnote').first
                 if note.count() and note.is_visible(): note.click()
+            r['outsideBin'] = exercise_cta(pg)
             r['afterUrl'] = pg.url; r['requests'] = list(reqs)
             if SHOTS: pg.locator('#tai-ve').scroll_into_view_if_needed(); pg.evaluate('()=>scrollTo(0,0)'); pg.screenshot(path=f'{SHOTS}/{name}-{lang}.png')
             res.append(r); c.close()
@@ -157,6 +168,9 @@ for r in res:
     if r.get('menuOpen') and r['menuOpen']['sw'] > r['menuOpen']['cw']: bad.append(f'{k}: mở menu bị tràn')
     if r.get('overflowAfter'): bad.append(f'{k}: tràn ngang sau khi mở menu')
     if r['single'] != 1 or r['betaBlock']: bad.append(f'{k}: phải có đúng một nút tải chính, không còn khối beta ({r["single"]}, beta={r["betaBlock"]})')
+    if r.get('outsideBin'): bad.append(f'{k}: ngoài #tai-ve còn href tệp {r["outsideBin"]}')
+    win_title = {'vi': 'Xem bản tải cho Windows', 'en': 'See the Windows download', 'zh-CN': '查看 Windows 版下载'}.get(r['lang'])
+    if win_title and r.get('ctaWinTitle') != win_title: bad.append(f'{k}: gợi ý nút Windows cuối trang “{r.get("ctaWinTitle")}”')
     # B145: chỉ khi khối beta còn trên trang (INCLUDE_PRERELEASE=false vẫn chèn khối đó). Nút tự động không có dòng này.
     if r.get('heroText') and r['heroText'].lower().count('beta') > 1: bad.append(f'{k}: link đầu trang lặp “beta”: {r["heroText"]}')  # B145
     if r['creditCount'] < 3: bad.append(f'{k}: dòng ghi công chỉ còn {r["creditCount"]}')
