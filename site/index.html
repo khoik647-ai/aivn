@@ -273,6 +273,13 @@ html[lang="zh-CN"] body{font-family:'Be Vietnam Pro','PingFang SC','Hiragino San
 h1,h2,h3{text-wrap:balance}
 html[lang="zh-CN"] h1,html[lang="zh-CN"] h2{letter-spacing:0}
 html[lang="zh-CN"] .eyebrow{letter-spacing:.12em}
+/* redesign (controls >= 24px, bot Design M4): header nav, footer links and language switch get real hit areas; 44px on phones */
+.nav ul a{display:inline-flex;align-items:center;min-height:32px;padding:0 6px}
+footer li a{display:inline-flex;align-items:center;min-height:32px}
+@media (max-width:760px){footer li a{min-height:44px}}
+.lang button{min-height:28px;display:inline-flex;align-items:center;justify-content:center}
+@media (max-width:760px){.lang button{min-height:32px}}
+@media (max-width:300px){.lang button{font-size:.74rem}}
 @media (max-width:520px){.lang button{padding:6px 7px;min-width:30px;font-size:.74rem}}
 /*AIVN-FIX-320*/@media (max-width:380px){header .wrap{padding-left:14px;padding-right:14px}.nav{gap:6px}.nav-cta{gap:6px}.logo{flex-shrink:0;gap:6px;font-size:1.08rem}.logo small{padding:1px 6px}.lang button{padding:6px 5px;min-width:27px}.burger{width:40px;height:40px;flex-shrink:0}.mobile-menu,.mobile-menu.open{padding-left:16px;padding-right:16px}.mobile-menu a{overflow-wrap:anywhere}h1,h2,h3,.lead,.checks li{overflow-wrap:anywhere}}.dev-grid>*,.privacy>*{min-width:0}.credit-sub{display:block;font-size:.85em;opacity:.8;margin-top:2px}.credit-sub:empty{display:none}/*END-FIX-320*//*AIVN-FIX-280*/@media (max-width:300px){header .wrap{padding-left:10px;padding-right:10px}.nav{gap:4px}.nav-cta{gap:4px}.logo{gap:4px;font-size:1rem}.logo small{padding:1px 4px;font-size:.62rem}.lang{padding:1px;gap:1px}.lang button{padding:6px 4px;min-width:24px;font-size:.7rem}.burger{width:36px;height:36px}}/*END-FIX-280*/</style>
 </head>
