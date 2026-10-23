@@ -75,11 +75,16 @@ def exercise_cta(pg):
         (groups[h] = groups[h] || []).push(a);
         if (!a.closest('#tai-ve')) outside.push(h || a.tagName);
       });
+      const inKhac = list => list.filter(a => a.closest('#tai-ve-khac')).length;
+      // #tai-ve-khac bị ẩn. Đúng một cặp sinh đôi (hai link cùng URL, .o-intelq và .o-x64) trong #tai-ve vẫn được phép; cặp thứ hai hoặc bản thứ ba thì báo.
+      const twinHrefs = Object.keys(groups).filter(h => inKhac(groups[h]) === 2);
       const dup = Object.keys(groups).filter(h => {
         const list = groups[h];
         const visible = list.filter(shown).length;
         const outsideN = list.filter(a => !a.closest('#tai-ve')).length;
-        return visible > 1 || outsideN > 1 || (outsideN > 0 && list.length > 1);
+        const khacN = inKhac(list);
+        const khacDup = khacN > 2 || (khacN === 2 && twinHrefs.length !== 1);
+        return visible > 1 || outsideN > 1 || (outsideN > 0 && list.length > 1) || khacDup;
       });
       const attrOut = [...document.querySelectorAll('[download]')].filter(el => !el.closest('#tai-ve')).map(el => el.getAttribute('href') || el.tagName);
       return {dup, outside, attr: attrOut, foreign};
