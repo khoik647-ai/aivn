@@ -780,6 +780,7 @@ function maskAssignments(text, depth = 0) {
     if (!value || isRedactedValue(value)) return m;
     if (!headerValueIsSecret(name, value) && !headerValueIsSecret(name, value.split(/\s+/)[0])) {
       if (depth < 8 && value.length < m.length && /[ \t]*:/.test(value)) return pre + name + sep + maskAssignments(value, depth + 1);
+      if (depth >= 8) return pre + name + sep + maskLabelTail(value);
       return m;
     }
     return pre + name + sep + '••••';
@@ -796,6 +797,16 @@ function maskAssignments(text, depth = 0) {
     return q + name + sep + '••••' + q;
   });
   return s;
+}
+// Hết độ sâu: quét tuyến tính, không đệ quy, từng cặp nhãn: một token.
+function maskLabelTail(text) {
+  const parts = String(text).split(/([ \t]+)/);
+  for (let k = 0; k + 2 < parts.length; k += 2) {
+    const lab = /(?:^|[^\w"'-])([A-Za-z][A-Za-z0-9_-]*):$/.exec(parts[k]);
+    const value = parts[k + 2];
+    if (lab && value && !value.endsWith(':') && !isRedactedValue(value) && headerValueIsSecret(lab[1], value)) parts[k + 2] = '••••';
+  }
+  return parts.join('');
 }
 function maskKnownSecrets(text) {
   let s = text == null ? '' : String(text);
