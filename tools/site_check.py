@@ -1,4 +1,5 @@
-"""Kiểm bố cục trang web AIVN (B143–B150, B162, B174, B183, B185, B186) ở 280/320/375/810/820/1280 px và dải 768–900 px × vi/en/zh bằng Playwright + Chrome. Thoát 1 nếu có lỗi.
+"""Kiểm bố cục trang web AIVN (B143–B150, B162, B174, B183, B185, B186) ở 280/320/375/390/810/820/1280 px và dải 768–900 px × vi/en/zh bằng Playwright + Chrome. Thoát 1 nếu có lỗi.
+B162: dải hẹp NARROW bắt đầu từ 280 px (Galaxy Fold), không từ 320 — vi/en/zh, không cuộn ngang, chữ và nút không tràn khung, điều khiển ≥24 px, nút tải chính ≥44 px.
 Một nút “Tải AIVN bản mới nhất” (#tai-ve .dl): API GitHub /releases được giả bằng dữ liệu thật trong test/fixtures/site-releases-api.json
 (bỏ bản nháp như khi khách không đăng nhập xem). Kiểm: chọn đúng tệp theo máy (Windows → .exe, Mac → .zip đúng chip, không biết chip → Apple Silicon
 + link “Mac dùng chip Intel?”, Linux → nút chính trỏ trang Releases + ghi chú “chưa có bản Linux”, không có .exe), điện thoại/máy tính bảng không thấy link .exe/.zip nào (chỉ nút “Gửi link”),
@@ -130,6 +131,7 @@ res = []
 bad_band = []
 band_log = []
 BAND = list(range(768, 901, 2))  # B185: 768, 780, 800, 810, 820, 834, 850, 880, 900 và mọi bước 2 px
+NARROW = [280, 320, 390]  # B162: bề rộng hẹp nhất là 280 px (Galaxy Fold gập). Không bắt đầu từ 320.
 CTA = {'vi': 'Tải miễn phí', 'en': 'Download free', 'zh': '免费下载'}
 def api(c, fail):
     if fail: c.route('https://api.github.com/**', lambda rt: rt.fulfill(status=403, content_type='application/json', body='{"message":"API rate limit exceeded"}'))
@@ -224,6 +226,65 @@ with sync_playwright() as p:
     pill_extra('win-loading-375', dict(viewport={'width': 375, 'height': 700}, user_agent=WIN), nav('Win32', 0, ('Windows', 'x86')), 'loading')
     pill_extra('linux-normal-1280', dict(viewport=D1280, user_agent=LNX), nav('Linux x86_64'), 'ok')
     pill_extra('iphone-normal-375', dict(viewport={'width': 375, 'height': 667}, user_agent=IPH, is_mobile=True, has_touch=True, device_scale_factor=2), nav('iPhone', 5), 'ok')
+    # B162: 280/320/390 × vi/en/zh. Trang không cuộn ngang; chữ và nút không tràn khung của chúng;
+    # mọi điều khiển nhìn thấy ≥ 24 px; nút tải chính (hoặc nút gửi đường dẫn trên điện thoại) ≥ 44 px.
+    narrow_js = r'''() => {
+      const d=document.documentElement, cw=d.clientWidth, problems=[];
+      const vis=e=>{const cs=getComputedStyle(e), r=e.getBoundingClientRect(); return cs.display!=='none'&&cs.visibility!=='hidden'&&r.width>0&&r.height>0;};
+      const clipped=e=>{
+        const r=e.getBoundingClientRect(); let p=e.parentElement;
+        while(p&&p!==document.body){
+          const o=getComputedStyle(p).overflowX;
+          if(o==='hidden'||o==='clip'||o==='auto'||o==='scroll'){
+            const pr=p.getBoundingClientRect();
+            if(r.right>pr.right+1.5||r.left<pr.left-1.5) return true;
+          }
+          p=p.parentElement;
+        }
+        return r.right>cw+1||r.left<-1;
+      };
+      if(d.scrollWidth>cw) problems.push('cuộn ngang '+d.scrollWidth+'>'+cw);
+      document.querySelectorAll('a,button,summary,input').forEach(e=>{
+        if(!vis(e)||e.closest('pre')) return;
+        const qa=e.closest('.qa'); if(qa&&!qa.classList.contains('open')&&e.closest('.ans')) return;
+        const r=e.getBoundingClientRect(), name=((e.innerText||e.getAttribute('aria-label')||e.className||e.tagName)+'').replace(/\s+/g,' ').trim().slice(0,28);
+        if(r.height<23.5||r.width<23.5) problems.push('điều khiển <24px '+Math.round(r.width)+'×'+Math.round(r.height)+' '+name);
+        if(clipped(e)||e.scrollWidth>e.clientWidth+2) problems.push('nút tràn khung '+name);
+      });
+      const tabs=document.querySelector('.code-tabs');
+      if(tabs&&tabs.scrollWidth>tabs.clientWidth+1) problems.push('thanh mã '+tabs.scrollWidth+'>'+tabs.clientWidth);
+      const grid=document.querySelector('.feat-grid'), feat=document.querySelector('.feat');
+      if(grid&&feat&&feat.getBoundingClientRect().width>grid.getBoundingClientRect().width+1) problems.push('thẻ tính năng rộng hơn lưới');
+      document.querySelectorAll('.steps-mock .st em').forEach(em=>{
+        const r=em.getBoundingClientRect();
+        if(r.width<80||r.height>120) problems.push('dòng bước '+Math.round(r.width)+'×'+Math.round(r.height));
+      });
+      const primary=[...document.querySelectorAll('#tai-ve .dl-main')].find(vis);
+      const ph=primary?primary.getBoundingClientRect().height:0;
+      if(ph<44) problems.push('nút tải chính '+Math.round(ph)+'px');
+      document.querySelectorAll('.badge,h1,h2,.lead,.feat p,.feat h3,.dl-main,.dl-sub,.hero-note').forEach(e=>{
+        if(!vis(e)||e.closest('pre')) return;
+        if(e.scrollWidth>e.clientWidth+2) problems.push('chữ tràn khung '+(e.className||e.tagName).toString().slice(0,24)+' '+e.scrollWidth+'>'+e.clientWidth);
+      });
+      return problems;
+    }'''
+    bad_narrow = []
+    for w in NARROW:
+        nc = b.new_context(viewport={'width': w, 'height': 900}, user_agent=AND, is_mobile=True, has_touch=True, device_scale_factor=2)
+        nc.add_init_script(nav('Linux armv8l', 5)); api(nc, False)
+        npg = nc.new_page()
+        for lang in ('vi', 'en', 'zh'):
+            npg.goto(URL + ('&' if '?' in URL else '?') + 'lang=' + lang, wait_until='load')
+            npg.evaluate('() => document.fonts.ready')
+            probs = npg.evaluate(narrow_js)
+            npg.click('#burger'); npg.wait_for_timeout(300)
+            probs += ['menu ' + x for x in npg.evaluate(narrow_js)]
+            npg.click('#burger'); npg.wait_for_timeout(200)
+            if npg.evaluate('()=>document.documentElement.scrollWidth>document.documentElement.clientWidth'):
+                probs.append('tràn sau khi đóng menu')
+            if probs: bad_narrow.append(f'narrow-{w} {lang}: ' + '; '.join(probs[:8]))
+            else: band_log.append(f'narrow-{w} {lang}: không tràn, nút trong khung, điều khiển ≥24, nút tải ≥44')
+        nc.close()
     b.close()
 json.dump(res, open(OUT, 'w'), ensure_ascii=False, indent=1)
 checked = [r for r in res if not r.get('pillOnly')]
@@ -306,6 +367,7 @@ for r in res:
         if sorted(o.split(' ')[0] for o in r['other']) != ['arm64', 'win', 'x64']: bad.append(f'{k}: Linux: thiếu link nhỏ Windows/Mac {r["other"]}')
         if r['gkLink'] or r['intelq']: bad.append(f'{k}: Linux mà hiện phần Mac')
 bad.extend(bad_band)
+bad.extend(bad_narrow)
 for line in band_log: print(line)
-print('\n'.join(bad) if bad else f'KIỂM BỐ CỤC OK: {len(checked)} lần chạy ({len(CONF)} cấu hình × vi/en/zh); dải 768–900 px × vi/en/zh ({len(BAND)} bề rộng) không tràn; huy hiệu có số hoặc ẩn ở mọi cấu hình')
+print('\n'.join(bad) if bad else f'KIỂM BỐ CỤC OK: {len(checked)} lần chạy ({len(CONF)} cấu hình × vi/en/zh); dải 768–900 px × vi/en/zh ({len(BAND)} bề rộng) không tràn; hẹp {NARROW[0]}–{NARROW[-1]} px × vi/en/zh không tràn khung; huy hiệu có số hoặc ẩn ở mọi cấu hình')
 sys.exit(1 if bad else 0)
