@@ -108,6 +108,8 @@ JS = r'''() => {
   state:row.dataset.state, os:row.dataset.os, t:row.dataset.t, arch:row.dataset.arch, pre:row.dataset.pre,
   mainVis:vis(main), mainH:vis(main)?H(main):null, mainHref:main.getAttribute('href'), mainText:vis(main)?main.innerText.trim():'',
   sub:vis(row.querySelector('.dl-sub'))?row.querySelector('.dl-sub').innerText.trim():'', ver:row.querySelector('.dl-ver').textContent,
+  pill:(document.querySelector('.badge .pill-ver')||{}).textContent||'', badgePre:!!(document.querySelector('.badge')&&document.querySelector('.badge').classList.contains('is-pre')),
+  badgeVis:vis(document.querySelector('.badge')), badgeText:vis(document.querySelector('.badge'))?(document.querySelector('.badge').innerText||'').replace(/\s+/g,' ').trim():'',
   beta:vis(row.querySelector('.dl-beta')), failLink:[...row.querySelectorAll('.dl-s-fail a')].filter(vis).map(a=>a.getAttribute('href')),
   intelq:vis(row.querySelector('.o-intelq')), lnx:vis(row.querySelector('.dl-lnx')), hint:vis(row.querySelector('.dl-hint')), gkLink:vis(row.querySelector('.dl-gklink')),
   other:[...row.querySelectorAll('.dl-other a')].filter(vis).map(a=>a.dataset.k+' '+a.getAttribute('href')),
@@ -197,8 +199,34 @@ with sync_playwright() as p:
             bad_band.append(f'band-820 {lang}: bấm nút đầu trang không tới #tai-ve')
         band_log.append(f'band {lang} 768..900 bước 2: {len(BAND)} bề rộng, nút “{CTA[lang]}” trong khung')
     bc.close()
+    # Huy hiệu không được hiện chữ rỗng: API lỗi (abort), không có tệp, chỉ còn bản thử nghiệm không tệp, và lúc đang tải.
+    # 403, Linux và iPhone đã nằm trong CONF. Đo lúc đang tải trước khi API trả về.
+    NOASSET = json.dumps([{**r, 'assets': []} for r in json.loads(API_BODY)])
+    PREONLY = json.dumps([{**r, 'assets': []} for r in json.loads(API_BODY) if r.get('prerelease')])
+    def pill_extra(name, kw, init, mode):
+        c = b.new_context(**kw); c.add_init_script(init); held = []
+        if mode == 'neterr': c.route('https://api.github.com/**', lambda rt: rt.abort())
+        elif mode == 'noasset': c.route('https://api.github.com/**', lambda rt: rt.fulfill(status=200, content_type='application/json', body=NOASSET))
+        elif mode == 'preonly': c.route('https://api.github.com/**', lambda rt: rt.fulfill(status=200, content_type='application/json', body=PREONLY))
+        elif mode == 'loading': c.route('https://api.github.com/**', lambda rt: held.append(rt))
+        else: api(c, False)
+        pg = c.new_page(); pg.goto(URL + '?lang=vi', wait_until='load')
+        if mode != 'loading': pg.wait_for_timeout(900)
+        r = pg.evaluate(JS); r['conf'] = name; r['lang'] = 'vi'; r['pillOnly'] = True; r['requests'] = []
+        if mode == 'loading' and r['state'] != 'loading': bad_band.append(f'{name}: cần còn trạng thái loading, gặp {r["state"]}')
+        for rt in held:
+            try: rt.abort()
+            except Exception: pass
+        res.append(r); c.close()
+    pill_extra('win-neterr-375', dict(viewport={'width': 375, 'height': 700}, user_agent=WIN), nav('Win32', 0, ('Windows', 'x86')), 'neterr')
+    pill_extra('win-noasset-1280', dict(viewport=D1280, user_agent=WIN), nav('Win32', 0, ('Windows', 'x86')), 'noasset')
+    pill_extra('win-preonly-1280', dict(viewport=D1280, user_agent=WIN), nav('Win32', 0, ('Windows', 'x86')), 'preonly')
+    pill_extra('win-loading-375', dict(viewport={'width': 375, 'height': 700}, user_agent=WIN), nav('Win32', 0, ('Windows', 'x86')), 'loading')
+    pill_extra('linux-normal-1280', dict(viewport=D1280, user_agent=LNX), nav('Linux x86_64'), 'ok')
+    pill_extra('iphone-normal-375', dict(viewport={'width': 375, 'height': 667}, user_agent=IPH, is_mobile=True, has_touch=True, device_scale_factor=2), nav('iPhone', 5), 'ok')
     b.close()
 json.dump(res, open(OUT, 'w'), ensure_ascii=False, indent=1)
+checked = [r for r in res if not r.get('pillOnly')]
 for r in res:
     print(r['conf'], r['lang'], 'overflow' if r['overflow'] else 'ok', r['sw'], '/', r['cw'], r['off'][:3], 'mobile', r['mobileCls'], 'state', r['state'], 'os', r['os'], 't', r['t'],
           'main', (r['mainHref'] or '').split('/')[-1] if r['mainVis'] else '(ẩn)', r['mainH'], 'ver', r['ver'], 'beta', r['beta'], 'intelq', r['intelq'], 'share', r['shareH'],
@@ -208,7 +236,17 @@ LABEL = {'vi': 'Điện thoại', 'en': 'Phone', 'zh-CN': '电话'}
 WANT = {'win': 'AIVN-Setup-0.16.0-beta.3.exe', 'arm64': 'AIVN-0.16.0-beta.3-arm64-mac.zip'}  # dữ liệu mẫu: bản mới nhất (cờ INCLUDE_PRERELEASE=true) là v0.16.0-beta.3
 STATIC = {'win': r'(^|/releases/latest/download/)AIVN-Setup\.exe$', 'mac': r'(^|/releases/latest/download/)AIVN-mac-arm64\.zip$'}
 bad = []
+def pill_problem(k, r):
+    """Huy hiệu phải có số phiên bản khi hiện, hoặc ẩn cả cụm. Không bao giờ hiện “Phiên bản · …” trống."""
+    pill = (r.get('pill') or '').strip(); ver = (r.get('ver') or '').strip(); out = []
+    if r.get('badgeVis'):
+        if not re.search(r'\d+\.\d+', pill) or not re.search(r'\d+\.\d+', r.get('badgeText') or ''):
+            out.append(f'{k}: huy hiệu hiện mà không có số phiên bản pill={pill!r} text={r.get("badgeText")!r}')
+        if ver and pill != ver: out.append(f'{k}: huy hiệu phiên bản {pill!r} khác nút tải {ver!r}')
+    return out
 for r in res:
+    if r.get('pillOnly'):
+        bad.extend(pill_problem(f"{r['conf']} {r['lang']}", r)); continue
     k = f"{r['conf']} {r['lang']}"; kind = r['kind']; fail = r['apifail']; phone = kind in ('ios', 'android')
     if r['overflow'] and not (r['cw'] > 760 and not r['outsideOverflow']): bad.append(f'{k}: tràn ngang {r["sw"]}>{r["cw"]}')
     if r.get('menuOpen') and r['menuOpen']['sw'] > r['menuOpen']['cw']: bad.append(f'{k}: mở menu bị tràn')
@@ -232,6 +270,8 @@ for r in res:
     if small: bad.append(f'{k}: nút/link trong khối tải thấp hơn 24 px: {small}')
     if not r['gk'] or r['gkSteps'] != 4 or not re.search(r'Vẫn mở|Open Anyway|仍要打开', r['gkText']): bad.append(f'{k}: thiếu hướng dẫn mở lần đầu trên Mac (Gatekeeper, 4 bước): {r["gk"]} {r["gkSteps"]}')
     if r['state'] != ('fail' if fail else 'ok'): bad.append(f'{k}: trạng thái {r["state"]}, cần {"fail" if fail else "ok"}')
+    bad.extend(pill_problem(k, r))
+    if bool(r.get('badgePre')) != bool(r['beta']): bad.append(f'{k}: nhãn Beta trên huy hiệu ({r.get("badgePre")}) khác nút ({r["beta"]})')
     if fail and not phone and r['failLink'] != ['https://github.com/khoik647-ai/aivn/releases']: bad.append(f'{k}: API lỗi mà không hiện link trang releases: {r["failLink"]}')
     if phone:  # B183/B186/M1: điện thoại và máy tính bảng không thấy link .exe/.zip nào; nút “Gửi link tải về máy tính” ≥ 44 px
         if not r['mobileCls'] or r['os'] != 'mobile': bad.append(f'{k}: điện thoại không được nhận ra ({r["os"]})')
@@ -267,5 +307,5 @@ for r in res:
         if r['gkLink'] or r['intelq']: bad.append(f'{k}: Linux mà hiện phần Mac')
 bad.extend(bad_band)
 for line in band_log: print(line)
-print('\n'.join(bad) if bad else f'KIỂM BỐ CỤC OK: {len(res)} lần chạy ({len(CONF)} cấu hình × vi/en/zh); dải 768–900 px × vi/en/zh ({len(BAND)} bề rộng) không tràn')
+print('\n'.join(bad) if bad else f'KIỂM BỐ CỤC OK: {len(checked)} lần chạy ({len(CONF)} cấu hình × vi/en/zh); dải 768–900 px × vi/en/zh ({len(BAND)} bề rộng) không tràn; huy hiệu có số hoặc ẩn ở mọi cấu hình')
 sys.exit(1 if bad else 0)

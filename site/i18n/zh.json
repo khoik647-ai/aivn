@@ -10,7 +10,7 @@
   "mnav.3": "开发者",
   "mnav.4": "下载",
   "mnav.5": "免费下载 AIVN",
-  "hero.1": "<span class=\"dot\"></span>0.15.3 版 · 屏幕控制始终配备“眼睛”，Zalo 搜索更可靠，主题动画可选",
+  "hero.1": "<span class=\"dot\"></span><span class=\"pill-txt\"><b class=\"pill-ver\" data-fb=\"v0.15.3\">v0.15.3</b> 版 · 在你的电脑上</span><span class=\"pill-beta\">Beta · 测试版</span>",
   "hero.2": "人工智能，<br/><span class=\"grad-text\">就在你的电脑上。</span>",
   "hero.3": "AIVN 让你下载开源语言模型并与之对话，无需联网，无需注册账号，数据始终留在你的电脑上。全新的 <b>AIVN AGENT</b> 模式还能自主使用工具：读取文件、计算、撰写报告、按计划发送提醒。",
   "hero.9": "免费 · Windows 10/11 64 位 · macOS 13 及以上 · 至少 <b>4 GB 内存</b>（建议 8 GB）· GPU 加速（Windows 上使用 Vulkan，Apple 芯片 Mac 上使用 Metal）",

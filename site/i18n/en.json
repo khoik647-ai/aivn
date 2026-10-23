@@ -10,7 +10,7 @@
   "mnav.3": "Developers",
   "mnav.4": "Download",
   "mnav.5": "Download AIVN for free",
-  "hero.1": "<span class=\"dot\"></span>Version 0.15.3 · Screen control always has “eyes”, more reliable Zalo search, theme animation options",
+  "hero.1": "<span class=\"dot\"></span><span class=\"pill-txt\">Version <b class=\"pill-ver\" data-fb=\"v0.15.3\">v0.15.3</b> · on your computer</span><span class=\"pill-beta\">Beta · pre-release</span>",
   "hero.2": "Artificial intelligence,<br/><span class=\"grad-text\">running right on your computer.</span>",
   "hero.3": "AIVN lets you download open-source language models and chat with them without an Internet connection or an account. Your data never leaves your computer. The new <b>AIVN AGENT</b> mode can also use tools on its own: read files, do calculations, write reports and send scheduled reminders.",
   "hero.9": "Free · Windows 10/11 64-bit · macOS 13 or later · At least <b>4 GB RAM</b> (8 GB recommended) · GPU acceleration (Vulkan on Windows, Metal on Apple Silicon Macs)",
