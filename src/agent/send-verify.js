@@ -351,27 +351,40 @@ const PROOF_SEND = new RegExp(`${SEND_VI}|${SEND_EN}|${SEND_ZH}`, 'iu');
 const REAL_SEND = new RegExp(`${SEND_VI}|${SOAN_ONLY}|${SEND_EN}|${SEND_ZH}`, 'iu');
 const LOOK_ASK = /(?:^|[^\p{L}])(?:nhìn|nhin|ngó|ngo|xem|đọc|doc|quan sát|kiểm tra|cho\s+(?:mình|tôi|em|tớ)\s+biết|chỉ\s+(?:nhìn|nhin|xem|đọc)|look(?:\s+at)?|see\s+if|read|check|what(?:'s|\s+is|\s+does)?|is\s+(?:the|it|there)|tell\s+me|just\s+look|only\s+look)(?![\p{L}])|(?:^|[^\p{L}])is\s+["“']|(?:có|còn)\s+(?:chữ|gì|nội dung)|co\s+chu|trống\s+không|\bempty\b|看看|看一下|看一看|瞧一下|读一下|讀一下|告诉我|告訴我|有没有|有沒有|是不是|什么|什麼|只看|只读|只讀|检查|檢查/iu;
 // Động từ gửi bị phủ định khi từ phủ định chi phối trực tiếp nó (có thể chen “được/bấm/có/press”).
-// “không/ko” là trợ từ hỏi CHỈ trong mẫu “có … không + động từ gửi + người nhận/luôn”
-// (“có chữ gì không gửi tin cho An luôn”). “chẳng lẽ không gửi … cho An” là lời thúc gửi (R2-B), không phải cấm.
-// Mọi cách nói khác (“không được gửi”, “không gửi gì cả”, “chưa gửi”, “ko gửi”, “khỏi gửi”) là cấm gửi.
+// “không/ko” đứng ngay trước động từ là cấm gửi, kể cả “có chữ gì không gửi tin cho An luôn”
+// và “chẳng lẽ không gửi … cho An” (từ chối nhầm được, gửi nhầm thì không).
 // Chữ Hán viết liền, không có khoảng trắng: “不要发送”, “先别发出去”, “别按发送”.
 const NEG_GOVERN = /(?:đừng|chớ|không(?:\s+được)?|chưa|ko|khoan|khỏi|khong(?:\s+duoc)?|don't|dont|do\s+not|never|without|hold\s+off(?:\s+on)?)\s+(?:(?:được|bấm|nhấn|ấn|nút|có|press|hit|on|the|a|an)\s+){0,3}$|(?:不要|先别|先別|别|別|勿|不)(?:\s*(?:按|点|点击|按下))*\s*$/iu;
 const HAY_CONT = /(?:đừng|chớ|không|ko|chưa|khỏi|don't|dont|do\s+not|never|不要|别|別|勿)\s+(?:\p{L}+\s+){0,6}(?:hay|hoặc|or|或者)\s+$/iu;
-function questionKhong(s, index) {
-  const pre = String(s || '').slice(Math.max(0, index - 32), index);
-  if (/(?:chẳng lẽ|chang le)\s+(?:không|ko)\s+$/iu.test(pre)) return true;
-  if (!/(?:^|[^\p{L}])(?:không|ko)\s+$/iu.test(pre) || /(?:không|ko)\s+được\s+$/iu.test(pre)) return false;
-  const window = String(s || '').slice(Math.max(0, index - 80), index);
-  if (!/(?:^|[^\p{L}])có\s+\S[\s\S]{0,40}?(?:không|ko)\s+$/iu.test(window)) return false;
-  const after = String(s || '').slice(index, index + 48);
-  return /(?:^|[^\p{L}])(?:luôn|cho|tới|đến|với|to|for)(?![\p{L}])/iu.test(after);
-}
 function negatedBefore(s, index) {
-  if (questionKhong(s, index)) return false;
   const pre = String(s || '').slice(Math.max(0, index - 48), index);
   if (NEG_GOVERN.test(pre) || HAY_CONT.test(pre)) return true;
   return /(?:^|[^\p{L}])dung\s*$/iu.test(pre);
 }
+// Cấm gửi khi BẤT KỲ từ phủ định hoặc cụm “chỉ nhìn” nằm trong câu lệnh.
+// Không tính chữ trong ngoặc kép, và không tính nội dung tin không có ngoặc đứng sau dấu hai chấm
+// (“Gửi tin cho An: đừng quên họp”). Phần sau ngoặc kép (“…: "nháp", đừng gửi”) vẫn tính.
+const isSpace = (c) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\u00a0' || c === '\u3000';
+function commandSurface(q) {
+  const s = String(q || '');
+  let out = '';
+  let quote = '';
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote) { if (c === quote) quote = ''; continue; }
+    if (c === '"' || c === '\u201c' || c === '\u00ab') { quote = c === '"' ? '"' : c === '\u201c' ? '\u201d' : '\u00bb'; out += ' '; continue; }
+    if (c === ':' || c === '\uff1a') {
+      let j = i + 1; while (j < s.length && isSpace(s[j])) j++;
+      const nxt = s[j];
+      if (nxt === '"' || nxt === '\u201c' || nxt === '\u00ab') { out += ' '; continue; }
+      break;
+    }
+    out += c;
+  }
+  return out;
+}
+const BLOCK_SEND = /(?:^|[^\p{L}])(?:tuyệt\s+nhiên|không|chẳng|chưa|đừng|ko|khỏi|cấm|thôi|don['’]t|do\s+not|never|without|refrain|hold\s+off|no\s+need|not|no)(?![\p{L}])|(?:^|[^\p{L}])(?:xem\s+thôi|chỉ\s+xem|chỉ\s+nhìn|just\s+look|only\s+look)(?![\p{L}])|不要|不用|禁止|别|別|勿|不|看看就行|只看/iu;
+function blocksSend(q) { return BLOCK_SEND.test(commandSurface(q)); }
 function keepAside(inner) { return REAL_SEND.test(inner) || KEEP_ASIDE.test(inner); }
 function intentText(q) {
   let s = String(q || '');
@@ -410,10 +423,10 @@ function lookOnly(q) {
   if (!LOOK_ASK.test(raw)) return false; // dấu ? một mình không đủ (“…send it to An?” vẫn là gửi)
   return true;
 }
-// Chỉ cho gửi khi câu là lệnh gửi rõ, và động từ gửi không bị phủ định.
-// Không rõ (không phải chỉ nhìn, cũng không phải lệnh gửi) → không cho gửi.
+// Chỉ cho gửi khi có động từ gửi không bị phủ định, và không có từ cấm / cụm chỉ-nhìn ở bất kỳ đâu
+// trong phần lệnh (ngoài ngoặc kép và ngoài nội dung tin sau dấu hai chấm).
 function allowsSend(q) {
-  if (lookOnly(q)) return false;
+  if (blocksSend(q) || lookOnly(q)) return false;
   if (hasSendVerb(q)) return true;
   if (!msgSend(q)) return false;
   const proof = scanSend(selfReport(intentText(q)), PROOF_SEND.source);
