@@ -40,8 +40,8 @@ test('tên tác giả và khối liên hệ giữ nguyên ở mọi ngôn ngữ'
     const m = html.match(new RegExp(`data-i18n="${k.replace('.', '\\.')}"[^>]*>([\\s\\S]*?)<\\/`)); if (m && m[1].includes(NAME)) assert.ok(D[l][k].includes(NAME), `${l} ${k} mất tên tác giả`);
   }
 });
-// Huy hiệu hero ghi bản ỔN ĐỊNH đang phát hành trên trang (QA box beta.2.8): khi package.json là bản thử nghiệm (0.16.0-beta.x) thì đó là
-// tag ổn định mới nhất (v0.15.3), không phải số của package; đến lúc phát hành bản ổn định (package không có “-”) thì phải khớp package.json.
+// Số tĩnh trong huy hiệu (data-fb) là bản ỔN ĐỊNH đang phát hành. JS ghi đè .pill-ver bằng đúng bản nút tải khi API trả về
+// (test/site-download-latest.test.js). Khi package.json là bản thử nghiệm thì số tĩnh là tag ổn định mới nhất, không phải số của package.
 const cmpV = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
 function stableOnSite() {
   const pv = require(path.join(root, 'package.json')).version;
@@ -53,9 +53,11 @@ function stableOnSite() {
   } catch {}
   return { v: null, how: 'không có .git (bản git archive)' };
 }
-test('phiên bản trên trang là bản ổn định đang phát hành, khớp ở cả 3 ngôn ngữ', () => {
-  const vi = (html.match(/Phiên bản (\d+\.\d+\.\d+) /) || [])[1]; assert.ok(vi, 'vi: không thấy “Phiên bản x.y.z”');
-  assert.ok(D.en['hero.1'].includes(`Version ${vi} `), 'en'); assert.ok(D.zh['hero.1'].includes(`${vi} 版`), 'zh');
+test('phiên bản tĩnh trên trang là bản ổn định đang phát hành, khớp ở cả 3 ngôn ngữ', () => {
+  const m = html.match(/Phiên bản <b class="pill-ver" data-fb="(v(\d+\.\d+\.\d+))">\1<\/b>/); assert.ok(m, 'vi: không thấy số phiên bản tĩnh');
+  const vi = m[2];
+  assert.ok(D.en['hero.1'].includes(`Version <b class="pill-ver" data-fb="v${vi}">v${vi}</b>`), 'en');
+  assert.ok(D.zh['hero.1'].includes(`<b class="pill-ver" data-fb="v${vi}">v${vi}</b> 版`), 'zh');
   const pv = require(path.join(root, 'package.json')).version.replace(/-.*/, '');
   assert.ok(cmpV(vi, pv) <= 0, `trang ghi ${vi} mới hơn package ${pv}`);
   const { v, how } = stableOnSite(); if (v) assert.strictEqual(vi, v, how);

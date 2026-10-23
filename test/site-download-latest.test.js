@@ -319,3 +319,70 @@ test('href tệp tải, sau new URL, phải thuộc https://github.com/khoik647-
   for (const leaf of ['AIVN-Setup.exe', 'AIVN-mac-arm64.zip', 'AIVN-mac-x64.zip']) assert.strictEqual(aivnDl(leaf, base).ok, true, leaf);
   assert.strictEqual(aivnDl('https://github.com/khoik647-ai/aivn/releases', base).looks, false);
 });
+
+test('huy hiệu phiên bản bằng đúng bản nút tải đã chọn: cờ bật, cờ tắt, API lỗi, và khi không có tệp cho máy này', async () => {
+  const fb = (html.match(/class="pill-ver" data-fb="([^"]+)"/) || [])[1];
+  assert.ok(fb && !/__/.test(fb), 'số tĩnh không được là chữ giữ chỗ');
+  assert.strictEqual((html.match(/DLX\.resolve\(/g) || []).length, 1, 'huy hiệu không được gọi API lần hai');
+  assert.match(html, /DLX\.viewFor\(mobile\?null:os,macArch,staticHref\)/);
+  assert.match(html, /DLX\.applyVersion\(\{button:row\.querySelector\('\.dl-ver'\),pill:pv,badge:badge\},view\.state==='ok'\?rel:null,''\)/);
+  const viBeta = html.match(/<span class="pill-beta">([^<]*)<\/span>/)[1];
+  assert.strictEqual(viBeta, html.match(/<span class="dl-beta" data-i18n="dl\.5">([^<]*)<\/span>/)[1]);
+  assert.ok(D.en['hero.1'].includes(`<span class="pill-beta">${D.en['dl.5']}</span>`), 'en: nhãn Beta khác nút');
+  assert.ok(D.zh['hero.1'].includes(`<span class="pill-beta">${D.zh['dl.5']}</span>`), 'zh: nhãn Beta khác nút');
+  const badgeHtml = html.slice(html.indexOf('class="badge"'), html.indexOf('class="badge"') + 500);
+  assert.ok(!/Zalo|mắt nhìn|theme animation|屏幕控制/.test(D.en['hero.1'] + D.zh['hero.1'] + badgeHtml), 'huy hiệu còn mô tả tính năng của một bản cũ');
+  // Cùng chuỗi với dòng phụ: view.state==='ok' && rel, nếu không thì rỗng. Không lấy newest(), không lấy data-fb khi p null.
+  const paint = async (flag, fetchFn, os, arch, href) => {
+    const L = lib(flag); await L.resolve(fetchFn);
+    const view = L.viewFor(os, arch, href);
+    const rel = view.state === 'ok' ? view.rel : null;
+    const nodes = { button: { textContent: '' }, pill: { textContent: '' }, badge: { on: null, classList: { toggle(_, v) { nodes.badge.on = v; } } } };
+    const shown = L.applyVersion(nodes, rel, '');
+    assert.strictEqual(nodes.pill.textContent, nodes.button.textContent);
+    assert.strictEqual(nodes.badge.on, shown.pre);
+    const sub = view.state === 'ok' && view.rel ? 'v' + String(view.rel.tag_name).replace(/^v/, '') : '';
+    assert.strictEqual(nodes.pill.textContent, sub, 'huy hiệu phải cùng chuỗi với dòng phụ');
+    assert.strictEqual(shown.pre, !!(view.state === 'ok' && view.rel && view.rel.prerelease));
+    return { L, view, shown, nodes };
+  };
+  const on = await paint(true, ok(API), 'windows', null, 'AIVN-Setup.exe');
+  assert.strictEqual(on.view.rel.tag_name, 'v0.16.0-beta.3');
+  assert.strictEqual(on.nodes.pill.textContent, 'v0.16.0-beta.3'); assert.strictEqual(on.shown.pre, true);
+  const off = await paint(false, ok(API), 'windows', null, 'AIVN-Setup.exe');
+  assert.strictEqual(off.nodes.pill.textContent, 'v0.15.3'); assert.strictEqual(off.nodes.button.textContent, off.nodes.pill.textContent);
+  assert.strictEqual(off.shown.pre, false);
+  const fail = await paint(true, async () => { throw new TypeError('Failed to fetch'); }, 'windows', null, 'AIVN-Setup.exe');
+  assert.strictEqual(fail.view.state, 'fail'); assert.strictEqual(fail.view.rel, null); assert.strictEqual(fail.L.newest(), null);
+  assert.strictEqual(fail.nodes.pill.textContent, ''); assert.strictEqual(fail.nodes.button.textContent, '');
+  assert.strictEqual(fail.shown.pre, false);
+  assert.strictEqual(lib().versionFor(null, '__VER__').text, '', 'không hiện chữ giữ chỗ');
+  assert.strictEqual(lib().versionFor(null, null).text, '');
+  // Bản mới nhất thiếu tệp Mac nhưng bản cũ hơn còn tệp: p khác null, huy hiệu lùi cùng nút
+  const noMac = API.filter((r) => r.tag_name !== 'v0.16.0-beta.3' && r.tag_name !== 'v0.16.0-beta.2.8');
+  const back = await paint(true, ok(noMac), 'mac', 'arm64', 'AIVN-mac-arm64.zip');
+  assert.strictEqual(back.view.rel.tag_name, back.L.target('mac', 'arm64').rel.tag_name);
+  assert.strictEqual(back.nodes.pill.textContent, 'v0.15.3'); assert.strictEqual(back.nodes.button.textContent, back.nodes.pill.textContent);
+  assert.strictEqual(back.shown.pre, false);
+  const winBack = await paint(true, ok(noMac), 'windows', null, 'AIVN-Setup.exe');
+  assert.strictEqual(winBack.nodes.pill.textContent, winBack.nodes.button.textContent);
+  assert.strictEqual(winBack.nodes.pill.textContent, 'v0.16.0-beta.2.7'); assert.strictEqual(winBack.shown.pre, true);
+  // p null: mọi tệp bị gỡ. newest() vẫn là beta; huy hiệu và nút hiện bản ổn định, không có nhãn Beta
+  const strip = API.map((r) => ({ ...r, assets: [] }));
+  const none = await paint(true, ok(strip), 'windows', null, 'AIVN-Setup.exe');
+  assert.strictEqual(none.L.newest().tag_name, 'v0.16.0-beta.3');
+  assert.strictEqual(none.L.target('windows'), null);
+  assert.strictEqual(none.view.fallback, true);
+  assert.strictEqual(none.view.rel.tag_name, 'v0.15.3'); assert.strictEqual(none.view.rel.prerelease, false);
+  assert.strictEqual(none.nodes.pill.textContent, 'v0.15.3');
+  assert.strictEqual(none.nodes.button.textContent, 'v0.15.3');
+  assert.strictEqual(none.shown.pre, false); assert.strictEqual(none.nodes.badge.on, false);
+  const noneMac = await paint(true, ok(strip), 'mac', 'x64', 'AIVN-mac-x64.zip');
+  assert.strictEqual(noneMac.nodes.pill.textContent, 'v0.15.3');
+  assert.strictEqual(noneMac.nodes.button.textContent, noneMac.nodes.pill.textContent);
+  assert.strictEqual(noneMac.shown.pre, false);
+  const lin = await paint(true, ok(API), 'linux', null, null);
+  assert.strictEqual(lin.view.rel, null);
+  assert.strictEqual(lin.nodes.pill.textContent, ''); assert.strictEqual(lin.nodes.button.textContent, '');
+  assert.strictEqual(lin.shown.pre, false);
+});

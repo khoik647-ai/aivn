@@ -108,6 +108,7 @@ JS = r'''() => {
   state:row.dataset.state, os:row.dataset.os, t:row.dataset.t, arch:row.dataset.arch, pre:row.dataset.pre,
   mainVis:vis(main), mainH:vis(main)?H(main):null, mainHref:main.getAttribute('href'), mainText:vis(main)?main.innerText.trim():'',
   sub:vis(row.querySelector('.dl-sub'))?row.querySelector('.dl-sub').innerText.trim():'', ver:row.querySelector('.dl-ver').textContent,
+  pill:(document.querySelector('.badge .pill-ver')||{}).textContent||'', badgePre:!!(document.querySelector('.badge')&&document.querySelector('.badge').classList.contains('is-pre')),
   beta:vis(row.querySelector('.dl-beta')), failLink:[...row.querySelectorAll('.dl-s-fail a')].filter(vis).map(a=>a.getAttribute('href')),
   intelq:vis(row.querySelector('.o-intelq')), lnx:vis(row.querySelector('.dl-lnx')), hint:vis(row.querySelector('.dl-hint')), gkLink:vis(row.querySelector('.dl-gklink')),
   other:[...row.querySelectorAll('.dl-other a')].filter(vis).map(a=>a.dataset.k+' '+a.getAttribute('href')),
@@ -232,6 +233,8 @@ for r in res:
     if small: bad.append(f'{k}: nút/link trong khối tải thấp hơn 24 px: {small}')
     if not r['gk'] or r['gkSteps'] != 4 or not re.search(r'Vẫn mở|Open Anyway|仍要打开', r['gkText']): bad.append(f'{k}: thiếu hướng dẫn mở lần đầu trên Mac (Gatekeeper, 4 bước): {r["gk"]} {r["gkSteps"]}')
     if r['state'] != ('fail' if fail else 'ok'): bad.append(f'{k}: trạng thái {r["state"]}, cần {"fail" if fail else "ok"}')
+    if r.get('pill') != r['ver']: bad.append(f'{k}: huy hiệu phiên bản {r.get("pill")!r} khác nút tải {r["ver"]!r}')
+    if bool(r.get('badgePre')) != bool(r['beta']): bad.append(f'{k}: nhãn Beta trên huy hiệu ({r.get("badgePre")}) khác nút ({r["beta"]})')
     if fail and not phone and r['failLink'] != ['https://github.com/khoik647-ai/aivn/releases']: bad.append(f'{k}: API lỗi mà không hiện link trang releases: {r["failLink"]}')
     if phone:  # B183/B186/M1: điện thoại và máy tính bảng không thấy link .exe/.zip nào; nút “Gửi link tải về máy tính” ≥ 44 px
         if not r['mobileCls'] or r['os'] != 'mobile': bad.append(f'{k}: điện thoại không được nhận ra ({r["os"]})')
