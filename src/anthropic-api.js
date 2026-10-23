@@ -3,6 +3,7 @@
 // Không nạp mô hình riêng. metadata bị bỏ qua. anthropic-version chỉ cần có mặt, không bị từ chối.
 const crypto = require('crypto');
 const { normalizeTools } = require('./schema');
+const { modelChanged } = require('./model-ref');
 
 class AnthropicError extends Error {
   constructor(message, status = 400, type = 'invalid_request_error') { super(message); this.status = status; this.type = type; }
@@ -246,7 +247,7 @@ function clientGone(req, res) {
   return !!(socket && socket.destroyed);
 }
 
-async function handleMessages({ req, res, engine, ensureModel, log, cors, readBody }) {
+async function handleMessages({ req, res, engine, ensureModel, log, cors, readBody, models = null }) {
   const headers = cors();
   const fail = (status, type, message) => { if (status !== 401) log(`  → ${status} ${String(message).slice(0, 200)}`); return anthropicError(res, status, type, message, headers); };
   let body;
@@ -260,6 +261,7 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
   const onClose = () => { if (!res.writableEnded) ac.abort(); };
   res.on('close', onClose);
   if (ac.signal.aborted || clientGone(req, res)) return;
+  const before = engine.status ? engine.status() : {};
   try { await ensureModel(translated.model, { signal: ac.signal }); }
   catch (e) {
     if (ac.signal.aborted || clientGone(req, res)) return;
@@ -268,13 +270,9 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
   }
   if (ac.signal.aborted || clientGone(req, res)) return;
   const st = engine.status ? engine.status() : {};
-  if (translated.model) {
-    const reqId = String(translated.model).toLowerCase().replace(/\.gguf$/, '');
-    if (!(st && st.loaded && (st.id === reqId || String(st.id).includes(reqId)))) {
-      const have = st && st.loaded && st.id ? st.id : 'chưa có mô hình';
-      return fail(409, 'invalid_request_error', `Mô hình đã đổi trong lúc nạp (${have}). Yêu cầu này không trả lời bằng mô hình khác. Hãy gửi lại.`);
-    }
-  }
+  const list = typeof models === 'function' ? models() : [];
+  const gone = modelChanged(list, translated.model, before, st);
+  if (gone) return fail(409, 'invalid_request_error', gone);
   const id = 'msg_' + crypto.randomBytes(12).toString('hex');
   const model = translated.model || (st && st.id) || '';
   const inputTokens = countInput(engine, translated.messages);

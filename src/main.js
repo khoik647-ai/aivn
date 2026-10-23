@@ -674,9 +674,9 @@ async function ensureModel(requested, { api = false, signal = null } = {}) {
   if (stopped()) return;
   const st = engine.status();
   if (requested) {
-    const req = String(requested).toLowerCase().replace(/\.gguf$/, '');
-    if (st.loaded && (st.id === req || st.id.includes(req))) return;
-    const m = listModels().find(x => x.id === req) || listModels().find(x => x.id.includes(req));
+    const { resolveModel } = require('./model-ref');
+    if (st.loaded && resolveModel([{ id: st.id }], requested)) return;
+    const m = resolveModel(listModels(), requested);
     if (m) {
       if (stopped()) return;
       // loadById không huỷ được. Ghi nhận lần nạp do API bắt đầu và số người đang giữ, rồi xét gỡ SAU khi nạp xong.

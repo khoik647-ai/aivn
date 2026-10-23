@@ -25,9 +25,8 @@ function parseSse(text) {
 
 async function withServer(fn, { engineExtra = {}, ensureModel = async () => {}, apiKey = null, text = 'Xin chào', finishReason = 'stop' } = {}) {
   const calls = []; let disconnectSaw = null;
-  let loadedId = 'm1';
   const engine = {
-    status: () => ({ loaded: true, id: loadedId }),
+    status: () => ({ loaded: true, id: 'm1' }),
     countTokens: (t) => String(t).length,
     async generate(messages, o = {}) {
       calls.push({ fn: 'generate', messages, o });
@@ -57,7 +56,7 @@ async function withServer(fn, { engineExtra = {}, ensureModel = async () => {}, 
     },
   };
   const logs = [];
-  const api = createApiServer({ engine, models: () => [{ id: 'm1', mtime: Date.now() }], ensureModel: async (model, extra) => { await ensureModel(model, extra); if (model) loadedId = String(model); }, log: (m) => logs.push(m), getOpts: () => ({ apiKey }) });
+  const api = createApiServer({ engine, models: () => [{ id: 'm1', mtime: Date.now() }], ensureModel, log: (m) => logs.push(m), getOpts: () => ({ apiKey }) });
   const port = 21000 + Math.floor(Math.random() * 10000);
   await api.start(port, '127.0.0.1');
   try { return await fn({ url: `http://127.0.0.1:${port}`, port, calls, logs, disconnect: () => disconnectSaw }); }

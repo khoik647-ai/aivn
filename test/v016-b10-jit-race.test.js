@@ -44,7 +44,7 @@ function world() {
     return engine.status();
   }
   const ctx = {
-    require: (m) => (m === './jit-load' ? require(path.join(__dirname, '..', 'src', 'jit-load')) : require(m)),
+    require: (m) => (m === './jit-load' ? require(path.join(__dirname, '..', 'src', 'jit-load')) : m === './model-ref' ? require(path.join(__dirname, '..', 'src', 'model-ref')) : require(m)),
     engine, settings, loadById,
     listModels: () => [{ id: 'a' }, { id: 'b' }],
     busy: 0, generations: new Map(), apiJit: null, lastUse: 0, log: () => {}, send: () => {}, console,
