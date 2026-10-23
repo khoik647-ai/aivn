@@ -187,12 +187,12 @@ test('B191: desktop-agent nối tài liệu mới vào ensure_app và chặn typ
   const ens = src.slice(src.indexOf('async function ensureApp(a, ctx)'), src.indexOf('async function ensureApp(a, ctx)') + 6000);
   assert.match(ens, /if \(freshDocWanted\(ctx, w\)\) \{\s*fd = await freshDoc\(ctx\);\s*if \(!fd\.ok && !fd\.skip\) return \{ error: FRESH_DOC_MSG, code: 'fresh-doc', stop: true/);
   const inner = src.slice(src.indexOf('async function actInner(a, ctx)'));
-  const gate = inner.indexOf("if ((action === 'type_text' || destructiveKey) && freshDocWanted(ctx, s.obs && s.obs.win))");
+  const gate = inner.indexOf("if ((action === 'type_text' || gatedKey) && freshDocWanted(ctx, s.obs && s.obs.win))");
   assert.ok(gate > 0 && gate < inner.indexOf('let needPoint ='), 'cổng B191 phải chạy trước khi chọn chỗ gõ');
   assert.match(inner.slice(gate, gate + 3500), /return \{ refused: true, stop: true, error: FRESH_DOC_MSG/);
   // (3) Notepad Win11 chung hwnd cho mọi thẻ: nhìn lại màn hình và kiểm danh tính tài liệu (cửa sổ + tên + thẻ + thẻ đang chọn + trống) trước MỖI lần gõ — tên chưa đặt nằm trong sameDoc (P64-4)
   assert.match(inner.slice(gate, gate + 3500), /const g = !seen \? \{ ok: false, why: 'observe' \} : !W2 \? \{ ok: false, why: 'no-window' \} : FD\.sameDoc\(fd, s\.obs\);\s*if \(!g\.ok\)/);
-  assert.match(inner.slice(gate, gate + 3500), /if \(action === 'type_text' && s\.freshDoc\) \{ s\.freshDoc\.typed = true; \(s\.freshDoc\.texts = s\.freshDoc\.texts \|\| \[\]\)\.push\(String\(a\.text \|\| ''\)\); \}/);
+  assert.match(inner.slice(gate, gate + 5000), /if \(action === 'type_text' && s\.freshDoc\) \{ s\.freshDoc\.typed = true; \(s\.freshDoc\.texts = s\.freshDoc\.texts \|\| \[\]\)\.push\(String\(a\.text \|\| ''\)\); \}/);
   assert.match(src, /s\.freshDoc = \{ hwnd: [^\n]*print: r\.print \|\| FD\.docPrint\(s\.obs\), typed: false/);
   assert.match(src, /hotkey: async \(keys\) => \{ const h = await act\(\{ action: 'hotkey', keys \}, ctx\)/);
 });
@@ -303,27 +303,102 @@ test('QA #64 v3 P64-9: tiêu đề còn dấu sửa (*Untitled / ● Untitled) k
   const r = await FD.ensureFresh(N.d); assert.strictEqual(r.ok, false, JSON.stringify(r)); assert.strictEqual(N.st.tabs.length, 2); assert.strictEqual(N.st.active, 0);
 });
 
-test('QA #64 v3 P64-7: cổng trước khi gõ KHÔNG nuốt lỗi nhìn lại màn hình và không kiểm trên lần nhìn cũ', () => {
-  const src = fs.readFileSync(path.join(__dirname, '../src/desktop-agent.js'), 'utf8');
-  const inner = src.slice(src.indexOf('async function actInner(a, ctx)'));
-  const gate = inner.slice(inner.indexOf("if ((action === 'type_text' || destructiveKey) && freshDocWanted("), inner.indexOf('let needPoint ='));
-  assert.ok(!/observe\(ctx, \{[^}]*\}\)\.catch\(\(\) => \{\}\)/.test(gate), 'không có observe(...).catch(() => {})');
-  assert.match(gate, /let seen = true; try \{ await observe\(ctx, \{ thumb: false, ocr: 'force' \}\); \} catch \(e\) \{ seen = false;/);
-  assert.match(gate, /!seen \? \{ ok: false, why: 'observe' \} : !W2 \? \{ ok: false, why: 'no-window' \}/);
+// ---- review #64 vòng 4: chạy THẬT act() của desktop-agent trên Notepad GIẢ (test/fixtures/b191-desk.js) — kiểm HÀNH VI, không đọc mã nguồn ----
+const DK = require('./fixtures/b191-desk');
+const FRESH_GATE = 'không phải tài liệu mới AIVN đã mở — không gõ';
+const T = (text, extra = {}) => ({ action: 'type_text', text, ...extra });
+const HK = (keys) => ({ action: 'hotkey', keys });
+const stopped = (r, msg = FRESH_GATE) => { assert.ok(r && r.refused === true && r.stop === true, JSON.stringify(r).slice(0, 300)); assert.strictEqual(r.error, msg); };
+
+test('QA #64 v3 P64-7 (hành vi): nhìn lại màn hình LỖI ở cổng trước khi gõ → DỪNG, không dán, thẻ cũ nguyên vẹn', async () => {
+  for (const fail of ['capture', 'tree']) {
+    const w = DK.notepad(); const ag = DK.make(w);
+    const out = await DK.run(ag, 'gõ hello vào Notepad', [T('hello'), (w) => { if (fail === 'capture') w.st.captureFails = 5; else w.treeThrow = true; }, T('PWNED')]);
+    assert.ok(!out[0].refused, JSON.stringify(out[0]).slice(0, 200)); stopped(out[1]);
+    assert.strictEqual(DK.pastes(), 1, `${fail}: chỉ dán lần đầu`); assert.ok(!w.oldTouched(), fail); assert.strictEqual(w.st.tabs[1].text, 'hello', fail);
+  }
 });
 
-test('QA #64 v3 P64-8 (+residual): chặn ở cổng trước khi gõ / bấm phím xoá = DỪNG thật (stop: true) với câu đã dịch', () => {
-  const src = fs.readFileSync(path.join(__dirname, '../src/desktop-agent.js'), 'utf8');
-  const inner = src.slice(src.indexOf('async function actInner(a, ctx)'));
-  const gate = inner.slice(inner.indexOf("if ((action === 'type_text' || destructiveKey) && freshDocWanted("), inner.indexOf('let needPoint ='));
-  assert.match(src, /const FRESH_GATE_MSG = 'không phải tài liệu mới AIVN đã mở — không gõ';/);
-  const refusals = gate.match(/return \{ refused: true[^\n]*/g) || []; assert.ok(refusals.length >= 3, refusals.length);
-  for (const x of refusals) assert.match(x, /^return \{ refused: true, stop: true, error: FRESH_(?:GATE|DOC)_MSG,/, x);
-  const re = new Function('return ' + src.match(/const FRESH_DESTRUCTIVE = (\/[^\n]+\/);/)[1])();
-  for (const k of ['ctrl+a', 'cmd+a', 'ctrl+x', 'delete', 'backspace', 'ctrl+backspace', 'cmd+z']) assert.ok(re.test(k), k);
-  for (const k of ['cmd+n', 'escape', 'ctrl+s', 'enter', 'alt+tab']) assert.ok(!re.test(k), k);
+test('QA #64 v3 P64-8 (hành vi) + review vòng 4 (2): cổng chặn = refused + stop + câu FRESH_GATE; phím chèn chữ phải qua cổng, chỉ phím trong DANH SÁCH CHO PHÉP được bỏ qua', async () => {
+  // E21: chưa mở tài liệu mới → mọi phím ngoài danh sách cho phép bị chặn, không phím nào tới bàn phím
+  const gated = ['ctrl+v', 'Ctrl + V', 'cmd+v', 'shift+insert', 'enter', 'tab', 'ctrl+h', 'ctrl+shift+v', 'ctrl+a', 'Control + A', 'delete', 'backspace', 'ctrl+z', 'x', 'ctrl+enter'];
+  for (const k of gated) {
+    const w = DK.notepad(); const ag = DK.make(w);
+    const [r] = await DK.run(ag, 'gõ hello vào Notepad', [HK(k)]);
+    stopped(r); assert.strictEqual(DK.performed.filter(p => p.action === 'key').length, 0, k); assert.ok(!w.oldTouched(), k);
+  }
+  // danh sách cho phép: không qua cổng (bấm thật)
+  for (const k of ['escape', 'esc', 'ctrl+n', 'cmd+n', 'ctrl+s', 'cmd+s', 'down', 'left', 'alt+tab']) {
+    const w = DK.notepad(); const ag = DK.make(w);
+    const [r] = await DK.run(ag, 'gõ hello vào Notepad', [HK(k)]);
+    assert.ok(!(r && r.refused), `${k}: ${JSON.stringify(r).slice(0, 200)}`); assert.ok(DK.performed.some(p => p.action === 'key'), k);
+  }
 });
-const GATE = 'không phải tài liệu mới AIVN đã mở — không gõ';
+
+test('review #64 vòng 4 E20: sau khi gõ vào tài liệu mới, tiêu điểm về thẻ cũ → Ctrl+V / Shift+Insert / Enter bị chặn, thẻ cũ nguyên vẹn', async () => {
+  for (const k of ['ctrl+v', 'shift+insert', 'enter']) {
+    const w = DK.notepad(); const ag = DK.make(w);
+    const out = await DK.run(ag, 'gõ hello vào Notepad', [T('hello'), (w) => { w.st.active = 0; }, HK(k)]);
+    stopped(out[1]); assert.strictEqual(DK.pastes(), 1, k); assert.ok(!w.oldTouched(), k);
+  }
+});
+
+test('review #64 vòng 4 E18: type_text kèm x,y / element trỏ vào THẺ CŨ → không bấm thẻ cũ, chỉ gõ vào tài liệu mới', async () => {
+  for (const extra of [{ x: 70, y: 42 }, { element: 'secret.txt' }, { target: 'secret.txt' }]) {
+    const w = DK.notepad(); const ag = DK.make(w);
+    const out = await DK.run(ag, 'gõ hello vào Notepad', [T('hello'), T('PWNED', extra)]);
+    assert.ok(!w.oldTouched(), JSON.stringify(extra)); assert.strictEqual(w.st.active, 1, 'không chuyển sang thẻ cũ');
+    assert.ok(!DK.performed.some(p => p.action === 'click'), 'không có cú bấm chuột'); assert.ok(!out[1].refused, JSON.stringify(out[1]).slice(0, 200));
+    assert.strictEqual(w.st.tabs[1].text, 'helloPWNED');
+  }
+  // E18c: lần gõ ĐẦU (chưa có tài liệu mới) kèm toạ độ thẻ cũ
+  const w = DK.notepad(); const ag = DK.make(w);
+  await DK.run(ag, 'gõ hello vào Notepad', [T('PWNED', { x: 70, y: 42 })]);
+  assert.ok(!w.oldTouched()); assert.strictEqual(w.st.tabs[1].text, 'PWNED');
+});
+
+test('review #64 vòng 4 E18 (kiểm lại): thẻ xin phép mở lâu, người dùng bấm sang thẻ cũ → kiểm lại NGAY TRƯỚC khi dán → DỪNG', async () => {
+  let arm = false; const now0 = Date.now;
+  const w = DK.notepad(); const ag = DK.make(w, {}, (req, w) => { if (arm) { Date.now = () => now0() + 2500; w.st.active = 0; } return { ok: true }; });
+  try {
+    const out = await DK.run(ag, 'gõ hello vào Notepad', [T('hello'), () => { arm = true; }, T('PWNED')]);
+    stopped(out[1]); assert.strictEqual(DK.pastes(), 1); assert.ok(!w.oldTouched()); assert.strictEqual(w.st.tabs[1].text, 'hello');
+    assert.ok(DK.logs.some(l => /B191: chặn ngay trước khi dán/.test(l)), DK.logs.join('\n'));
+  } finally { Date.now = now0; }
+});
+
+test('review #64 vòng 4 E24/E25: NỘI DUNG cần gõ không tắt bảo vệ (“gõ: Đừng xoá tệp này”, “type: see readme.txt”)', async () => {
+  for (const q of ['mở Notepad và gõ: Đừng xoá tệp này nhé', 'open Notepad and type: see readme.txt for details', 'mở Notepad và gõ "báo cáo.docx đã gửi"', 'open Notepad and write "append the logs at the end of the day"',
+    'mở Notepad và gõ：tệp này quan trọng', '打开记事本并输入：请看 readme.txt', 'open Notepad and type “existing file notes.txt”'])
+    assert.strictEqual(FD.freshDocTask(q), true, q);
+  for (const q of ['mở notes.txt và gõ abc', 'open C:\\notes\\a.txt and type hi', 'open the existing document and type: hi', "mở tệp báo cáo và viết: xong", 'mở Notepad và gõ tiếp vào cuối: abc'])
+    assert.strictEqual(FD.freshDocTask(q), false, q);
+  assert.strictEqual(FD.commandPart("open Notepad and type don't stop"), "open Notepad and type don't stop", 'dấu nháy trong từ không phải ngoặc');
+  for (const [q, text] of [['mở Notepad và gõ: Đừng xoá tệp này nhé', 'Đừng xoá tệp này nhé'], ['open Notepad and type: see readme.txt for details', 'see readme.txt for details']]) {
+    const w = DK.notepad({ tabs: [{ name: 'Untitled', text: 'KHOI-SECRET', dirty: true }], valueReadable: false }); const ag = DK.make(w);
+    await DK.run(ag, q, [T(text)]);
+    assert.ok(!w.oldTouched(), q); assert.strictEqual(w.st.tabs.length, 2, q); assert.strictEqual(w.st.tabs[1].text, text, q);
+  }
+});
+
+test('review #64 vòng 4 (nên sửa): tên VS Code bản địa, ownTitle ≥ 3 ký tự, OCR lỗi → không chắc (không gõ)', async () => {
+  for (const t of ['无标题-1 - Visual Studio Code', '未命名-1 - Visual Studio Code', 'Không có tiêu đề-1 - Visual Studio Code', '● 无标题-2 - Visual Studio Code', 'Untitled-1 - Visual Studio Code'])
+    assert.strictEqual(FD.untitled(t), true, t);
+  const vsw = (title) => ({ title, proc: 'Code.exe', pid: 5, hwnd: 50 });
+  assert.strictEqual(FD.ownTitle({ typed: true, texts: ['ab cd'] }, vsw('ab - Visual Studio Code')), false, 'nhãn 2 ký tự');
+  assert.strictEqual(FD.ownTitle({ typed: true, texts: ['a'] }, vsw('a - Visual Studio Code')), false, 'nhãn 1 ký tự');
+  assert.strictEqual(FD.ownTitle({ typed: true, texts: ['abc def'] }, vsw('abc - Visual Studio Code')), true, 'đủ 3 ký tự');
+  // OCR lỗi: blankState / sameDoc / ensureFresh không coi là “trống”
+  const obs = { win: { title: 'Untitled - Notepad', proc: 'Notepad.exe', pid: 1, hwnd: 7 }, elements: [{ role: 'Document', kind: 'edit', name: 'Text editor', editable: true, value: null, b: NOTEPAD_BOX }], dialog: null, ocrFailed: true };
+  assert.strictEqual(FD.blankState(obs).why, 'ocr-failed'); assert.strictEqual(FD.blankState(obs).blank, null);
+  const rec = { hwnd: '7', title: 'Untitled - Notepad', print: { ...FD.docPrint(obs), newIdx: null }, typed: false, texts: [] };
+  assert.deepStrictEqual(FD.sameDoc(rec, obs), { ok: false, why: 'unsure' });
+  // e2e: OCR hỏng, không đọc được giá trị → không mở được tài liệu mới chắc chắn → DỪNG, không dán
+  const w = DK.notepad({ valueReadable: false }); w.ocrThrow = true; const ag = DK.make(w);
+  const [r] = await DK.run(ag, 'gõ hello vào Notepad', [T('hello')]);
+  assert.ok(r && r.refused && r.stop, JSON.stringify(r).slice(0, 300)); assert.strictEqual(DK.pastes(), 0); assert.ok(!w.oldTouched());
+});
+const GATE = FRESH_GATE;
 for (const lang of ['vi', 'en', 'zh']) {
   test(`QA #64 v3 P64-8 [${lang}]: screen_act bị cổng chặn (refused + stop) → dừng, kết quả thất bại, câu cuối theo ngôn ngữ`, async () => {
     const AG = require('../src/agent/agent'); const CT = require('../src/agent/computer-tools'); const { createMemoryStore } = require('../src/agent/memory');

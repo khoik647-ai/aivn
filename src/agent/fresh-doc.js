@@ -24,8 +24,8 @@ function editorOf(win) {
   return EDITORS.find(e => (p && e.proc.test(p)) || (e.title && e.title.test(t))) || null;
 }
 
-// tên tài liệu MỚI chưa lưu (tiếng Anh/Việt/Trung) — phần đầu tiêu đề trước “ - Ứng dụng”; bỏ dấu “chưa lưu” (*, ●) ở đầu
-const UNTITLED = /^(?:untitled(?:[\s-]?\d+)?|untitled document(?:\s?\d+)?|không có tiêu đề(?:\s?\d+)?|không tiêu đề(?:\s?\d+)?|chưa đặt tên(?:\s?\d+)?|chưa có tên(?:\s?\d+)?|无标题(?:\s?\d+)?|未命名(?:\s?\d+)?|新建文本文档|new \d+|document\s?\d+|tài liệu\s?\d+|文档\s?\d+)$/iu; // QA #64 v3 P64-5: Word ẩn đuôi .docx → “Document - Word” có thể là tệp ĐÃ LƯU; tài liệu mới của Word luôn có số (Document1)
+// tên tài liệu MỚI chưa lưu (tiếng Anh/Việt/Trung; VS Code bản địa: “无标题-1”, “未命名-1”, “Không có tiêu đề-1”) — phần đầu tiêu đề trước “ - Ứng dụng”; bỏ dấu “chưa lưu” (*, ●) ở đầu
+const UNTITLED = /^(?:untitled(?:[\s-]?\d+)?|untitled document(?:[\s-]?\d+)?|không có tiêu đề(?:[\s-]?\d+)?|không tiêu đề(?:[\s-]?\d+)?|chưa đặt tên(?:[\s-]?\d+)?|chưa có tên(?:[\s-]?\d+)?|无标题(?:[\s-]?\d+)?|未命名(?:[\s-]?\d+)?|新建文本文档|new \d+|document\s?\d+|tài liệu\s?\d+|文档\s?\d+)$/iu; // QA #64 v3 P64-5: Word ẩn đuôi .docx → “Document - Word” có thể là tệp ĐÃ LƯU; tài liệu mới của Word luôn có số (Document1)
 function docName(title) { return String(title || '').split(/\s+[-–—]\s+/)[0].replace(/^[\s*●•]+/u, '').replace(/[\s*●•]+$/u, '').trim(); }
 // WordPad: tài liệu mới tên “Document” (không số) và WordPad hiện cả đuôi tệp → “Document - WordPad” là chưa đặt tên; Word thì không (P64-5)
 const untitled = (title) => { const n = docName(title); return UNTITLED.test(n) || (/^document$/i.test(n) && /\s[-–—]\sWordPad$/i.test(String(title || ''))); };
@@ -85,9 +85,19 @@ function namesExistingFile(t) {
   for (const m of t.matchAll(CODE_FILE_RE)) if (CODE_BEFORE.test(t.slice(0, m.index)) && !SAVE_BEFORE.test(t.slice(0, m.index))) return true;
   return false;
 }
+// review #64 vòng 4 (3): NỘI DUNG cần gõ (trong ngoặc kép, sau dấu “:” đầu tiên) không được tắt bảo vệ (“gõ: Đừng xoá tệp này”, “type: see readme.txt”)
+// → chỉ xét phần LỆNH khi tìm cách nói “tệp/tài liệu có sẵn” và tên tệp. “:” trong đường dẫn (C:\, http://) hay giờ (10:30) không tính.
+const QUOTED = /"[^"\n]*"|“[^”\n]*”|„[^“”\n]*[“”]|「[^」\n]*」|『[^』\n]*』|‘[^’\n]*’|«[^»\n]*»|(?<![\p{L}\d])'[^'\n]*'(?![\p{L}\d])/gu;
+function commandPart(q) {
+  let t = String(q || '').replace(QUOTED, ' ');
+  t = t.replace(/["“„「『‘«][^\n]*$/u, ' '); // ngoặc mở không đóng → phần sau là nội dung
+  const i = t.search(/[:：](?![\\/]|\d)/u); if (i >= 0) t = t.slice(0, i);
+  return t;
+}
 function freshDocTask(q) {
   const t = String(q || ''); if (!t.trim()) return false;
-  return (TYPE.test(t) || TYPE_ASCII.test(t)) && !EXISTING.test(t) && !namesExistingFile(t);
+  const c = commandPart(t);
+  return (TYPE.test(t) || TYPE_ASCII.test(t)) && !EXISTING.test(c) && !namesExistingFile(c);
 }
 
 // vùng soạn thảo chính: phần tử soạn được lớn nhất (không phải OCR, không phải ô mật khẩu/hộp chọn)
@@ -108,6 +118,8 @@ function blankState(obs) {
   const box = el ? el.b : null;
   const txt = box ? (obs.elements || []).filter(e => e !== el && (e.ocr || /^(Text|AXStaticText)$/.test(String(e.role || ''))) && String(e.name || '').trim() && inside(e, box)) : [];
   if (txt.length) return { blank: false, why: 'content', title };
+  // review #64 vòng 4: OCR lỗi / không chạy được → KHÔNG phải “không có chữ”: không chắc
+  if (obs && obs.ocrFailed) return { blank: null, why: 'ocr-failed', title };
   return { blank: null, why: 'unread', title };
 }
 
@@ -135,6 +147,7 @@ async function ensureFresh(d, { tries = 3 } = {}) {
       if (at) { log(`đã mở tài liệu mới trống “${st.title}” (Ctrl+N đã mở thẻ/cửa sổ mới, OCR không thấy chữ)`); return { ok: true, how: 'new', title: st.title, print: { ...p1, newIdx: at.idx }, steps }; }
       st = { blank: false, why: samePrint(p0, docPrint(obs)) ? 'unchanged' : 'not-new', title: st.title };
     }
+    if (st.blank === null && st.why === 'ocr-failed') st = { blank: false, why: 'unsure', title: st.title }; // OCR lỗi: không chắc → thử lại / dừng
   }
   log(`sau Ctrl+N vẫn chưa thấy tài liệu mới trống (${st ? st.why : '?'}: “${st ? st.title : ''}”) → KHÔNG gõ`);
   return { ok: false, why: st ? st.why : 'unknown', title: st ? st.title : '', steps };
@@ -144,7 +157,7 @@ function ownTitle(rec, win) {
   const ed = editorOf(win); if (!ed || ed.id !== 'vscode' || !rec || !rec.typed) return false;
   const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const label = norm(docName(win.title).replace(/(?:…|\.\.\.)$/u, '')); const first = norm(String((rec.texts || []).join('\n')).split('\n').find(l => l.trim()) || '');
-  return !!label && !!first && first.startsWith(label);
+  return [...label].length >= 3 && !!first && first.startsWith(label); // review #64 vòng 4: nhãn 1–2 ký tự trùng quá dễ → không nhận
 }
 // trước MỖI lần gõ: tài liệu đang hiện có còn đúng là tài liệu mới AIVN đã mở (rec = { hwnd, title, print, typed, texts }) không.
 // Notepad Win11 dùng chung hwnd cho mọi thẻ → kiểm cả danh sách thẻ + THẺ ĐANG CHỌN; chưa gõ gì thì tài liệu còn phải trống. Không chắc → không gõ.
@@ -164,10 +177,10 @@ function sameDoc(rec, obs) {
   if (!tabsOk) return { ok: false, why: 'tabs' };
   if (now.sel != null && now.sel >= 0 && k != null && now.sel !== k) return { ok: false, why: 'focus' };
   const proven = (now.sel != null && k != null && now.sel === k) || (!TABBED.has(ed.id) && !now.tabs.length && !!rec.print.hwnd && rec.print.hwnd === now.hwnd);
-  if (!rec.typed) { const st = blankState(obs); if (st.blank === false) return { ok: false, why: st.why }; if (st.blank === true || proven) return { ok: true }; return { ok: false, why: 'unsure' }; }
+  if (!rec.typed) { const st = blankState(obs); if (st.blank === false) return { ok: false, why: st.why }; if (st.why === 'ocr-failed') return { ok: false, why: 'unsure' }; if (st.blank === true || proven) return { ok: true }; return { ok: false, why: 'unsure' }; }
   // đã gõ: đọc được nội dung thì nó phải chứa đúng các đoạn AIVN đã gõ (thẻ “*Untitled” cũ của người dùng cũng có dấu * — phân biệt bằng nội dung)
   const el = docEl(obs); const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim();
   if (el && el.value != null) return (rec.texts || []).some(t => norm(t) && !norm(el.value).includes(norm(t))) ? { ok: false, why: 'content' } : { ok: true };
   return proven ? { ok: true } : { ok: false, why: 'unsure' };
 }
-module.exports = { EDITORS, editorOf, untitled, dirty, docName, tabsOf, docPrint, newDocEvidence, newDocAt, ownTitle, TABBED, freshDocTask, docEl, blankState, ensureFresh, sameDoc };
+module.exports = { EDITORS, editorOf, untitled, dirty, docName, tabsOf, docPrint, newDocEvidence, newDocAt, ownTitle, TABBED, freshDocTask, commandPart, docEl, blankState, ensureFresh, sameDoc };

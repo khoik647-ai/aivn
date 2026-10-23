@@ -29,7 +29,10 @@ const FD = require('./agent/fresh-doc');
 const FRESH_DOC_MSG = 'chưa mở được tài liệu mới trống — AIVN không gõ vào tài liệu đang có của bạn';
 // QA #64 v3 P64-8: cổng trước mỗi lần gõ chặn → DỪNG thật với câu đã dịch (en/zh trong src/i18n)
 const FRESH_GATE_MSG = 'không phải tài liệu mới AIVN đã mở — không gõ';
-const FRESH_DESTRUCTIVE = /^(?:(?:ctrl|cmd|command|meta|control)\+(?:a|x|z|y|backspace|delete|del)|delete|del|backspace)$/;
+// Review #64 vòng 4 (2): phím tắt khi đang bảo vệ tài liệu mới — danh sách CHO PHÉP (không chèn/xoá chữ): Esc, Ctrl/⌘+N, Ctrl/⌘+S, mũi tên, Alt+Tab.
+// Mọi phím khác (Ctrl+V, Shift+Insert, Enter, Tab, phím chữ, Ctrl+H, Ctrl+A, Delete…) phải qua cổng sameDoc như type_text.
+const FRESH_FREE_KEYS = /^(?:esc|escape|(?:ctrl|cmd|command|meta|control|mod|cmdorctrl|commandorcontrol)\+(?:n|s)|(?:arrow)?(?:up|down|left|right)|alt\+tab|alt\+shift\+tab)$/;
+const freshKeyFree = (keys) => FRESH_FREE_KEYS.test(String(keys || '').toLowerCase().replace(/\s+/g, ''));
 
 const DRAFT_SEND = SV.DRAFT_ONLY; // lệnh chỉ soạn (một nguồn: send-verify)
 // B94/B101: chữ vừa gõ nằm ở đâu — 'composer' (ô soạn tin), 'wrong' (ô khác, vd. ô tìm kiếm) hoặc null (không đọc được)
@@ -282,7 +285,7 @@ function createDesktopAgent(deps) {
     const named = (Array.isArray(raw.els) ? raw.els : []).filter(x => x && x.n && U.INTERACTIVE.has(x.r)).length;
     // B124 (máy thật: cây giao diện 0 phần tử có tên ở MỌI lần nhìn Zalo/Chrome → toàn OCR, chậm): ghi chẩn đoán UIA một lần/ứng dụng/phiên; RawView đã được thử
     if (raw && (raw.diag || raw.via === 'raw')) { const pk = String((raw.win && raw.win.proc) || ''); s.uiaDiag = s.uiaDiag || {}; if (!s.uiaDiag[pk]) { s.uiaDiag[pk] = 1; deps.log && deps.log('desk', `B124: UIA “${pk}”: duyệt ${raw.via === 'raw' ? 'RawView (ControlView gần như rỗng)' : 'ControlView'}${raw.diag ? ` · đã xét ${raw.diag.seenControl}/${raw.diag.seen} nút, ${raw.diag.named} có tên · gốc lớp “${raw.diag.cls}” framework “${raw.diag.fw}” · con cấp 1: ${(raw.diag.kids || []).slice(0, 8).join(' ; ') || '(không có)'}` : ` · ${named} phần tử có tên`}`); } }
-    let ocrLines = [];
+    let ocrLines = []; let ocrFailed = false;
     const proc = (raw.win && raw.win.proc) || (s.target && s.target.proc) || '';
     const poor = !!(raw.noTree || raw.error || named < 8 || U.poorTreeApp(proc));
     const wantOcr = ocr === 'force' || (ocr !== 'off' && poor);
@@ -292,9 +295,10 @@ function createDesktopAgent(deps) {
         const r = await ocrShot(shot, wb ? rectNorm(wb) : null);
         ocrLines = r.map(l => { const a = normToNative(l.nb.x1, l.nb.y1), c = normToNative(l.nb.x2, l.nb.y2); return { text: l.text, b: [a.x, a.y, c.x - a.x, c.y - a.y] }; });
         s.ocrUsed = true;
-      } catch (e) { deps.log && deps.log('desk', 'OCR lỗi: ' + e.message); }
-    }
+      } catch (e) { ocrFailed = true; deps.log && deps.log('desk', 'OCR lỗi: ' + e.message); }
+    } else if (wantOcr) ocrFailed = true;
     const obs = U.normalize(raw, { ocr: ocrLines, max: 160 });
+    if (ocrFailed) obs.ocrFailed = true; // B191 review #64 vòng 4: OCR lỗi ≠ “không có chữ” (fresh-doc coi là không chắc)
     s.idReg = s.idReg || {}; U.stabilizeIds(obs.elements, s.idReg); // B55: id ổn định giữa các lần quan sát
     s.obs = obs; s.shot = shot;
     let list = obs.elements;
@@ -461,6 +465,8 @@ function createDesktopAgent(deps) {
       if (action === 'right_click') await press('right');
       if (action === 'type_text' && x != null) { await press('left'); await sleep(250); }
     } finally { if (hidOv && overlay && !overlay.isDestroyed() && session) overlay.showInactive(); }
+    // B191 review #64 vòng 4 (1): kiểm lại tài liệu SAU cú bấm và TRƯỚC khi dán/bấm phím (hook do act() đặt); không chắc → không gõ gì
+    if (a && a.__freshCheck && (action === 'type_text' || action === 'hotkey')) { let ok = false; try { ok = await a.__freshCheck({ clicked: action === 'type_text' && x != null }); } catch { ok = false; } if (!ok) { a.__freshBlocked = true; return; } }
     if (action === 'type_text') {
       if (a.__replace || a.__clear) { n.keyTap('a', require('./agent/keys').primaryOf(process.platform)); await sleep(120); if (a.__clear) { n.keyTap('delete'); await sleep(120); } }
       const t = String(a.text || '');
@@ -589,7 +595,7 @@ function createDesktopAgent(deps) {
         // Word/TextEdit mở tài liệu mới trong CỬA SỔ mới của cùng ứng dụng → theo cửa sổ đang ở trước
         const fg = await fgWin(); if (fg && fg.hwnd && s.target && String(fg.hwnd) !== String(s.target.hwnd) && s.target.pid && fg.pid === s.target.pid) s.target = { ...s.target, hwnd: fg.hwnd, title: fg.title };
         const o = await observe(ctx, { thumb: false, ocr }); text = o && o.text ? o.text : text;
-        return { win: s.obs && s.obs.win, elements: s.obs ? s.obs.elements : [], dialog: s.dialog };
+        return { win: s.obs && s.obs.win, elements: s.obs ? s.obs.elements : [], dialog: s.dialog, ocrFailed: !!(s.obs && s.obs.ocrFailed) };
       },
       hotkey: async (keys) => { const h = await act({ action: 'hotkey', keys }, ctx); if (h && (h.error || h.refused)) throw new Error(String(h.error || h.summary || 'phím tắt bị từ chối')); },
       sleep, log: (m) => deps.log && deps.log('desk', 'B191: ' + m),
@@ -731,24 +737,27 @@ function createDesktopAgent(deps) {
     if (!s.obs) await observe(ctx, { thumb: false });
     // B191: gõ trong trình soạn thảo cho việc “mở/tạo X rồi gõ” → chỉ gõ vào tài liệu mới trống AIVN đã kiểm (không gõ vào thẻ/tệp cũ của người dùng)
     // QA #64 v3: phím XOÁ/SỬA (Ctrl+A, Ctrl+X, Delete, Backspace…) cũng qua cổng này (residual); mọi lần chặn đều là DỪNG thật (P64-8)
-    const destructiveKey = action === 'hotkey' && FRESH_DESTRUCTIVE.test(String(a.keys || '').toLowerCase().replace(/\s+/g, ''));
-    if ((action === 'type_text' || destructiveKey) && freshDocWanted(ctx, s.obs && s.obs.win)) {
+    const gatedKey = action === 'hotkey' && !freshKeyFree(a.keys); // review #64 vòng 4 (2): mọi phím ngoài danh sách cho phép
+    let freshGate = null; // review #64 vòng 4 (1): bản ghi tài liệu mới để kiểm LẠI ngay trước khi dán/bấm phím (sau cú bấm, sau thẻ xin phép)
+    if ((action === 'type_text' || gatedKey) && freshDocWanted(ctx, s.obs && s.obs.win)) {
       const W = s.obs.win; const fd = s.freshDoc;
       if (!fd) {
-        if (destructiveKey) return { refused: true, stop: true, error: FRESH_GATE_MSG, forModel: `KHÔNG bấm “${a.keys}”: AIVN chưa mở tài liệu mới trống cho việc này — cửa sổ “${W.title || ''}” có thể là tài liệu có sẵn của người dùng. DỪNG, báo người dùng.`, summary: 'không phải tài liệu mới AIVN đã mở — không gõ' };
+        if (gatedKey) return { refused: true, stop: true, error: FRESH_GATE_MSG, forModel: `KHÔNG bấm “${a.keys}”: AIVN chưa mở tài liệu mới trống cho việc này — cửa sổ “${W.title || ''}” có thể là tài liệu có sẵn của người dùng. DỪNG, báo người dùng.`, summary: 'không phải tài liệu mới AIVN đã mở — không gõ' };
         const r = await freshDoc(ctx);
         if (!r.ok && !r.skip) return { refused: true, stop: true, error: FRESH_DOC_MSG, forModel: `KHÔNG gõ: ${FRESH_DOC_MSG}. Cửa sổ “${r.title || W.title || ''}” không phải tài liệu mới trống (${r.why}). DỪNG, báo người dùng.`, summary: 'chưa mở được tài liệu mới trống — không gõ', detail: r.steps.join('; ') };
-        if (r.ok && r.how === 'new') { a = { ...a }; for (const k of ['element', 'target', 'x', 'y']) delete a[k]; } // id/toạ độ cũ thuộc tài liệu cũ: gõ vào tài liệu mới đang chọn
       } else {
         // Notepad Win11: mọi thẻ chung một hwnd → nhìn lại màn hình (ép OCR) rồi kiểm cửa sổ + danh sách thẻ + thẻ đang chọn + nội dung trước khi gõ.
         // QA #64 v3 P64-7: nhìn lại THẤT BẠI (lỗi / không có cửa sổ) → không chắc → DỪNG; không bao giờ kiểm trên lần nhìn CŨ
         let seen = true; try { await observe(ctx, { thumb: false, ocr: 'force' }); } catch (e) { seen = false; deps.log && deps.log('desk', `B191: nhìn lại màn hình lỗi (${String(e && e.message || e).split('\n')[0]})`); }
         const W2 = seen && s.obs && s.obs.win ? s.obs.win : null; const g = !seen ? { ok: false, why: 'observe' } : !W2 ? { ok: false, why: 'no-window' } : FD.sameDoc(fd, s.obs);
         if (!g.ok) {
-          deps.log && deps.log('desk', `B191: chặn ${destructiveKey ? 'phím ' + a.keys : 'gõ'} — cửa sổ “${(W2 && W2.title) || ''}” không chắc là tài liệu mới “${fd.title}” AIVN đã mở (${g.why})`);
-          return { refused: true, stop: true, error: FRESH_GATE_MSG, forModel: `KHÔNG ${destructiveKey ? 'bấm “' + a.keys + '”' : 'gõ'}: ${FRESH_GATE_MSG}. Cửa sổ đang là “${(W2 && W2.title) || ''}”, không chắc là tài liệu mới “${fd.title}” AIVN đã mở cho việc này (${g.why}; đó có thể là tài liệu có sẵn của người dùng). DỪNG, báo người dùng.`, summary: FRESH_GATE_MSG };
+          deps.log && deps.log('desk', `B191: chặn ${gatedKey ? 'phím ' + a.keys : 'gõ'} — cửa sổ “${(W2 && W2.title) || ''}” không chắc là tài liệu mới “${fd.title}” AIVN đã mở (${g.why})`);
+          return { refused: true, stop: true, error: FRESH_GATE_MSG, forModel: `KHÔNG ${gatedKey ? 'bấm “' + a.keys + '”' : 'gõ'}: ${FRESH_GATE_MSG}. Cửa sổ đang là “${(W2 && W2.title) || ''}”, không chắc là tài liệu mới “${fd.title}” AIVN đã mở cho việc này (${g.why}; đó có thể là tài liệu có sẵn của người dùng). DỪNG, báo người dùng.`, summary: FRESH_GATE_MSG };
         }
       }
+      // review #64 vòng 4 (1): id/toạ độ có thể trỏ vào THẺ CŨ của người dùng (cú bấm chạy SAU cổng rồi mới dán) → khi đang bảo vệ, luôn gõ vào tài liệu mới đang chọn
+      if (action === 'type_text' && ['element', 'target', 'x', 'y'].some(k => a[k] != null)) { deps.log && deps.log('desk', `B191: bỏ element/target/x/y của type_text — chỉ gõ vào tài liệu mới AIVN đã mở`); a = { ...a }; for (const k of ['element', 'target', 'x', 'y']) delete a[k]; }
+      if (s.freshDoc) freshGate = { rec: { ...s.freshDoc, print: s.freshDoc.print, texts: [...(s.freshDoc.texts || [])] }, at: Date.now() };
       if (action === 'type_text' && s.freshDoc) { s.freshDoc.typed = true; (s.freshDoc.texts = s.freshDoc.texts || []).push(String(a.text || '')); } // từ đây tài liệu mới có chữ của AIVN (dấu * là của AIVN)
     }
     let needPoint = ['click', 'double_click', 'right_click'].includes(action) || ((action === 'type_text' || action === 'scroll') && (a.element || a.target || (a.x != null && a.y != null && !(Number(a.x) === 0 && Number(a.y) === 0))));
@@ -1087,7 +1096,22 @@ function createDesktopAgent(deps) {
         return true;
       };
     }
+    // review #64 vòng 4 (1): kiểm LẠI tài liệu ngay trước khi dán/bấm phím — sau cú bấm (nếu có) hoặc khi đã qua thời gian (thẻ xin phép, đổi thẻ…)
+    if (freshGate) {
+      a.__freshCheck = async ({ clicked }) => {
+        if (!clicked && Date.now() - freshGate.at < 1500) return true;
+        let seen = true; try { await observe(ctx, { thumb: false, ocr: 'force' }); } catch (e) { seen = false; }
+        const W3 = seen && s.obs && s.obs.win ? s.obs.win : null; const g = !seen ? { ok: false, why: 'observe' } : !W3 ? { ok: false, why: 'no-window' } : FD.sameDoc(freshGate.rec, s.obs);
+        if (!g.ok) { freshGate.why = g.why; freshGate.title = (W3 && W3.title) || ''; deps.log && deps.log('desk', `B191: chặn ngay trước khi ${action === 'hotkey' ? 'bấm ' + a.keys : 'dán'}${clicked ? ' (sau cú bấm)' : ''} — “${freshGate.title}” không chắc là tài liệu mới AIVN đã mở (${g.why})`); }
+        return g.ok;
+      };
+    }
     await performAt(action, t && t.x != null ? t.x : null, t && t.x != null ? t.y : null, a);
+    if (a.__freshBlocked) {
+      if (action === 'type_text' && s.freshDoc && freshGate) { s.freshDoc.typed = freshGate.rec.typed; s.freshDoc.texts = freshGate.rec.texts; }
+      s.lastAction = null;
+      return { refused: true, stop: true, error: FRESH_GATE_MSG, forModel: `KHÔNG ${action === 'hotkey' ? 'bấm “' + a.keys + '”' : 'gõ'}: ${FRESH_GATE_MSG}. Ngay trước khi ${action === 'hotkey' ? 'bấm phím' : 'dán'}, cửa sổ là “${freshGate.title || ''}”, không chắc là tài liệu mới AIVN đã mở (${freshGate.why}). DỪNG, báo người dùng.`, summary: FRESH_GATE_MSG };
+    }
     if (a.__submitSkipped) {
       s.composerFocus = false; s.lastAction = { action, at: Date.now(), doneAt: Date.now(), query: 'ô soạn tin' };
       const w = preSend && preSend.wrongEl;
