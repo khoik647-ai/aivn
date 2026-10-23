@@ -23,7 +23,7 @@ const ORDINARY_WORDS = new Set([
   'monkey', 'donkey', 'turkey', 'whiskey', 'hockey', 'jockey', 'turnkey',
   'bypass', 'compass', 'overpass', 'surpass', 'trespass', 'underpass',
 ]);
-const SECRET_VALUE = /^(?:sk-|sk_|ghp_|github_pat_|hf_|AKIA[0-9A-Z]{16}|xox[baprs]-)/;
+const SECRET_VALUE = /^(?:sk-|sk_|rk_(?:live|test)_|whsec_|AIza[0-9A-Za-z_-]{35}|\d{8,10}:AA[0-9A-Za-z_-]{33}|ghp_|github_pat_|hf_|AKIA[0-9A-Z]{16}|xox[baprs]-)/;
 const BEARER_VALUE = /^bearer\s+\S/i;
 const JWT_VALUE = /^(?:eyJ[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]{20,})\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}$/;
 const PEM_VALUE = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+-----END [A-Z ]*PRIVATE KEY-----/;
@@ -723,8 +723,10 @@ function maskHexRuns(text) {
     return '••••';
   });
 }
-function maskAssignments(text) {
+function maskAssignments(text, depth = 0) {
   let s = String(text);
+  // Nhãn không bí mật đứng trước không được nuốt phần sau. Đệ quy chỉ trên chuỗi ngắn hơn.
+  if (depth > 8) return s;
   const mysql = /\bmysql\b|(^|\s)-u(\s|=|$)/i.test(s);
   s = s.replace(/(^|[\s"'`=])([A-Za-z_][\w.-]{0,80})=([^\s"'`&]*)/g, (m, pre, name, value) => {
     if (!value || isRedactedValue(value)) return m;
@@ -776,8 +778,22 @@ function maskAssignments(text) {
   });
   s = s.replace(/(^|[^\w"'-])([A-Za-z][A-Za-z0-9_-]*)([ \t]*:[ \t]*)([|>][-+]?[ \t]*\r?\n[ \t]+\S+|\S+(?:[ \t]+\S+)?)/g, (m, pre, name, sep, value) => {
     if (!value || isRedactedValue(value)) return m;
-    if (!headerValueIsSecret(name, value) && !headerValueIsSecret(name, value.split(/\s+/)[0])) return m;
+    if (!headerValueIsSecret(name, value) && !headerValueIsSecret(name, value.split(/\s+/)[0])) {
+      if (depth < 8 && value.length < m.length && /[ \t]*:/.test(value)) return pre + name + sep + maskAssignments(value, depth + 1);
+      return m;
+    }
     return pre + name + sep + '••••';
+  });
+  s = s.replace(/(["'])([A-Za-z][A-Za-z0-9_-]*)([ \t]*:[ \t]*)([^"'\r\n]+)\1/g, (m, q, name, sep, value) => {
+    if (!value || isRedactedValue(value.trim())) return m;
+    if (!headerValueIsSecret(name, value) && !headerValueIsSecret(name, value.split(/\s+/).pop())) {
+      if (depth < 8 && value.length < m.length && /[ \t]*:/.test(value)) {
+        const inner = maskAssignments(value, depth + 1);
+        if (inner !== value) return q + name + sep + inner + q;
+      }
+      return m;
+    }
+    return q + name + sep + '••••' + q;
   });
   return s;
 }
@@ -785,6 +801,9 @@ function maskKnownSecrets(text) {
   let s = text == null ? '' : String(text);
   s = s.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '••••');
   s = s.replace(/(?:sk-|sk_|ghp_|github_pat_|hf_|xox[baprs]-)[A-Za-z0-9._~+/-]{8,}/g, '••••');
+  s = s.replace(/\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/g, '••••');
+  s = s.replace(/\b(?:rk|sk)_(?:live|test)_[0-9A-Za-z]{16,}|\bwhsec_[0-9A-Za-z]{24,}/g, '••••');
+  s = s.replace(/\b\d{8,10}:AA[0-9A-Za-z_-]{33}(?![0-9A-Za-z_-])/g, '••••');
   s = s.replace(/bearer\s+[A-Za-z0-9._~+/-]{4,}/gi, '••••');
   s = s.replace(/\bAKIA[0-9A-Z]{16}\b/g, '••••');
   s = s.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '••••');
