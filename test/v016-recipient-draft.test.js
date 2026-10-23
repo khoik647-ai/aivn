@@ -36,6 +36,6 @@ test('lệnh chỉ soạn (mọi cách nói ở trên) là CHỈ SOẠN → B101
   for (const [q] of CASES.slice(0, 15)) assert.ok(SV.DRAFT_ONLY.test(q), 'phải là chỉ soạn: ' + q);
   for (const q of ['gửi tin "AIVN test" cho Cloud của tôi trên Zalo', 'send "hi" to Lan on Messenger', 'nhắn Lan là mai họp', '给王老师发消息“明天开会”']) assert.ok(!SV.DRAFT_ONLY.test(q), 'không phải chỉ soạn: ' + q);
   const fs = require('fs'), path = require('path'); const rd = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
-  assert.match(rd('src/desktop-agent.js'), /const DRAFT_SEND = SV\.DRAFT_ONLY;/); assert.match(rd('src/qa-runner.js'), /const DRAFT_RE = require\('\.\/agent\/send-verify'\)\.DRAFT_ONLY;/);
+  assert.match(rd('src/desktop-agent.js'), /const DRAFT_SEND = SV\.DRAFT_ONLY;/); assert.match(rd('src/qa-runner.js'), /const DRAFT_RE = (?:require\('\.\/agent\/send-verify'\)|SV)\.DRAFT_ONLY;/);
   assert.match(rd('src/agent/agent.js'), /const DRAFT_RE = require\('\.\/send-verify'\)\.DRAFT_ONLY;/);
 });
