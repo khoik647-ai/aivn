@@ -8,11 +8,20 @@ const mcpMod = require('./mcp');
 
 const { safeName, classifyUrl, claimCatalogId, isExcelServer, validate, presets, secretIdOf, secretPlaceholder } = mcpMod;
 
-// TOKEN/KEY/SECRET/AUTH khớp cả cụm (X_APP_KEY, AUTHORIZATION) chứ không nuốt MAX_TOKENS, KEYBOARD_LAYOUT, AUTHOR.
-// APPID, AWS_ID, SIG, SID, PASS, CRED cũng chỉ khớp cả cụm, để không nuốt APPLICATION, SIGNAL, SIDE, COMPASS, CLIENT_ID.
-const SECRET_NAME = /API[-_]?KEY|APP[-_]?ID|AWS[-_]?ID|PASSWORD|PASSWD|PWD|CREDENTIAL|SIGNATURE|(?:^|[^A-Za-z0-9])(?:TOKEN|KEY|SECRET|AUTH(?:ORIZATION|ENTICATION)?|SIG|SID|PASS|CRED)(?:[^A-Za-z0-9]|$)/i;
-const SECRET_VALUE = /^(?:sk-|sk_|ghp_|github_pat_|hf_|Bearer |AKIA[0-9A-Z]{16}|xox[baprs]-)/;
-const SECRET_QUERY = new Set(['apikey', 'key', 'token', 'accesstoken', 'auth', 'password', 'passwd', 'pwd', 'pass', 'secret', 'sig', 'signature', 'appid', 'appkey', 'sid', 'credential', 'credentials', 'apisecret', 'clientsecret', 'refreshtoken', 'idtoken', 'privatekey', 'accesskey', 'accesskeyid', 'awsaccesskeyid', 'secretaccesskey', 'secretkey', 'authkey']);
+// Tên bí mật là QUY TẮC theo từ, không theo danh sách khoá đã biết.
+// Tách camelCase rồi tách tiếp trên ký tự không phải chữ. Từ đúng, hoặc hậu tố khi tên không tách được.
+const SECRET_WORDS = new Set([
+  'key', 'apikey', 'token', 'secret', 'pass', 'password', 'passwd', 'pwd',
+  'auth', 'authorization', 'authentication', 'bearer', 'credential', 'credentials',
+  'cookie', 'session', 'jwt', 'pat', 'dsn', 'private', 'signature', 'sig',
+  'otp', 'totp', 'pin', 'appid',
+]);
+const SECRET_SUFFIXES = ['password', 'secret', 'token', 'pass', 'key'];
+const SECRET_VALUE = /^(?:sk-|sk_|ghp_|github_pat_|hf_|AKIA[0-9A-Z]{16}|xox[baprs]-)/;
+const BEARER_VALUE = /^bearer\s+\S/i;
+const JWT_VALUE = /^(?:eyJ[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]{20,})\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}$/;
+const PEM_VALUE = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+-----END [A-Z ]*PRIVATE KEY-----/;
+const FILE_EXT = /\.(?:gguf|bin|json|ya?ml|txt|safetensors|md|png|jpe?g|gif|webp|onnx|pt|pth|ckpt|ggml|pdf|csv|tsv|xml|html?|log|toml|ini|cfg)$/i;
 const SOON = ['zalo', 'gmail', 'drive', 'calendar', 'notion'];
 const BIZ_READ = ['listStock', 'getPicking', 'listPickings', 'getOrder', 'listOrders', 'getInvoice', 'listInvoices', 'salesReport', 'invoiceReport', 'stockReport', 'overview'];
 const BIZ_WRITE = ['createReceipt', 'setDone', 'validatePicking', 'adjustStock', 'sendQuote', 'confirmOrder', 'resetToQuote', 'saveInvoice', 'invoiceOrder', 'postInvoice', 'resetInvoice'];
@@ -112,8 +121,37 @@ const CARD_STRINGS = [
   SAVED_PAUSED,
 ];
 
-function isSecretName(name) { return SECRET_NAME.test(String(name || '')); }
-function looksLikeSecretValue(v) { return typeof v === 'string' && v !== '' && SECRET_VALUE.test(v); }
+function nameWords(name) {
+  return String(name || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/[^A-Za-z]+/)
+    .map(w => w.toLowerCase())
+    .filter(Boolean);
+}
+function flatWords(name) {
+  return String(name || '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
+}
+function joinedSuffix(word) {
+  for (const suf of SECRET_SUFFIXES) {
+    if (word.length <= suf.length || !word.endsWith(suf)) continue;
+    if (word === suf + 's') continue;
+    return true;
+  }
+  return false;
+}
+function isSecretName(name) {
+  const words = nameWords(name);
+  if (words.some(w => SECRET_WORDS.has(w))) return true;
+  const flat = flatWords(name);
+  if (flat.some(w => SECRET_WORDS.has(w))) return true;
+  if (words.length === 1 && joinedSuffix(words[0])) return true;
+  if (flat.length === 1 && joinedSuffix(flat[0])) return true;
+  return false;
+}
+function looksLikeSecretValue(v) {
+  return typeof v === 'string' && v !== '' && (SECRET_VALUE.test(v) || BEARER_VALUE.test(v) || JWT_VALUE.test(v) || PEM_VALUE.test(v));
+}
 // Khoá AWS thường dài 40 ký tự. Mẫu QA dài 39. Chỉ tính khi cùng máy chủ có AKIA. Đường dẫn bắt đầu bằng / không phải.
 function looksLikeAwsSecret(v) {
   return typeof v === 'string' && /^[A-Za-z0-9/+]{39,40}$/.test(v) && /[/+]/.test(v) && !v.startsWith('/');
@@ -122,6 +160,7 @@ function likelySecretValue(v) {
   if (looksLikeSecretValue(v)) return true;
   if (typeof v !== 'string' || secretIdOf(v)) return false;
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) return false;
+  if (FILE_EXT.test(v)) return false;
   if (v.length < 20 || v.length > 500) return false;
   if (/[\s"'\\]/.test(v) || v.startsWith('-') || v.startsWith('.')) return false;
   if (v.startsWith('/') || /^[A-Za-z]:[\\/]/.test(v)) return false;
@@ -136,14 +175,65 @@ function likelySecretValue(v) {
 function isBenignLiteral(v) {
   return typeof v === 'string' && /^(none|null|false|true|off|no|yes|default)$/i.test(v);
 }
-function isSecret(name, value) {
-  if (typeof value !== 'string' || value === '') return false;
-  return isSecretName(name) || likelySecretValue(value);
+function isFilePathName(name) {
+  const words = nameWords(name);
+  if (!words.length) return false;
+  const last = words[words.length - 1];
+  return last === 'file' || last === 'path';
 }
-function queryNorm(name) { return String(name || '').replace(/[^A-Za-z0-9]/g, '').toLowerCase(); }
+function looksLikePath(v) {
+  if (typeof v !== 'string' || v === '') return false;
+  if (v.startsWith('/') || v.startsWith('~/') || v.startsWith('./') || v.startsWith('../') || v.startsWith('.\\') || v.startsWith('..\\')) return true;
+  if (/^[A-Za-z]:[\\/]/.test(v)) return true;
+  if (/^[A-Za-z0-9+/]+=*$/.test(v) && !v.startsWith('/')) return false;
+  return /[/\\][^/\\]+/.test(v);
+}
+function valueMaskable(name, value) {
+  if (typeof value !== 'string' || value === '') return false;
+  if (isBenignLiteral(value)) return false;
+  if (/^\d+$/.test(value)) return value.length >= 8;
+  if (isFilePathName(name) && looksLikePath(value)) return false;
+  return true;
+}
+function b64JsonSecrets(v) {
+  if (typeof v !== 'string' || v.length < 16 || v.length % 4 !== 0) return null;
+  if (!/^[A-Za-z0-9+/]+=*$/.test(v)) return null;
+  let raw;
+  try { raw = Buffer.from(v, 'base64'); } catch { return null; }
+  if (!raw.length) return null;
+  const back = raw.toString('base64').replace(/=+$/, '');
+  if (back !== v.replace(/=+$/, '')) return null;
+  const text = raw.toString('utf8');
+  if (!text || text.includes('\uFFFD') || text === v) return null;
+  let parsed;
+  try { parsed = JSON.parse(text); } catch { return null; }
+  const inners = [];
+  (function walk(val, key) {
+    if (typeof val === 'string') {
+      if (key && valueLooksSecret(key, val)) inners.push(val);
+      return;
+    }
+    if (Array.isArray(val)) val.forEach((item, i) => walk(item, String(i)));
+    else if (val && typeof val === 'object') for (const [k, item] of Object.entries(val)) walk(item, k);
+  })(parsed, '');
+  return inners.length ? inners : null;
+}
+function valueLooksSecret(name, value) {
+  if (typeof value !== 'string' || value === '' || isRedactedValue(value)) return false;
+  if (isSecretName(name)) return valueMaskable(name, value);
+  if (isBenignLiteral(value)) return false;
+  if (likelySecretValue(value)) return true;
+  if (looksLikeAwsSecret(value) && value.length === 40) return true;
+  return false;
+}
+function isSecret(name, value) {
+  if (valueLooksSecret(name, value)) return true;
+  return !!b64JsonSecrets(value);
+}
 function isSecretQueryName(name) {
-  const n = queryNorm(name);
-  return n !== '' && SECRET_QUERY.has(n);
+  let n = String(name || '');
+  try { n = decodeURIComponent(n); } catch { /* giữ tên gốc */ }
+  return n !== '' && isSecretName(n);
 }
 function decodePart(v) {
   try { return decodeURIComponent(String(v)); } catch { return String(v); }
@@ -185,7 +275,41 @@ function urlSecretSpans(text) {
       spans.push({ start, end, already: false, slotHint: 'userinfo', value: decoded, note: decoded === value ? [decoded] : [decoded, value] });
     }
   }
-  const qRe = /([?&])([^=&#]+)=([^&#]*)/g;
+  const bareUserRe = /([a-z][a-z0-9+.-]*:\/\/)([^:/?#@]+)@/gi;
+  while ((m = bareUserRe.exec(s))) {
+    const value = m[2];
+    const start = m.index + m[1].length;
+    const end = start + value.length;
+    if (!value || isRedactedValue(value)) continue;
+    const decoded = decodePart(value);
+    spans.push({ start, end, already: false, slotHint: 'userinfo', value: decoded, note: decoded === value ? [decoded] : [decoded, value] });
+  }
+  const slackRe = /hooks\.slack\.com\/services\/T[A-Za-z0-9]+\/B[A-Za-z0-9]+\/([A-Za-z0-9]+)/g;
+  while ((m = slackRe.exec(s))) {
+    const value = m[1];
+    const start = m.index + m[0].length - value.length;
+    const end = start + value.length;
+    if (!value || isRedactedValue(value)) continue;
+    spans.push({ start, end, already: false, slotHint: 'slack', value, note: [value] });
+  }
+  const discordRe = /discord(?:app)?\.com\/api\/webhooks\/\d+\/([A-Za-z0-9_-]+)/g;
+  while ((m = discordRe.exec(s))) {
+    const value = m[1];
+    const start = m.index + m[0].length - value.length;
+    const end = start + value.length;
+    if (!value || isRedactedValue(value)) continue;
+    spans.push({ start, end, already: false, slotHint: 'discord', value, note: [value] });
+  }
+  const pwRe = /(?:password|pwd)\s*=\s*([^;\s&#]+)/gi;
+  while ((m = pwRe.exec(s))) {
+    const value = m[1];
+    const start = m.index + m[0].length - value.length;
+    const end = start + value.length;
+    if (!value) continue;
+    if (isRedactedValue(value)) spans.push({ start, end, already: true, slotHint: slotFromPlaceholder(value, 'password') });
+    else spans.push({ start, end, already: false, slotHint: 'password', value, note: [value] });
+  }
+  const qRe = /([?&#])([^=&#\s]+)=([^&#\s]*)/g;
   while ((m = qRe.exec(s))) {
     const rawName = m[2];
     const value = m[3];
@@ -226,9 +350,32 @@ function splitFlag(a) {
 }
 function isSecretFlagName(name) {
   const n = String(name || '');
-  if (/(?:file|path|dir|url)$/i.test(n)) return false;
   if (/^k$/i.test(n)) return true;
-  return isSecretQueryName(n) || isSecretName(n);
+  return isSecretName(n);
+}
+function isRealFlag(a) {
+  return typeof a === 'string' && (a.startsWith('--') || /^-[A-Za-z]$/.test(a));
+}
+function parseAssign(text) {
+  const s = String(text || '');
+  const eq = s.indexOf('=');
+  if (eq <= 0) return null;
+  return { name: s.slice(0, eq), value: s.slice(eq + 1) };
+}
+function isEnvFlag(a) {
+  const f = splitFlag(a);
+  return !!(f && !f.hasEq && /^(e|env)$/i.test(f.name));
+}
+function mysqlish(def) {
+  const args = def && Array.isArray(def.args) ? def.args.map(a => String(a)) : [];
+  const cmd = String(def && def.command || '');
+  if (/\bmysql\b/i.test(cmd) || args.some(a => /\bmysql\b/i.test(a))) return true;
+  return args.some(a => a === '-u' || /^--user(?:$|=)/i.test(a) || /^-u.+/.test(a));
+}
+function flaggedValueIsSecret(name, value) {
+  if (typeof value !== 'string' || value === '' || isRedactedValue(value)) return false;
+  if (isSecretFlagName(name)) return valueMaskable(name, value) || likelySecretValue(value);
+  return likelySecretValue(value) || (looksLikeAwsSecret(value) && value.length === 40);
 }
 function isBareSecretFlag(a) {
   const f = splitFlag(a);
@@ -245,8 +392,8 @@ function splitHeaderValue(a) {
   return { name: m[1], value: m[3], valueStart: start, valueEnd: start + m[3].length };
 }
 function headerValueIsSecret(name, value) {
-  if (!value || isBenignLiteral(value) || isRedactedValue(value)) return false;
-  return isSecretName(name) || isSecretQueryName(name) || looksLikeSecretValue(value) || likelySecretValue(value);
+  if (!value || isRedactedValue(value)) return false;
+  return isSecret(name, value);
 }
 function serverHasAkia(def) {
   return /AKIA[0-9A-Z]{16}/.test(JSON.stringify(def || {}));
@@ -277,9 +424,16 @@ function secretFindings(def) {
     }
   }
   function valueIsSecret(name, value) {
-    if (typeof value !== 'string' || value === '' || isBenignLiteral(value)) return false;
+    if (typeof value !== 'string' || value === '' || isRedactedValue(value)) return false;
     if (isSecret(name, value)) return true;
     return !!(akia && looksLikeAwsSecret(value));
+  }
+  function notesFor(value) {
+    const notes = [];
+    if (typeof value === 'string' && value) notes.push(value);
+    const inner = b64JsonSecrets(value);
+    if (inner) for (const x of inner) if (x && !notes.includes(x)) notes.push(x);
+    return notes;
   }
   function considerString(text, loc, keyName) {
     if (typeof text !== 'string' || text === '') return;
@@ -288,7 +442,7 @@ function secretFindings(def) {
       addAlready(keyName || String(whole).split(':').pop() || 'secret', loc);
       return;
     }
-    if (valueIsSecret(keyName, text)) { addNew(keyName || 'secret', text, loc, null, [text]); return; }
+    if (valueIsSecret(keyName, text)) { addNew(keyName || 'secret', text, loc, null, notesFor(text)); return; }
     addSpans(text, loc);
   }
   for (const bag of ['env', 'headers']) {
@@ -298,11 +452,12 @@ function secretFindings(def) {
       const loc = { type: bag === 'headers' ? 'header' : 'env', key: k };
       if (secretIdOf(v)) { addAlready(k, loc); continue; }
       if (typeof v !== 'string' || v === '') continue;
-      if (valueIsSecret(k, v)) addNew(k, v, loc, null, [v]);
+      if (valueIsSecret(k, v)) addNew(k, v, loc, null, notesFor(v));
       else addSpans(v, loc);
     }
   }
   const args = def && Array.isArray(def.args) ? def.args : [];
+  const mysql = mysqlish(def);
   args.forEach((a, i) => {
     if (typeof a !== 'string') return;
     const loc = { type: 'arg', index: i };
@@ -313,12 +468,20 @@ function secretFindings(def) {
       return;
     }
     const flag = splitFlag(a);
+    if (flag && flag.hasEq && /^(e|env)$/i.test(flag.name)) {
+      const ev = parseAssign(flag.value);
+      if (ev && ev.value && !isRedactedValue(ev.value) && valueIsSecret(ev.name, ev.value)) {
+        const start = a.length - ev.value.length;
+        addNew(sanitizeSlot(ev.name), ev.value, loc, { start, end: a.length }, notesFor(ev.value));
+        return;
+      }
+    }
     if (flag && flag.hasEq && /^(h|header)$/i.test(flag.name)) {
       const h = splitHeaderValue(flag.value);
       if (h && isRedactedValue(h.value)) { addAlready(slotFromPlaceholder(h.value, sanitizeSlot(h.name)), loc); return; }
       if (h && headerValueIsSecret(h.name, h.value)) {
         const start = a.length - flag.value.length + h.valueStart;
-        addNew(sanitizeSlot(h.name), h.value, loc, { start, end: start + h.value.length }, [h.value]);
+        addNew(sanitizeSlot(h.name), h.value, loc, { start, end: start + h.value.length }, notesFor(h.value));
         return;
       }
     }
@@ -327,24 +490,47 @@ function secretFindings(def) {
         addAlready(slotFromPlaceholder(flag.value, 'arg' + i), loc);
         return;
       }
-      if (flag.value && !isRedactedValue(flag.value) && !isBenignLiteral(flag.value) && (isSecretFlagName(flag.name) || looksLikeSecretValue(flag.value) || likelySecretValue(flag.value) || (akia && looksLikeAwsSecret(flag.value)))) {
-        addNew('arg' + i, a, loc, null, flag.value === a ? [a] : [a, flag.value]);
+      if (flag.value && !isRedactedValue(flag.value) && (flaggedValueIsSecret(flag.name, flag.value) || (akia && looksLikeAwsSecret(flag.value)))) {
+        const notes = flag.value === a ? notesFor(a) : [a, ...notesFor(flag.value)];
+        addNew('arg' + i, a, loc, null, notes);
         return;
       }
     }
-    if (i > 0 && isHeaderFlag(args[i - 1]) && !a.startsWith('-')) {
+    if (mysql && /^-[pP](.+)$/.test(a) && !a.startsWith('--')) {
+      const val = a.slice(2);
+      if (val && !isRealFlag(a) && valueIsSecret('password', val)) {
+        addNew('password', val, loc, { start: 2, end: a.length }, [val]);
+        return;
+      }
+    }
+    if (i > 0 && isEnvFlag(args[i - 1]) && !isRealFlag(a)) {
+      const ev = parseAssign(a);
+      if (ev && ev.value && valueIsSecret(ev.name, ev.value)) {
+        addNew(sanitizeSlot(ev.name), ev.value, loc, { start: ev.name.length + 1, end: a.length }, notesFor(ev.value));
+        return;
+      }
+    }
+    if (i > 0 && args[i - 1] === '-p' && mysql && !isRealFlag(a) && valueIsSecret('password', a)) {
+      addNew('password', a, loc, null, [a]);
+      return;
+    }
+    if (i > 0 && isHeaderFlag(args[i - 1]) && !isRealFlag(a)) {
       const h = splitHeaderValue(a);
       if (h && isRedactedValue(h.value)) { addAlready(slotFromPlaceholder(h.value, sanitizeSlot(h.name)), loc); return; }
       if (h && headerValueIsSecret(h.name, h.value)) {
-        addNew(sanitizeSlot(h.name), h.value, loc, { start: h.valueStart, end: h.valueEnd }, [h.value]);
+        addNew(sanitizeSlot(h.name), h.value, loc, { start: h.valueStart, end: h.valueEnd }, notesFor(h.value));
         return;
       }
     }
-    if (i > 0 && isBareSecretFlag(args[i - 1]) && !a.startsWith('-') && a !== '' && !isBenignLiteral(a)) {
-      addNew('arg' + i, a, loc, null, [a]);
+    if (i > 0 && isBareSecretFlag(args[i - 1]) && !isRealFlag(a) && a !== '' && flaggedValueIsSecret(splitFlag(args[i - 1]).name, a)) {
+      addNew('arg' + i, a, loc, null, notesFor(a));
       return;
     }
-    if (valueIsSecret('', a) || (akia && looksLikeAwsSecret(a))) { addNew('arg' + i, a, loc, null, [a]); return; }
+    if (i >= 2 && /^--api$/i.test(args[i - 2]) && /^key$/i.test(String(args[i - 1])) && !isRealFlag(a) && valueIsSecret('key', a)) {
+      addNew('arg' + i, a, loc, null, notesFor(a));
+      return;
+    }
+    if (valueIsSecret('', a) || (akia && looksLikeAwsSecret(a))) { addNew('arg' + i, a, loc, null, notesFor(a)); return; }
     addSpans(a, loc);
   });
   if (def && typeof def.url === 'string' && def.url) {
@@ -422,20 +608,84 @@ function storageSecure(safeStorage) {
 
 function maskAwsAdjacent(text) {
   const s = text == null ? '' : String(text);
-  if (!/AKIA[0-9A-Z]{16}/.test(s)) return s;
-  return s.replace(/[A-Za-z0-9/+]{39,40}/g, (m, offset, str) => {
-    const prev = offset > 0 ? str[offset - 1] : '';
-    const next = str[offset + m.length] || '';
-    if (/[A-Za-z0-9/+]/.test(prev) || /[A-Za-z0-9/+]/.test(next)) return m;
-    if (!looksLikeAwsSecret(m)) return m;
+  return s.replace(/(^|[^A-Za-z0-9/+])([A-Za-z0-9/+]{39,40})(?![A-Za-z0-9/+])/g, (m, pre, body, offset) => {
+    if (!looksLikeAwsSecret(body)) return m;
+    if (body.length === 39) {
+      const lo = Math.max(0, offset - 96);
+      const hi = Math.min(s.length, offset + m.length + 96);
+      if (!/akia|aws|secret/i.test(s.slice(lo, hi))) return m;
+    }
+    return pre + '••••';
+  });
+}
+function maskHexRuns(text) {
+  return String(text).replace(/\b[0-9a-f]{32,}\b/gi, (m, offset, str) => {
+    if (m.length === 64) return m;
+    if (m.length === 40) {
+      const lo = Math.max(0, offset - 96);
+      const hi = Math.min(str.length, offset + m.length + 96);
+      if (!/aws|secret|akia/i.test(str.slice(lo, hi))) return m;
+    }
     return '••••';
   });
 }
+function maskAssignments(text) {
+  let s = String(text);
+  const mysql = /\bmysql\b|(^|\s)-u(\s|=|$)/i.test(s);
+  s = s.replace(/(^|[\s"'`=])([A-Za-z_][\w.-]{0,80})=([^\s"'`&]*)/g, (m, pre, name, value) => {
+    if (!value || isRedactedValue(value)) return m;
+    if (!valueLooksSecret(name, value) && !b64JsonSecrets(value)) return m;
+    return pre + name + '=' + '••••';
+  });
+  s = s.replace(/(^|[\s])(--?[A-Za-z][\w.-]*)(=|\s+)(\S+)/g, (m, pre, flag, sep, value) => {
+    const fname = flag.replace(/^-+/, '');
+    if (!value || isRedactedValue(value)) return m;
+    if (/^(e|env)$/i.test(fname)) {
+      const ev = parseAssign(value);
+      if (ev && ev.value && !isRedactedValue(ev.value) && (valueLooksSecret(ev.name, ev.value) || b64JsonSecrets(ev.value))) {
+        return pre + flag + sep + ev.name + '=' + '••••';
+      }
+    }
+    if (sep !== '=' && isRealFlag(value)) return m;
+    if (/^p$/i.test(fname) && sep !== '=' && mysql && !isBenignLiteral(value)) return pre + flag + sep + '••••';
+    if (!flaggedValueIsSecret(fname, value)) return m;
+    return pre + flag + sep + '••••';
+  });
+  if (mysql) s = s.replace(/(^|\s)-p(\S+)/gi, (m, pre, val) => (val && !isRedactedValue(val) ? pre + '-p••••' : m));
+  s = s.replace(/(^|\s)(--api)(\s+)(key)(\s+)(\S+)/gi, (m, pre, a, s1, k, s2, val) => {
+    if (!val || isRealFlag(val) || isRedactedValue(val) || isBenignLiteral(val)) return m;
+    return pre + a + s1 + k + s2 + '••••';
+  });
+  s = s.replace(/"([A-Za-z][A-Za-z0-9_-]*)"\s*:\s*"([^"]*)"/g, (m, name, value) => {
+    if (!value || isRedactedValue(value) || !headerValueIsSecret(name, value)) return m;
+    const i = m.lastIndexOf('"' + value + '"');
+    if (i < 0) return m;
+    return m.slice(0, i + 1) + '••••' + m.slice(i + 1 + value.length);
+  });
+  s = s.replace(/(^|[^\w"'-])([A-Za-z][A-Za-z0-9-]*)(\s*:\s*)(\S+(?:\s+\S+)?)/g, (m, pre, name, sep, value) => {
+    if (!value || isRedactedValue(value)) return m;
+    if (!headerValueIsSecret(name, value) && !headerValueIsSecret(name, value.split(/\s+/)[0])) return m;
+    return pre + name + sep + '••••';
+  });
+  return s;
+}
 function maskKnownSecrets(text) {
   let s = text == null ? '' : String(text);
+  s = s.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '••••');
+  s = s.replace(/(?:sk-|sk_|ghp_|github_pat_|hf_|xox[baprs]-)[A-Za-z0-9._~+/-]{8,}/g, '••••');
+  s = s.replace(/bearer\s+[A-Za-z0-9._~+/-]{4,}/gi, '••••');
+  s = s.replace(/\bAKIA[0-9A-Z]{16}\b/g, '••••');
+  s = s.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g, '••••');
+  s = s.replace(/\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, '••••');
+  s = maskHexRuns(s);
   s = maskAwsAdjacent(s);
-  s = s.replace(/(?:sk-|sk_|ghp_|github_pat_|hf_|xox[baprs]-|Bearer )[A-Za-z0-9._~+/-]{8,}/g, '••••');
-  s = s.replace(/AKIA[0-9A-Z]{16}/g, '••••');
+  s = s.replace(/(^|[^A-Za-z0-9+/])([A-Za-z0-9+/]{40,}={0,2})(?![A-Za-z0-9+/])/g, (m, pre, body) => {
+    if (body.startsWith('/')) return m;
+    const mixed = /[a-z]/.test(body) && /[A-Z]/.test(body) && /\d/.test(body);
+    if (!mixed && !b64JsonSecrets(body)) return m;
+    return pre + '••••';
+  });
+  s = maskAssignments(s);
   return maskUrlSecrets(s);
 }
 function createSecretStore({ dir, safeStorage = null } = {}) {
@@ -446,7 +696,8 @@ function createSecretStore({ dir, safeStorage = null } = {}) {
   function remember(v) {
     if (typeof v !== 'string' || v.length < 4) return;
     noted.add(v);
-    if (v.startsWith('Bearer ') && v.length > 15) noted.add(v.slice(7));
+    const bearer = /^bearer\s+/i.exec(v);
+    if (bearer && v.length > bearer[0].length + 4) noted.add(v.slice(bearer[0].length));
   }
   function mask(text) {
     let s = text == null ? '' : String(text);
@@ -464,7 +715,7 @@ function createSecretStore({ dir, safeStorage = null } = {}) {
     const out = {};
     for (const [k, v] of Object.entries(value)) {
       if (k === 'env' || k === 'headers' || k === 'enc') continue;
-      if (typeof v === 'string' && v && (isSecretName(k) || likelySecretValue(v))) { out[k] = '••••'; continue; }
+      if (typeof v === 'string' && isSecret(k, v)) { out[k] = '••••'; continue; }
       out[k] = maskDeep(v, seen);
     }
     return out;
@@ -735,24 +986,59 @@ function locWrite(def, loc, text) {
   }
 }
 function topLevelIsSecret(key, value) {
-  if (typeof value !== 'string' || value === '' || secretIdOf(value) || isBenignLiteral(value)) return false;
+  if (typeof value !== 'string' || value === '' || secretIdOf(value)) return false;
   if (isSecret(key, value) || looksLikeSecretValue(value)) return true;
   return urlSecretSpans(value).some(sp => !sp.already);
+}
+function noteExtras(store, value) {
+  if (!store || typeof value !== 'string') return;
+  const inner = b64JsonSecrets(value);
+  if (inner) for (const x of inner) if (x && x !== value) store.note(x);
+  for (const sp of urlSecretSpans(value)) if (!sp.already && sp.value && sp.value !== value) store.note(sp.value);
 }
 function extractSecrets(cfg, store) {
   const next = JSON.parse(JSON.stringify(cfg || {}));
   let count = 0;
   let rewritten = 0;
+  function bury(parts, value) {
+    const id = 'mcp:global:' + sanitizeSlot(parts.map(p => String(p)).join('_'));
+    if (store) {
+      store.put(id, value);
+      noteExtras(store, value);
+    }
+    let cur = next;
+    for (let i = 0; i < parts.length - 1; i++) cur = cur[parts[i]];
+    cur[parts[parts.length - 1]] = secretPlaceholder(id);
+    count++;
+  }
+  function walkTop(node, parts) {
+    if (typeof node === 'string') {
+      if (!topLevelIsSecret(String(parts[parts.length - 1]), node) && !isSecret(String(parts[parts.length - 1]), node)) return;
+      bury(parts, node);
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach((item, i) => walkTop(item, parts.concat(i)));
+      return;
+    }
+    if (node && typeof node === 'object') {
+      for (const [k, v] of Object.entries(node)) walkTop(v, parts.concat(k));
+    }
+  }
   for (const [k, v] of Object.entries(next)) {
     if (k === 'mcpServers') continue;
-    if (!topLevelIsSecret(k, v)) continue;
-    const id = `mcp:global:${sanitizeSlot(k)}`;
-    if (store) {
-      store.put(id, v);
-      for (const sp of urlSecretSpans(v)) if (!sp.already && sp.value && sp.value !== v) store.note(sp.value);
+    if (typeof v === 'string') {
+      if (!topLevelIsSecret(k, v)) continue;
+      const id = `mcp:global:${sanitizeSlot(k)}`;
+      if (store) {
+        store.put(id, v);
+        noteExtras(store, v);
+      }
+      delete next[k];
+      count++;
+      continue;
     }
-    delete next[k];
-    count++;
+    if (v && typeof v === 'object') walkTop(v, [k]);
   }
   const servers = next.mcpServers && typeof next.mcpServers === 'object' ? next.mcpServers : {};
   for (const [name, def] of Object.entries(servers)) {

@@ -4,22 +4,23 @@ const fs = require('fs');
 const path = require('path');
 const MAX = 5 * 1024 * 1024;
 let dir = null, file = null, engineFile = null, broken = null;
-const SECRET_KEY = /(token|password|passwd|pw|secret|api[-_]?key|authorization|cookie|hfToken|privateKey|adminKey)/i;
 function redact(v, depth = 0) {
   if (v == null) return v;
   if (typeof v === 'string') {
-    let s = v.replace(/\bhf_[A-Za-z0-9]{8,}\b/g, 'hf_***').replace(/\b(gh[pousr]_)[A-Za-z0-9]{10,}\b/g, '$1***').replace(/(Bearer\s+)[A-Za-z0-9._-]{8,}/gi, '$1***');
-    s = s.replace(/\b(?:sk-|sk_|github_pat_|xox[baprs]-)[A-Za-z0-9._~+/-]{8,}/g, '••••');
-    try {
-      const PG = require('./plugins');
-      s = PG.maskAwsAdjacent(s);
-      s = s.replace(/\bAKIA[0-9A-Z]{16}\b/g, '••••');
-      return PG.maskUrlSecrets(s);
-    } catch { return s.replace(/\bAKIA[0-9A-Z]{16}\b/g, '••••'); }
+    let s = v.replace(/\bhf_[A-Za-z0-9]{8,}\b/g, 'hf_***').replace(/\b(gh[pousr]_)[A-Za-z0-9]{10,}\b/g, '$1***');
+    try { return require('./plugins').maskKnownSecrets(s); }
+    catch { return s; }
   }
   if (typeof v !== 'object' || depth > 4) return v;
   if (Array.isArray(v)) return v.slice(0, 50).map(x => redact(x, depth + 1));
-  const o = {}; for (const [k, x] of Object.entries(v)) o[k] = SECRET_KEY.test(k) ? '***' : redact(x, depth + 1); return o;
+  let PG = null;
+  try { PG = require('./plugins'); } catch { /* giữ nguyên khi thiếu */ }
+  const o = {};
+  for (const [k, x] of Object.entries(v)) {
+    if (typeof x === 'string' && PG && PG.isSecret(k, x)) o[k] = '***';
+    else o[k] = redact(x, depth + 1);
+  }
+  return o;
 }
 const short = (s, n = 400) => { s = String(s); return s.length > n ? s.slice(0, n) + `…(+${s.length - n} ký tự)` : s; };
 function fmt(x) { if (x === undefined) return ''; if (typeof x === 'string') return short(redact(x), 4000); try { return short(JSON.stringify(redact(x)), 4000); } catch { return String(x); } }
