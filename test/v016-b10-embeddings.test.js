@@ -6,7 +6,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { createApiServer } = require('../src/server');
-const { createEmbedServer, listEmbeddingModels, gpuLayersFor, embedGpuChoice, inspectFile, inspectCacheStats, chatIdsExcept, contextLimit, clipByCodePoints, EMBED_IDLE_NGL, META_CACHE_MAX, MAX_STRING_CHARS, MAX_TOTAL_CHARS, MAX_EMBED_BODY } = require('../src/embed-server');
+const { createEmbedServer, listEmbeddingModels, gpuLayersFor, embedGpuChoice, freeForEmbed, inspectFile, inspectCacheStats, chatIdsExcept, contextLimit, clipByCodePoints, definitelyEmbedding, isEmbedGguf, EMBED_IDLE_NGL, META_CACHE_MAX, MAX_STRING_CHARS, MAX_TOTAL_CHARS, MAX_EMBED_BODY } = require('../src/embed-server');
+const { findServer } = require('../src/vision-server');
 
 const FAKE = path.join(__dirname, 'fixtures', 'fake-llama', 'llama-server');
 const GB = 1024 * 1024 * 1024;
@@ -193,10 +194,11 @@ test('main.js nối embed-server và giữ câu từ chối mô hình trò chuy�
   assert.match(m, /createEmbedServer/);
   assert.match(m, /là mô hình trò chuyện, không tạo embeddings được/);
   assert.match(m, /embed-server/);
-  assert.match(m, /inspectFile/);
   assert.match(m, /isEmbedGguf/);
+  assert.match(m, /embed-server'\)\.isEmbedGguf/);
   assert.match(m, /chatIdsExcept/);
-  const holdAt = m.indexOf('ep.hold()');
+  const holdAt = m.indexOf('ep.hold(HOLD_MS)');
+  assert.ok(holdAt > 0, 'hold có hạn, nạp mô hình treo không giữ máy nhúng mãi');
   const stopAt = m.indexOf('embedProc.stop()');
   const vramAt = m.indexOf('idleVramUsed = h0.vram.total');
   const loadAt = m.indexOf('engine.loadModel(m.id');
@@ -595,4 +597,147 @@ test('cắt dự phòng theo điểm mã nên không tách emoji', async () => {
     await srv.stop();
     if (prev == null) delete process.env.AIVN_FAKE_TOKENIZE_FAIL; else process.env.AIVN_FAKE_TOKENIZE_FAIL = prev;
   }
+});
+
+function llamaExeName() { return process.platform === 'win32' ? 'llama-server.exe' : 'llama-server'; }
+function devServerPath() {
+  const plat = process.platform === 'win32' ? 'win' : process.platform;
+  return path.join(__dirname, '..', 'build', 'llama', `${plat}-${process.arch}`, llamaExeName());
+}
+function putExe(file) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.copyFileSync(FAKE, file);
+  fs.chmodSync(file, 0o755);
+}
+function withLookupEnv(fn) {
+  const prevRes = process.resourcesPath;
+  const prevLlama = process.env.AIVN_LLAMA_SERVER;
+  const prevAivn = process.env.AIVN_RESOURCES;
+  delete process.env.AIVN_LLAMA_SERVER;
+  delete process.env.AIVN_RESOURCES;
+  return Promise.resolve().then(fn).finally(() => {
+    if (prevRes === undefined) delete process.resourcesPath; else process.resourcesPath = prevRes;
+    if (prevLlama == null) delete process.env.AIVN_LLAMA_SERVER; else process.env.AIVN_LLAMA_SERVER = prevLlama;
+    if (prevAivn == null) delete process.env.AIVN_RESOURCES; else process.env.AIVN_RESOURCES = prevAivn;
+  });
+}
+
+test('findServer thấy llama-server ở bản đóng gói và ở mã nguồn, không tiêm findExe', async () => {
+  const exe = llamaExeName();
+  const pack = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b10-res-'));
+  const packedExe = path.join(pack, 'llama', exe);
+  putExe(packedExe);
+  const emptyRes = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b10-empty-res-'));
+  const dev = devServerPath();
+  const devExisted = fs.existsSync(dev);
+  let devCreated = false;
+  await withLookupEnv(async () => {
+    process.resourcesPath = pack;
+    const foundPack = findServer();
+    assert.ok(foundPack, 'bản đóng gói phải có đường dẫn llama-server');
+    assert.equal(path.resolve(foundPack), path.resolve(packedExe));
+    process.resourcesPath = emptyRes;
+    if (!devExisted) { putExe(dev); devCreated = true; }
+    const foundDev = findServer();
+    assert.ok(foundDev, 'mã nguồn phải có đường dẫn llama-server');
+    assert.equal(path.resolve(foundDev), path.resolve(dev));
+  });
+  fs.rmSync(pack, { recursive: true, force: true });
+  fs.rmSync(emptyRes, { recursive: true, force: true });
+  if (devCreated) {
+    fs.rmSync(dev, { force: true });
+    let dir = path.dirname(dev);
+    for (let i = 0; i < 3; i++) { try { fs.rmdirSync(dir); } catch { break; } dir = path.dirname(dir); }
+  }
+});
+
+test('/v1/embeddings không 503 khi llama-server có trong resources của bản đóng gói', async () => {
+  const pack = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b10-pack-'));
+  putExe(path.join(pack, 'llama', llamaExeName()));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b10-pack-models-'));
+  writeModels(dir);
+  let srv, api;
+  await withLookupEnv(async () => {
+    process.resourcesPath = pack;
+    assert.equal(path.resolve(findServer()), path.resolve(path.join(pack, 'llama', llamaExeName())));
+    srv = createEmbedServer({ idleMs: 0, gpuLayers: () => 0, log: () => {} });
+    api = harness(dir, srv);
+    const port = await listen(api);
+    try {
+      const r = await post(port, { input: 'xin chào từ bản đóng gói' });
+      const text = await r.text();
+      assert.notEqual(r.status, 503, text);
+      assert.equal(r.status, 200, text);
+    } finally {
+      await srv.stop();
+      await api.stop();
+    }
+  });
+});
+
+test('llama-server nhìn ảnh đang chạy thì embeddings lấy -ngl 4, không auto', async () => {
+  const MB = 1024 * 1024;
+  const inflated = { gpu: 'cuda', vram: { total: 12 * GB, free: 11440 * MB, integratedOnly: false } };
+  const unsure = freeForEmbed(inflated.vram, { visionRunning: true });
+  assert.ok(unsure.free > 2 * GB && unsure.free <= 6 * GB);
+  assert.equal(await embedGpuChoice({ probe: () => ({ ...inflated, vram: unsure }), chatLoaded: true, timeoutMs: 200 }), 4);
+  const measured = freeForEmbed(inflated.vram, { visionRunning: true, measuredFree: 3.7 * GB });
+  assert.equal(await embedGpuChoice({ probe: () => ({ ...inflated, vram: measured }), chatLoaded: true, timeoutMs: 200 }), 4);
+  assert.equal(await embedGpuChoice({ probe: () => inflated, chatLoaded: true, timeoutMs: 200 }), null, 'không có llama-server nhìn ảnh thì 11 GB trống vẫn là auto');
+  const eng = fs.readFileSync(path.join(__dirname, '..', 'src', 'engine.js'), 'utf8');
+  const hw = eng.slice(eng.indexOf('async function hardwareInfo'), eng.indexOf('async function modelGeometry'));
+  assert.match(hw, /visionOn/);
+  assert.match(hw, /freeForEmbed/);
+});
+
+test('nạp mô hình treo không giữ máy nhúng quá hạn', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b10-hold-timeout-'));
+  writeModels(dir);
+  const srv = createEmbedServer({ findExe: () => FAKE, idleMs: 0, gpuLayers: () => 0, log: () => {}, holdMs: 250 });
+  const model = srv.list([dir])[0];
+  const t0 = Date.now();
+  const beat = setInterval(() => {}, 40);
+  try {
+    srv.hold();
+    const pending = srv.open(model);
+    await sleep(40);
+    assert.equal(srv.stats().held, true);
+    assert.equal(srv.stats().spawns, 0);
+    await pending;
+    const dt = Date.now() - t0;
+    assert.ok(dt >= 180, 'phải đợi hết hạn giữ, đo được ' + dt);
+    assert.ok(dt < 2000, 'hết hạn phải mở cổng, đo được ' + dt);
+    assert.equal(srv.stats().spawns, 1);
+    assert.equal(srv.stats().held, false);
+  } finally { clearInterval(beat); try { srv.release(); } catch {} await srv.stop(); }
+});
+
+test('isEmbedGguf không giấu mô hình trò chuyện', () => {
+  assert.equal(definitelyEmbedding({ arch: 'llama', pooling: null }), false);
+  assert.equal(definitelyEmbedding({ arch: 'llama', pooling: 'mean' }), false);
+  assert.equal(definitelyEmbedding({ arch: 'qwen2', pooling: null }), false);
+  assert.equal(definitelyEmbedding({ arch: 'bert', pooling: 'mean' }), true);
+  assert.equal(definitelyEmbedding({ arch: null, pooling: 'mean' }), true);
+  assert.equal(definitelyEmbedding(null), false);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b10-chat-'));
+  writeModels(dir);
+  assert.equal(isEmbedGguf(path.join(dir, 'qwen-q4.gguf')), false);
+  assert.equal(isEmbedGguf(path.join(dir, 'bge-m3-q8_0.gguf')), true);
+  const named = path.join(dir, 'my-embed-chat-q4.gguf');
+  fs.writeFileSync(named, gguf([kvStr('general.architecture', 'qwen2'), kvU32('qwen2.block_count', 4)]));
+  assert.equal(inspectFile(named).arch, 'qwen2');
+  assert.equal(isEmbedGguf(named), false);
+  assert.equal(isEmbedGguf(path.join(dir, 'khong-co.gguf')), false);
+});
+
+test('cắt theo cụm chữ: emoji ZWJ và dấu kết hợp không bị tách', () => {
+  const family = '👨\u200D👩\u200D👧';
+  assert.ok(Array.from(family).length > 1);
+  assert.equal(clipByCodePoints(family, 1), family);
+  assert.equal(clipByCodePoints('x' + family + 'y', 2), 'x' + family);
+  const marked = 'a' + 'e\u0301' + 'b';
+  assert.equal(Array.from(marked).length, 4);
+  assert.equal(clipByCodePoints(marked, 2), 'ae\u0301');
+  assert.notEqual(clipByCodePoints(marked, 2), 'ae');
+  assert.equal(clipByCodePoints('a😀b', 2), 'a😀');
 });

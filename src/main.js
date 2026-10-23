@@ -74,6 +74,9 @@ function findNode() {
   }
   return cands.find(p => { try { return fs.statSync(p).isFile(); } catch { return false; } }) || null;
 }
+// Bản đóng gói: llama-server ở resources/llama. Tiến trình con nhận AIVN_RESOURCES qua engine-proxy;
+// tiến trình chính (embeddings) cũng cần, không chỉ khi chạy llama.cpp ngay trong Electron.
+if (process.resourcesPath && !process.env.AIVN_RESOURCES) process.env.AIVN_RESOURCES = process.resourcesPath;
 const hostScript = path.join(__dirname, 'engine-host.js').replace(/app\.asar([\\/])/, 'app.asar.unpacked$1');
 const nodePath = process.env.AIVN_INPROC === '1' ? null : findNode();
 // B13 (QA lượt 2): ghi pid llama-server ra tệp; lần mở sau dọn tiến trình còn sót khi AIVN bị tắt đột ngột (kill, sập, mất điện…)
@@ -88,7 +91,6 @@ if (nodePath) {
     onCrash: (e) => { engineDied = true; send('model:status', { loaded: false }); send('engine:crash', { message: e.message }); } });
 } else {
   console.warn('[engine] không tìm thấy Node.js đi kèm, chạy llama.cpp ngay trong Electron (mô hình > 2 GB chạy CPU có thể lỗi)');
-  if (process.resourcesPath && !process.env.AIVN_RESOURCES) process.env.AIVN_RESOURCES = process.resourcesPath;
   const inproc = require('./engine');
   inproc.setLoadProgress((p) => send('model:progress', { id: p.id, pct: p.pct, mode: p.mode }));
   engine = { ...inproc, external: false, calibrate: async () => {}, ocr: (b) => require('./ocr').recognize(b), start: async () => {}, stop: async () => {} };
@@ -319,13 +321,11 @@ const log = (msg) => { LOG.log('app', msg); const e = { t: Date.now(), msg }; se
 
 const SPLIT_RE = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i;
 // Mô hình nhúng (dùng cho tìm kiếm tài liệu), không phải mô hình trò chuyện
-const EMBED_RE = /(^|[-_.])(embed|embedding|bge-m3|bge-small|bge-base|bge-large|multilingual-e5|e5-(small|base|large)|nomic-embed|gte-)/i;
 const NAMES = require('./model-names'); // mục 5: tên tệp chung (q4_k_m.gguf) → id/khớp danh mục kèm tên repo
 function modelIdFromFile(f) { return NAMES.idFor(f, SPLIT_RE); }
-// Tên tệp (EMBED_RE) hoặc kiến trúc/pooling trong GGUF — cùng inspectFile của embed-server (all-MiniLM, bert, pooling mean…).
+// Chỉ ẩn khỏi danh sách trò chuyện khi chắc là mô hình nhúng. Tên tệp chứa "embed" không đủ.
 function isEmbedGguf(full) {
-  if (EMBED_RE.test(path.basename(full))) return true;
-  try { return !!require('./embed-server').inspectFile(full); } catch { return false; }
+  try { return require('./embed-server').isEmbedGguf(full); } catch { return false; }
 }
 
 // Quét thư mục mô hình (models/<tác giả>/<repo>/<tệp>.gguf và tệp ở gốc). Mô hình chia phần chỉ hiện một dòng.
@@ -515,7 +515,7 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
     // Giữ máy nhúng suốt lúc nạp: yêu cầu /v1/embeddings đến giữa chừng phải đợi xong rồi mới chọn -ngl.
     // Dừng tiến trình đang chạy (kể cả lần start chưa xong) trước khi đo VRAM rảnh và trước engine.loadModel.
     const ep = embeddingProc();
-    ep.hold();
+    ep.hold(HOLD_MS);
     try {
     if (embedProc) { try { await embedProc.stop(); } catch (e) { log('[embed] không dừng được trước khi nạp mô hình: ' + (e && e.message || e)); } }
     // B38: số đo VRAM thật — VRAM đã dùng lúc chưa nạp mô hình (màn hình, ứng dụng khác) làm mốc
@@ -1008,7 +1008,7 @@ function withParts(orig, text) {
 }
 
 // /v1/embeddings: llama-server --embeddings riêng (src/embed-server.js). RAG vẫn dùng ensureEmbedder() trong tiến trình engine.
-const { createEmbedServer, embedGpuChoice, chatIdsExcept, GPU_PROBE_MS } = require('./embed-server');
+const { createEmbedServer, embedGpuChoice, chatIdsExcept, GPU_PROBE_MS, HOLD_MS } = require('./embed-server');
 function embeddingProc() {
   if (embedProc) return embedProc;
   embedProc = createEmbedServer({

@@ -26,6 +26,10 @@ const MAX_TOTAL_CHARS = 1000000;
 const MAX_EMBED_BODY = 2 * 1024 * 1024;
 const META_CACHE_MAX = 512;
 const GPU_PROBE_MS = 2000;
+// Nạp mô hình treo không được giữ máy nhúng mãi. Hết hạn thì embeddings được chạy.
+const HOLD_MS = 3 * 60 * 1000;
+// Khi llama-server nhìn ảnh đang chạy mà không đo được VRAM trống thật: kẹp vào khoảng ra -ngl 4, không để auto.
+const CONSERVATIVE_FREE = 4 * GB;
 
 class EmbedError extends Error {
   constructor(msg, status = 500, code) { super(msg); this.status = status; this.code = code; }
@@ -92,12 +96,36 @@ function inspectFile(file) {
   return info;
 }
 
-// Cắt theo điểm mã (không theo đơn vị UTF-16) để không tách cặp surrogate của emoji.
+// Cắt theo cụm chữ (Intl.Segmenter). Không có Segmenter thì cắt theo điểm mã, để không tách cặp surrogate.
+function textUnits(text) {
+  const s = String(text);
+  try {
+    if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+      const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+      const out = [];
+      for (const part of seg.segment(s)) out.push(part.segment);
+      if (out.length) return out;
+    }
+  } catch {}
+  return Array.from(s);
+}
 function clipByCodePoints(text, n) {
-  const chars = Array.from(String(text));
+  const chars = textUnits(text);
   const keep = Math.max(0, Math.floor(Number(n) || 0));
   if (chars.length <= keep) return chars.join('');
   return chars.slice(0, keep).join('');
+}
+
+// Chỉ đúng khi chắc là mô hình nhúng. Tên tệp chứa "embed" hoặc kiến trúc trò chuyện thì không.
+function definitelyEmbedding(info) {
+  if (!info || typeof info !== 'object') return false;
+  const arch = info.arch || '';
+  if (EMBED_ARCH.has(arch)) return true;
+  if (info.pooling && !arch) return true;
+  return false;
+}
+function isEmbedGguf(full) {
+  try { return definitelyEmbedding(inspectFile(full)); } catch { return false; }
 }
 
 // Id mô hình nhúng không được nằm trong danh sách trò chuyện (kể cả khi tên tệp không khớp EMBED_RE).
@@ -160,6 +188,22 @@ function gpuLayersFor({ vramTotal = 0, vramFree = null, chatLoaded = false, inte
   return EMBED_IDLE_NGL;
 }
 
+// llama-server nhìn ảnh giữ VRAM mà node-llama-cpp không tính. Đo được thì lấy số trống thật; không đo được thì kẹp để -ngl không thành auto.
+function freeForEmbed(vram, { visionRunning = false, measuredFree = null } = {}) {
+  if (!visionRunning || !vram || typeof vram !== 'object') return vram;
+  const reported = Number(vram.free);
+  const total = Number(vram.total);
+  let free = Number.isFinite(reported) ? reported : 0;
+  // null = chưa đo được. Số 0 là đo được và VRAM trống thật sự hết.
+  const measured = measuredFree == null ? NaN : Number(measuredFree);
+  if (Number.isFinite(measured) && measured >= 0) free = Math.min(free, measured);
+  else free = Math.min(free, CONSERVATIVE_FREE);
+  if (Number.isFinite(total) && total > 0) free = Math.min(free, total);
+  if (free < 0) free = 0;
+  if (free === vram.free) return vram;
+  return { ...vram, free };
+}
+
 // Đo VRAM trống ngay trước khi spawn. probe treo hoặc lỗi → -ngl 0, không dùng số đo lúc mở máy.
 function embedGpuChoice({ probe, chatLoaded = false, timeoutMs = GPU_PROBE_MS } = {}) {
   const ms = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : GPU_PROBE_MS;
@@ -212,7 +256,7 @@ function toF32(e) {
   return Float32Array.from(e, (x) => Number(x) || 0);
 }
 
-function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe = null, gpuLayers = () => 0 } = {}) {
+function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe = null, gpuLayers = () => 0, holdMs = HOLD_MS } = {}) {
   const idle = Number.isFinite(idleMs) ? idleMs : (Number(process.env.AIVN_EMBED_IDLE_MS) > 0 ? Number(process.env.AIVN_EMBED_IDLE_MS) : DEFAULT_IDLE_MS);
   const locate = findExe || VS.findServer;
   let proc = null, port = 0, key = '', current = null, wanted = null, timer = null, spawns = 0, lastArgs = null, truncatedCount = 0, lastId = null;
@@ -221,19 +265,36 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
   let holds = 0;
   let gate = Promise.resolve();
   let openGate = () => {};
-  function hold() {
+  let holdTimer = null;
+  const holdLimit = Number.isFinite(holdMs) && holdMs > 0 ? holdMs : HOLD_MS;
+  function clearHoldTimer() {
+    if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+  }
+  function openHold() {
+    holds = 0;
+    clearHoldTimer();
+    const done = openGate;
+    gate = Promise.resolve();
+    openGate = () => {};
+    done();
+  }
+  function hold(ms) {
     holds += 1;
-    if (holds === 1) gate = new Promise((resolve) => { openGate = resolve; });
+    if (holds !== 1) return;
+    gate = new Promise((resolve) => { openGate = resolve; });
+    const limit = Number.isFinite(ms) && ms > 0 ? ms : holdLimit;
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      if (holds <= 0) return;
+      log('[embed] hết hạn giữ máy nhúng khi nạp mô hình, embeddings được chạy tiếp');
+      openHold();
+    }, limit);
+    if (typeof holdTimer.unref === 'function') holdTimer.unref();
   }
   function release() {
     if (holds <= 0) return;
     holds -= 1;
-    if (holds === 0) {
-      const done = openGate;
-      gate = Promise.resolve();
-      openGate = () => {};
-      done();
-    }
+    if (holds === 0) openHold();
   }
   // Gọi fn đồng bộ khi không còn hold, để hold() không lọt vào giữa lúc kiểm tra và lúc xếp hàng.
   function runFree(fn) {
@@ -479,7 +540,7 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
 function inspectCacheStats() { return { reads: metaReads }; }
 
 module.exports = {
-  createEmbedServer, listEmbeddingModels, gpuLayersFor, embedGpuChoice, inspectFile, inspectCacheStats, EmbedError, EMBED_RE, DEFAULT_IDLE_MS,
-  contextLimit, chatIdsExcept, assertInputLengths, clipByCodePoints, EMBED_IDLE_NGL, META_CACHE_MAX, GPU_PROBE_MS,
+  createEmbedServer, listEmbeddingModels, gpuLayersFor, embedGpuChoice, freeForEmbed, inspectFile, inspectCacheStats, EmbedError, EMBED_RE, DEFAULT_IDLE_MS,
+  contextLimit, chatIdsExcept, assertInputLengths, clipByCodePoints, definitelyEmbedding, isEmbedGguf, EMBED_IDLE_NGL, META_CACHE_MAX, GPU_PROBE_MS, HOLD_MS,
   MAX_STRING_CHARS, MAX_TOTAL_CHARS, MAX_EMBED_BODY,
 };
