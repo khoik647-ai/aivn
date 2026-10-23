@@ -497,6 +497,34 @@ test('review #64 vòng 6 M1′ (X1/X2/X3) + X4: nội dung ở dòng đầu, “
   for (const q of ['xin chào\n\ngõ vào tài liệu đang mở', 'gõ tiếp', 'mở Notepad và gõ tiếp vào cuối']) assert.strictEqual(FD.freshDocTask(q), false, q);
 });
 
+test('review #64 vòng 6 M1′ cùng dòng: nội dung trước dấu câu/phẩy không tắt bảo vệ — hành vi: thẻ cũ nguyên, chữ vào thẻ mới', async () => {
+  for (const [name, q, text] of [
+    ['chấm', 'Đừng xoá tệp này. Mở Notepad và gõ dòng trên', 'Đừng xoá tệp này'],
+    ['chấm en', 'Meeting notes from the current file. Open Notepad and type the above.', 'Meeting notes from the current file'],
+    ['phẩy', 'Đừng xoá tệp này, mở Notepad và gõ dòng trên', 'Đừng xoá tệp này'],
+    ['phẩy en', 'Meeting notes from the current file, open Notepad and type the above', 'Meeting notes from the current file'],
+    ['chấm phẩy', 'Đừng xoá tệp này; mở Notepad và gõ dòng trên', 'Đừng xoá tệp này'],
+    ['chấm than', 'Đừng xoá tệp này! Mở Notepad và gõ', 'Đừng xoá tệp này'],
+    ['readme', 'See readme.txt. Open Notepad and type the above.', 'See readme.txt'],
+    ['đường dẫn', 'Đường dẫn C:\\Users\\khoi\\notes.txt, mở Notepad và gõ', 'C:\\Users\\khoi\\notes.txt'],
+    ['U+2028', 'Đừng xoá tệp này\u2028mở Notepad và gõ dòng trên', 'Đừng xoá tệp này'],
+    ['chấm Trung', '当前文件的内容。打开记事本并输入上面的', '当前文件的内容'],
+    ['đừng gõ', 'Đừng gõ vào tệp này. Mở Notepad và gõ dòng trên', 'Đừng gõ vào tệp này'],
+  ]) {
+    assert.strictEqual(FD.freshDocTask(q), true, name);
+    assert.strictEqual(FD.namedTarget(q), null, name);
+    const w = OLD_DIRTY(); const ag = DK.make(w);
+    await DK.run(ag, q, [T(text)]);
+    assert.ok(!w.oldTouched(), name); assert.strictEqual(w.st.tabs.length, 2, name); assert.strictEqual(w.st.tabs[1].text, text, name);
+  }
+  // lệnh mở tệp / tài liệu đang mở vẫn là ngoại lệ (kể cả khi cách động từ bằng phẩy)
+  for (const q of ['mở notes.txt, gõ abc', 'open C:\\notes\\a.txt, type hi', 'open the existing document, type hi', 'mở notes.txt và gõ abc', 'gõ vào tài liệu đang mở, rồi viết thêm', 'type 3.14 into notes.txt', 'e.g. type into the current document'])
+    assert.strictEqual(FD.freshDocTask(q), false, q);
+  assert.strictEqual(FD.namedTarget('type 3.14 into notes.txt'), 'notes.txt');
+  assert.strictEqual(FD.namedTarget('open C:\\notes\\a.txt, type hi'), null);
+  assert.strictEqual(FD.freshDocTask('mở Notepad, gõ "abc" rồi lưu thành ghichu.txt'), true);
+});
+
 test('review #64 vòng 6 X6/X7: “gõ X vào <tệp>” chỉ bỏ bảo vệ khi tài liệu đang hiện ĐÚNG là tệp đó — hành vi', async () => {
   for (const [name, q, text] of [['X7', 'mở Notepad và gõ hello vào Untitled.txt', 'hello'], ['X6', 'open Notepad and type a reminder into notes.txt\nbuy milk', 'buy milk']]) {
     const w = OLD_DIRTY(); const ag = DK.make(w);

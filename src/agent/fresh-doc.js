@@ -103,10 +103,33 @@ function firstVerb(t) {
 const CUT = /[\r\n]|[:：﹕∶꞉˸︓](?![\\/]|\d)|["“”„«»‹「『‘’`(（\[【{<＜《〈]|(?<![\p{L}\d])'|\s[-–—]+\s/u;
 // review #64 vòng 6 (M1′): nội dung có thể ở DÒNG ĐẦU, câu lệnh ở dòng dưới (“<đoạn văn>\nmở Notepad và gõ đoạn trên”) →
 // dòng lệnh = dòng ĐẦU TIÊN có động từ ghi; dòng không có động từ ghi là nội dung. Không dòng nào có → '' (bảo vệ bật).
-const linesOf = (q) => String(q || '').replace(/(\d)[:：﹕∶](?=\d)/gu, '$1\u2009').split(/\r\n|[\r\n]/); // giờ 10:30 không phải dấu phân cách
+// Cùng lỗ trên CÙNG một dòng: “Đừng xoá tệp này. Mở Notepad và gõ…” / “Meeting notes from the current file, open Notepad and type…”
+// / “See readme.txt. Open Notepad and type the above” — mệnh đề đứng trước động từ ghi là nội dung, không được tắt bảo vệ.
+// Ngắt dòng Unicode (U+2028/U+2029) cũng là dòng mới. Giờ 10:30 không phải dấu phân cách; “notes.txt” / “3.14” không phải hết câu.
+const linesOf = (q) => String(q || '').replace(/(\d)[:：﹕∶](?=\d)/gu, '$1\u2009').split(/\r\n|[\r\n\u2028\u2029]/);
+const OPEN_START = /^\s*(?:(?:please|hãy|xin)\s+)?(?:mở|open|edit|sửa|打开|打開)(?![\p{L}])/iu;
+function splitClauses(line) {
+  const re = /[.!?…](?=\s)|[,，;；](?=\s)|[。！？…]|[，；]/gu;
+  const parts = []; let start = 0; let m;
+  while ((m = re.exec(line))) { parts.push({ text: line.slice(start, m.index), sep: /[,，;；]/.test(m[0]) ? 'comma' : 'stop' }); start = m.index + m[0].length; }
+  parts.push({ text: line.slice(start), sep: null });
+  return parts;
+}
 function commandPart(q) {
   const line = linesOf(q).find(l => writeTask(l)); if (line == null) return '';
-  const i = line.search(CUT); return i >= 0 ? line.slice(0, i) : line;
+  const parts = splitClauses(line);
+  const vi = []; parts.forEach((p, i) => { if (writeTask(p.text)) vi.push(i); });
+  if (!vi.length) { const i = line.search(CUT); return i >= 0 ? line.slice(0, i) : line; }
+  // hai câu đều có động từ ghi (“Đừng gõ vào tệp này. Mở Notepad và gõ…”) → câu sau là lệnh; phẩy thì giữ câu đầu (“gõ vào tài liệu đang mở, rồi viết…”)
+  const hard = vi.length > 1 && parts.slice(vi[0], vi[vi.length - 1]).some(p => p.sep === 'stop');
+  const idx = hard ? vi[vi.length - 1] : vi[0];
+  let text = parts[idx].text;
+  // “mở notes.txt, gõ abc” / “open the existing document, type hi”: mệnh đề mở tệp ngay trước động từ vẫn là lệnh
+  if (idx > 0 && parts[idx - 1].sep === 'comma' && !writeTask(parts[idx - 1].text)) {
+    const prev = parts[idx - 1].text;
+    if (OPEN_START.test(prev) && (namesExistingFile(prev) || EXISTING.test(prev))) text = prev + ',' + text;
+  }
+  const cut = text.search(CUT); return (cut >= 0 ? text.slice(0, cut) : text).trim();
 }
 const URL_RE = /(?:[a-z][a-z\d+.-]*:\/\/|www\.)\S*/giu;
 // cụm đích NGAY sau động từ ghi (không có nội dung xen giữa)
