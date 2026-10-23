@@ -10,7 +10,10 @@ test('B68 (sửa nóng trên gh-pages) đã có trong site/index.html; release.s
   // điện thoại không bao giờ nhận tệp (mobile=phone); khi không có JS/API nút giữ link tĩnh tới bộ cài ổn định (release.sh đổi thành releases/latest/download).
   assert.match(site, /var FALLBACK='https:\/\/github\.com\/'\+REPO\+'\/releases';/);
   assert.match(site, /<a aria-describedby="dl-sub" class="dl-main" href="AIVN-Setup\.exe">/);
-  assert.match(site, /var p=DLX\.target\(mobile\?null:os,macArch\)/); assert.match(site, /var mobile=phone;/);
+  // Nút chính lấy hệ/chip khách đã chọn (chosen → pickOs/pickArch; chưa chọn thì theo máy). Điện thoại luôn truyền null.
+  assert.match(site, /var pickOs=chosen==='win'\?'windows':\(chosen==='arm64'\|\|chosen==='x64'\)\?'mac':os;/);
+  assert.match(site, /var pickArch=\(chosen==='arm64'\|\|chosen==='x64'\)\?chosen:macArch;/);
+  assert.match(site, /var p=DLX\.target\(mobile\?null:pickOs,pickArch\)/); assert.match(site, /var mobile=phone;/);
   assert.match(site, /if\(kind==='mobile'\)main\.href='#tai-ve';/);
   assert.match(site, /#tai-ve\{scroll-margin-top:calc\(var\(--hdr,72px\) \+ 20px\)\}/); assert.match(site, /@keyframes dlflash/);
   const rel = fs.readFileSync(path.join(root, 'release.sh'), 'utf8');
@@ -31,4 +34,9 @@ test('site_drift: dòng/khoá i18n thêm trên gh-pages sau lần triển khai g
   r = run(hot.replace('0.15.3', '0.16.0')); assert.strictEqual(r.status, 0, r.stderr);
   const digest = require('crypto').createHash('sha256').update(fs.readFileSync(path.join(live, 'index.html'))).digest('hex').slice(0, 12);
   assert.strictEqual(run(newer, { SITE_DRIFT_ACK: digest }).status, 0); assert.strictEqual(run(newer, { SITE_DRIFT_ACK: 'sai' }).status, 1);
+  const good = hot.replace('0.15.3', '0.16.0');
+  fs.writeFileSync(path.join(live, 'revoked-v2.json'), '{"payload":"x"}\n');
+  r = run(good); assert.strictEqual(r.status, 0, r.stderr); assert.doesNotMatch(r.stderr + r.stdout, /revoked-v2/);
+  fs.writeFileSync(path.join(live, 'notes-hot.txt'), 'sửa nóng\n');
+  r = run(good); assert.strictEqual(r.status, 1, r.stdout + r.stderr); assert.match(r.stderr, /notes-hot\.txt/); assert.doesNotMatch(r.stderr, /revoked-v2/);
 });

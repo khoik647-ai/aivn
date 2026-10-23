@@ -7,7 +7,13 @@ hướng dẫn mở lần đầu trên Mac (Gatekeeper “Vẫn mở”/“Open 
 Dùng: python tools/site_check.py URL out.json [thư-mục-ảnh]"""
 import sys, json, re, os
 from playwright.sync_api import sync_playwright
-URL = sys.argv[1]; OUT = sys.argv[2]; SHOTS = sys.argv[3] if len(sys.argv) > 3 else None
+_args = [a for a in sys.argv[1:] if not a.startswith('--')]
+_flags = {a for a in sys.argv[1:] if a.startswith('--')}
+if len(_args) < 2:
+    sys.exit('Dùng: python tools/site_check.py URL out.json [thư-mục-ảnh] [--matrix]')
+URL, OUT = _args[0], _args[1]
+SHOTS = _args[2] if len(_args) > 2 else None
+MATRIX = '--matrix' in _flags
 CREDIT = 'NGUYỄN NGỌC KHÔI SINH VIÊN VLU'
 FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'test', 'fixtures', 'site-releases-api.json')
 API_BODY = json.dumps([r for r in json.load(open(FIX, encoding='utf-8')) if not r['draft']])
@@ -69,11 +75,16 @@ def exercise_cta(pg):
         (groups[h] = groups[h] || []).push(a);
         if (!a.closest('#tai-ve')) outside.push(h || a.tagName);
       });
+      const inKhac = list => list.filter(a => a.closest('#tai-ve-khac')).length;
+      // #tai-ve-khac bị ẩn. Đúng một cặp sinh đôi (hai link cùng URL, .o-intelq và .o-x64) trong #tai-ve vẫn được phép; cặp thứ hai hoặc bản thứ ba thì báo.
+      const twinHrefs = Object.keys(groups).filter(h => inKhac(groups[h]) === 2);
       const dup = Object.keys(groups).filter(h => {
         const list = groups[h];
         const visible = list.filter(shown).length;
         const outsideN = list.filter(a => !a.closest('#tai-ve')).length;
-        return visible > 1 || outsideN > 1 || (outsideN > 0 && list.length > 1);
+        const khacN = inKhac(list);
+        const khacDup = khacN > 2 || (khacN === 2 && twinHrefs.length !== 1);
+        return visible > 1 || outsideN > 1 || (outsideN > 0 && list.length > 1) || khacDup;
       });
       const attrOut = [...document.querySelectorAll('[download]')].filter(el => !el.closest('#tai-ve')).map(el => el.getAttribute('href') || el.tagName);
       return {dup, outside, attr: attrOut, foreign};
@@ -88,6 +99,7 @@ CONF = [('fold-280', dict(viewport={'width': 280, 'height': 653}, user_agent=AND
         ('mac-safari-arm64-1280', dict(viewport=D1280, user_agent=SAF), nav('MacIntel'), 'mac'),        # B174: Mac M… dùng Safari (không biết chip)
         ('mac-safari-intel-1280', dict(viewport=D1280, user_agent=SAF), nav('MacIntel'), 'mac'),        # B174: Mac Intel dùng Safari
         ('mac-chrome-arm64-1280', dict(viewport=D1280, user_agent=MCH), nav('MacIntel', 0, ('macOS', 'arm')), 'mac-arm64'),
+        ('mac-chrome-intel-1280', dict(viewport=D1280, user_agent=MCH), nav('MacIntel', 0, ('macOS', 'x86')), 'mac-x64'),
         ('linux-1280', dict(viewport=D1280, user_agent=LNX), nav('Linux x86_64'), 'linux'),
         ('desktop-1280', dict(viewport=D1280, user_agent=WIN), nav('Win32', 0, ('Windows', 'x86')), 'win'),
         ('desktop-1280-apifail', dict(viewport=D1280, user_agent=WIN), nav('Win32', 0, ('Windows', 'x86')), 'win'),      # API 403 → link tĩnh
@@ -114,15 +126,21 @@ JS = r'''() => {
   beta:vis(row.querySelector('.dl-beta')), failLink:[...row.querySelectorAll('.dl-s-fail a')].filter(vis).map(a=>a.getAttribute('href')),
   intelq:vis(row.querySelector('.o-intelq')), lnx:vis(row.querySelector('.dl-lnx')), hint:vis(row.querySelector('.dl-hint')), gkLink:vis(row.querySelector('.dl-gklink')),
   other:[...row.querySelectorAll('.dl-other a')].filter(vis).map(a=>a.dataset.k+' '+a.getAttribute('href')),
+  otherLine:vis(document.getElementById('tai-ve-khac')),
+  srcOther:[...document.querySelectorAll('#tai-ve-khac a[data-k]')].map(a=>a.dataset.k+' '+a.getAttribute('href')),
   shareVis:vis(share), shareH:vis(share)?H(share):null, mobnote:vis(row.querySelector('.dl-mobnote')),
   ctrls, binVis, ctaHrefs:[...document.querySelectorAll('.cta .dl-row a[href]')].map(a=>a.getAttribute('href')),
-  gk:!!gk, gkSteps:gk?gk.querySelectorAll('li').length:0, gkText:gk?gk.textContent:'', gkSummaryH:gk&&vis(gk.querySelector('summary'))?H(gk.querySelector('summary')):null,
+  gk:!!gk, gkSteps:gk?gk.querySelectorAll('li').length:0, gkText:gk?gk.textContent:'', secText:(document.getElementById('mo-tren-mac')||{}).textContent||'', gkSummaryH:gk&&vis(gk.querySelector('summary'))?H(gk.querySelector('summary')):null,
   hdrHref:hdr?hdr.getAttribute('href'):null, raw:/__MB_|__SHA|__VER/.test(document.body.innerText)||[...document.querySelectorAll('[title]')].some(e=>/__MB_/.test(e.title)),
   stableWin:[...document.querySelectorAll('.dl-row .dl-btn[data-os=windows]')].filter(vis).map(a=>a.getAttribute('href')),
   stableMac:[...document.querySelectorAll('.cta .dl-btn[data-os=mac]')].filter(vis).length,
   ctaWinTitle:((document.querySelector('.cta [data-os=windows]')||{}).getAttribute&&document.querySelector('.cta [data-os=windows]').getAttribute('title'))||'',
   dlNotes:[...document.querySelectorAll('.dl-mnote')].filter(vis).map(e=>e.innerText.trim()),
   outsideOverflow:[...document.querySelectorAll('body *')].some(e=>!e.closest('header')&&e.getBoundingClientRect().width&&e.getBoundingClientRect().right>cw+0.5&&getComputedStyle(e).position!=='fixed'&&getComputedStyle(e).display!=='none'),
+  osPicks:[...document.querySelectorAll('a.os-pick')].map(a=>{const k=a.getAttribute('data-k');const src=document.querySelector('#tai-ve .dl-other a[data-k="'+k+'"]');return {k:k,href:a.getAttribute('href'),resolved:a.getAttribute('data-resolved')||'',src:src?src.getAttribute('href'):'',vis:vis(a)};}),
+  gkShown:vis(document.getElementById('mo-tren-mac')), gkGuide:vis(document.getElementById('gk-guide')),
+  linuxSoon:[...document.querySelectorAll('.os-row [data-os=linux], .cta [data-os=linux]')].filter(vis).length,
+  linuxSoonStyle:[...document.querySelectorAll('.os-row [data-os=linux].soon, .cta [data-os=linux].soon')].map(el=>{const s=getComputedStyle(el);return {op:s.opacity,cur:s.cursor,dis:el.getAttribute('aria-disabled')};}),
   creditCount:(foot.match(/NGUYỄN NGỌC KHÔI SINH VIÊN VLU/g)||[]).length, footPhone:(foot.match(/(Điện thoại|Phone|电话)[:：]?\s*[^\n]*/)||[''])[0],
   footSub:((document.querySelector('[data-i18n="footer.sub"]')||{}).innerText||'').trim(),
   heroText:(()=>{const a=document.querySelector('.beta-hero a');return a?a.innerText:'';})()};
@@ -130,6 +148,8 @@ JS = r'''() => {
 res = []
 bad_band = []
 band_log = []
+matrix_bad = []
+matrix_n = 0
 BAND = list(range(768, 901, 2))  # B185: 768, 780, 800, 810, 820, 834, 850, 880, 900 và mọi bước 2 px
 NARROW = [280, 320, 375, 390]  # B162: bề rộng hẹp nhất là 280 px (Galaxy Fold gập). Không bắt đầu từ 320. 375 px là bề rộng iPhone.
 NARROW_CLIENT = (
@@ -148,8 +168,28 @@ with sync_playwright() as p:
             c = b.new_context(**kw); c.add_init_script(init); api(c, name.endswith('apifail')); pg = c.new_page(); reqs = []
             pg.on('request', lambda r: reqs.append(r.url) if re.search(r'\.(exe|zip)(\?|$)', r.url) else None)
             pg.on('download', lambda dl: (reqs.append('DOWNLOAD ' + dl.url), dl.cancel()))
+            errs = []
+            pg.on('pageerror', lambda e, bucket=errs: bucket.append(str(e)))
             pg.goto(URL + ('&' if '?' in URL else '?') + 'lang=' + lang, wait_until='load'); pg.wait_for_timeout(900)
-            r = pg.evaluate(JS); r['conf'] = name; r['kind'] = kind; r['apifail'] = name.endswith('apifail')
+            r = pg.evaluate(JS); r['conf'] = name; r['kind'] = kind; r['apifail'] = name.endswith('apifail'); r['jsErrors'] = errs
+            if kind not in ('ios', 'android'):
+                pg.emulate_media(reduced_motion='reduce')
+                r['osPickProbe'] = pg.evaluate(r'''() => {
+                  const row=document.getElementById('tai-ve');
+                  const shown=e=>{if(!e)return false;for(let n=e;n;n=n.parentElement){const cs=getComputedStyle(n);if(cs.display==='none'||cs.visibility==='hidden')return false;}const b=e.getBoundingClientRect();return b.width>0&&b.height>=24;};
+                  const hit=e=>{e.scrollIntoView({block:'center',inline:'nearest'});const b=e.getBoundingClientRect();const x=Math.min(innerWidth-2,Math.max(2,b.left+b.width/2));const y=Math.min(innerHeight-2,Math.max(2,b.top+b.height/2));const n=document.elementFromPoint(x,y);return !!(n&&(n===e||e.contains(n)));};
+                  const kindOf=h=>{h=h||'';if(/AIVN-Setup(?:-[^/?#]+)?\.exe(?:$|[?#])/.test(h)||/(?:^|\/)AIVN-Setup\.exe(?:$|[?#])/.test(h))return 'win';if(/arm64-mac\.zip|AIVN-mac-arm64\.zip/.test(h))return 'arm64';if(/x64-mac\.zip|AIVN-mac-x64\.zip/.test(h))return 'x64';return '';};
+                  const links=()=>[...row.querySelectorAll('a[href]')].filter(shown).map(a=>({k:kindOf(a.getAttribute('href')),href:a.getAttribute('href'),h:Math.round(a.getBoundingClientRect().height),hit:hit(a)}));
+                  const out={before:links()};
+                  ['win','arm64','x64'].forEach(k=>{
+                    const card=document.querySelector('#os-row a.os-pick[data-k="'+k+'"]');
+                    if(!card){out[k]={missing:true};return;}
+                    card.click();
+                    const main=row.querySelector('a.dl-main'), sw=row.querySelector('.dl-switch-a');
+                    out[k]={t:row.getAttribute('data-t'),href:main.getAttribute('href'),h:Math.round(main.getBoundingClientRect().height),vis:shown(main),hit:shown(main)&&hit(main),swVis:shown(sw),swHref:sw?sw.getAttribute('href'):'',swHit:shown(sw)&&hit(sw)};
+                  });
+                  return out;
+                }''')
             # M8: nút “Tải miễn phí” ở đầu trang chỉ cuộn tới #tai-ve (không tải gì)
             hb = pg.locator('header .nav-cta a.btn')
             if hb.count() and hb.is_visible():
@@ -170,6 +210,7 @@ with sync_playwright() as p:
                 if note.count() and note.is_visible(): note.click()
             got = exercise_cta(pg)
             r['outsideBin'] = got['outside']; r['dupUrls'] = got['dup']; r['outsideAttr'] = got['attr']; r['foreign'] = got['foreign']
+            r['gkAfter'] = pg.evaluate('''() => { const e=document.getElementById('mo-tren-mac'); if(!e) return false; const cs=getComputedStyle(e); return cs.display!=='none' && e.getClientRects().length>0; }''')
             r['afterUrl'] = pg.url; r['requests'] = list(reqs)
             if SHOTS: pg.locator('#tai-ve').scroll_into_view_if_needed(); pg.evaluate('()=>scrollTo(0,0)'); pg.screenshot(path=f'{SHOTS}/{name}-{lang}.png')
             res.append(r); c.close()
@@ -290,6 +331,56 @@ with sync_playwright() as p:
                 if probs: bad_narrow.append(f'narrow-{w} {uname} {lang}: ' + '; '.join(probs[:8]))
                 else: band_log.append(f'narrow-{w} {uname} {lang}: không tràn, nút trong khung, điều khiển ≥24, nút tải ≥44')
             nc.close()
+    # Ma trận đầy đủ chỉ khi gọi --matrix (publish-beta vẫn chạy site_check không cờ này).
+    # 6 hệ × API ok/lỗi × 8 bề rộng × vi/en/zh. Chỉ tính lỗi JS và tràn ngang.
+    if MATRIX:
+        MW = [280, 320, 375, 390, 768, 1024, 1280, 1440]
+        MCLIENT = (
+            ('windows', dict(user_agent=WIN), nav('Win32', 0, ('Windows', 'x86'))),
+            ('mac-arm64', dict(user_agent=MCH), nav('MacIntel', 0, ('macOS', 'arm'))),
+            ('mac-intel', dict(user_agent=MCH), nav('MacIntel', 0, ('macOS', 'x86'))),
+            ('linux', dict(user_agent=LNX), nav('Linux x86_64')),
+            ('android', dict(user_agent=AND, is_mobile=True, has_touch=True, device_scale_factor=2), nav('Linux armv8l', 5)),
+            ('iphone', dict(user_agent=IPH, is_mobile=True, has_touch=True, device_scale_factor=2), nav('iPhone', 5)),
+        )
+        measure = r'''() => {
+          const d=document.documentElement, cw=d.clientWidth, off=[];
+          const sticks=e=>{
+            const r=e.getBoundingClientRect();
+            if(!(r.width>0 && (r.right>cw+1 || r.left<-1)) || getComputedStyle(e).position==='fixed') return false;
+            let p=e.parentElement;
+            while(p && p!==document.body && p!==document.documentElement){
+              const o=getComputedStyle(p).overflowX;
+              if(o==='auto'||o==='scroll'||o==='hidden'||o==='clip'){
+                const pr=p.getBoundingClientRect();
+                if(pr.left>=-1 && pr.right<=cw+1) return false;
+              }
+              p=p.parentElement;
+            }
+            return true;
+          };
+          document.querySelectorAll('body *').forEach(e=>{ if(sticks(e)) off.push((e.tagName+'.'+String(e.className).slice(0,28))+':'+Math.round(e.getBoundingClientRect().right)); });
+          return {sw:d.scrollWidth, cw, overflow:d.scrollWidth>cw, off:off.slice(0,4)};
+        }'''
+        for mname, base, init in MCLIENT:
+            for fail in (False, True):
+                kw = dict(base); kw['viewport'] = {'width': 1440, 'height': 900}
+                mc = b.new_context(**kw); mc.add_init_script(init); api(mc, fail); mpg = mc.new_page(); errs = []
+                mpg.on('pageerror', lambda e, bucket=errs: bucket.append(str(e)))
+                for lang in ('vi', 'en', 'zh'):
+                    del errs[:]
+                    mpg.goto(URL + ('&' if '?' in URL else '?') + 'lang=' + lang, wait_until='load')
+                    try: mpg.wait_for_function("() => { const r=document.getElementById('tai-ve'); return !!(r && r.dataset.state && r.dataset.state!=='loading'); }", timeout=8000)
+                    except Exception as ex: matrix_bad.append(f'matrix {mname} api={"fail" if fail else "ok"} {lang}: không chờ xong nút tải ({ex})')
+                    mpg.evaluate('() => document.fonts.ready')
+                    for w in MW:
+                        mpg.set_viewport_size({'width': w, 'height': 900})
+                        mr = mpg.evaluate(measure); matrix_n += 1
+                        tag = f'matrix {mname} api={"fail" if fail else "ok"} {lang} {w}px'
+                        if errs: matrix_bad.append(f'{tag}: lỗi JS {errs[:2]}'); del errs[:]
+                        if mr['overflow'] or mr['off']: matrix_bad.append(f'{tag}: tràn {mr["sw"]}>{mr["cw"]} {mr["off"]}')
+                mc.close()
+        print(f'MA TRẬN: {matrix_n} lần (6 hệ × API ok/lỗi × {len(MW)} bề rộng × vi/en/zh), lỗi {len(matrix_bad)}')
     b.close()
 json.dump(res, open(OUT, 'w'), ensure_ascii=False, indent=1)
 checked = [r for r in res if not r.get('pillOnly')]
@@ -300,7 +391,50 @@ for r in res:
 
 LABEL = {'vi': 'Điện thoại', 'en': 'Phone', 'zh-CN': '电话'}
 WANT = {'win': 'AIVN-Setup-0.16.0-beta.3.exe', 'arm64': 'AIVN-0.16.0-beta.3-arm64-mac.zip'}  # dữ liệu mẫu: bản mới nhất (cờ INCLUDE_PRERELEASE=true) là v0.16.0-beta.3
-STATIC = {'win': r'(^|/releases/latest/download/)AIVN-Setup\.exe$', 'mac': r'(^|/releases/latest/download/)AIVN-mac-arm64\.zip$'}
+STATIC = {'win': r'(^|/releases/latest/download/)AIVN-Setup\.exe$', 'mac': r'(^|/releases/latest/download/)AIVN-mac-arm64\.zip$', 'x64': r'(^|/releases/latest/download/)AIVN-mac-x64\.zip$'}
+ASSET = {
+    True: {'win': 'AIVN-Setup.exe', 'arm64': 'AIVN-mac-arm64.zip', 'x64': 'AIVN-mac-x64.zip'},
+    False: {'win': 'AIVN-Setup-0.16.0-beta.3.exe', 'arm64': 'AIVN-0.16.0-beta.3-arm64-mac.zip', 'x64': 'AIVN-0.16.0-beta.3-x64-mac.zip'},
+}
+def ends_asset(href, name):
+    return bool(href) and (href.endswith(name) or href.endswith('/' + name))
+def hero_buttons(k, r):
+    """Hàng nút Windows / Apple Silicon / Intel lấy href đã phân giải trong #tai-ve, không có href tệp riêng. Hướng dẫn Gatekeeper chỉ hiện trên Mac cho đến khi bấm nút macOS."""
+    out = []
+    picks = r.get('osPicks') or []
+    by = {}
+    for p in picks:
+        by.setdefault(p.get('k'), []).append(p)
+    want = ASSET[bool(r.get('apifail'))]
+    for key in ('win', 'arm64', 'x64'):
+        group = by.get(key) or []
+        if len(group) < 2:
+            out.append(f'{k}: thiếu nút {key} (có {len(group)}, cần hàng hero và CTA)')
+        for p in group:
+            if p.get('href') != '#tai-ve' or re.search(r'\.(exe|zip)(\?|#|$)', p.get('href') or '', re.I):
+                out.append(f'{k}: nút {key} không được mang href tệp ({p.get("href")})')
+            if not ends_asset(p.get('resolved'), want[key]) or p.get('src') != p.get('resolved'):
+                out.append(f'{k}: nút {key} phải dùng href trong #tai-ve {want[key]}, gặp {p.get("resolved")!r}')
+    phone = r.get('kind') in ('ios', 'android')
+    mac = r.get('kind') in ('mac', 'mac-arm64', 'mac-x64')
+    if phone and any(p.get('vis') for p in picks):
+        out.append(f'{k}: điện thoại vẫn thấy hàng nút hệ điều hành')
+    if not phone:
+        if sum(1 for p in picks if p.get('vis')) < 6:
+            out.append(f'{k}: máy tính không thấy đủ nút Windows / Apple Silicon / Intel')
+        if (r.get('linuxSoon') or 0) < 1:
+            out.append(f'{k}: thiếu nút Linux sắp ra mắt')
+        if bool(r.get('gkShown')) != bool(mac):
+            out.append(f'{k}: hướng dẫn Gatekeeper lúc mở trang hiện={r.get("gkShown")} (chỉ macOS)')
+        if mac and not r.get('gkGuide'):
+            out.append(f'{k}: macOS không thấy phần minh hoạ Gatekeeper')
+        if not mac and r.get('gkAfter') is not True:
+            out.append(f'{k}: bấm nút macOS mà hướng dẫn Gatekeeper không hiện')
+        if mac and r.get('gkAfter') is not True:
+            out.append(f'{k}: macOS mất hướng dẫn Gatekeeper sau khi bấm')
+    elif r.get('gkShown') or r.get('gkAfter'):
+        out.append(f'{k}: điện thoại thấy hướng dẫn Gatekeeper')
+    return out
 bad = []
 def pill_problem(k, r):
     """Huy hiệu phải có số phiên bản khi hiện, hoặc ẩn cả cụm. Không bao giờ hiện “Phiên bản · …” trống."""
@@ -329,12 +463,33 @@ for r in res:
     if r['creditCount'] < 3: bad.append(f'{k}: dòng ghi công chỉ còn {r["creditCount"]}')
     if not r['footPhone'].startswith(LABEL.get(r['lang'], '?')): bad.append(f'{k}: nhãn điện thoại “{r["footPhone"]}”')
     if (r['lang'] != 'vi') != bool(r['footSub']): bad.append(f'{k}: phụ đề ghi công “{r["footSub"]}” (en/zh phải có, vi để trống)')
+    if r.get('jsErrors'): bad.append(f'{k}: lỗi JS {r["jsErrors"][:2]}')
+    bad.extend(hero_buttons(k, r))
     if r['requests']: bad.append(f'{k}: mở trang/bấm nút đầu trang/hướng dẫn mà trình duyệt tải tệp {r["requests"]}')
     if r['raw']: bad.append(f'{k}: trang hiện chữ giữ chỗ (__MB_…)')
     if r['hdrHref'] != '#tai-ve' or r.get('hdrScroll') is False: bad.append(f'{k}: nút đầu trang phải là neo #tai-ve ({r["hdrHref"]}, cuộn={r.get("hdrScroll")})')
     small = [c for c in r['ctrls'] if c['h'] < 24]
     if small: bad.append(f'{k}: nút/link trong khối tải thấp hơn 24 px: {small}')
-    if not r['gk'] or r['gkSteps'] != 4 or not re.search(r'Vẫn mở|Open Anyway|仍要打开', r['gkText']): bad.append(f'{k}: thiếu hướng dẫn mở lần đầu trên Mac (Gatekeeper, 4 bước): {r["gk"]} {r["gkSteps"]}')
+    if r.get('otherLine'): bad.append(f'{k}: dòng “Các bản khác” vẫn hiện dưới nút chính')
+    if not phone:
+        probe = r.get('osPickProbe') or {}
+        want_pick = ASSET[bool(fail)]
+        for key in ('win', 'arm64', 'x64'):
+            p = probe.get(key) or {}
+            if p.get('t') != key or not ends_asset(p.get('href'), want_pick[key]) or not p.get('vis') or not p.get('hit') or (p.get('h') or 0) < 44:
+                bad.append(f'{k}: bấm thẻ {key} không đưa nút chính tới tệp hiện, bấm được: {p}')
+            if key in ('arm64', 'x64'):
+                other = 'x64' if key == 'arm64' else 'arm64'
+                if not p.get('swVis') or not p.get('swHit') or not ends_asset(p.get('swHref'), want_pick[other]):
+                    bad.append(f'{k}: nút chính là bản Mac mà không có link hiện tới bản {other}: {p}')
+        if kind in ('mac', 'mac-arm64', 'mac-x64'):
+            got = {x.get('k') for x in (probe.get('before') or []) if x.get('hit')}
+            if 'arm64' not in got or 'x64' not in got:
+                bad.append(f'{k}: máy Mac phải thấy cả bản arm64 và x64 qua link hiện: {probe.get("before")}')
+    soon = r.get('linuxSoonStyle') or []
+    if len(soon) != 2 or any(s.get('op') != '0.55' or s.get('cur') != 'not-allowed' or s.get('dis') != 'true' for s in soon):
+        bad.append(f'{k}: nút Linux “sắp ra mắt” (hero và CTA) phải opacity 0.55, cursor not-allowed, aria-disabled: {soon}')
+    if not r['gk'] or r['gkSteps'] != 3 or not re.search(r'Vẫn mở|Open Anyway|仍要打开', r.get('secText') or '') or not re.search(r'xattr', r['gkText'] or ''): bad.append(f'{k}: thiếu hướng dẫn mở lần đầu trên Mac (hai thẻ + ghi chú, không lặp bước): {r["gk"]} {r["gkSteps"]}')
     if r['state'] != ('fail' if fail else 'ok'): bad.append(f'{k}: trạng thái {r["state"]}, cần {"fail" if fail else "ok"}')
     bad.extend(pill_problem(k, r))
     if bool(r.get('badgePre')) != bool(r['beta']): bad.append(f'{k}: nhãn Beta trên huy hiệu ({r.get("badgePre")}) khác nút ({r["beta"]})')
@@ -350,29 +505,36 @@ for r in res:
         continue
     if r['mobileCls'] or r['shareVis']: bad.append(f'{k}: máy tính mà hiện phần điện thoại')
     if not r['mainVis'] or (r['mainH'] or 0) < 44: bad.append(f'{k}: nút chính không hiện / thấp {r["mainH"]} px')
-    if r['dlNotes'] or not r['stableWin'] or r['stableMac'] != 1: bad.append(f'{k}: hàng nút cuối trang đổi notes={r["dlNotes"]!r} win={r["stableWin"]} mac={r["stableMac"]}')
+    if r['dlNotes'] or not r['stableWin'] or r['stableMac'] < 1: bad.append(f'{k}: hàng nút cuối trang đổi notes={r["dlNotes"]!r} win={r["stableWin"]} mac={r["stableMac"]}')
     if kind == 'win':
         if fail:
             if not re.search(STATIC['win'], r['mainHref']): bad.append(f'{k}: API lỗi mà nút chính không giữ link tĩnh AIVN-Setup.exe: {r["mainHref"]}')
         elif not r['mainHref'].endswith('/v0.16.0-beta.3/' + WANT['win']) or r['ver'] != 'v0.16.0-beta.3' or not r['beta']: bad.append(f'{k}: Windows: {r["mainHref"]} {r["ver"]} beta={r["beta"]}')
         if r['gkLink'] or r['intelq']: bad.append(f'{k}: Windows mà hiện phần Mac')
-    elif kind in ('mac', 'mac-arm64'):
+    elif kind in ('mac', 'mac-arm64') or kind == 'mac-x64':
         if re.search(r'\.exe$', r['mainHref']): bad.append(f'{k}: {kind} vẫn được mời tải .exe: {r["mainHref"]}')  # B174
-        if fail:
-            if not re.search(STATIC['mac'], r['mainHref']): bad.append(f'{k}: API lỗi mà nút chính không giữ link tĩnh AIVN-mac-arm64.zip: {r["mainHref"]}')
-        elif not r['mainHref'].endswith('/v0.16.0-beta.3/' + WANT['arm64']) or not r['beta']: bad.append(f'{k}: Mac: nút chính {r["mainHref"]} beta={r["beta"]} (không biết chip → Apple Silicon)')
-        if (kind == 'mac') != r['intelq']: bad.append(f'{k}: link “Mac dùng chip Intel?” {"thiếu" if kind == "mac" else "thừa"}')
-        if not r['gkLink'] or r.get('gkOpen') != 4 or (r.get('gkSummaryH') or 0) < 44: bad.append(f'{k}: Mac: hướng dẫn Gatekeeper không mở được từ khối tải: {r["gkLink"]} {r.get("gkOpen")} {r.get("gkSummaryH")}')
-        if not fail and not any(o.startswith('x64 ') and o.endswith('/v0.16.0-beta.3/AIVN-0.16.0-beta.3-x64-mac.zip') for o in r['other']): bad.append(f'{k}: Mac: thiếu link bản Intel đúng release {r["other"]}')
+        if kind == 'mac-x64':
+            if fail:
+                if not re.search(STATIC['x64'], r['mainHref']): bad.append(f'{k}: API lỗi mà nút chính không giữ link tĩnh AIVN-mac-x64.zip: {r["mainHref"]}')
+            elif not r['mainHref'].endswith('/v0.16.0-beta.3/AIVN-0.16.0-beta.3-x64-mac.zip') or not r['beta']: bad.append(f'{k}: Mac Intel: nút chính {r["mainHref"]} beta={r["beta"]}')
+            if not fail and not any(o.startswith('arm64 ') and o.endswith('/v0.16.0-beta.3/AIVN-0.16.0-beta.3-arm64-mac.zip') for o in r['srcOther']): bad.append(f'{k}: Mac Intel: thiếu nguồn Apple Silicon trong #tai-ve {r["srcOther"]}')
+        else:
+            if fail:
+                if not re.search(STATIC['mac'], r['mainHref']): bad.append(f'{k}: API lỗi mà nút chính không giữ link tĩnh AIVN-mac-arm64.zip: {r["mainHref"]}')
+            elif not r['mainHref'].endswith('/v0.16.0-beta.3/' + WANT['arm64']) or not r['beta']: bad.append(f'{k}: Mac: nút chính {r["mainHref"]} beta={r["beta"]} (không biết chip → Apple Silicon)')
+            if not fail and not any(o.startswith('x64 ') and o.endswith('/v0.16.0-beta.3/AIVN-0.16.0-beta.3-x64-mac.zip') for o in r['srcOther']): bad.append(f'{k}: Mac: thiếu nguồn bản Intel trong #tai-ve {r["srcOther"]}')
+        if r['intelq']: bad.append(f'{k}: link “Mac dùng chip Intel?” vẫn hiện (hàng nút đã có cả hai chip)')
+        if not r['gkLink'] or r.get('gkOpen') != 3 or (r.get('gkSummaryH') or 0) < 44: bad.append(f'{k}: Mac: hướng dẫn Gatekeeper không mở được từ khối tải: {r["gkLink"]} {r.get("gkOpen")} {r.get("gkSummaryH")}')
     elif kind == 'linux':
         if re.search(r'\.(exe|zip)$', r['mainHref']): bad.append(f'{k}: {kind} vẫn được mời tải .exe: {r["mainHref"]}')  # B174
         # M2/QA2: Linux không bao giờ được mời tải .exe; nút chính → trang Releases, có ghi chú “chưa có bản Linux”, vẫn giữ link nhỏ Windows/Mac
         if r['mainHref'] != 'https://github.com/khoik647-ai/aivn/releases' or not r['lnx']: bad.append(f'{k}: Linux: nút chính phải trỏ trang Releases và hiện ghi chú chưa có bản Linux: {r["mainHref"]} lnx={r["lnx"]}')
         if not re.search(r'Xem các bản AIVN trên GitHub|See AIVN releases on GitHub|在 GitHub 查看 AIVN 各版本', r['mainText']): bad.append(f'{k}: Linux: nhãn nút chính “{r["mainText"]}”')
-        if sorted(o.split(' ')[0] for o in r['other']) != ['arm64', 'win', 'x64']: bad.append(f'{k}: Linux: thiếu link nhỏ Windows/Mac {r["other"]}')
+        if sorted({o.split(' ')[0] for o in r.get('srcOther') or []}) != ['arm64', 'win', 'x64']: bad.append(f'{k}: Linux: thiếu nguồn Windows/Mac trong #tai-ve {r.get("srcOther")}')
         if r['gkLink'] or r['intelq']: bad.append(f'{k}: Linux mà hiện phần Mac')
 bad.extend(bad_band)
 bad.extend(bad_narrow)
+bad.extend(matrix_bad)
 for line in band_log: print(line)
-print('\n'.join(bad) if bad else f'KIỂM BỐ CỤC OK: {len(checked)} lần chạy ({len(CONF)} cấu hình × vi/en/zh); dải 768–900 px × vi/en/zh ({len(BAND)} bề rộng) không tràn; hẹp {NARROW[0]}–{NARROW[-1]} px × vi/en/zh không tràn khung; huy hiệu có số hoặc ẩn ở mọi cấu hình')
+print('\n'.join(bad) if bad else f'KIỂM BỐ CỤC OK: {len(checked)} lần chạy ({len(CONF)} cấu hình × vi/en/zh); dải 768–900 px × vi/en/zh ({len(BAND)} bề rộng) không tràn; hẹp {NARROW[0]}–{NARROW[-1]} px × vi/en/zh không tràn khung; huy hiệu có số hoặc ẩn ở mọi cấu hình; hàng nút hệ điều hành lấy đúng tệp trong #tai-ve; hướng dẫn Gatekeeper chỉ hiện trên macOS' + (f'; ma trận {matrix_n} lần không lỗi JS, không tràn' if MATRIX else ''))
 sys.exit(1 if bad else 0)

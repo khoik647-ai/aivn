@@ -110,8 +110,11 @@ test('một đường tải duy nhất: không còn khối beta riêng; nút đ�
   assert.ok(!/data-dl-direct|function directUrl/.test(html), 'nút đầu trang vẫn tải thẳng tệp');
   assert.strictEqual((html.match(/maxTouchPoints/g) || []).length, 1, 'chỉ một bộ nhận diện máy');
   assert.ok(html.includes('NGUYỄN NGỌC KHÔI SINH VIÊN VLU'));
-  const gk = html.match(/<details class="dl-gk" data-i18n="dl\.20">([\s\S]*?)<\/details>/)[1];
-  assert.strictEqual((gk.match(/<li>/g) || []).length, 4); assert.match(gk, /Vẫn mở/); assert.match(D.en['dl.20'], /Open Anyway/);
+  const gk = html.match(/<details class="dl-gk[^"]*" open data-i18n="dl\.20">([\s\S]*?)<\/details>/)[1];
+  assert.strictEqual((gk.match(/<li>/g) || []).length, 3, 'phần ghi chú dưới hai thẻ chỉ giữ việc thẻ chưa nói');
+  assert.match(gk, /Ứng dụng/); assert.match(gk, /<b>Xong<\/b>/); assert.match(gk, /xattr -dr com\.apple\.quarantine/);
+  assert.ok(!/Vẫn mở/.test(gk), 'bước Vẫn mở đã nằm trên thẻ, không lặp trong danh sách');
+  assert.match(html, /data-i18n="gk\.9">Vẫn mở/); assert.match(D.en['dl.20'], /<b>Done<\/b>/); assert.match(D.en['gk.9'], /Open Anyway/);
 });
 
 test('Linux / máy tính không rõ hệ điều hành: nút chính không bao giờ là .exe mà trỏ trang Releases, có ghi chú “chưa có bản Linux”, giữ link nhỏ Windows/Mac, không còn link Linux chết href="#"', async () => {
@@ -192,7 +195,7 @@ test('không có tệp cho máy này: không lấy phiên bản từ newest(); n
   assert.strictEqual(vi, 'Tải AIVN bản ổn định'); assert.ok(!/\blink\b/i.test(vi), 'tiếng Việt không dùng chữ link');
   assert.strictEqual(D.en['dl.21'], 'Download the stable AIVN'); assert.strictEqual(D.zh['dl.21'], '下载稳定版 AIVN');
   assert.match(html, /\.dl\[data-fb="1"\] \.dl-l-latest\{display:none\}\.dl\[data-fb="1"\] \.dl-l-stable\{display:inline\}/);
-  assert.match(html, /DLX\.viewFor\(mobile\?null:os,macArch,staticHref\)/);
+  assert.match(html, /DLX\.viewFor\(mobile\?null:pickOs,pickArch,staticHref\)/);
 });
 
 test('INCLUDE_PRERELEASE=true: publish-beta chỉ --clear, không chèn khối beta và không thêm link tải thứ hai', () => {
@@ -324,7 +327,7 @@ test('huy hiệu phiên bản bằng đúng bản nút tải đã chọn: cờ b
   const fb = (html.match(/class="pill-ver" data-fb="([^"]+)"/) || [])[1];
   assert.ok(fb && !/__/.test(fb), 'số tĩnh không được là chữ giữ chỗ');
   assert.strictEqual((html.match(/DLX\.resolve\(/g) || []).length, 1, 'huy hiệu không được gọi API lần hai');
-  assert.match(html, /DLX\.viewFor\(mobile\?null:os,macArch,staticHref\)/);
+  assert.match(html, /DLX\.viewFor\(mobile\?null:pickOs,pickArch,staticHref\)/);
   assert.match(html, /DLX\.applyVersion\(\{button:row\.querySelector\('\.dl-ver'\),pill:pv,badge:badge\},view\.state==='ok'\?rel:null,pv&&pv\.getAttribute\('data-fb'\)\)/);
   assert.match(html, /\.badge\.is-empty\{display:none\}/);
   const viBeta = html.match(/<span class="pill-beta">([^<]*)<\/span>/)[1];
