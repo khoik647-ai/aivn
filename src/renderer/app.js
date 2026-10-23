@@ -2004,16 +2004,23 @@ async function refreshMcp(withText = false) {
 }
 A.onMcpChanged((servers) => { paintMcp({ servers }); });
 $('#mcpBlock').addEventListener('toggle', () => { if ($('#mcpBlock').open) refreshMcp(true); });
-$('#mcpMaster').addEventListener('change', async (e) => { await A.mcpMaster(e.target.checked); mcpState.enabled = e.target.checked; paintMcp(); refreshAgent(); });
+$('#mcpMaster').addEventListener('change', async (e) => { await A.mcpMaster(e.target.checked); mcpState.enabled = e.target.checked; await refreshMcp(); refreshAgent(); });
 $('#mcpSaveBtn').addEventListener('click', async () => {
   const r = await A.mcpSave($('#mcpJson').value);
   $('#mcpMsg').textContent = r.ok ? '✓ Đã lưu' : '⚠ ' + r.error; $('#mcpMsg').style.color = r.ok ? '' : '#82071e';
-  if (r.ok) { for (const x of r.servers) if (x.enabled) A.mcpRestart(x.name); refreshMcp(true); }
+  // B179: công tắc chính tắt thì Lưu chỉ ghi mcp.json, không kết nối lại.
+  if (r.ok && !r.paused && $('#mcpMaster').checked) { for (const x of r.servers) if (x.enabled) A.mcpRestart(x.name); }
+  if (r.ok) refreshMcp(true);
 });
 $('#mcpBlock').addEventListener('click', async (e) => {
   const p = e.target.closest('[data-mcp-preset]'); const rs = e.target.closest('[data-mcp-restart]');
-  if (p) { const r = await A.mcpPreset(p.dataset.mcpPreset); if (r.ok) { toast(`Đã thêm máy chủ “${r.name}” — đang kết nối (lần đầu có thể mất 30–60 giây để tải gói).`); refreshMcp(true); } else if (!r.canceled) toast('⚠ ' + r.error); }
-  if (rs) { A.mcpRestart(rs.dataset.mcpRestart); }
+  if (p) {
+    const r = await A.mcpPreset(p.dataset.mcpPreset);
+    if (r.ok && !r.paused) { toast(`Đã thêm máy chủ “${r.name}” — đang kết nối (lần đầu có thể mất 30–60 giây để tải gói).`); refreshMcp(true); }
+    else if (r.ok) { toast('✓ Đã lưu'); refreshMcp(true); }
+    else if (!r.canceled) toast('⚠ ' + r.error);
+  }
+  if (rs) { if (!$('#mcpMaster').checked) { refreshMcp(true); return; } A.mcpRestart(rs.dataset.mcpRestart); }
 });
 $('#mcpBlock').addEventListener('change', async (e) => { const t = e.target.closest('[data-mcp-toggle]'); if (!t) return; await A.mcpToggle({ name: t.dataset.mcpToggle, on: t.checked }); refreshMcp(true); refreshAgent(); });
 

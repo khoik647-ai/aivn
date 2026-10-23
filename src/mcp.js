@@ -2,6 +2,7 @@
 // Máy khách MCP (Model Context Protocol): đọc mcp.json kiểu { mcpServers: { tên: { command, args, env } | { url, type } } },
 // khởi chạy máy chủ (stdio hoặc http/SSE), lấy danh sách công cụ, gọi công cụ cho AIVN AGENT (tên công cụ: mcp__<máy chủ>__<công cụ>).
 // LƯU Ý AN TOÀN: máy chủ MCP stdio là chương trình chạy trên máy người dùng.
+// B179: công tắc chính (masterOn) tắt thì mọi đường start/stdio/http/SSE đều không mở tiến trình hay kết nối.
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
@@ -222,9 +223,16 @@ function claimCatalogId(def, { catalog = ADVANCED_CATALOG, taken = [] } = {}) {
   }
   return null;
 }
-function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null, resolveSecret = null, getExcelFolders = null }) {
+function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null, resolveSecret = null, getExcelFolders = null, masterOn = null }) {
   const file = path.join(dir, 'mcp.json');
   const servers = new Map(); // tên → { state, client, transport, tools, error, logs[] }
+  const gen = new Map(); // tên → số lần stop, để huỷ lần start đang dở
+  const inflight = new Map(); // tên → { client } khi connect chưa xong
+  const bump = (name) => { const n = (gen.get(name) || 0) + 1; gen.set(name, n); return n; };
+  function masterAllowed() {
+    if (typeof masterOn !== 'function') return true;
+    try { return masterOn() !== false; } catch { return false; }
+  }
   let lastRead = { mcpServers: {}, fileError: null, problems: {}, lan: {} };
   let lastRaw = { mcpServers: {} };
   const S = () => sdk || {
@@ -252,11 +260,23 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
     addLog(name, 'LỖI: ' + message); log('mcp', `${name}: lỗi ${message}`); onChange(); return status(name);
   }
 
+  function pausedStatus(name) {
+    const st = status(name);
+    const base = st || { name, state: 'off', enabled: true, tools: [], logs: [], error: null };
+    return { ...base, state: 'off', paused: true, tools: [] };
+  }
   async function start(name) {
     const loaded = load();
     const def = loaded.mcpServers[name];
     if (!def) throw new Error(`Không có máy chủ "${name}" trong mcp.json.`);
     await stop(name, { quiet: true });
+    // Công tắc chính tắt: không dựng stdio/http/SSE, kể cả khi đường gọi là preset, kết nối lại, tải plugin hay nạp lại cài đặt.
+    if (!masterAllowed()) {
+      log('mcp', `${name}: bỏ qua vì công tắc chính đang tắt`);
+      onChange();
+      return pausedStatus(name);
+    }
+    const ticket = gen.get(name);
     const e = entry(name); e.state = 'starting'; e.error = null; e.tools = []; onChange();
     if (loaded.fileError) return fail(name, loaded.fileError);
     if (loaded.problems[name]) return fail(name, loaded.problems[name]);
@@ -284,10 +304,18 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
         transport.stderr && transport.stderr.on('data', (d) => addLog(name, String(d)));
       }
       client = new Client({ name: 'AIVN', version: '0.15.0' }, { capabilities: {} });
+      inflight.set(name, { client, ticket });
       let earlyClose; const closed = new Promise((_, rej) => { earlyClose = () => rej(new Error('Máy chủ thoát ngay khi khởi động — xem nhật ký máy chủ bên dưới.')); });
       transport.onclose = () => { if (e.state === 'starting') earlyClose(); const x = servers.get(name); if (x && x.client === client && x.state === 'on') { x.state = 'error'; x.error = 'Máy chủ đã dừng.'; addLog(name, 'Máy chủ đã dừng'); onChange(); } };
       let tmo; closed.catch(() => {});
       await Promise.race([client.connect(transport), closed, new Promise((_, rej) => { tmo = setTimeout(() => rej(new Error('Quá 60 giây chưa kết nối được (lần đầu npx có thể phải tải gói).')), 60000); })]).finally(() => clearTimeout(tmo));
+      if (gen.get(name) !== ticket || !masterAllowed()) {
+        try { await client.close(); } catch { /* công tắc tắt giữa chừng */ }
+        inflight.delete(name);
+        if (e.state === 'starting' || e.client === client) Object.assign(e, { client: null, transport: null, state: 'off', tools: [] });
+        onChange();
+        return pausedStatus(name);
+      }
       const lt = await client.listTools();
       const tools = (lt.tools || []).map(t => ({ name: t.name, full: toolName(name, t.name), description: t.description || '', inputSchema: t.inputSchema || { type: 'object', properties: {} } }));
       const seen = new Map();
@@ -299,23 +327,53 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
         }
         seen.set(t.full, t.name);
       }
+      if (gen.get(name) !== ticket || !masterAllowed()) {
+        try { await client.close(); } catch { /* công tắc tắt giữa chừng */ }
+        inflight.delete(name);
+        if (e.state === 'starting' || e.client === client) Object.assign(e, { client: null, transport: null, state: 'off', tools: [] });
+        onChange();
+        return pausedStatus(name);
+      }
+      inflight.delete(name);
       Object.assign(e, { client, transport, state: 'on', tools });
       addLog(name, `Đã kết nối · ${e.tools.length} công cụ: ${e.tools.map(t => t.name).join(', ')}`);
       log('mcp', `${name}: đã kết nối, ${e.tools.length} công cụ`);
     } catch (err) {
       if (client) { try { await client.close(); } catch { /* đã lỗi */ } }
+      inflight.delete(name);
+      if (gen.get(name) !== ticket || !masterAllowed()) {
+        if (e.state === 'starting' || e.client === client) Object.assign(e, { client: null, transport: null, state: 'off', tools: [], error: null });
+        onChange();
+        return pausedStatus(name);
+      }
       e.state = 'error'; e.error = err.message; e.client = null; e.transport = null; e.tools = [];
       addLog(name, 'LỖI: ' + err.message); log('mcp', `${name}: lỗi ${err.message}`);
     }
     onChange(); return status(name);
   }
   async function stop(name, { quiet = false } = {}) {
-    const e = servers.get(name); if (!e) return;
-    const c = e.client; Object.assign(e, { client: null, transport: null, state: 'off', tools: [] });
-    if (c) { try { await c.close(); } catch { /* đóng */ } if (!quiet) addLog(name, 'Đã tắt'); }
-    if (!quiet) onChange();
+    bump(name);
+    const fly = inflight.get(name);
+    if (fly) inflight.delete(name);
+    const e = servers.get(name);
+    if (!e && !(fly && fly.client)) return;
+    const c = e && e.client;
+    const list = [];
+    if (fly && fly.client) list.push(fly.client);
+    if (c && c !== (fly && fly.client)) list.push(c);
+    // Đóng khi state còn "starting" để onclose huỷ connect đang chờ, không để tiến trình sống thêm 60 giây.
+    for (const client of list) { try { await client.close(); } catch { /* đóng */ } }
+    if (e) Object.assign(e, { client: null, transport: null, state: 'off', tools: [] });
+    if (c && !quiet) addLog(name, 'Đã tắt');
+    if (e && !quiet) onChange();
   }
-  async function startEnabled() { for (const [n, d] of Object.entries(config().mcpServers)) if (!d.disabled) start(n).catch(() => {}); }
+  async function startEnabled({ wait = false } = {}) {
+    if (!masterAllowed()) return [];
+    const names = []; const jobs = [];
+    for (const [n, d] of Object.entries(config().mcpServers)) if (!d.disabled) { names.push(n); jobs.push(start(n).catch(() => {})); }
+    if (wait) await Promise.all(jobs);
+    return names;
+  }
   function status(only) {
     const loaded = load();
     const cfg = loaded.mcpServers || {};
@@ -344,7 +402,10 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
     const cfg = config(); if (!cfg.mcpServers[name]) throw new Error('Không có máy chủ này.');
     if (on) delete cfg.mcpServers[name].disabled; else cfg.mcpServers[name].disabled = true;
     fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(file, JSON.stringify(cfg, null, 2));
-    if (on) await start(name); else await stop(name);
+    if (!on) { await stop(name); return status(name); }
+    // Công tắc từng máy chỉ ghi cấu hình khi công tắc chính đang tắt. Không spawn.
+    if (!masterAllowed()) { log('mcp', `${name}: bỏ qua vì công tắc chính đang tắt`); return pausedStatus(name); }
+    await start(name);
     return status(name);
   }
   // ---- cho AIVN AGENT ----
@@ -373,8 +434,20 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
     if (r.isError) { addLog(hit.n, `Lỗi: ${text.slice(0, 200)}`); return { error: text, forModel: `Lỗi từ máy chủ MCP ${hit.n}: ${text}`, summary: text.slice(0, 160) }; }
     return { forModel: text, summary: `${hit.t.name} · ${text.split('\n')[0].slice(0, 120)}`, detail: text.slice(0, 3000) };
   }
-  async function stopAll() { for (const n of [...servers.keys()]) await stop(n, { quiet: true }); }
-  return { file, readText, config, fileError, status, start, stop, startEnabled, saveText, setEnabled, names, defs: defsMap, has: (n) => /^mcp__/.test(n) && names().includes(n), exec, stopAll };
+  async function stopAll() {
+    const names = [...servers.keys()];
+    for (const n of names) await stop(n, { quiet: true });
+    if (names.length) onChange();
+  }
+  return { file, readText, config, fileError, status, start, stop, startEnabled, saveText, setEnabled, names, defs: defsMap, has: (n) => /^mcp__/.test(n) && names().includes(n), exec, stopAll, masterAllowed };
+}
+// B179: đổi công tắc chính (hoặc nạp lại cài đặt có agentMcp). Tắt thì dừng ngay. Bật thì startEnabled. Không đổi thì không spawn.
+async function syncMasterFlag(mcp, { prevOn, nextOn, wait = false } = {}) {
+  const prev = !!prevOn; const next = !!nextOn;
+  if (prev === next) return { changed: false, started: [] };
+  if (!next) { await mcp.stopAll(); return { changed: true, started: [] }; }
+  const started = await mcp.startEnabled({ wait });
+  return { changed: true, started };
 }
 // Mẫu dựng sẵn
 function presets({ folder = null } = {}) {
@@ -384,4 +457,4 @@ function presets({ folder = null } = {}) {
     memory: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] }
   };
 }
-module.exports = { createMcpManager, validate, resolveCommand, toolName, safeName, resultText, presets, classifyUrl, excelCallError, isExcelServer, claimCatalogId, normCatalogUrl, ADVANCED_CATALOG };
+module.exports = { createMcpManager, validate, resolveCommand, toolName, safeName, resultText, presets, classifyUrl, excelCallError, isExcelServer, claimCatalogId, normCatalogUrl, ADVANCED_CATALOG, syncMasterFlag };

@@ -223,7 +223,7 @@ async function initStores() {
   scheduler = createScheduler({ file: path.join(ud, 'schedules.json'), onFire: onScheduleFire, log: (m) => { console.log(m); log(m); } });
   computerTools = createComputerTools({ launchCacheFile: path.join(app.getPath('userData'), 'app-launch-cache.json'), sandbox: () => benchSandbox, getSettings: () => settings.data, listWindows: () => require('./agent/uitree').windows(), openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => LOG.block('apps', 'Quét ứng dụng đã cài (AIVN AGENT)', [`nguồn: ${JSON.stringify(d.sources)}`, `lỗi: ${d.errors.length ? d.errors.join('; ') : 'không'}`, `thư mục Desktop: ${d.dirs ? d.dirs.desktop.join(' | ') : '—'}`, `thư mục Start Menu: ${d.dirs ? d.dirs.start.join(' | ') : '—'}`, `thời gian tìm sâu: ${d.ms ?? '?'} ms`]),
     keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: (a, ctx) => deskWrap(getDesk().look, a, ctx), act: (a, ctx) => deskWrap(getDesk().act, a, ctx), ensureApp: (a, ctx) => deskWrap(getDesk().ensureApp, a, ctx), readText: (a, ctx) => deskWrap(getDesk().readText, a, ctx), pending: () => (desk && desk.active() ? desk.pending() : null), searchTodo: () => (desk && desk.active() ? desk.searchTodo() : null), searchFound: () => (desk && desk.active() ? desk.searchFound() : null), likely: (q) => (desk && desk.active() ? desk.likely(q) : null), cleanupDraft: (o) => (desk && desk.active() ? desk.cleanupDraft(o) : null), readBrowserPage: (o) => (desk && desk.active() ? desk.readBrowserPage(o) : null), openInBrowser: (b, u) => getDesk().openInBrowser(b, u), browserRead: (a, ctx) => deskWrap(getDesk().browserRead, a, ctx) } });
-  mcp = require('./mcp').createMcpManager({ dir: app.getPath('userData'), log: (sc, m) => LOG.log(sc, m), onChange: () => send('mcp:changed', mcp.status()), getExcelFolders: () => { try { const meta = JSON.parse(fs.readFileSync(path.join(ud, 'plugins-meta.json'), 'utf8')); const list = meta && meta.connectors && meta.connectors.excel && meta.connectors.excel.folders; return Array.isArray(list) ? list.filter(x => typeof x === 'string') : []; } catch { return []; } } });
+  mcp = require('./mcp').createMcpManager({ dir: app.getPath('userData'), log: (sc, m) => LOG.log(sc, m), onChange: () => send('mcp:changed', mcp.status()), masterOn: () => settings.data.agentMcp !== false, getExcelFolders: () => { try { const meta = JSON.parse(fs.readFileSync(path.join(ud, 'plugins-meta.json'), 'utf8')); const list = meta && meta.connectors && meta.connectors.excel && meta.connectors.excel.folders; return Array.isArray(list) ? list.filter(x => typeof x === 'string') : []; } catch { return []; } } });
   agent = createAgent({ engine: agentEngine, mcp, recipes: require('./agent/recipes').createRecipeStore(path.join(app.getPath('userData'), 'agent-recipes.json')), getSettings: () => settings.data, gateOk: () => lastGateOk, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: extractAny, embedForMemory, log, computer: computerTools,
     logTool: (x) => LOG.log('tool', `${x.auto ? '(tự động) ' : ''}${x.name} → ${x.status} sau ${x.ms ?? '?'} ms`, { args: Object.fromEntries(Object.entries(x.args || {}).map(([k, v]) => [k, typeof v === 'string' && v.length > 200 ? v.slice(0, 200) + '…' : v])), ketQua: String(x.summary || '').slice(0, 300) }),
     trash: async (p) => { try { await shell.trashItem(p); } catch (e) { throw new Error('Không chuyển được tệp vào Thùng rác (' + e.message + '). Tệp vẫn còn nguyên.'); } } });
@@ -575,6 +575,7 @@ async function ensureModel(requested, { api = false } = {}) {
 let apiJit = null;
 function apiHost() { return settings.data.apiLan ? '0.0.0.0' : '127.0.0.1'; }
 async function startApi(port) {
+  // B179: máy chủ API (cổng 1234) không khởi động kết nối ứng dụng. Chỉ công tắc chính quyết định.
   if (settings.data.apiLan && !settings.data.apiKey) throw new Error('Mở cho mạng nội bộ cần có khoá API (tạo khoá ở mục Máy chủ API) để thiết bị lạ không dùng được mô hình của bạn.');
   return api.start(port, apiHost());
 }
@@ -1101,7 +1102,8 @@ function registerIpc() {
   ipcMain.handle('cloud:clearKey', () => { cloudKeys.clear(); const c = { ...cloudCfg(), enabled: false }; settings.data.cloudBrain = c; settings.save(); LOG.log('agent', 'Bộ não đám mây: đã xoá khoá API'); return cloudPublic(); });
   ipcMain.handle('cloud:test', async () => { try { return await cloudBrain.test(); } catch (e) { return { ok: false, error: e.message }; } });
   ipcMain.on('ui:log', (_e, msg) => { if (typeof msg === 'string') log(msg.slice(0, 300)); });
-  ipcMain.handle('settings:set', (_e, patch = {}) => {
+  ipcMain.handle('settings:set', async (_e, patch = {}) => {
+    const prevMaster = settings.data.agentMcp !== false;
     const { hfToken, hfTokenSet, cloudBrain: _cloudIgnored, apiKey: _k, apiLan: _l, apiCors: _c, apiTtlMin: _t, ...rest } = patch; // máy chủ API chỉ đổi qua server:config/server:key // bộ não đám mây chỉ đổi qua cloud:save (khoá không đi qua đây)
     Object.assign(settings.data, rest);
     const intOrNull = (v, max) => (Number.isInteger(v) && v >= 0 && v <= max ? v : null);
@@ -1122,12 +1124,15 @@ function registerIpc() {
     if ('theme' in rest && win && !win.isDestroyed()) win.setBackgroundColor(windowBg());
     if ('themeFx' in rest) settings.data.themeFx = ['full', 'os', 'off'].includes(rest.themeFx) ? rest.themeFx : 'full';
     if ('agentFolders' in rest) settings.data.agentFolders = (Array.isArray(rest.agentFolders) ? rest.agentFolders : []).filter(f => typeof f === 'string' && path.isAbsolute(f)); // chỉ thêm qua hộp thoại chọn thư mục
+    if ('agentMcp' in rest) settings.data.agentMcp = rest.agentMcp !== false;
     settings.save();
     if ('keepInTray' in rest || 'openAtLogin' in rest) applyBackgroundPrefs();
     if (['gpu', 'gpuDevice', 'vramLimitGB'].some(k => k in rest) && engine.restart) { const env = engineEnv(); for (const [k, v] of Object.entries(env)) { if (v) process.env[k] = v; else delete process.env[k]; } hwCache = null;
       // không giết bộ máy khi đang trả lời: áp dụng ở lần nạp mô hình tới / khi rảnh
       if ((engine.busy && engine.busy()) || generations.size) { pendingEngineRestart = env; LOG.log('engine', 'Đổi cài đặt GPU trong lúc đang chạy: sẽ khởi động lại bộ máy khi xong lượt hiện tại'); }
       else engine.restart(env, 'đổi cài đặt GPU').then(() => send('model:status', engine.status())).catch(() => {}); }
+    // B179: nạp lại cài đặt không được tự spawn MCP. Chỉ dừng khi công tắc vừa tắt, hoặc startEnabled khi vừa bật.
+    if ('agentMcp' in rest) { try { await require('./mcp').syncMasterFlag(mcp, { prevOn: prevMaster, nextOn: settings.data.agentMcp !== false }); } catch (e) { LOG.log('mcp', e.message); } }
     return publicSettings();
   });
 
@@ -1337,19 +1342,25 @@ function registerIpc() {
   });
   // ---- Kết nối (MCP) ----
   ipcMain.handle('mcp:status', () => ({ servers: mcp.status(), text: mcp.readText(), file: mcp.file, enabled: settings.data.agentMcp !== false }));
-  ipcMain.handle('mcp:save', async (_e, text) => { try { await mcp.saveText(String(text)); LOG.log('mcp', 'Đã lưu mcp.json'); return { ok: true, servers: mcp.status() }; } catch (e) { return { ok: false, error: e.message }; } });
-  ipcMain.handle('mcp:toggle', async (_e, { name, on }) => { try { return { ok: true, server: await mcp.setEnabled(name, !!on) }; } catch (e) { return { ok: false, error: e.message }; } });
-  ipcMain.handle('mcp:restart', async (_e, name) => { try { return { ok: true, server: await mcp.start(name) }; } catch (e) { return { ok: false, error: e.message }; } });
+  const mcpMasterOff = () => settings.data.agentMcp === false;
+  ipcMain.handle('mcp:save', async (_e, text) => { try { await mcp.saveText(String(text)); LOG.log('mcp', 'Đã lưu mcp.json'); return { ok: true, paused: mcpMasterOff(), servers: mcp.status() }; } catch (e) { return { ok: false, error: e.message }; } });
+  ipcMain.handle('mcp:toggle', async (_e, { name, on }) => { try { const server = await mcp.setEnabled(name, !!on); return { ok: true, paused: !!(on && mcpMasterOff()), server }; } catch (e) { return { ok: false, error: e.message }; } });
+  ipcMain.handle('mcp:restart', async (_e, name) => { if (mcpMasterOff()) return { ok: false, paused: true }; try { return { ok: true, server: await mcp.start(name) }; } catch (e) { return { ok: false, error: e.message }; } });
   ipcMain.handle('mcp:preset', async (_e, kind) => {
     let folder = null;
     if (kind === 'filesystem') { const r = await dialog.showOpenDialog(win, { buttonLabel: 'Chọn thư mục', title: 'Chọn thư mục cho máy chủ MCP filesystem', properties: ['openDirectory'] }); if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }; folder = r.filePaths[0]; }
     const P = require('./mcp').presets({ folder }); if (!P[kind]) return { ok: false, error: 'Không có mẫu này.' };
     const cfg = mcp.config(); let name = kind; let i = 2; while (cfg.mcpServers[name]) name = `${kind}-${i++}`;
     cfg.mcpServers[name] = P[kind];
-    try { await mcp.saveText(JSON.stringify(cfg)); mcp.start(name).catch(() => {}); return { ok: true, name }; } catch (e) { return { ok: false, error: e.message }; }
+    try { await mcp.saveText(JSON.stringify(cfg)); if (mcpMasterOff()) return { ok: true, name, paused: true }; mcp.start(name).catch(() => {}); return { ok: true, name }; } catch (e) { return { ok: false, error: e.message }; }
   });
-  ipcMain.handle('mcp:master', (_e, on) => { settings.data.agentMcp = !!on; settings.save(); return true; });
-  setTimeout(() => mcp.startEnabled().catch(() => {}), 4000);
+  ipcMain.handle('mcp:master', async (_e, on) => {
+    const prev = settings.data.agentMcp !== false;
+    settings.data.agentMcp = !!on; settings.save();
+    try { await require('./mcp').syncMasterFlag(mcp, { prevOn: prev, nextOn: !!on }); } catch (e) { LOG.log('mcp', e.message); }
+    return true;
+  });
+  setTimeout(() => { if (settings.data.agentMcp === false) return; mcp.startEnabled().catch(() => {}); }, 4000);
   ipcMain.handle('bench:ground', async (_e, { id }) => { try { return { ok: true, result: await runGroundingBench(id) }; } catch (e) { return { ok: false, error: e.message }; } });
   ipcMain.handle('logs:open', () => { const d = LOG.dir || path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(d, { recursive: true }); LOG.log('app', 'Người dùng mở thư mục nhật ký'); shell.openPath(LOG.file && fs.existsSync(LOG.file) ? d : d); return d; });
   ipcMain.handle('apps:scan-test', async (_e, q) => { const r = await computerTools.scanReport(String(q || 'zalo').slice(0, 60)); LOG.block('apps', `Kiểm tra quét ứng dụng (tìm "${r.query}")`, [`tổng: ${r.total} mục · ${r.ms} ms`, `nguồn: ${JSON.stringify(r.sources)}`, `lỗi: ${r.errors.length ? r.errors.join('; ') : 'không'}`, `khớp tốt nhất: ${r.best ? r.best.name + ' → ' + (r.best.path || r.best.appId || '?') : 'không có'}`, ...r.matches.map(m => `- ${m.name} · ${m.path || m.appId || ''}${m.target ? ' → ' + m.target : ''}`)]); return r; });
