@@ -1261,6 +1261,7 @@
     "Nạp mô hình: {0}": "Load model: {0}",
     "Nạp thêm": "Load more",
     "Nằm trọn trong VRAM": "Fits fully in VRAM",
+    "Nằm trọn trong VRAM, sát giới hạn": "Fits fully in VRAM, close to the limit",
     "Nội dung": "Memo",
     "Nội dung mcp.json": "mcp.json content",
     "Nội dung nhắc": "Reminder text",
@@ -1666,6 +1667,7 @@
     "Về mặc định (tự động)": "Reset to default (automatic)",
     "Về mặc định của mô hình": "Reset to the model's defaults",
     "Vừa bộ nhớ hợp nhất của Mac": "Fits the Mac's unified memory",
+    "Vừa bộ nhớ hợp nhất của Mac, sát giới hạn": "Fits the Mac's unified memory, close to the limit",
     "XOÁ": "DELETE",
     "Xem": "View",
     "Xem AIVN AGENT có tìm thấy một ứng dụng trên máy không (Desktop, Start Menu, thư mục cài đặt).": "Check whether AIVN AGENT can find an app on this computer (Desktop, Start Menu, install folders).",
@@ -2732,7 +2734,25 @@
     "Đã nạp trên GPU, ngữ cảnh {0}.": "Loaded on the GPU, context {0}.",
     "GPU không nạp được mô hình này, AIVN đã chuyển sang {0}, ngữ cảnh {1} (chậm hơn nhưng vẫn dùng được).": "The GPU couldn't load this model, so AIVN switched to {0}, context {1} (slower, but it works).",
     "Đã dùng ngữ cảnh {0} thay vì {1} vì lần nạp trước mô hình chỉ vừa ở ngữ cảnh đó.": "Using context {0} instead of {1} because the last load only fit at that context size.",
-    "Đã nạp bằng {0}, {1}, ngữ cảnh {2}. Mô hình không vừa trọn VRAM nên phần còn lại chạy bằng CPU — chậm hơn nhưng vẫn dùng được.": "Loaded with {0}, {1}, context {2}. The model doesn't fit entirely in VRAM, so the rest runs on the CPU — slower, but it works."
+    "Đã nạp bằng {0}, {1}, ngữ cảnh {2}. Mô hình không vừa trọn VRAM nên phần còn lại chạy bằng CPU — chậm hơn nhưng vẫn dùng được.": "Loaded with {0}, {1}, context {2}. The model doesn't fit entirely in VRAM, so the rest runs on the CPU — slower, but it works.",
+    "Không chuyển xong thư mục mô hình": "Could not finish moving the models folder",
+    "Thử lại": "Try again",
+    "Chuyển thư mục mô hình bị dừng vì quá lâu không thấy tiến triển. Mô hình vẫn nằm ở thư mục cũ, không mất tệp. Hãy bấm Thử lại.": "The model move stopped because it made no progress for too long. The models are still in the old folder and no file was lost. Click Try again.",
+    "Bản vừa chép không khớp khi đọc lại": "The copy just written does not match when read back.",
+    "Chép không khớp nội dung nguồn": "The copy does not match the source contents.",
+    "Chép “{0}” không khớp nội dung nguồn": "The copy of “{0}” does not match the source contents.",
+    "Chưa xác minh được “{0}” ở đích, không xoá bản gốc": "Could not verify “{0}” at the destination, so the original was not deleted.",
+    "Không chuyển được vì thư mục đích đã có tệp cùng tên nhưng không giống hệt. Mọi tệp vẫn ở thư mục cũ và cài đặt chưa đổi. Hãy đổi tên hoặc dời các tệp này rồi thử lại: {0}": "Could not move the models folder because the destination already has a file with the same name that is not identical. Every file is still in the old folder and settings were not changed. Rename or move these files, then try again: {0}",
+    "Đích đã có tệp cùng tên.": "The destination already has a file with the same name.",
+    "Đích “{0}” không khớp sau khi đọc lại": "The destination “{0}” does not match when read back.",
+    "Đổi tên “{0}” không khớp nội dung": "Renaming “{0}” did not keep the same contents.",
+    "Thư mục này trỏ tới chính thư mục mô hình hiện tại (đường tắt, liên kết, hoặc cùng một thư mục với tên khác). Hãy chọn thư mục khác.": "This folder points at the current models folder (a shortcut, a link, or the same folder under another name). Choose a different folder.",
+    "Không chuyển liên kết “{0}”. Đây là đường tắt, không phải tệp mô hình. Liên kết và tệp mà nó trỏ tới vẫn còn nguyên. Hãy thay bằng tệp thật hoặc dời liên kết đi rồi thử lại.": "Could not move the link “{0}” because it is a shortcut, not a model file. The link and the file it points at are unchanged. Replace it with a real file, or move the link aside, then try again.",
+    "Chuyển mô hình đang chờ ổ đích. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu. Sẽ thử lại khi thư mục này truy cập được: {0}": "A model move is waiting for the destination drive. Some files may currently exist only on the missing destination drive. It will try again when this folder is accessible: {0}",
+    "Chuyển mô hình đang chờ ổ đích {0}, thư mục “{1}”. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu, và sẽ được phục hồi khi ổ này có lại.": "A model move is waiting for destination drive {0}, folder “{1}”. Some files may currently exist only on the missing destination drive, and will be recovered when this drive is back.",
+    "Đang chờ ổ đích của lần chuyển trước.": "Waiting for the destination drive of the previous move.",
+    "Đang dùng mô hình nên chưa hoàn tất được lần chuyển trước. Hãy gỡ mô hình rồi thử lại.": "A model is in use, so the previous move cannot be finished. Unload the model, then try again.",
+    "Chưa xoá được nhật ký lần chuyển trước. Hãy đóng chương trình đang mở tệp đó rồi thử lại.": "Could not delete the log of the previous move. Close the program that has that file open, then try again."
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.en = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

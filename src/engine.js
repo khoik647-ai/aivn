@@ -11,6 +11,7 @@ let loading = null;       // promise khi đang nạp
 let queue = Promise.resolve(); // tuần tự hoá các yêu cầu sinh văn bản
 let vision = null;        // llama-server (mmproj) khi mô hình nhìn được ảnh
 let visionOn = false;
+let visionVramCache = null; // { at, free, ok } — VRAM trống thật khi llama-server nhìn ảnh đang giữ GPU
 let embedder = null;      // { id, path, model, ctx, prefix }
 let embedQueue = Promise.resolve();
 function getVision() { if (!vision) vision = require('./vision-server').createVisionServer({ log: (m) => console.log(m) }); return vision; }
@@ -41,9 +42,36 @@ async function vramInfo(l) {
 }
 let progressCb = null; // 0.16: báo tiến độ nạp mô hình (viên chọn mô hình hiển thị %)
 const setLoadProgress = (cb) => { progressCb = cb; };
+// node-llama-cpp không tính VRAM của tiến trình llama-server khác. Hỏi --list-devices; không đo được thì kẹp số trống.
+async function visionFreeBytes() {
+  const now = Date.now();
+  if (visionVramCache && now - visionVramCache.at < (visionVramCache.ok ? 8000 : 1500)) return visionVramCache.free;
+  let free = null;
+  let ok = false;
+  let timer = null;
+  try {
+    const VS = require('./vision-server');
+    const exe = VS.findServer();
+    if (exe) {
+      const d = await Promise.race([
+        VS.listDevices(exe, { timeoutMs: 1200, fresh: true }),
+        new Promise((resolve) => { timer = setTimeout(() => resolve(null), 1200); }),
+      ]);
+      const gpus = d && Array.isArray(d.all) ? d.all.filter((x) => x.freeMiB != null && !/^cpu/i.test(x.id)) : [];
+      if (gpus.length) { free = Math.min(...gpus.map((g) => g.freeMiB)) * 1024 * 1024; ok = true; }
+    }
+  } catch { free = null; ok = false; }
+  finally { if (timer) clearTimeout(timer); }
+  visionVramCache = { at: now, free, ok };
+  return free;
+}
 async function hardwareInfo() {
   const l = await getLlama();
-  const vram = await vramInfo(l).catch(() => null);
+  let vram = await vramInfo(l).catch(() => null);
+  if (visionOn && vram && vram.total > 0) {
+    try { vram = require('./embed-server').freeForEmbed(vram, { visionRunning: true, measuredFree: await visionFreeBytes() }); }
+    catch { vram = require('./embed-server').freeForEmbed(vram, { visionRunning: true }); }
+  }
   let devices = []; try { devices = await l.getGpuDeviceNames(); } catch {}
   const cpu = (os.cpus()[0] || {}).model || '';
   // B168: GPU tích hợp thường đứng trước trong danh sách Vulkan → nhãn dùng gpuName (GPU rời được ưu tiên), danh sách xếp GPU rời trước
@@ -202,7 +230,7 @@ async function loadModel(id, modelPath, opts = {}) {
           await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: false, ...vx, gpuLayers: 0, fitTargetMiB: 0 });
         }
       }
-      visionOn = true;
+      visionOn = true; visionVramCache = null;
     })();
     try { await loading; } finally { loading = null; }
     return status();
@@ -271,7 +299,7 @@ async function loadModel(id, modelPath, opts = {}) {
 
 
 async function unloadModel() {
-  if (visionOn) { visionOn = false; await queue.catch(() => {}); await getVision().stop(); }
+  if (visionOn) { visionOn = false; visionVramCache = null; await queue.catch(() => {}); await getVision().stop(); }
   if (!current) return;
   const c = current; current = null;
   await queue.catch(() => {});
