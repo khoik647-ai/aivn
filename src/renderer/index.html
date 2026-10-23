@@ -75,10 +75,12 @@
         <section class="approve-card only-agent" id="approveCard" hidden role="alertdialog" aria-labelledby="apTitle" data-testid="approve-card">
           <div class="ap-head"><span class="ap-icon" id="apIcon" data-testid="ap-icon">🔧</span><div><b id="apTitle"></b><div class="muted small" id="apSub" data-testid="ap-sub"></div></div></div>
           <table class="ap-fields" id="apFields" data-testid="ap-fields"></table>
+          <p class="ap-note small" id="apNote" hidden data-testid="ap-note"></p>
+          <details id="apDetails" data-testid="approve-details" hidden><summary>Chi tiết</summary><table class="ap-fields" id="apDetailsBody" data-testid="ap-details-body"></table></details>
           <pre class="ap-preview" id="apPreview" hidden></pre>
           <pre class="ap-diff" id="apDiff" hidden></pre>
           <div class="ap-reason" id="apReasonBox" hidden data-testid="ap-reason-box"><textarea id="apReason" rows="2" maxlength="500" placeholder="Lý do / góp ý cho AIVN AGENT (vd. “đặt tên tệp là tom-tat.md”)…" data-testid="ap-reason"></textarea></div>
-          <label class="ap-always small" id="apAlwaysRow" hidden data-testid="ap-always-row"><input type="checkbox" id="apAlways" data-testid="ap-always"> Luôn cho phép công cụ này</label>
+          <label class="ap-always small" id="apAlwaysRow" hidden data-testid="ap-always-row"><input type="checkbox" id="apAlways" data-testid="ap-always"> <span id="apAlwaysText">Luôn cho phép công cụ này</span></label>
           <div class="ap-warn small" id="apWarn" hidden data-testid="ap-warn"></div>
           <div class="ap-actions">
             <button type="button" class="btn primary" id="apAllow" title="Ctrl+Enter" data-testid="ap-allow">Cho phép <kbd>Ctrl+Enter</kbd></button>
@@ -111,8 +113,8 @@
           <div class="set-block comp-block">
             <details class="set-block mcp-block" id="mcpBlock" data-testid="mcp-block"><summary><b>🔌 Kết nối (MCP)</b> <span class="muted small" id="mcpSum" data-testid="mcp-sum"></span></summary>
               <div class="mcp-warn small">⚠ Máy chủ MCP là chương trình chạy trên máy bạn (stdio) hoặc dịch vụ bên ngoài (http/SSE) và có thể đọc/ghi dữ liệu. Chỉ thêm máy chủ bạn tin tưởng. AIVN luôn xin phép trước mỗi lần gọi công cụ MCP (trừ khi bạn chọn “Luôn cho phép”).</div>
-              <label class="check toggle"><input type="checkbox" id="mcpMaster" data-testid="mcp-master"> <span><b>Cho AIVN AGENT dùng công cụ MCP</b></span></label>
-              <div class="row wrap"><span class="small muted">Thêm nhanh:</span><button type="button" class="btn sm" data-mcp-preset="filesystem" data-testid="mcp-preset-filesystem">📁 filesystem (chọn thư mục)</button><button type="button" class="btn sm" data-mcp-preset="fetch" data-testid="mcp-preset-fetch">🌐 fetch</button><button type="button" class="btn sm" data-mcp-preset="memory" data-testid="mcp-preset-memory">🧠 memory</button></div>
+              <label class="check toggle"><input type="checkbox" id="mcpMaster" data-testid="mcp-master"> <span><b>Cho AIVN AGENT dùng các ứng dụng đã kết nối</b></span></label>
+              <div class="row wrap"><span class="small muted">Thêm nhanh:</span><button type="button" class="btn sm" data-mcp-preset="filesystem" data-testid="mcp-preset-filesystem">📁 filesystem (chọn thư mục)</button><button type="button" class="btn sm" data-mcp-preset="fetch" data-testid="mcp-preset-fetch">🌐 fetch</button><button type="button" class="btn sm" data-mcp-preset="memory" data-testid="mcp-preset-memory">🧠 Sổ tay agent</button></div>
               <div class="mcp-list" id="mcpList" data-testid="mcp-list"></div>
               <label class="small">mcp.json <span class="muted" id="mcpFile" data-testid="mcp-file"></span></label>
               <textarea id="mcpJson" class="mcp-json" rows="9" spellcheck="false" aria-label="Nội dung mcp.json" data-testid="mcp-json"></textarea>

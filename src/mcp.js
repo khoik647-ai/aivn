@@ -7,10 +7,22 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const DEFAULT = { mcpServers: {} };
+const PROBE_TIMEOUT_RAW = 'Quá thời gian chạy thử.';
+const PROBE_SLOW_RAW = 'Quá 60 giây chưa kết nối được (lần đầu npx có thể phải tải gói).';
+const PROBE_EXIT_RAW = 'Máy chủ thoát ngay khi khởi động — xem nhật ký máy chủ bên dưới.';
+const PROBE_STOPPED_RAW = 'Máy chủ đã dừng.';
 const EXCEL_PKG = '@negokaz/excel-mcp-server';
 const safeName = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'may-chu';
 const toolName = (server, tool) => `mcp__${safeName(server)}__${String(tool).replace(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 64);
-const secretRef = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && typeof v.$aivnSecret === 'string' && Object.keys(v).length === 1;
+const SECRET_TOKEN = /^\$\{secret:([^}]+)\}$/;
+// Dạng chuẩn trong mcp.json là chuỗi "${secret:id}". { "$aivnSecret": id } là dạng cũ, vẫn đọc được.
+function secretIdOf(v) {
+  if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.$aivnSecret === 'string' && Object.keys(v).length === 1) return v.$aivnSecret;
+  if (typeof v === 'string') { const m = SECRET_TOKEN.exec(v); if (m && m[1]) return m[1]; }
+  return null;
+}
+function secretPlaceholder(id) { return `\${secret:${id}}`; }
+const secretRef = (v) => secretIdOf(v) != null && typeof v === 'object';
 
 // http: chỉ vòng lặp cục bộ hoặc đúng ba dải nội bộ. Không phân giải DNS.
 function classifyUrl(url) {
@@ -141,19 +153,60 @@ function validate(cfg) {
   if (bad) throw new Error(bad[1]);
   return cfg;
 }
-function materializeMap(obj, resolveSecret) {
-  const out = {};
-  for (const [k, v] of Object.entries(obj || {})) {
-    if (typeof v === 'string') { out[k] = v; continue; }
-    if (secretRef(v)) {
-      let got;
-      try { got = typeof resolveSecret === 'function' ? resolveSecret(v.$aivnSecret) : undefined; } catch { got = undefined; }
-      if (typeof got !== 'string' || got === '') throw new Error(`Không giải được khoá bí mật “${k}”.`);
-      out[k] = got;
-      continue;
+// Chỉ mã hoá khi chỗ giữ nằm trong query, fragment hoặc userinfo của một URL.
+function secretInUrlPosition(text, offset) {
+  const s = String(text || '');
+  const re = /[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]*/gi;
+  let m;
+  while ((m = re.exec(s))) {
+    const start = m.index;
+    const end = start + m[0].length;
+    if (offset < start || offset >= end) continue;
+    const url = m[0];
+    const rel = offset - start;
+    const rest = url.indexOf('://') + 3;
+    let userEnd = -1;
+    for (let i = rest; i < url.length; i++) {
+      const c = url[i];
+      if (c === '@') { userEnd = i; break; }
+      if (c === '/' || c === '?' || c === '#') break;
     }
-    throw new Error(`Không giải được khoá bí mật “${k}”.`);
+    if (userEnd >= 0 && rel >= rest && rel < userEnd) return true;
+    const hash = url.indexOf('#');
+    const q = url.indexOf('?');
+    if (hash >= 0 && rel > hash) return true;
+    if (q >= 0 && rel > q && (hash < 0 || rel < hash)) return true;
+    return false;
   }
+  return false;
+}
+function expandSecrets(text, resolveSecret, note) {
+  if (typeof text !== 'string' || !text.includes('${secret:')) return text;
+  const mark = (v) => { try { if (typeof note === 'function' && v) note(v); } catch { /* kho không nhận */ } };
+  return text.replace(/\$\{secret:([^}]+)\}/g, (full, id, offset) => {
+    let got;
+    try { got = typeof resolveSecret === 'function' ? resolveSecret(id) : undefined; } catch { got = undefined; }
+    if (typeof got !== 'string' || got === '') throw new Error(`Không giải được khoá bí mật “${String(id).split(':').pop() || id}”.`);
+    if (!secretInUrlPosition(text, offset)) return got;
+    const enc = encodeURIComponent(got);
+    if (enc !== got) mark(enc);
+    return enc;
+  });
+}
+function materializeValue(slot, v, resolveSecret, note) {
+  const id = secretIdOf(v);
+  if (!id) {
+    if (typeof v === 'string') return v.includes('${secret:') ? expandSecrets(v, resolveSecret, note) : v;
+    throw new Error(`Không giải được khoá bí mật “${slot}”.`);
+  }
+  let got;
+  try { got = typeof resolveSecret === 'function' ? resolveSecret(id) : undefined; } catch { got = undefined; }
+  if (typeof got !== 'string' || got === '') throw new Error(`Không giải được khoá bí mật “${slot}”.`);
+  return got;
+}
+function materializeMap(obj, resolveSecret, note) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj || {})) out[k] = materializeValue(k, v, resolveSecret, note);
   return out;
 }
 function callTimeout(def) {
@@ -222,7 +275,7 @@ function claimCatalogId(def, { catalog = ADVANCED_CATALOG, taken = [] } = {}) {
   }
   return null;
 }
-function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null, resolveSecret = null, getExcelFolders = null }) {
+function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null, resolveSecret = null, noteSecret = null, getExcelFolders = null, scrub = null }) {
   const file = path.join(dir, 'mcp.json');
   const servers = new Map(); // tên → { state, client, transport, tools, error, logs[] }
   let lastRead = { mcpServers: {}, fileError: null, problems: {}, lan: {} };
@@ -245,14 +298,21 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
   }
   function config() { load(); return lastRaw; }
   function fileError() { load(); return lastRead.fileError; }
+  const clean = (s) => { const raw = s == null ? '' : String(s); try { return typeof scrub === 'function' ? String(scrub(raw)) : raw; } catch { return '••••'; } };
+  const note = (v) => { try { if (typeof noteSecret === 'function') noteSecret(v); } catch { /* kho không nhận */ } };
   const entry = (n) => { if (!servers.has(n)) servers.set(n, { state: 'off', tools: [], error: null, logs: [] }); return servers.get(n); };
-  const addLog = (n, line) => { const e = entry(n); for (const l of String(line).split(/\r?\n/)) if (l.trim()) e.logs.push(`${new Date().toLocaleTimeString('vi-VN')} ${l.slice(0, 400)}`); if (e.logs.length > 200) e.logs.splice(0, e.logs.length - 200); };
+  const addLog = (n, line) => { const e = entry(n); for (const l of clean(line).split(/\r?\n/)) if (l.trim()) e.logs.push(`${new Date().toLocaleTimeString('vi-VN')} ${l.slice(0, 400)}`); if (e.logs.length > 200) e.logs.splice(0, e.logs.length - 200); };
   function fail(name, message) {
-    const e = entry(name); e.state = 'error'; e.error = message; e.client = null; e.transport = null; e.tools = [];
-    addLog(name, 'LỖI: ' + message); log('mcp', `${name}: lỗi ${message}`); onChange(); return status(name);
+    const msg = clean(message);
+    const e = entry(name); e.state = 'error'; e.error = msg; e.client = null; e.transport = null; e.tools = [];
+    addLog(name, 'LỖI: ' + msg); log('mcp', clean(`${name}: lỗi ${msg}`)); onChange(); return status(name);
   }
 
-  async function start(name) {
+  async function start(name, opts = {}) {
+    const limit = Number(opts && opts.connectTimeout) > 0 ? Number(opts.connectTimeout) : 60000;
+    const timeoutMsg = limit === 60000 ? PROBE_SLOW_RAW : PROBE_TIMEOUT_RAW;
+    const deadline = Date.now() + limit;
+    const failTimer = (rej) => setTimeout(() => rej(new Error(timeoutMsg)), Math.max(1, deadline - Date.now()));
     const loaded = load();
     const def = loaded.mcpServers[name];
     if (!def) throw new Error(`Không có máy chủ "${name}" trong mcp.json.`);
@@ -269,27 +329,28 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
         if (!st || !st.isDirectory()) throw new Error(`"cwd" của "${name}" phải là thư mục có sẵn.`);
       }
       let env = {}; let headers = null;
-      if (!def.url) env = materializeMap(def.env, resolveSecret);
-      else if (def.headers) headers = materializeMap(def.headers, resolveSecret);
+      if (!def.url) env = materializeMap(def.env, resolveSecret, note);
+      else if (def.headers) headers = materializeMap(def.headers, resolveSecret, note);
       let transport;
       if (def.url) {
-        const u = new URL(def.url);
+        const u = new URL(expandSecrets(def.url, resolveSecret, note));
         const opts = headers ? { requestInit: { headers } } : undefined;
         transport = def.type === 'sse' || /\/sse\/?$/.test(u.pathname) ? new Sse(u, opts) : new Http(u, opts);
-        addLog(name, `Kết nối ${def.type === 'sse' ? 'SSE' : 'HTTP'} ${u.origin}${u.pathname}`);
+        addLog(name, clean(`Kết nối ${def.type === 'sse' ? 'SSE' : 'HTTP'} ${u.origin}${u.pathname}`));
       } else {
-        const r = resolveCommand(def.command, def.args || []);
-        addLog(name, `Chạy: ${def.command} ${(def.args || []).join(' ')}${r.bundled ? ' (dùng Node đi kèm AIVN)' : ''}`);
+        const args = (def.args || []).map((a, i) => materializeValue(`arg${i}`, a, resolveSecret, note));
+        const r = resolveCommand(def.command, args);
+        addLog(name, clean(`Chạy: ${def.command} ${(def.args || []).join(' ')}${r.bundled ? ' (dùng Node đi kèm AIVN)' : ''}`));
         transport = new Stdio({ command: r.command, args: r.args, env: { ...process.env, ...r.env, ...env }, stderr: 'pipe', cwd: def.cwd || undefined });
-        transport.stderr && transport.stderr.on('data', (d) => addLog(name, String(d)));
+        transport.stderr && transport.stderr.on('data', (d) => addLog(name, clean(String(d))));
       }
       client = new Client({ name: 'AIVN', version: '0.15.0' }, { capabilities: {} });
-      let earlyClose; const closed = new Promise((_, rej) => { earlyClose = () => rej(new Error('Máy chủ thoát ngay khi khởi động — xem nhật ký máy chủ bên dưới.')); });
-      transport.onclose = () => { if (e.state === 'starting') earlyClose(); const x = servers.get(name); if (x && x.client === client && x.state === 'on') { x.state = 'error'; x.error = 'Máy chủ đã dừng.'; addLog(name, 'Máy chủ đã dừng'); onChange(); } };
+      let earlyClose; const closed = new Promise((_, rej) => { earlyClose = () => rej(new Error(PROBE_EXIT_RAW)); });
+      transport.onclose = () => { if (e.state === 'starting') earlyClose(); const x = servers.get(name); if (x && x.client === client && x.state === 'on') { x.state = 'error'; x.error = PROBE_STOPPED_RAW; addLog(name, 'Máy chủ đã dừng'); onChange(); } };
       let tmo; closed.catch(() => {});
-      await Promise.race([client.connect(transport), closed, new Promise((_, rej) => { tmo = setTimeout(() => rej(new Error('Quá 60 giây chưa kết nối được (lần đầu npx có thể phải tải gói).')), 60000); })]).finally(() => clearTimeout(tmo));
-      const lt = await client.listTools();
-      const tools = (lt.tools || []).map(t => ({ name: t.name, full: toolName(name, t.name), description: t.description || '', inputSchema: t.inputSchema || { type: 'object', properties: {} } }));
+      await Promise.race([client.connect(transport), closed, new Promise((_, rej) => { tmo = failTimer(rej); })]).finally(() => clearTimeout(tmo));
+      let tmoList; const lt = await Promise.race([client.listTools(), new Promise((_, rej) => { tmoList = failTimer(rej); })]).finally(() => clearTimeout(tmoList));
+      const tools = (lt.tools || []).map(t => { const tool = clean(t.name); return { name: tool, full: toolName(name, tool), description: clean(t.description || ''), inputSchema: t.inputSchema || { type: 'object', properties: {} } }; });
       const seen = new Map();
       for (const t of tools) {
         if (seen.has(t.full)) {
@@ -300,12 +361,14 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
         seen.set(t.full, t.name);
       }
       Object.assign(e, { client, transport, state: 'on', tools });
-      addLog(name, `Đã kết nối · ${e.tools.length} công cụ: ${e.tools.map(t => t.name).join(', ')}`);
-      log('mcp', `${name}: đã kết nối, ${e.tools.length} công cụ`);
+      addLog(name, clean(`Đã kết nối · ${e.tools.length} công cụ: ${e.tools.map(t => t.name).join(', ')}`));
+      log('mcp', clean(`${name}: đã kết nối, ${e.tools.length} công cụ`));
     } catch (err) {
       if (client) { try { await client.close(); } catch { /* đã lỗi */ } }
-      e.state = 'error'; e.error = err.message; e.client = null; e.transport = null; e.tools = [];
-      addLog(name, 'LỖI: ' + err.message); log('mcp', `${name}: lỗi ${err.message}`);
+      const message = clean(err && err.message);
+      const stack = clean(err && err.stack);
+      e.state = 'error'; e.error = message; e.client = null; e.transport = null; e.tools = [];
+      addLog(name, 'LỖI: ' + message); log('mcp', clean(`${name}: lỗi ${message}\n${stack}`));
     }
     onChange(); return status(name);
   }
@@ -325,10 +388,10 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
       return {
         name: n, enabled: !cfg[n].disabled, lan: !!loaded.lan[n],
         kind: cfg[n].url ? (cfg[n].type === 'sse' ? 'sse' : 'http') : 'stdio',
-        command: cfg[n].url || [cfg[n].command, ...(cfg[n].args || [])].join(' '),
-        state: problem ? 'error' : e.state, error: problem || e.error,
-        tools: (problem ? [] : e.tools).map(t => ({ name: t.name, full: t.full, description: t.description.slice(0, 200) })),
-        logs: e.logs.slice(-60)
+        command: clean(cfg[n].url || [cfg[n].command, ...(cfg[n].args || [])].join(' ')),
+        state: problem ? 'error' : e.state, error: clean(problem || e.error || ''),
+        tools: (problem ? [] : e.tools).map(t => ({ name: t.name, full: t.full, description: clean(t.description).slice(0, 200) })),
+        logs: e.logs.slice(-60).map(clean)
       };
     });
     return only ? list.find(x => x.name === only) : list;
@@ -363,15 +426,23 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
       const folders = typeof getExcelFolders === 'function' ? getExcelFolders() : [];
       const denied = excelCallError(args, folders);
       if (denied) {
-        addLog(hit.n, `Từ chối ${hit.t.name}: ${denied}`);
-        return { error: denied, forModel: denied, summary: denied.slice(0, 160) };
+        const msg = clean(denied);
+        addLog(hit.n, `Từ chối ${hit.t.name}: ${msg}`);
+        return { error: msg, forModel: msg, summary: msg.slice(0, 160) };
       }
     }
-    addLog(hit.n, `Gọi ${hit.t.name} ${JSON.stringify(args).slice(0, 200)}`);
-    const r = await hit.e.client.callTool({ name: hit.t.name, arguments: args || {} }, undefined, { signal: ctx.signal, timeout: callTimeout(def) });
-    const text = resultText(r);
-    if (r.isError) { addLog(hit.n, `Lỗi: ${text.slice(0, 200)}`); return { error: text, forModel: `Lỗi từ máy chủ MCP ${hit.n}: ${text}`, summary: text.slice(0, 160) }; }
-    return { forModel: text, summary: `${hit.t.name} · ${text.split('\n')[0].slice(0, 120)}`, detail: text.slice(0, 3000) };
+    addLog(hit.n, clean(`Gọi ${hit.t.name} ${JSON.stringify(args).slice(0, 500)}`));
+    let r;
+    try { r = await hit.e.client.callTool({ name: hit.t.name, arguments: args || {} }, undefined, { signal: ctx.signal, timeout: callTimeout(def) }); }
+    catch (err) {
+      const message = clean(err && err.message);
+      const stack = clean(err && err.stack);
+      addLog(hit.n, `Lỗi: ${message}`); log('mcp', clean(`Gọi ${hit.t.name} lỗi ${message}\n${stack}`));
+      const e = new Error(message); e.stack = stack; throw e;
+    }
+    const text = clean(resultText(r));
+    if (r.isError) { addLog(hit.n, `Lỗi: ${text.slice(0, 200)}`); return { error: text, forModel: clean(`Lỗi từ máy chủ MCP ${hit.n}: ${text}`), summary: text.slice(0, 160) }; }
+    return { forModel: text, summary: clean(`${hit.t.name} · ${text.split('\n')[0].slice(0, 120)}`), detail: text.slice(0, 3000) };
   }
   async function stopAll() { for (const n of [...servers.keys()]) await stop(n, { quiet: true }); }
   return { file, readText, config, fileError, status, start, stop, startEnabled, saveText, setEnabled, names, defs: defsMap, has: (n) => /^mcp__/.test(n) && names().includes(n), exec, stopAll };
@@ -384,4 +455,4 @@ function presets({ folder = null } = {}) {
     memory: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-memory'] }
   };
 }
-module.exports = { createMcpManager, validate, resolveCommand, toolName, safeName, resultText, presets, classifyUrl, excelCallError, isExcelServer, claimCatalogId, normCatalogUrl, ADVANCED_CATALOG };
+module.exports = { createMcpManager, validate, resolveCommand, toolName, safeName, resultText, presets, classifyUrl, excelCallError, isExcelServer, claimCatalogId, normCatalogUrl, ADVANCED_CATALOG, secretIdOf, secretPlaceholder, expandSecrets, PROBE_TIMEOUT_RAW, PROBE_SLOW_RAW, PROBE_EXIT_RAW, PROBE_STOPPED_RAW };

@@ -1733,13 +1733,23 @@ function apShow() {
   const c = apOpen = apQueue.shift();
   const card = $('#approveCard'); card.classList.toggle('danger', !!c.danger);
   $('#apIcon').textContent = c.icon || '🔧'; $('#apTitle').textContent = c.title || 'AIVN AGENT xin phép';
-  $('#apSub').textContent = `Công cụ: ${c.label || c.tool}${c.path ? ' · ' + c.path : ''}`;
-  $('#apFields').innerHTML = (c.fields || []).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('');
+  $('#apSub').textContent = c.sub ? String(c.sub) : `Công cụ: ${c.label || c.tool}${c.path ? ' · ' + c.path : ''}`;
+  $('#apFields').innerHTML = (c.fields || []).map((row) => { const k = row[0], v = row[1], tip = row[2], raw = row[3] === 'raw' || row.length > 2; return `<tr><td>${esc(k)}</td><td${tip ? ` title="${esc(tip)}"` : ''}${raw ? ' data-noi18n' : ''}>${esc(v)}</td></tr>`; }).join('');
+  const note = $('#apNote'); if (note) { note.hidden = !c.note; note.textContent = c.note || ''; }
+  const det = $('#apDetails'); const detBody = $('#apDetailsBody');
+  if (det && detBody) {
+    det.open = false;
+    const rows = c.details || [];
+    det.hidden = !rows.length;
+    detBody.innerHTML = rows.map(([k, v]) => `<tr><td>${esc(k)}</td><td data-noi18n>${esc(v)}</td></tr>`).join('');
+  }
   $('#apPreview').hidden = !c.preview; $('#apPreview').textContent = c.preview || '';
   $('#apDiff').hidden = !c.diff;
   $('#apDiff').innerHTML = c.diff ? c.diff.text.split('\n').map(l => { const k = l.startsWith('+ ') ? 'add' : l.startsWith('- ') ? 'del' : 'ctx'; return `<span class="${k}"><i class="g" aria-label="${k === 'add' ? 'thêm' : k === 'del' ? 'bỏ' : ''}">${k === 'add' ? '+' : k === 'del' ? '−' : ' '}</i>${esc(k === 'ctx' ? l.replace(/^ {2}/, '') : l.slice(2)) || ' '}</span>`; }).join('') : '';
   $('#apReasonBox').hidden = true; $('#apReason').value = '';
-  $('#apAlwaysRow').hidden = !c.allowAlways; $('#apAlways').checked = false; $('#apWarn').hidden = true; // không bao giờ bật sẵn
+  $('#apAlwaysRow').hidden = !c.allowAlways; $('#apAlways').checked = false; if ($('#apAlwaysText')) $('#apAlwaysText').textContent = c.alwaysLabel || 'Luôn cho phép công cụ này';
+  const connectCard = c.tool === 'connector_connect' || c.tool === 'mcp_connect' || c.tool === 'mcp_import' || c.tool === 'mcp_replace' || c.tool === 'excel_folders';
+  $('#apWarn').hidden = !(connectCard && c.warn); if (connectCard && c.warn) $('#apWarn').textContent = c.warn; // không bao giờ bật sẵn
   card.hidden = false; state.genPhase = 'ask'; if (state.genKind === 'agent') paintGenChrome(); else setPhase('ask');
   paintAgentWait();
   if (approveLive()) { $('#apDeny').focus({ preventScroll: true }); card.scrollTop = 0; card.scrollIntoView({ block: 'nearest' }); }
@@ -1768,7 +1778,7 @@ $('#apDenyReason').addEventListener('click', () => {
   if ($('#apReasonBox').hidden) { $('#apReasonBox').hidden = false; $('#apReason').focus(); $('#apDenyReason').textContent = 'Gửi lý do & từ chối'; return; }
   apAnswer(false, true); $('#apDenyReason').textContent = 'Từ chối kèm lý do';
 });
-$('#apAlways').addEventListener('change', (e) => { const c = apOpen; $('#apWarn').hidden = !e.target.checked; $('#apWarn').textContent = '⚠ ' + ((c && c.warn) || 'AIVN AGENT sẽ dùng công cụ này mà không hỏi lại.') + ' Bạn có thể bỏ trong Cài đặt AIVN AGENT.'; });
+$('#apAlways').addEventListener('change', (e) => { const c = apOpen; const connectCard = c && (c.tool === 'connector_connect' || c.tool === 'mcp_connect' || c.tool === 'mcp_import' || c.tool === 'mcp_replace' || c.tool === 'excel_folders'); if (connectCard) { $('#apWarn').hidden = !c.warn; $('#apWarn').textContent = c.warn || ''; return; } $('#apWarn').hidden = !e.target.checked; $('#apWarn').textContent = '⚠ ' + ((c && c.warn) || 'AIVN AGENT sẽ dùng công cụ này mà không hỏi lại.') + ' Bạn có thể bỏ trong Cài đặt AIVN AGENT.'; });
 document.addEventListener('keydown', (e) => {
   if (!apOpen) return;
   const operable = approveLive();
@@ -1982,20 +1992,34 @@ $('#perfSpeedBtn').addEventListener('click', async () => {
 
 // --- Kết nối (MCP) ---
 let mcpState = { servers: [] };
+function mcpLogText(logs) {
+  const tr = (s) => (window.I18N && I18N.lang !== 'vi' ? I18N.tr(s, I18N.lang) : s);
+  const lines = Array.isArray(logs) ? logs.filter(l => l != null && String(l) !== '') : [];
+  if (!lines.length) return tr('(trống)');
+  const bundled = '(dùng Node đi kèm AIVN)';
+  return lines.map((line) => {
+    const s = String(line);
+    const cut = s.indexOf(' ');
+    if (cut <= 0) return tr(s);
+    let rest = tr(s.slice(cut + 1));
+    if (rest.includes(bundled)) rest = rest.split(bundled).join(tr(bundled));
+    return s.slice(0, cut) + ' ' + rest;
+  }).join('\n');
+}
 function paintMcp(st) {
   if (st) mcpState = { ...mcpState, ...st };
   const list = mcpState.servers || [];
   const on = list.filter(x => x.state === 'on');
   $('#mcpSum').textContent = list.length ? `${on.length}/${list.length} máy chủ đang kết nối · ${on.reduce((a, x) => a + x.tools.length, 0)} công cụ` : 'chưa có máy chủ nào';
   if (typeof mcpState.enabled === 'boolean') $('#mcpMaster').checked = mcpState.enabled;
-  const stLbl = { on: 'đang kết nối', off: 'đã tắt', starting: 'đang khởi động…', error: 'lỗi' };
-  $('#mcpList').innerHTML = list.map(x => `<div class="mcp-srv"><div class="hd"><label class="check"><input type="checkbox" data-mcp-toggle="${esc(x.name)}" ${x.enabled ? 'checked' : ''}> <b>${esc(x.name)}</b></label><span class="st ${x.state}">${stLbl[x.state] || x.state}</span><span class="muted small">${esc(x.kind)} · ${esc(x.command).slice(0, 90)}</span><button type="button" class="btn sm" data-mcp-restart="${esc(x.name)}">Kết nối lại</button></div>
-    ${x.error ? `<div class="small" style="color:#82071e">${esc(x.error)}</div>` : ''}
+  const stLbl = { on: 'đang kết nối', off: 'Đã tắt', starting: 'đang khởi động…', error: 'lỗi' };
+  $('#mcpList').innerHTML = list.map(x => `<div class="mcp-srv"><div class="hd"><label class="check"><input type="checkbox" data-mcp-toggle="${esc(x.name)}" ${x.enabled ? 'checked' : ''}> <b>${esc(x.displayName || x.name)}</b></label><span class="st ${x.state}">${stLbl[x.state] || x.state}</span><span class="muted small mcp-cmd">${esc(x.kind)} · ${esc(x.command)}</span><button type="button" class="btn sm" data-mcp-restart="${esc(x.name)}">Kết nối lại</button></div>
+    ${x.hint ? `<div class="mcp-hint small" style="color:#82071e">${esc(x.hint)}</div>` : ''}
     ${x.tools.length ? `<div class="small muted">Công cụ: ${x.tools.map(t => `<code title="${esc(t.description)}">${esc(t.name)}</code>`).join(' ')}</div>` : ''}
-    <details><summary class="small">Nhật ký máy chủ</summary><pre>${esc(x.logs.join('\n') || '(trống)')}</pre></details></div>`).join('') || '<div class="small muted">Chưa có máy chủ. Thêm nhanh bằng các nút ở trên hoặc sửa mcp.json.</div>';
+    <details><summary class="small">Chi tiết</summary>${x.error ? `<div class="mcp-raw small">${esc(x.error)}</div>` : ''}<div class="small muted">Nhật ký máy chủ</div><pre>${esc(mcpLogText(x.logs))}</pre></details></div>`).join('') || '<div class="small muted">Chưa có máy chủ. Thêm nhanh bằng các nút ở trên hoặc sửa mcp.json.</div>';
   const b = $('#mcpBadges'); const shown = list.filter(x => x.enabled && (x.state === 'on' || x.state === 'error'));
   b.hidden = !(isAgent() && mcpState.enabled !== false && shown.length);
-  b.innerHTML = shown.map(x => `<span class="${x.state === 'error' ? 'error' : ''}" title="${esc(x.state === 'error' ? x.error || '' : x.tools.map(t => t.name).join(', '))}">🔌 ${esc(x.name)}${x.state === 'on' ? ' · ' + x.tools.length : ' · lỗi'}</span>`).join('');
+  b.innerHTML = shown.map(x => `<span class="${x.state === 'error' ? 'error' : ''}" title="${esc(x.state === 'error' ? (x.hint || x.error || '') : x.tools.map(t => t.name).join(', '))}">🔌 ${esc(x.displayName || x.name)}${x.state === 'on' ? ' · ' + x.tools.length : ' · lỗi'}</span>`).join('');
 }
 async function refreshMcp(withText = false) {
   const st = await A.mcpStatus(); mcpState = { servers: st.servers, enabled: st.enabled };
@@ -2007,15 +2031,38 @@ $('#mcpBlock').addEventListener('toggle', () => { if ($('#mcpBlock').open) refre
 $('#mcpMaster').addEventListener('change', async (e) => { await A.mcpMaster(e.target.checked); mcpState.enabled = e.target.checked; paintMcp(); refreshAgent(); });
 $('#mcpSaveBtn').addEventListener('click', async () => {
   const r = await A.mcpSave($('#mcpJson').value);
-  $('#mcpMsg').textContent = r.ok ? '✓ Đã lưu' : '⚠ ' + r.error; $('#mcpMsg').style.color = r.ok ? '' : '#82071e';
-  if (r.ok) { for (const x of r.servers) if (x.enabled) A.mcpRestart(x.name); refreshMcp(true); }
+  if (!r.ok) { $('#mcpMsg').textContent = r.canceled ? (r.notice || 'Chưa chuyển khoá vào kho bảo mật. Chưa lưu mcp.json.') : '⚠ ' + (r.error || ''); $('#mcpMsg').style.color = r.canceled ? '' : '#82071e'; return; }
+  const paused = mcpState.enabled === false || r.paused;
+  if (paused) {
+    $('#mcpMsg').textContent = [r.notice, 'Đã lưu. Sẽ kết nối khi bạn bật “Cho AIVN AGENT dùng các ứng dụng đã kết nối”.'].filter(Boolean).join(' ');
+    $('#mcpMsg').style.color = ''; refreshMcp(true); return;
+  }
+  $('#mcpMsg').textContent = r.notice || '✓ Đã lưu'; $('#mcpMsg').style.color = '';
+  for (const x of r.servers) if (x.enabled) A.mcpRestart(x.name);
+  refreshMcp(true);
 });
 $('#mcpBlock').addEventListener('click', async (e) => {
   const p = e.target.closest('[data-mcp-preset]'); const rs = e.target.closest('[data-mcp-restart]');
-  if (p) { const r = await A.mcpPreset(p.dataset.mcpPreset); if (r.ok) { toast(`Đã thêm máy chủ “${r.name}” — đang kết nối (lần đầu có thể mất 30–60 giây để tải gói).`); refreshMcp(true); } else if (!r.canceled) toast('⚠ ' + r.error); }
-  if (rs) { A.mcpRestart(rs.dataset.mcpRestart); }
+  if (p) {
+    const r = await A.mcpPreset(p.dataset.mcpPreset);
+    if (r.paused || mcpState.enabled === false) toast('Công tắc “Cho AIVN AGENT dùng các ứng dụng đã kết nối” đang tắt. AIVN sẽ kết nối khi bạn bật công tắc.');
+    else if (r.ok) { toast(`Đã thêm máy chủ “${r.label || r.name}” — đang kết nối (lần đầu có thể mất 30–60 giây để tải gói).`); refreshMcp(true); }
+    else if (!r.canceled) toast('⚠ ' + r.error);
+    if (r.ok) refreshMcp(true);
+  }
+  if (rs) {
+    if (mcpState.enabled === false) { toast('Công tắc “Cho AIVN AGENT dùng các ứng dụng đã kết nối” đang tắt. AIVN sẽ kết nối khi bạn bật công tắc.'); return; }
+    const r = await A.mcpRestart(rs.dataset.mcpRestart);
+    if (r && r.paused) toast(r.error);
+  }
 });
-$('#mcpBlock').addEventListener('change', async (e) => { const t = e.target.closest('[data-mcp-toggle]'); if (!t) return; await A.mcpToggle({ name: t.dataset.mcpToggle, on: t.checked }); refreshMcp(true); refreshAgent(); });
+$('#mcpBlock').addEventListener('change', async (e) => {
+  const t = e.target.closest('[data-mcp-toggle]'); if (!t) return;
+  if (t.checked && mcpState.enabled === false) { t.checked = false; toast('Công tắc “Cho AIVN AGENT dùng các ứng dụng đã kết nối” đang tắt. AIVN sẽ kết nối khi bạn bật công tắc.'); return; }
+  const r = await A.mcpToggle({ name: t.dataset.mcpToggle, on: t.checked });
+  if (r && r.paused) toast(r.error || 'Công tắc “Cho AIVN AGENT dùng các ứng dụng đã kết nối” đang tắt. AIVN sẽ kết nối khi bạn bật công tắc.');
+  refreshMcp(true); refreshAgent();
+});
 
 // --- Cài đặt AIVN AGENT ---
 async function refreshAgent() {

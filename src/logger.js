@@ -4,13 +4,72 @@ const fs = require('fs');
 const path = require('path');
 const MAX = 5 * 1024 * 1024;
 let dir = null, file = null, engineFile = null, broken = null;
-const SECRET_KEY = /(token|password|passwd|pw|secret|api[-_]?key|authorization|cookie|hfToken|privateKey|adminKey)/i;
-function redact(v, depth = 0) {
+function plugins() {
+  try { return require('./plugins'); } catch { return null; }
+}
+function flagBody(a) {
+  if (typeof a !== 'string' || !a.startsWith('-')) return null;
+  const body = a.replace(/^-+/, '');
+  if (!body || body.includes('=')) return null;
+  return body;
+}
+// Đối số kề cờ trong mảng: '--apiKey' rồi giá trị, '-p' rồi giá trị, '-H' rồi 'Cookie: …'.
+function redactListedArg(arr, i, PG) {
+  const cur = String(arr[i]);
+  const glued = /^-p(.+)$/i.exec(cur);
+  if (glued && !cur.startsWith('--') && PG.isSecret('password', glued[1])) return '-p***';
+  const fname = flagBody(i > 0 ? arr[i - 1] : '');
+  if (fname && /^(h|header)$/i.test(fname)) {
+    const h = /^([A-Za-z][A-Za-z0-9-]*)(\s*:\s*)([\s\S]+)$/.exec(cur);
+    if (h && PG.isSecret(h[1], h[3])) return h[1] + h[2] + '***';
+    const masked = PG.maskKnownSecrets(cur);
+    if (masked !== cur) return masked;
+    return null;
+  }
+  if (fname && /^p$/i.test(fname) && !cur.startsWith('-') && PG.isSecret('password', cur)) return '***';
+  if (fname && (PG.isSecretName(fname) || /^k$/i.test(fname)) && !cur.startsWith('--') && !/^-[A-Za-z]$/.test(cur) && PG.isSecret(fname, cur)) return '***';
+  if (i >= 2 && /^--api$/i.test(String(arr[i - 2])) && /^key$/i.test(String(arr[i - 1])) && !cur.startsWith('-') && PG.isSecret('key', cur)) return '***';
+  return null;
+}
+function redactList(arr, depth, seen) {
+  const PG = plugins();
+  const out = [];
+  const n = Math.min(arr.length, 50);
+  for (let i = 0; i < n; i++) {
+    const cur = arr[i];
+    if (typeof cur === 'string' && PG) {
+      const hit = redactListedArg(arr, i, PG);
+      if (hit != null) { out.push(hit); continue; }
+    }
+    out.push(redact(cur, depth + 1, seen));
+  }
+  return out;
+}
+function redact(v, depth = 0, seen) {
   if (v == null) return v;
-  if (typeof v === 'string') return v.replace(/\bhf_[A-Za-z0-9]{8,}\b/g, 'hf_***').replace(/\b(gh[pousr]_)[A-Za-z0-9]{10,}\b/g, '$1***').replace(/(Bearer\s+)[A-Za-z0-9._-]{8,}/gi, '$1***');
-  if (typeof v !== 'object' || depth > 4) return v;
-  if (Array.isArray(v)) return v.slice(0, 50).map(x => redact(x, depth + 1));
-  const o = {}; for (const [k, x] of Object.entries(v)) o[k] = SECRET_KEY.test(k) ? '***' : redact(x, depth + 1); return o;
+  if (typeof v === 'string') {
+    let s = v.replace(/\bhf_[A-Za-z0-9]{8,}\b/g, 'hf_***').replace(/\b(gh[pousr]_)[A-Za-z0-9]{10,}\b/g, '$1***');
+    const PG = plugins();
+    try { return PG ? PG.maskKnownSecrets(s) : s; }
+    catch { return '••••'; }
+  }
+  if (typeof v !== 'object') return v;
+  if (!seen) seen = new WeakSet();
+  if (seen.has(v)) return '[Circular]';
+  if (depth > 12) return '[…]';
+  seen.add(v);
+  try {
+    if (Array.isArray(v)) return redactList(v, depth, seen);
+    const PG = plugins();
+    const o = {};
+    for (const [k, x] of Object.entries(v)) {
+      if (typeof x === 'string' && PG && PG.isSecret(k, x)) o[k] = '***';
+      else o[k] = redact(x, depth + 1, seen);
+    }
+    return o;
+  } finally {
+    seen.delete(v);
+  }
 }
 const short = (s, n = 400) => { s = String(s); return s.length > n ? s.slice(0, n) + `…(+${s.length - n} ký tự)` : s; };
 function fmt(x) { if (x === undefined) return ''; if (typeof x === 'string') return short(redact(x), 4000); try { return short(JSON.stringify(redact(x)), 4000); } catch { return String(x); } }

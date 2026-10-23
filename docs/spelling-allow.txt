@@ -10,6 +10,7 @@ Redistributable
 Vulkan
 Wi
 Zalo
+agent
 amp
 args
 auto

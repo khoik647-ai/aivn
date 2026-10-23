@@ -223,9 +223,14 @@ async function initStores() {
   scheduler = createScheduler({ file: path.join(ud, 'schedules.json'), onFire: onScheduleFire, log: (m) => { console.log(m); log(m); } });
   computerTools = createComputerTools({ launchCacheFile: path.join(app.getPath('userData'), 'app-launch-cache.json'), sandbox: () => benchSandbox, getSettings: () => settings.data, listWindows: () => require('./agent/uitree').windows(), openPath: (p) => shell.openPath(p), openExternal: (u) => shell.openExternal(u), log, logScan: (d) => LOG.block('apps', 'Quét ứng dụng đã cài (AIVN AGENT)', [`nguồn: ${JSON.stringify(d.sources)}`, `lỗi: ${d.errors.length ? d.errors.join('; ') : 'không'}`, `thư mục Desktop: ${d.dirs ? d.dirs.desktop.join(' | ') : '—'}`, `thư mục Start Menu: ${d.dirs ? d.dirs.start.join(' | ') : '—'}`, `thời gian tìm sâu: ${d.ms ?? '?'} ms`]),
     keyTap: (k) => { try { SC.libnut().keyTap(k); } catch (e) { throw new Error(e.message); } }, visionReady: () => !!engine.status().vision, screen: { look: (a, ctx) => deskWrap(getDesk().look, a, ctx), act: (a, ctx) => deskWrap(getDesk().act, a, ctx), ensureApp: (a, ctx) => deskWrap(getDesk().ensureApp, a, ctx), readText: (a, ctx) => deskWrap(getDesk().readText, a, ctx), pending: () => (desk && desk.active() ? desk.pending() : null), searchTodo: () => (desk && desk.active() ? desk.searchTodo() : null), searchFound: () => (desk && desk.active() ? desk.searchFound() : null), likely: (q) => (desk && desk.active() ? desk.likely(q) : null), cleanupDraft: (o) => (desk && desk.active() ? desk.cleanupDraft(o) : null), readBrowserPage: (o) => (desk && desk.active() ? desk.readBrowserPage(o) : null), openInBrowser: (b, u) => getDesk().openInBrowser(b, u), browserRead: (a, ctx) => deskWrap(getDesk().browserRead, a, ctx) } });
-  mcp = require('./mcp').createMcpManager({ dir: app.getPath('userData'), log: (sc, m) => LOG.log(sc, m), onChange: () => send('mcp:changed', mcp.status()), getExcelFolders: () => { try { const meta = JSON.parse(fs.readFileSync(path.join(ud, 'plugins-meta.json'), 'utf8')); const list = meta && meta.connectors && meta.connectors.excel && meta.connectors.excel.folders; return Array.isArray(list) ? list.filter(x => typeof x === 'string') : []; } catch { return []; } } });
+  pluginSecrets = require('./plugins').createSecretStore({ dir: ud, safeStorage: require('electron').safeStorage });
+  const scrubText = (s) => pluginSecrets.mask(s == null ? '' : String(s));
+  mcp = require('./mcp').createMcpManager({ dir: ud, log: (sc, m) => LOG.log(sc, scrubText(m)), scrub: scrubText, resolveSecret: (id) => pluginSecrets.get(id), noteSecret: (v) => pluginSecrets.note(v), onChange: () => send('mcp:changed', plugins ? plugins.publicServers() : pluginSecrets.maskDeep(mcp.status())), getExcelFolders: () => { try { const meta = JSON.parse(fs.readFileSync(path.join(ud, 'plugins-meta.json'), 'utf8')); const list = meta && meta.connectors && meta.connectors.excel && meta.connectors.excel.folders; return Array.isArray(list) ? list.filter(x => typeof x === 'string') : []; } catch { return []; } } });
+  plugins = require('./plugins').createPluginGate({ dir: ud, mcp, secrets: pluginSecrets, approve: (card) => approveCard(card), log: (sc, m) => LOG.log(sc, scrubText(m)), getAgentFolders: () => (settings.data.agentFolders || []).filter(x => typeof x === 'string'), agentEnabled: () => settings.data.agentMcp !== false });
+  mcp.ensureLazy = () => plugins.ensureLazy();
+  plugins.sealAndUpgrade().catch(() => {});
   agent = createAgent({ engine: agentEngine, mcp, recipes: require('./agent/recipes').createRecipeStore(path.join(app.getPath('userData'), 'agent-recipes.json')), getSettings: () => settings.data, gateOk: () => lastGateOk, allowAlways: (name) => { const l = new Set(settings.data.agentAlwaysAllow || []); l.add(name); settings.data.agentAlwaysAllow = [...l]; settings.save(); LOG.log('agent', `Người dùng chọn "Luôn cho phép": ${name}`); }, memory, scheduler, extractFile: extractAny, embedForMemory, log, computer: computerTools,
-    logTool: (x) => LOG.log('tool', `${x.auto ? '(tự động) ' : ''}${x.name} → ${x.status} sau ${x.ms ?? '?'} ms`, { args: Object.fromEntries(Object.entries(x.args || {}).map(([k, v]) => [k, typeof v === 'string' && v.length > 200 ? v.slice(0, 200) + '…' : v])), ketQua: String(x.summary || '').slice(0, 300) }),
+    logTool: (x) => LOG.log('tool', scrubText(`${x.auto ? '(tự động) ' : ''}${x.name} → ${x.status} sau ${x.ms ?? '?'} ms`), { args: pluginSecrets.maskDeep(Object.fromEntries(Object.entries(x.args || {}).map(([k, v]) => [k, typeof v === 'string' && v.length > 200 ? v.slice(0, 200) + '…' : v]))), ketQua: scrubText(String(x.summary || '')).slice(0, 300) }),
     trash: async (p) => { try { await shell.trashItem(p); } catch (e) { throw new Error('Không chuyển được tệp vào Thùng rác (' + e.message + '). Tệp vẫn còn nguyên.'); } } });
   lic = createLicenseState({ file: path.join(ud, 'license.json'), isPackaged: app.isPackaged, log: (m) => { log(m); if (isTest) console.log(m); }, fetchJson });
   appLock = createAppLock(path.join(ud, 'applock.json'));
@@ -673,15 +678,24 @@ function askConfirm(req) {
   });
 }
 // Thẻ xin phép chung (Cho phép / Từ chối / Từ chối kèm lý do / Luôn cho phép) — trả { ok, reason, always }
+function approveCard(card) {
+  const safe = pluginSecrets ? pluginSecrets.maskDeep(card) : card;
+  if (typeof qaReq !== 'undefined' && qaReq && qaReq.enabled) {
+    const task = String(qaReq.args && (qaReq.args.task || qaReq.args.script) || '');
+    return QAR.answerFor(safe, { draft: QAR.DRAFT_RE.test(task) });
+  }
+  return askApproval(safe);
+}
 function askApproval(card) {
+  const safe = pluginSecrets ? pluginSecrets.maskDeep(card) : card;
   if (!win || win.isDestroyed()) return Promise.resolve({ ok: false });
   if (!win.isVisible()) win.show(); if (win.isMinimized()) win.restore(); win.focus();
   const id = 'p' + (++confirmSeq);
   return new Promise((resolve) => {
     const t = setTimeout(() => { confirms.delete(id); send('agent:approve-cancel', { id }); resolve({ ok: false, reason: '', timeout: true }); }, 10 * 60e3);
     confirms.set(id, (r) => { clearTimeout(t); confirms.delete(id); resolve(r && typeof r === 'object' ? { ok: r.ok === true, reason: String(r.reason || '').slice(0, 500), always: r.always === true } : { ok: r === true }); });
-    send('agent:approve', { id, ...card });
-    LOG.log('agent', `Xin phép: ${card.title} (${card.tool})`);
+    send('agent:approve', { id, ...safe });
+    LOG.log('agent', pluginSecrets ? pluginSecrets.mask(`Xin phép: ${safe.title} (${safe.tool})`) : `Xin phép: ${safe.title} (${safe.tool})`);
     if (!app.isPackaged && process.env.AIVN_APPROVE_AUTO) setTimeout(async () => { if (process.env.AIVN_QACU && confirmSeq <= 3) { await sleep(500); try { fs.writeFileSync(path.join(process.env.AIVN_QACU, `approve-card-${confirmSeq}.png`), (await win.webContents.capturePage()).toPNG()); } catch {} } const f = confirms.get(id); if (f) f(process.env.AIVN_APPROVE_AUTO === 'allow' ? { ok: true } : { ok: false, reason: process.env.AIVN_APPROVE_AUTO.replace(/^deny:?/, '') }); }, 200);
   });
 }
@@ -708,8 +722,8 @@ async function runAgentTurn({ reqId, convoId, messages, headless = false, signal
   const tb = tokenBatcher(reqId);
   try { return await agent.run({ messages, convoId, signal, headless, qa: !!qa, attachments: files, confirm: qa ? qa.confirm : (...a) => { tb.flush(); return askConfirm(...a); }, confirmScreen: qa ? qa.confirmScreen : (...a) => { tb.flush(); return askScreen(...a); }, approve: qa ? qa.approve : (card) => { tb.flush(); return askApproval(card); }, // QA runner: thẻ xin phép luôn bị TỪ CHỐI tự động (qa-runner.js)
     onToken: (t) => reqId && tb.push(t),
-    onStep: (st) => { tb.flush(); if (qa && qa.onStep) qa.onStep(st); reqId && send('agent:step', { reqId, step: slimStep(st) }); },
-    onStatus: (st) => { tb.flush(); reqId && send('agent:status', { reqId, ...st }); } }); }
+    onStep: (st) => { tb.flush(); const step = pluginSecrets ? pluginSecrets.maskDeep(slimStep(st)) : slimStep(st); if (qa && qa.onStep) qa.onStep(step); reqId && send('agent:step', { reqId, step }); },
+    onStatus: (st) => { tb.flush(); const safe = pluginSecrets ? pluginSecrets.maskDeep(st) : st; reqId && send('agent:status', { reqId, ...safe }); } }); }
   finally {
     tb.flush();
     // B104: lượt kết thúc bất thường (hết giờ QA / lỗi) mà ô soạn còn chữ AIVN gõ chưa gửi → xoá; người dùng bấm Dừng → không thao tác thêm, chỉ ghi lại
@@ -733,7 +747,7 @@ async function slowAgentWarning() {
 }
 // ---------- Điều khiển máy tính kiểu desktop agent (quan sát → thao tác → kiểm tra) ----------
 let desk = null;
-let mcp = null;
+let mcp = null, pluginSecrets = null, plugins = null;
 const qaAsks = []; // chỉ khi phát triển (AIVN_DESK_AUTO): ghi lại các thẻ xin phép để kiểm thử
 let agentStepScale = 1; // ×3 khi mô hình đang nạp là “Rất chậm” (bật tay) — xem agent-eligibility.js
 function getDesk() {
@@ -1336,20 +1350,49 @@ function registerIpc() {
       return { ok: true, result: c.importContacts(rows, { onDuplicate: 'merge' }) }; } catch (e) { return { ok: false, error: e.userMessage || e.message }; }
   });
   // ---- Kết nối (MCP) ----
-  ipcMain.handle('mcp:status', () => ({ servers: mcp.status(), text: mcp.readText(), file: mcp.file, enabled: settings.data.agentMcp !== false }));
-  ipcMain.handle('mcp:save', async (_e, text) => { try { await mcp.saveText(String(text)); LOG.log('mcp', 'Đã lưu mcp.json'); return { ok: true, servers: mcp.status() }; } catch (e) { return { ok: false, error: e.message }; } });
-  ipcMain.handle('mcp:toggle', async (_e, { name, on }) => { try { return { ok: true, server: await mcp.setEnabled(name, !!on) }; } catch (e) { return { ok: false, error: e.message }; } });
-  ipcMain.handle('mcp:restart', async (_e, name) => { try { return { ok: true, server: await mcp.start(name) }; } catch (e) { return { ok: false, error: e.message }; } });
+  const scrubErr = (e) => pluginSecrets ? pluginSecrets.mask(e && e.message) : (e && e.message);
+  ipcMain.handle('mcp:status', () => ({ ...plugins.publicPayload(), enabled: settings.data.agentMcp !== false }));
+  const masterOff = () => settings.data.agentMcp === false;
+  const pausedReply = () => ({ ok: false, paused: true, error: require('./plugins').MASTER_OFF });
+  ipcMain.handle('mcp:save', async (_e, text) => {
+    const body = String(text);
+    const peek = plugins.peekSecrets(body);
+    if (peek.count > 0) {
+      const ans = await dialog.showMessageBox(win, TO({
+        type: 'warning', buttons: ['Để sau', 'Đưa vào kho bảo mật'], defaultId: 1, cancelId: 0, title: 'Khoá bí mật',
+        message: `Phát hiện ${peek.count} khoá bí mật trong tệp. Đưa vào kho bảo mật? Giá trị sẽ không ghi dạng chữ trong mcp.json.`,
+        detail: pluginSecrets.secure() ? require('./plugins').KEYCHAIN_OK : require('./plugins').KEYCHAIN_NO,
+      }));
+      if (ans.response !== 1) return { ok: false, canceled: true, offer: true, secretCount: peek.count, saved: false, moved: false, notice: require('./plugins').NOT_MOVED };
+    }
+    const r = await plugins.saveJson(body);
+    if (r.ok) LOG.log('mcp', 'Đã lưu mcp.json');
+    if (r.ok && masterOff()) r.paused = true;
+    return r;
+  });
+  ipcMain.handle('mcp:toggle', async (_e, { name, on }) => { if (on && masterOff()) return pausedReply(); return plugins.toggle(name, !!on); });
+  ipcMain.handle('mcp:restart', async (_e, name) => { if (masterOff()) return pausedReply(); return plugins.startServer(name); });
   ipcMain.handle('mcp:preset', async (_e, kind) => {
+    if (masterOff()) return pausedReply();
     let folder = null;
     if (kind === 'filesystem') { const r = await dialog.showOpenDialog(win, { buttonLabel: 'Chọn thư mục', title: 'Chọn thư mục cho máy chủ MCP filesystem', properties: ['openDirectory'] }); if (r.canceled || !r.filePaths[0]) return { ok: false, canceled: true }; folder = r.filePaths[0]; }
-    const P = require('./mcp').presets({ folder }); if (!P[kind]) return { ok: false, error: 'Không có mẫu này.' };
-    const cfg = mcp.config(); let name = kind; let i = 2; while (cfg.mcpServers[name]) name = `${kind}-${i++}`;
-    cfg.mcpServers[name] = P[kind];
-    try { await mcp.saveText(JSON.stringify(cfg)); mcp.start(name).catch(() => {}); return { ok: true, name }; } catch (e) { return { ok: false, error: e.message }; }
+    return plugins.addPreset(kind, folder);
   });
-  ipcMain.handle('mcp:master', (_e, on) => { settings.data.agentMcp = !!on; settings.save(); return true; });
-  setTimeout(() => mcp.startEnabled().catch(() => {}), 4000);
+  ipcMain.handle('mcp:master', async (_e, on) => {
+    settings.data.agentMcp = !!on; settings.save();
+    if (!on) { try { await mcp.stopAll(); } catch (e) { LOG.log('mcp', scrubErr(e)); } return true; }
+    plugins.startAuto().catch(() => {});
+    return true;
+  });
+  ipcMain.handle('plugins:connect', async (_e, id) => plugins.connectConnector(id));
+  ipcMain.handle('plugins:disconnect', async (_e, { id, remove } = {}) => plugins.disconnectConnector(id, { remove: !!remove }));
+  ipcMain.handle('plugins:autostart', async (_e, { name, on } = {}) => plugins.setAutostart(name, !!on));
+  ipcMain.handle('plugins:list', () => ({ connectors: plugins.connectorView(), servers: plugins.publicServers(), secretsSecure: pluginSecrets.secure() }));
+  ipcMain.handle('plugins:probe', async (_e, name) => { if (masterOff()) return pausedReply(); return plugins.probeServer(String(name || '')); });
+  ipcMain.handle('plugins:rename', async (_e, { name, label } = {}) => plugins.setDisplayName(name, label));
+  ipcMain.handle('plugins:secret', async (_e, { name, key, value, bag } = {}) => plugins.setUserSecret(name, key, value, bag));
+  ipcMain.handle('plugins:excelFolders', async (_e, folders) => plugins.changeExcelFolders(Array.isArray(folders) ? folders : []));
+  setTimeout(() => plugins.startAuto().catch(() => {}), 4000);
   ipcMain.handle('bench:ground', async (_e, { id }) => { try { return { ok: true, result: await runGroundingBench(id) }; } catch (e) { return { ok: false, error: e.message }; } });
   ipcMain.handle('logs:open', () => { const d = LOG.dir || path.join(app.getPath('userData'), 'logs'); fs.mkdirSync(d, { recursive: true }); LOG.log('app', 'Người dùng mở thư mục nhật ký'); shell.openPath(LOG.file && fs.existsSync(LOG.file) ? d : d); return d; });
   ipcMain.handle('apps:scan-test', async (_e, q) => { const r = await computerTools.scanReport(String(q || 'zalo').slice(0, 60)); LOG.block('apps', `Kiểm tra quét ứng dụng (tìm "${r.query}")`, [`tổng: ${r.total} mục · ${r.ms} ms`, `nguồn: ${JSON.stringify(r.sources)}`, `lỗi: ${r.errors.length ? r.errors.join('; ') : 'không'}`, `khớp tốt nhất: ${r.best ? r.best.name + ' → ' + (r.best.path || r.best.appId || '?') : 'không có'}`, ...r.matches.map(m => `- ${m.name} · ${m.path || m.appId || ''}${m.target ? ' → ' + m.target : ''}`)]); return r; });

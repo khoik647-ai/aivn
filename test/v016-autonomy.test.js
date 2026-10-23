@@ -37,7 +37,7 @@ test('câu “không cần hỏi lại” bật cho riêng lượt đó; xoá đ
 });
 test('chạy lệnh / Python / MCP luôn hỏi kể cả khi bật', () => {
   const auto = AU.forTurn({ setting: true, query: 'cứ làm luôn' });
-  for (const tool of ['run_command', 'run_python', 'run_javascript', 'mcp__fs__write_file']) assert.equal(AU.skipAsk(auto, 'tool', { tool }), false, tool);
+  for (const tool of ['run_command', 'run_python', 'run_javascript', 'mcp__fs__write_file', 'biz_deleteInvoice', 'biz_registerPayment', 'biz_listStock', 'excel_write_to_sheet']) assert.equal(AU.skipAsk(auto, 'tool', { tool }), false, tool);
   assert.equal(AU.skipAsk(auto, 'open-exec'), false); assert.equal(AU.skipAsk(auto, 'system', { asked: false }), false);
 });
 test('gửi tin: chỉ không hỏi khi nội dung đúng là tin người dùng nêu; “hỏi trước khi gửi” thắng', () => {

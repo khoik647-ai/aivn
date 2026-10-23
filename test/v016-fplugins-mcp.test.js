@@ -97,6 +97,20 @@ test('headers và bí mật đưa vào vận chuyển, không lọt nhật ký',
   assert.equal(seen.calls.at(-1).timeout, 5000);
 });
 
+test('chuỗi ${secret:id} được giải khi chạy; dạng cũ $aivnSecret vẫn là bí danh', async () => {
+  const dir = dirOf(); const { sdk, seen } = fakeSdk();
+  const secret = 'hf_chuoi-chuan-12345678';
+  write(dir, { mcpServers: { remote: { url: 'https://example.com/mcp', headers: { Authorization: '${secret:mcp:remote:Authorization}' } } } });
+  const m = M.createMcpManager({ dir, sdk, resolveSecret: (id) => id === 'mcp:remote:Authorization' ? secret : '' });
+  const st = await m.start('remote');
+  assert.equal(st.state, 'on', st.error);
+  assert.equal(seen.http.opts.requestInit.headers.Authorization, secret);
+  assert.equal(JSON.stringify(m.status('remote')).includes(secret), false);
+  assert.equal(M.secretIdOf('${secret:mcp:remote:Authorization}'), 'mcp:remote:Authorization');
+  assert.equal(M.secretIdOf({ $aivnSecret: 'mcp:remote:Authorization' }), 'mcp:remote:Authorization');
+  assert.equal(M.secretPlaceholder('mcp:a:TOKEN'), '${secret:mcp:a:TOKEN}');
+});
+
 test('bí mật không giải được thì không chạy', async () => {
   const dir = dirOf(); const { sdk, seen } = fakeSdk();
   write(dir, { mcpServers: { local: { command: 'node', args: ['x'], env: { TOKEN: { $aivnSecret: 'mcp:local:TOKEN' } } } } });
