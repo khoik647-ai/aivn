@@ -1,5 +1,5 @@
 """Kiểm bố cục trang web AIVN (B143–B150, B162, B174, B183, B185, B186) ở 280/320/375/390/810/820/1280 px và dải 768–900 px × vi/en/zh bằng Playwright + Chrome. Thoát 1 nếu có lỗi.
-B162: dải hẹp NARROW bắt đầu từ 280 px (Galaxy Fold), không từ 320 — vi/en/zh, không cuộn ngang, chữ và nút không tràn khung, điều khiển ≥24 px, nút tải chính ≥44 px.
+B162: dải hẹp NARROW bắt đầu từ 280 px (Galaxy Fold), gồm 375 px, không từ 320 — Android và iPhone × vi/en/zh, không cuộn ngang, chữ và nút không tràn khung, điều khiển ≥24 px, nút tải chính ≥44 px.
 Một nút “Tải AIVN bản mới nhất” (#tai-ve .dl): API GitHub /releases được giả bằng dữ liệu thật trong test/fixtures/site-releases-api.json
 (bỏ bản nháp như khi khách không đăng nhập xem). Kiểm: chọn đúng tệp theo máy (Windows → .exe, Mac → .zip đúng chip, không biết chip → Apple Silicon
 + link “Mac dùng chip Intel?”, Linux → nút chính trỏ trang Releases + ghi chú “chưa có bản Linux”, không có .exe), điện thoại/máy tính bảng không thấy link .exe/.zip nào (chỉ nút “Gửi link”),
@@ -131,7 +131,11 @@ res = []
 bad_band = []
 band_log = []
 BAND = list(range(768, 901, 2))  # B185: 768, 780, 800, 810, 820, 834, 850, 880, 900 và mọi bước 2 px
-NARROW = [280, 320, 390]  # B162: bề rộng hẹp nhất là 280 px (Galaxy Fold gập). Không bắt đầu từ 320.
+NARROW = [280, 320, 375, 390]  # B162: bề rộng hẹp nhất là 280 px (Galaxy Fold gập). Không bắt đầu từ 320. 375 px là bề rộng iPhone.
+NARROW_CLIENT = (
+    ('android', AND, nav('Linux armv8l', 5)),
+    ('iphone', IPH, nav('iPhone', 5)),
+)
 CTA = {'vi': 'Tải miễn phí', 'en': 'Download free', 'zh': '免费下载'}
 def api(c, fail):
     if fail: c.route('https://api.github.com/**', lambda rt: rt.fulfill(status=403, content_type='application/json', body='{"message":"API rate limit exceeded"}'))
@@ -270,21 +274,22 @@ with sync_playwright() as p:
     }'''
     bad_narrow = []
     for w in NARROW:
-        nc = b.new_context(viewport={'width': w, 'height': 900}, user_agent=AND, is_mobile=True, has_touch=True, device_scale_factor=2)
-        nc.add_init_script(nav('Linux armv8l', 5)); api(nc, False)
-        npg = nc.new_page()
-        for lang in ('vi', 'en', 'zh'):
-            npg.goto(URL + ('&' if '?' in URL else '?') + 'lang=' + lang, wait_until='load')
-            npg.evaluate('() => document.fonts.ready')
-            probs = npg.evaluate(narrow_js)
-            npg.click('#burger'); npg.wait_for_timeout(300)
-            probs += ['menu ' + x for x in npg.evaluate(narrow_js)]
-            npg.click('#burger'); npg.wait_for_timeout(200)
-            if npg.evaluate('()=>document.documentElement.scrollWidth>document.documentElement.clientWidth'):
-                probs.append('tràn sau khi đóng menu')
-            if probs: bad_narrow.append(f'narrow-{w} {lang}: ' + '; '.join(probs[:8]))
-            else: band_log.append(f'narrow-{w} {lang}: không tràn, nút trong khung, điều khiển ≥24, nút tải ≥44')
-        nc.close()
+        for uname, ua, init in NARROW_CLIENT:
+            nc = b.new_context(viewport={'width': w, 'height': 900}, user_agent=ua, is_mobile=True, has_touch=True, device_scale_factor=2)
+            nc.add_init_script(init); api(nc, False)
+            npg = nc.new_page()
+            for lang in ('vi', 'en', 'zh'):
+                npg.goto(URL + ('&' if '?' in URL else '?') + 'lang=' + lang, wait_until='load')
+                npg.evaluate('() => document.fonts.ready')
+                probs = npg.evaluate(narrow_js)
+                npg.click('#burger'); npg.wait_for_timeout(300)
+                probs += ['menu ' + x for x in npg.evaluate(narrow_js)]
+                npg.click('#burger'); npg.wait_for_timeout(200)
+                if npg.evaluate('()=>document.documentElement.scrollWidth>document.documentElement.clientWidth'):
+                    probs.append('tràn sau khi đóng menu')
+                if probs: bad_narrow.append(f'narrow-{w} {uname} {lang}: ' + '; '.join(probs[:8]))
+                else: band_log.append(f'narrow-{w} {uname} {lang}: không tràn, nút trong khung, điều khiển ≥24, nút tải ≥44')
+            nc.close()
     b.close()
 json.dump(res, open(OUT, 'w'), ensure_ascii=False, indent=1)
 checked = [r for r in res if not r.get('pillOnly')]

@@ -1,5 +1,5 @@
 // B162 (#32): màn 280 px (Galaxy Fold) không tràn ngang, chữ và nút không tràn khung.
-// site_check có ca Playwright 280/320/390 × vi/en/zh; dải hẹp bắt đầu từ 280, không từ 320.
+// site_check có ca Playwright 280/320/375/390 × Android và iPhone × vi/en/zh; dải hẹp bắt đầu từ 280, không từ 320.
 const test = require('node:test'); const assert = require('node:assert'); const fs = require('fs'); const path = require('path');
 const root = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'site/index.html'), 'utf8');
@@ -19,9 +19,11 @@ test('B162: CSS ≤380 px giữ nút mã, dòng bước và thẻ tính năng tr
 });
 
 test('B162: site_check đo từ 280 px cho vi/en/zh, không bắt đầu từ 320', () => {
-  assert.match(check, /NARROW = \[280, 320, 390\]/);
+  assert.match(check, /NARROW = \[280, 320, 375, 390\]/);
+  assert.ok(check.includes("('iphone', IPH"), 'dải hẹp có máy iPhone');
   assert.ok(check.includes("('fold-280', dict(viewport={'width': 280"), 'vẫn có máy Fold 280');
   assert.match(check, /for w in NARROW:/);
+  assert.match(check, /for uname, ua, init in NARROW_CLIENT:/);
   assert.match(check, /for lang in \('vi', 'en', 'zh'\)/);
   assert.match(check, /nút tải chính/);
   assert.match(check, /điều khiển <24px/);
