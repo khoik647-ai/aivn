@@ -6,8 +6,15 @@ const root = path.join(__dirname, '..');
 const site = fs.readFileSync(path.join(root, 'site/index.html'), 'utf8');
 
 test('B68 (sửa nóng trên gh-pages) đã có trong site/index.html; release.sh chạy kiểm tra trôi lệch trước khi đăng', () => {
-  assert.match(site, /var REL='https:\/\/github\.com\/khoik647-ai\/aivn\/releases\/latest\/download\/';/);
-  assert.match(site, /function directUrl\(\)\{if\(mobile\)return null;/); assert.match(site, /var mobile=phone;/);
+  // B68 tải thẳng từ nút đầu trang đã được thay có chủ ý (Design M8): nút đầu trang chỉ cuộn tới #tai-ve; chỉ nút “Tải AIVN bản mới nhất” tải tệp,
+  // điện thoại không bao giờ nhận tệp (mobile=phone); khi không có JS/API nút giữ link tĩnh tới bộ cài ổn định (release.sh đổi thành releases/latest/download).
+  assert.match(site, /var FALLBACK='https:\/\/github\.com\/'\+REPO\+'\/releases';/);
+  assert.match(site, /<a aria-describedby="dl-sub" class="dl-main" href="AIVN-Setup\.exe">/);
+  // Nút chính lấy hệ/chip khách đã chọn (chosen → pickOs/pickArch; chưa chọn thì theo máy). Điện thoại luôn truyền null.
+  assert.match(site, /var pickOs=chosen==='win'\?'windows':\(chosen==='arm64'\|\|chosen==='x64'\)\?'mac':os;/);
+  assert.match(site, /var pickArch=\(chosen==='arm64'\|\|chosen==='x64'\)\?chosen:macArch;/);
+  assert.match(site, /var p=DLX\.target\(mobile\?null:pickOs,pickArch\)/); assert.match(site, /var mobile=phone;/);
+  assert.match(site, /if\(kind==='mobile'\)main\.href='#tai-ve';/);
   assert.match(site, /#tai-ve\{scroll-margin-top:calc\(var\(--hdr,72px\) \+ 20px\)\}/); assert.match(site, /@keyframes dlflash/);
   const rel = fs.readFileSync(path.join(root, 'release.sh'), 'utf8');
   const i = rel.indexOf('tools/site_drift.py --rendered "$SITE" --live'); assert.ok(i > 0);

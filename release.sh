@@ -12,7 +12,8 @@
 #   AIVN_VERSION=0.16.0-beta.3  BẢN BETA (B174): ghi phiên bản này vào gói (package.json trong git không đổi), build Windows + macOS arm64/x64,
 #                 đăng PRERELEASE (không bao giờ Latest), KHÔNG đính latest*.yml (máy bản ổn định không tự cập nhật lên beta),
 #                 TỪ CHỐI nếu thiếu tệp Mac. Cần BETA_NOTES=<ghi chú công khai .md> (đủ vi/en/zh + cách mở lần đầu trên Mac).
-#                 Sau khi đăng: tools/publish-beta-site.sh đưa link (Windows + Mac theo hệ điều hành) lên trang web.
+#                 Sau khi đăng: tools/publish-beta-site.sh đưa khối beta lên trang, trừ khi site/index.html có INCLUDE_PRERELEASE=true
+#                 (nút tải tự động đã là một nguồn tải — khi đó chỉ --clear, gỡ khối cũ, không chèn khối mới).
 #
 # Cần: node/npm (đã npm install), wine (để electron-builder ghi icon/metadata vào .exe), zip,
 #      rcodesign, git, gh (đã chạy "gh auth login" với quyền repo + pages).
@@ -135,8 +136,13 @@ if [[ "$BETA" == 1 ]]; then
   jq -e '[.assets[].name | select(test("^latest.*\\.yml$"))] | length == 0' <<<"$J" >/dev/null || die "$TAG có latest*.yml"
   for f in "${BNEED[@]}"; do jq -e --arg n "$(basename "$f")" '[.assets[] | select(.name==$n)] | length == 1' <<<"$J" >/dev/null || die "$TAG thiếu $(basename "$f")"; done
   [[ $(gh api "repos/$OWNER/$REPO/releases/latest" --jq .tag_name) == "$LATEST_BEFORE" ]] || die "Latest đã đổi khỏi $LATEST_BEFORE"
-  step "Đưa link bản beta (Windows + Mac theo hệ điều hành) lên trang web"
-  tools/publish-beta-site.sh "$OWNER" "$TAG"
+  step "Đưa khối beta lên trang web (khi nút tự động đã gồm bản thử nghiệm thì chỉ gỡ khối cũ)"
+  if grep -qE 'var INCLUDE_PRERELEASE=true;' "$ROOT/site/index.html"; then
+    echo "INCLUDE_PRERELEASE=true: chỉ gỡ khối beta cũ (--clear), không chèn khối mới."
+    tools/publish-beta-site.sh "$OWNER" --clear
+  else
+    tools/publish-beta-site.sh "$OWNER" "$TAG"
+  fi
   echo; echo "XONG (beta): https://github.com/$OWNER/$REPO/releases/tag/$TAG · Latest vẫn là $LATEST_BEFORE"
   exit 0
 fi
@@ -160,6 +166,15 @@ sed -e "s#href=\"AIVN-Setup.exe\"#href=\"$BASE_URL/AIVN-Setup.exe\"#g" \
     -e "s#href=\"AIVN-mac-x64.zip\"#href=\"$BASE_URL/AIVN-mac-x64.zip\"#g" \
     site/index.html > "$SITE/index.html"
 for f in preview-desktop.png preview-mobile.png favicon.svg favicon.ico apple-touch-icon.png; do [[ -f "site/$f" ]] && cp "site/$f" "$SITE/"; done
+# Chỉ chép tệp thường: bỏ qua symlink trong site/img (không đưa liên kết ra trang phát hành).
+if [[ -d site/img ]]; then
+  mkdir -p "$SITE/img"
+  while IFS= read -r -d '' f; do
+    rel="${f#site/img/}"
+    mkdir -p "$SITE/img/$(dirname "$rel")"
+    cp -p "$f" "$SITE/img/$rel"
+  done < <(find site/img -type f -print0)
+fi
 # dung lượng tải thật của bản phát hành này (QA B10), MB thập phân, làm tròn
 mb() { node -e 'const s=require("fs").statSync(process.argv[1]).size;process.stdout.write(String(Math.round(s/1e6)))' "$1"; }
 MB_WIN="$(mb "$OUT/AIVN-Setup.exe")"; MB_ARM="$(mb "$OUT/AIVN-mac-arm64.zip")"; MB_X64="$(mb "$OUT/AIVN-mac-x64.zip")"

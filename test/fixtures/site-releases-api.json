@@ -1,0 +1,732 @@
+[
+ {
+  "tag_name": "v0.16.0-beta.2.6",
+  "name": "AIVN 0.16.0-beta.2.6 (bản thử nháp — B107–B117)",
+  "draft": true,
+  "prerelease": true,
+  "published_at": null,
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/untagged-d672140e4f419df9a2a4",
+  "assets": [
+   {
+    "name": "AIVN-Setup-0.16.0-beta.2.6.exe",
+    "size": 244962864,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/untagged-d672140e4f419df9a2a4/AIVN-Setup-0.16.0-beta.2.6.exe"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.16.0-beta.2.5",
+  "name": "AIVN 0.16.0-beta.2.5 (nháp, chỉ Windows)",
+  "draft": true,
+  "prerelease": true,
+  "published_at": null,
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/untagged-67b42d2328d1e464775c",
+  "assets": [
+   {
+    "name": "AIVN-Setup-0.16.0-beta.2.5.exe",
+    "size": 244944370,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/untagged-67b42d2328d1e464775c/AIVN-Setup-0.16.0-beta.2.5.exe"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.16.0-beta.2.4",
+  "name": "AIVN 0.16.0-beta.2.4 (nháp, chỉ Windows)",
+  "draft": true,
+  "prerelease": true,
+  "published_at": null,
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/untagged-19a64c2564b0a8754a6e",
+  "assets": [
+   {
+    "name": "AIVN-Setup-0.16.0-beta.2.4.exe",
+    "size": 244929708,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/untagged-19a64c2564b0a8754a6e/AIVN-Setup-0.16.0-beta.2.4.exe"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.16.0-beta.2.3",
+  "name": "AIVN 0.16.0-beta.2.3 (draft)",
+  "draft": true,
+  "prerelease": true,
+  "published_at": null,
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/untagged-fd35807a4e085e27ccb9",
+  "assets": [
+   {
+    "name": "AIVN-Setup-0.16.0-beta.2.3.exe",
+    "size": 244924217,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/untagged-fd35807a4e085e27ccb9/AIVN-Setup-0.16.0-beta.2.3.exe"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.16.0-beta.1",
+  "name": "AIVN 0.16.0-beta.1 (bản thử nội bộ, nháp)",
+  "draft": true,
+  "prerelease": false,
+  "published_at": null,
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/untagged-4fcd43d1e93d8de0fb70",
+  "assets": [
+   {
+    "name": "AIVN-Setup-0.16.0-beta.1.exe",
+    "size": 240389119,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/untagged-4fcd43d1e93d8de0fb70/AIVN-Setup-0.16.0-beta.1.exe"
+   },
+   {
+    "name": "AIVN-Setup-0.16.0-beta.1.exe.blockmap",
+    "size": 251684,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/untagged-4fcd43d1e93d8de0fb70/AIVN-Setup-0.16.0-beta.1.exe.blockmap"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.16.0-beta.3-pre",
+  "name": "AIVN 0.16.0-beta.3-pre (bản thử trước beta.3, nháp — chỉ Windows)",
+  "draft": true,
+  "prerelease": true,
+  "published_at": null,
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/untagged-09a01d425733c9941c36",
+  "assets": [
+   {
+    "name": "AIVN-Setup-0.16.0-beta.3-pre.exe",
+    "size": 244830363,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/untagged-09a01d425733c9941c36/AIVN-Setup-0.16.0-beta.3-pre.exe"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.16.0-beta.2.2",
+  "name": "AIVN 0.16.0-beta.2.2 (nháp, chỉ Windows)",
+  "draft": true,
+  "prerelease": true,
+  "published_at": null,
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/untagged-539883979dd45de6cdc2",
+  "assets": [
+   {
+    "name": "AIVN-Setup-0.16.0-beta.2.2.exe",
+    "size": 244868341,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/untagged-539883979dd45de6cdc2/AIVN-Setup-0.16.0-beta.2.2.exe"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.16.0-beta.2.1",
+  "name": "AIVN 0.16.0-beta.2.1 (bản thử B83–B86 cho QA Zalo thật, nháp — chỉ Windows)",
+  "draft": true,
+  "prerelease": true,
+  "published_at": null,
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/untagged-5de94ecfdc602b1f6c3e",
+  "assets": [
+   {
+    "name": "AIVN-Setup-0.16.0-beta.2.1.exe",
+    "size": 244856637,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/untagged-5de94ecfdc602b1f6c3e/AIVN-Setup-0.16.0-beta.2.1.exe"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.16.0-beta.2",
+  "name": "AIVN 0.16.0-beta.2 (bản thử nội bộ, nháp)",
+  "draft": true,
+  "prerelease": true,
+  "published_at": null,
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/untagged-5be85683077faec2d370",
+  "assets": [
+   {
+    "name": "AIVN-Setup-0.16.0-beta.2.exe",
+    "size": 244761806,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/untagged-5be85683077faec2d370/AIVN-Setup-0.16.0-beta.2.exe"
+   },
+   {
+    "name": "AIVN-Setup-0.16.0-beta.2.exe.blockmap",
+    "size": 257416,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/untagged-5be85683077faec2d370/AIVN-Setup-0.16.0-beta.2.exe.blockmap"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.16.0-beta.3",
+  "name": "AIVN 0.16.0-beta.3 (bản thử nghiệm)",
+  "draft": false,
+  "prerelease": true,
+  "published_at": "2026-10-22T20:22:10Z",
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/v0.16.0-beta.3",
+  "assets": [
+   {
+    "name": "AIVN-0.16.0-beta.3-arm64-mac.zip",
+    "size": 267854159,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.3/AIVN-0.16.0-beta.3-arm64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.16.0-beta.3-x64-mac.zip",
+    "size": 280754509,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.3/AIVN-0.16.0-beta.3-x64-mac.zip"
+   },
+   {
+    "name": "AIVN-Setup-0.16.0-beta.3.exe",
+    "size": 245128172,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.3/AIVN-Setup-0.16.0-beta.3.exe"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.16.0-beta.2.8",
+  "name": "AIVN 0.16.0-beta.2.8 (bản thử nghiệm)",
+  "draft": false,
+  "prerelease": true,
+  "published_at": "2026-10-22T08:55:23Z",
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/v0.16.0-beta.2.8",
+  "assets": [
+   {
+    "name": "AIVN-0.16.0-beta.2.8-arm64-mac.zip",
+    "size": 267701414,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.2.8/AIVN-0.16.0-beta.2.8-arm64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.16.0-beta.2.8-x64-mac.zip",
+    "size": 280600852,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.2.8/AIVN-0.16.0-beta.2.8-x64-mac.zip"
+   },
+   {
+    "name": "AIVN-Setup-0.16.0-beta.2.8.exe",
+    "size": 245012768,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.2.8/AIVN-Setup-0.16.0-beta.2.8.exe"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.16.0-beta.2.7",
+  "name": "AIVN 0.16.0-beta.2.7 (bản thử nghiệm)",
+  "draft": false,
+  "prerelease": true,
+  "published_at": "2026-10-22T06:42:06Z",
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/v0.16.0-beta.2.7",
+  "assets": [
+   {
+    "name": "AIVN-Setup-0.16.0-beta.2.7.exe",
+    "size": 244978025,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.2.7/AIVN-Setup-0.16.0-beta.2.7.exe"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.15.3",
+  "name": "AIVN 0.15.3",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-21T06:42:56Z",
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/v0.15.3",
+  "assets": [
+   {
+    "name": "AIVN-0.15.3-arm64-mac.zip",
+    "size": 259835253,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.3/AIVN-0.15.3-arm64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.15.3-arm64-mac.zip.blockmap",
+    "size": 273986,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.3/AIVN-0.15.3-arm64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-0.15.3-x64-mac.zip",
+    "size": 272736118,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.3/AIVN-0.15.3-x64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.15.3-x64-mac.zip.blockmap",
+    "size": 284070,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.3/AIVN-0.15.3-x64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-mac-arm64.zip",
+    "size": 259835253,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.3/AIVN-mac-arm64.zip"
+   },
+   {
+    "name": "AIVN-mac-x64.zip",
+    "size": 272736118,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.3/AIVN-mac-x64.zip"
+   },
+   {
+    "name": "AIVN-Setup-0.15.3.exe",
+    "size": 240075606,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.3/AIVN-Setup-0.15.3.exe"
+   },
+   {
+    "name": "AIVN-Setup-0.15.3.exe.blockmap",
+    "size": 251338,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.3/AIVN-Setup-0.15.3.exe.blockmap"
+   },
+   {
+    "name": "AIVN-Setup.exe",
+    "size": 240075606,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.3/AIVN-Setup.exe"
+   },
+   {
+    "name": "latest-mac.yml",
+    "size": 500,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.3/latest-mac.yml"
+   },
+   {
+    "name": "latest.yml",
+    "size": 340,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.3/latest.yml"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.15.2",
+  "name": "AIVN 0.15.2",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-20T20:25:25Z",
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/v0.15.2",
+  "assets": [
+   {
+    "name": "AIVN-0.15.2-arm64-mac.zip",
+    "size": 259786603,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.2/AIVN-0.15.2-arm64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.15.2-arm64-mac.zip.blockmap",
+    "size": 274127,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.2/AIVN-0.15.2-arm64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-0.15.2-x64-mac.zip",
+    "size": 272686008,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.2/AIVN-0.15.2-x64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.15.2-x64-mac.zip.blockmap",
+    "size": 284192,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.2/AIVN-0.15.2-x64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-mac-arm64.zip",
+    "size": 259786603,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.2/AIVN-mac-arm64.zip"
+   },
+   {
+    "name": "AIVN-mac-x64.zip",
+    "size": 272686008,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.2/AIVN-mac-x64.zip"
+   },
+   {
+    "name": "AIVN-Setup-0.15.2.exe",
+    "size": 240045489,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.2/AIVN-Setup-0.15.2.exe"
+   },
+   {
+    "name": "AIVN-Setup-0.15.2.exe.blockmap",
+    "size": 251293,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.2/AIVN-Setup-0.15.2.exe.blockmap"
+   },
+   {
+    "name": "AIVN-Setup.exe",
+    "size": 240045489,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.2/AIVN-Setup.exe"
+   },
+   {
+    "name": "latest-mac.yml",
+    "size": 500,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.2/latest-mac.yml"
+   },
+   {
+    "name": "latest.yml",
+    "size": 340,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.2/latest.yml"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.15.1",
+  "name": "AIVN 0.15.1",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-20T18:23:29Z",
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/v0.15.1",
+  "assets": [
+   {
+    "name": "AIVN-0.15.1-arm64-mac.zip",
+    "size": 259780672,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.1/AIVN-0.15.1-arm64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.15.1-arm64-mac.zip.blockmap",
+    "size": 273919,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.1/AIVN-0.15.1-arm64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-0.15.1-x64-mac.zip",
+    "size": 272681426,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.1/AIVN-0.15.1-x64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.15.1-x64-mac.zip.blockmap",
+    "size": 284201,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.1/AIVN-0.15.1-x64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-mac-arm64.zip",
+    "size": 259780672,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.1/AIVN-mac-arm64.zip"
+   },
+   {
+    "name": "AIVN-mac-x64.zip",
+    "size": 272681426,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.1/AIVN-mac-x64.zip"
+   },
+   {
+    "name": "AIVN-Setup-0.15.1.exe",
+    "size": 240040838,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.1/AIVN-Setup-0.15.1.exe"
+   },
+   {
+    "name": "AIVN-Setup-0.15.1.exe.blockmap",
+    "size": 251466,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.1/AIVN-Setup-0.15.1.exe.blockmap"
+   },
+   {
+    "name": "AIVN-Setup.exe",
+    "size": 240040838,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.1/AIVN-Setup.exe"
+   },
+   {
+    "name": "latest-mac.yml",
+    "size": 500,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.1/latest-mac.yml"
+   },
+   {
+    "name": "latest.yml",
+    "size": 340,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.1/latest.yml"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.15.0",
+  "name": "AIVN 0.15.0",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-20T17:01:21Z",
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/v0.15.0",
+  "assets": [
+   {
+    "name": "AIVN-0.15.0-arm64-mac.zip",
+    "size": 259772180,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.0/AIVN-0.15.0-arm64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.15.0-arm64-mac.zip.blockmap",
+    "size": 274197,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.0/AIVN-0.15.0-arm64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-0.15.0-x64-mac.zip",
+    "size": 272672523,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.0/AIVN-0.15.0-x64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.15.0-x64-mac.zip.blockmap",
+    "size": 284172,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.0/AIVN-0.15.0-x64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-mac-arm64.zip",
+    "size": 259772180,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.0/AIVN-mac-arm64.zip"
+   },
+   {
+    "name": "AIVN-mac-x64.zip",
+    "size": 272672523,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.0/AIVN-mac-x64.zip"
+   },
+   {
+    "name": "AIVN-Setup-0.15.0.exe",
+    "size": 240033449,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.0/AIVN-Setup-0.15.0.exe"
+   },
+   {
+    "name": "AIVN-Setup-0.15.0.exe.blockmap",
+    "size": 251450,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.0/AIVN-Setup-0.15.0.exe.blockmap"
+   },
+   {
+    "name": "AIVN-Setup.exe",
+    "size": 240033449,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.0/AIVN-Setup.exe"
+   },
+   {
+    "name": "latest-mac.yml",
+    "size": 500,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.0/latest-mac.yml"
+   },
+   {
+    "name": "latest.yml",
+    "size": 340,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.15.0/latest.yml"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.14.4",
+  "name": "AIVN 0.14.4",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-20T14:35:58Z",
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/v0.14.4",
+  "assets": [
+   {
+    "name": "AIVN-0.14.4-arm64-mac.zip",
+    "size": 251409383,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.4/AIVN-0.14.4-arm64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.14.4-arm64-mac.zip.blockmap",
+    "size": 264734,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.4/AIVN-0.14.4-arm64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-0.14.4-x64-mac.zip",
+    "size": 264309171,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.4/AIVN-0.14.4-x64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.14.4-x64-mac.zip.blockmap",
+    "size": 276084,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.4/AIVN-0.14.4-x64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-mac-arm64.zip",
+    "size": 251409383,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.4/AIVN-mac-arm64.zip"
+   },
+   {
+    "name": "AIVN-mac-x64.zip",
+    "size": 264309171,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.4/AIVN-mac-x64.zip"
+   },
+   {
+    "name": "AIVN-Setup-0.14.4.exe",
+    "size": 233674657,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.4/AIVN-Setup-0.14.4.exe"
+   },
+   {
+    "name": "AIVN-Setup-0.14.4.exe.blockmap",
+    "size": 245921,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.4/AIVN-Setup-0.14.4.exe.blockmap"
+   },
+   {
+    "name": "AIVN-Setup.exe",
+    "size": 233674657,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.4/AIVN-Setup.exe"
+   },
+   {
+    "name": "latest-mac.yml",
+    "size": 500,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.4/latest-mac.yml"
+   },
+   {
+    "name": "latest.yml",
+    "size": 340,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.4/latest.yml"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.14.3",
+  "name": "AIVN 0.14.3",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-20T13:42:27Z",
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/v0.14.3",
+  "assets": [
+   {
+    "name": "AIVN-0.14.3-arm64-mac.zip",
+    "size": 251397654,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.3/AIVN-0.14.3-arm64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.14.3-arm64-mac.zip.blockmap",
+    "size": 264533,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.3/AIVN-0.14.3-arm64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-0.14.3-x64-mac.zip",
+    "size": 264298336,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.3/AIVN-0.14.3-x64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.14.3-x64-mac.zip.blockmap",
+    "size": 276127,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.3/AIVN-0.14.3-x64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-mac-arm64.zip",
+    "size": 251397654,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.3/AIVN-mac-arm64.zip"
+   },
+   {
+    "name": "AIVN-mac-x64.zip",
+    "size": 264298336,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.3/AIVN-mac-x64.zip"
+   },
+   {
+    "name": "AIVN-Setup-0.14.3.exe",
+    "size": 233665410,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.3/AIVN-Setup-0.14.3.exe"
+   },
+   {
+    "name": "AIVN-Setup-0.14.3.exe.blockmap",
+    "size": 246035,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.3/AIVN-Setup-0.14.3.exe.blockmap"
+   },
+   {
+    "name": "AIVN-Setup.exe",
+    "size": 233665410,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.3/AIVN-Setup.exe"
+   },
+   {
+    "name": "latest-mac.yml",
+    "size": 500,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.3/latest-mac.yml"
+   },
+   {
+    "name": "latest.yml",
+    "size": 340,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.3/latest.yml"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.14.2",
+  "name": "AIVN 0.14.2",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-20T12:31:18Z",
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/v0.14.2",
+  "assets": [
+   {
+    "name": "AIVN-0.14.2-arm64-mac.zip",
+    "size": 251382133,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.2/AIVN-0.14.2-arm64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.14.2-arm64-mac.zip.blockmap",
+    "size": 264642,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.2/AIVN-0.14.2-arm64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-0.14.2-x64-mac.zip",
+    "size": 264282794,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.2/AIVN-0.14.2-x64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.14.2-x64-mac.zip.blockmap",
+    "size": 276140,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.2/AIVN-0.14.2-x64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-mac-arm64.zip",
+    "size": 251382133,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.2/AIVN-mac-arm64.zip"
+   },
+   {
+    "name": "AIVN-mac-x64.zip",
+    "size": 264282794,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.2/AIVN-mac-x64.zip"
+   },
+   {
+    "name": "AIVN-Setup-0.14.2.exe",
+    "size": 233652248,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.2/AIVN-Setup-0.14.2.exe"
+   },
+   {
+    "name": "AIVN-Setup-0.14.2.exe.blockmap",
+    "size": 245839,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.2/AIVN-Setup-0.14.2.exe.blockmap"
+   },
+   {
+    "name": "AIVN-Setup.exe",
+    "size": 233652248,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.2/AIVN-Setup.exe"
+   },
+   {
+    "name": "latest-mac.yml",
+    "size": 500,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.2/latest-mac.yml"
+   },
+   {
+    "name": "latest.yml",
+    "size": 340,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.2/latest.yml"
+   }
+  ]
+ },
+ {
+  "tag_name": "v0.14.1",
+  "name": "AIVN 0.14.1",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-10-20T11:55:20Z",
+  "html_url": "https://github.com/khoik647-ai/aivn/releases/tag/v0.14.1",
+  "assets": [
+   {
+    "name": "AIVN-0.14.1-arm64-mac.zip",
+    "size": 251363165,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.1/AIVN-0.14.1-arm64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.14.1-arm64-mac.zip.blockmap",
+    "size": 264599,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.1/AIVN-0.14.1-arm64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-0.14.1-x64-mac.zip",
+    "size": 264264058,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.1/AIVN-0.14.1-x64-mac.zip"
+   },
+   {
+    "name": "AIVN-0.14.1-x64-mac.zip.blockmap",
+    "size": 276090,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.1/AIVN-0.14.1-x64-mac.zip.blockmap"
+   },
+   {
+    "name": "AIVN-mac-arm64.zip",
+    "size": 251363165,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.1/AIVN-mac-arm64.zip"
+   },
+   {
+    "name": "AIVN-mac-x64.zip",
+    "size": 264264058,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.1/AIVN-mac-x64.zip"
+   },
+   {
+    "name": "AIVN-Setup-0.14.1.exe",
+    "size": 233637199,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.1/AIVN-Setup-0.14.1.exe"
+   },
+   {
+    "name": "AIVN-Setup-0.14.1.exe.blockmap",
+    "size": 245831,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.1/AIVN-Setup-0.14.1.exe.blockmap"
+   },
+   {
+    "name": "AIVN-Setup.exe",
+    "size": 233637199,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.1/AIVN-Setup.exe"
+   },
+   {
+    "name": "latest-mac.yml",
+    "size": 500,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.1/latest-mac.yml"
+   },
+   {
+    "name": "latest.yml",
+    "size": 340,
+    "browser_download_url": "https://github.com/khoik647-ai/aivn/releases/download/v0.14.1/latest.yml"
+   }
+  ]
+ }
+]

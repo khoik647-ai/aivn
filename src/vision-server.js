@@ -31,12 +31,20 @@ function sseParser() {
 // Windows: STATUS_DLL_NOT_FOUND khi thiếu Microsoft Visual C++ Redistributable
 const DLL_NOT_FOUND = [3221225781, -1073741515];
 
+// Bản đóng gói (app.isPackaged): extraResources để llama-server ở process.resourcesPath/llama.
+// Tiến trình con của bộ máy nhận cùng chỗ qua AIVN_RESOURCES. Mã nguồn: build/llama/<nền>-<arch>.
+function appIsPackaged() {
+  if (!process.versions || !process.versions.electron) return false;
+  try { const { app } = require('electron'); return !!(app && app.isPackaged); } catch { return false; }
+}
 function findServer() {
   const plat = process.platform === 'win32' ? 'win' : process.platform;
+  const packaged = appIsPackaged();
   const cands = [process.env.AIVN_LLAMA_SERVER,
     process.env.AIVN_RESOURCES && path.join(process.env.AIVN_RESOURCES, 'llama', EXE),
-    path.join(__dirname, '..', 'build', 'llama', `${plat}-${process.arch}`, EXE)].filter(Boolean);
-  return cands.find(p => fs.existsSync(p)) || null;
+    process.resourcesPath && path.join(process.resourcesPath, 'llama', EXE)];
+  if (!packaged) cands.push(path.join(__dirname, '..', 'build', 'llama', `${plat}-${process.arch}`, EXE));
+  return cands.filter(Boolean).find(p => { try { return fs.existsSync(p); } catch { return false; } }) || null;
 }
 
 function freePort() {
@@ -59,11 +67,12 @@ function parseDevices(text) {
   return out;
 }
 const devCache = new Map();
-function listDevices(exe, { timeoutMs = 20000, allDevices = false } = {}) {
+function listDevices(exe, { timeoutMs = 20000, allDevices = false, fresh = false } = {}) {
   let st = null; try { st = fs.statSync(exe); } catch { return Promise.resolve({ ok: false, cuda: [], all: [], error: 'không thấy ' + exe }); }
   // allDevices: liệt kê MỌI GPU kể cả khi người dùng đã giới hạn bằng GGML_VK_VISIBLE_DEVICES (bộ chọn GPU cần cả danh sách)
+  // fresh: bỏ bộ nhớ đệm — VRAM trống đổi sau khi llama-server nhìn ảnh đã nạp mô hình
   const env = { ...process.env }; if (allDevices) delete env.GGML_VK_VISIBLE_DEVICES;
-  const key = `${exe}|${st.mtimeMs}|${st.size}|${env.GGML_VK_VISIBLE_DEVICES || ''}`; if (devCache.has(key)) return devCache.get(key);
+  const key = `${exe}|${st.mtimeMs}|${st.size}|${env.GGML_VK_VISIBLE_DEVICES || ''}`; if (!fresh && devCache.has(key)) return devCache.get(key);
   const p = new Promise((resolve) => {
     require('child_process').execFile(exe, ['--list-devices'], { cwd: path.dirname(exe), env, timeout: timeoutMs, windowsHide: true, maxBuffer: 1 << 20 }, (e, out, err) => {
       const all = parseDevices(`${out || ''}\n${err || ''}`);
@@ -71,7 +80,8 @@ function listDevices(exe, { timeoutMs = 20000, allDevices = false } = {}) {
       resolve({ ok: true, cuda: all.filter(d => /^CUDA\d+$/i.test(d.id)), all });
     });
   });
-  devCache.set(key, p); p.then(r => { if (!r.ok) devCache.delete(key); }); return p;
+  if (!fresh) { devCache.set(key, p); p.then(r => { if (!r.ok) devCache.delete(key); }); }
+  return p;
 }
 
 function createVisionServer({ log = () => {} } = {}) {

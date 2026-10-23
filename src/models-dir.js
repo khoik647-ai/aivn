@@ -76,7 +76,13 @@ function journalWrite(file, obj) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(obj)); fs.renameSync(tmp, file);
 }
-function journalClear(file) { if (!file) return; try { fs.rmSync(file, { force: true }); } catch {} try { fs.rmSync(file + '.tmp', { force: true }); } catch {} }
+// true khi tệp nhật ký không còn. EBUSY/EPERM (tệp đang bị giữ) không được nuốt thành “đã xoá”.
+function journalClear(file) {
+  if (!file) return true;
+  const rm = (p) => { try { fs.rmSync(p, { force: true }); return true; } catch (e) { return !!(e && e.code === 'ENOENT'); } };
+  const fileGone = rm(file), tmpGone = rm(file + '.tmp');
+  return fileGone && tmpGone;
+}
 // Sự kiện tiến độ đến SAU khi lượt chuyển đã xong không được bật lại thanh (IPC send và lời invoke có thể đảo thứ tự khi máy nặng).
 function dirProgressGate(job, p) {
   if (!job || !job.moving) return { moving: false, show: false };
@@ -173,11 +179,14 @@ async function rollbackJournal(j) {
 }
 // Nhật ký cũ không có created (chỉ có ở commit chưa phát hành). Chỉ hoàn tác.
 // Không bao giờ xoá nguồn còn tồn tại — cùng kích thước không chứng minh cùng nội dung.
-function recoverMoveLegacy(j, file) {
+// Chỉ xoá nhật ký khi đĩa vẫn đúng bản đã đọc. Lần chuyển mới có thể ghi đè models-move.json trong lúc recover đang băm.
+function journalSame(file, raw) { try { return fs.readFileSync(file, 'utf8') === raw; } catch { return false; } }
+function journalClearIfSame(file, raw) { if (!journalSame(file, raw)) return false; return journalClear(file); }
+function recoverMoveLegacy(j, file, raw) {
   const destFile = (f) => { const st = lstatOrNull(path.join(j.to, f.rel)); return !!(st && st.isFile() && !st.isSymbolicLink() && st.size === f.size); };
   const sourceThere = (f) => !!lstatOrNull(path.join(j.from, f.rel));
   if (j.phase === 'commit' && j.rels.length && j.rels.every(destFile) && j.rels.every((f) => !sourceThere(f))) {
-    journalClear(file); return { resumed: true, dir: path.resolve(j.to) };
+    journalClearIfSame(file, raw); return { resumed: true, dir: path.resolve(j.to) };
   }
   for (const f of j.rels) {
     const src = path.join(j.from, f.rel), dst = path.join(j.to, f.rel);
@@ -188,32 +197,141 @@ function recoverMoveLegacy(j, file) {
       catch { fs.copyFileSync(dst, src); const back = lstatOrNull(src); if (back && back.isFile() && !back.isSymbolicLink() && back.size === f.size) { try { fs.unlinkSync(dst); } catch {} } }
     } catch {}
   }
-  pruneEmpty(j.to); journalClear(file); return { rolledBack: true, dir: path.resolve(j.from) };
+  pruneEmpty(j.to); journalClearIfSame(file, raw); return { rolledBack: true, dir: path.resolve(j.from) };
+}
+// B218: ổ / thư mục đích chưa truy cập được thì KHÔNG xoá nhật ký, KHÔNG xoá hay dời tệp.
+const DEST_BLOCK = new Set(['ENOENT', 'EACCES', 'EIO', 'ENODEV', 'EPERM']);
+const heavyRecover = new Map(); // nhật ký đã băm trong lần chạy này → không băm lại khi đích vẫn kẹt
+const heavyDone = new Map(); // lần chuyển đã xong nhưng chưa xoá được nhật ký (EBUSY/EPERM) → không báo chờ ổ
+const PREV_WAIT = 'Đang chờ ổ đích của lần chuyển trước.';
+const MODEL_BUSY = 'Đang dùng mô hình nên chưa hoàn tất được lần chuyển trước. Hãy gỡ mô hình rồi thử lại.';
+const JOURNAL_BUSY = 'Chưa xoá được nhật ký lần chuyển trước. Hãy đóng chương trình đang mở tệp đó rồi thử lại.';
+function isDestBlock(e) { return !!(e && DEST_BLOCK.has(e.code)); }
+// Mọi tệp trong nhật ký còn nằm ở nguồn → thư mục đích đúng là người dùng đã xoá (hoàn tác được).
+// Thiếu một tệp ở nguồn (commit đã xoá bản gốc) thì ENOENT có thể là ổ rút: điểm gắn trống còn đó, hoặc đích là gốc volume.
+function sourcesAllPresent(j) {
+  if (!j || !j.from || !Array.isArray(j.rels)) return false;
+  return j.rels.every((f) => {
+    const rel = f && typeof f === 'object' ? f.rel : f;
+    return typeof rel === 'string' && !!rel && !!lstatOrNull(path.join(j.from, rel));
+  });
+}
+function destRootBlocked(dir, j) {
+  let st = null;
+  try { st = fs.lstatSync(dir); }
+  catch (e) {
+    if (e && e.code === 'ENOENT') {
+      let parentOk = false;
+      try { fs.lstatSync(path.dirname(dir)); parentOk = true; } catch { parentOk = false; }
+      // Cha cũng mất: ổ vắng. Cha còn: chỉ coi là đã xoá thư mục khi mọi tệp vẫn còn ở nguồn.
+      if (!parentOk || !sourcesAllPresent(j)) return e;
+      return null;
+    }
+    return isDestBlock(e) ? e : null;
+  }
+  if (st.isSymbolicLink() || st.isDirectory()) {
+    try { fs.readdirSync(dir); return null; }
+    catch (e) { return isDestBlock(e) ? e : null; }
+  }
+  return null;
+}
+async function destChildBlocked(j) {
+  const rels = new Set();
+  for (const f of j.rels) if (f && typeof f.rel === 'string') rels.add(f.rel);
+  if (Array.isArray(j.created)) for (const c of j.created) if (c && typeof c.rel === 'string') rels.add(c.rel);
+  if (Array.isArray(j.temps)) for (const t of j.temps) if (typeof t === 'string') rels.add(t);
+  for (const rel of rels) {
+    try { await fs.promises.lstat(path.join(j.to, rel)); }
+    catch (e) { if (e && e.code === 'ENOENT') continue; if (isDestBlock(e)) return e; }
+  }
+  return null;
+}
+function pendingOf(j, err) {
+  const to = path.resolve(j.to), from = path.resolve(j.from), drive = driveOf(to), base = path.basename(to);
+  return {
+    pending: true, state: 'pending', reason: 'destination missing', code: 'EDEST', dir: from, to, drive,
+    fsCode: (err && err.code) || 'ENOENT',
+    log: `Chuyển mô hình đang chờ ổ đích. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu. Sẽ thử lại khi thư mục này truy cập được: ${to}`,
+    notice: `Chuyển mô hình đang chờ ổ đích ${drive}, thư mục “${base}”. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu, và sẽ được phục hồi khi ổ này có lại.`,
+  };
 }
 // Bản chuyển dở (sập giữa chừng). Nhật ký mới (có created): chỉ đụng tệp lần chuyển này tạo ra.
 // Đủ sha256 ở đích → xoá nguồn (trừ symlink và cùng inode). Thiếu → hoàn tác. phase quit luôn hoàn tác.
+// Đích chưa truy cập được → pending, giữ nhật ký, không đụng tệp. Băm nặng tối đa một lần mỗi nhật ký trong một lần chạy.
 async function recoverMove(file) {
-  let j; try { j = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
-  if (!j || !j.from || !j.to || !Array.isArray(j.rels)) { journalClear(file); return null; }
-  if (!Array.isArray(j.created)) return recoverMoveLegacy(j, file);
-  let verified = j.rels.length > 0;
-  if (verified) {
-    for (const f of j.rels) {
-      if (await symlinkBetween(j.to, f.rel) || !(await writtenMatch(path.join(j.to, f.rel), f))) { verified = false; break; }
-    }
+  if (moveActive && moveActive.journal && path.resolve(String(moveActive.journal)) === path.resolve(file)) return null;
+  const id = path.resolve(file);
+  let raw; try { raw = fs.readFileSync(file, 'utf8'); } catch { heavyDone.delete(id); heavyRecover.delete(id); return null; }
+  let j; try { j = JSON.parse(raw); } catch { return null; }
+  if (!j || !j.from || !j.to || !Array.isArray(j.rels)) { journalClearIfSame(file, raw); return null; }
+  const stampEarly = crypto.createHash('sha256').update(raw).digest('hex');
+  const donePrior = heavyDone.get(id);
+  if (donePrior && donePrior.stamp === stampEarly) {
+    let cleared = false;
+    try { cleared = journalClearIfSame(file, raw); } catch { cleared = false; }
+    if (cleared) { heavyDone.delete(id); heavyRecover.delete(id); }
+    return donePrior.result;
   }
-  if (j.phase !== 'quit' && (j.phase === 'commit' || verified) && verified) {
-    for (const f of j.rels) {
-      const src = path.join(j.from, f.rel), dst = path.join(j.to, f.rel);
-      if (await symlinkBetween(j.to, f.rel) || !(await writtenMatch(dst, f))) continue;
-      const dstSt = lstatOrNull(dst), srcSt = lstatOrNull(src);
-      if (!dstSt || dstSt.isSymbolicLink() || !dstSt.isFile() || !srcSt || srcSt.isSymbolicLink()) continue;
-      if (srcSt.dev === dstSt.dev && srcSt.ino === dstSt.ino) continue;
-      try { fs.unlinkSync(src); } catch {}
+  const rootErr = destRootBlocked(j.to, j);
+  if (rootErr) return pendingOf(j, rootErr);
+  const childErr = await destChildBlocked(j);
+  if (childErr) return pendingOf(j, childErr);
+  const stamp = stampEarly;
+  if (heavyRecover.get(id) === stamp) return pendingOf(j, { code: 'EIO' });
+  let didHash = false;
+  const match = async (p, meta) => {
+    try {
+      const st = await fs.promises.lstat(p);
+      if (!st.isFile() || st.isSymbolicLink() || !meta || !meta.sha256 || st.size !== meta.size) return false;
+      didHash = true; heavyRecover.set(id, stamp);
+      return (await hashFile(p)) === meta.sha256;
+    } catch (e) {
+      if (e && e.code !== 'ENOENT' && isDestBlock(e)) { if (didHash) heavyRecover.set(id, stamp); e.aivnDestBlock = true; throw e; }
+      return false;
     }
-    cleanTemps(j); pruneEmpty(j.from); journalClear(file); return { resumed: true, dir: path.resolve(j.to) };
+  };
+  const finish = (result) => {
+    try {
+      if (!fs.existsSync(file)) { heavyRecover.delete(id); heavyDone.delete(id); }
+      else if (result && !result.pending && (result.resumed || result.rolledBack)) {
+        // Xoá nhật ký lỗi EBUSY/EPERM: tệp còn, nhưng lần chuyển đã xong. Lần sau không được báo chờ ổ.
+        heavyRecover.delete(id); heavyDone.set(id, { stamp, result });
+      }
+    } catch {}
+    return result;
+  };
+  try {
+    if (!Array.isArray(j.created)) return finish(recoverMoveLegacy(j, file, raw));
+    let verified = j.rels.length > 0;
+    if (verified) {
+      for (const f of j.rels) {
+        if (await symlinkBetween(j.to, f.rel) || !(await match(path.join(j.to, f.rel), f))) { verified = false; break; }
+      }
+    }
+    const gone = destRootBlocked(j.to, j);
+    if (gone) return pendingOf(j, gone);
+    if (j.phase !== 'quit' && (j.phase === 'commit' || verified) && verified) {
+      for (const f of j.rels) {
+        const src = path.join(j.from, f.rel), dst = path.join(j.to, f.rel);
+        if (await symlinkBetween(j.to, f.rel) || !(await match(dst, f))) continue;
+        const dstSt = lstatOrNull(dst), srcSt = lstatOrNull(src);
+        if (!dstSt || dstSt.isSymbolicLink() || !dstSt.isFile() || !srcSt || srcSt.isSymbolicLink()) continue;
+        if (srcSt.dev === dstSt.dev && srcSt.ino === dstSt.ino) continue;
+        try { fs.unlinkSync(src); } catch {}
+      }
+      cleanTemps(j);
+      const still = destRootBlocked(j.to, j);
+      if (still) return pendingOf(j, still);
+      pruneEmpty(j.from); journalClearIfSame(file, raw); return finish({ resumed: true, dir: path.resolve(j.to) });
+    }
+    await rollbackJournal(j);
+    const after = destRootBlocked(j.to, j);
+    if (after) return pendingOf(j, after);
+    pruneEmpty(j.to); journalClearIfSame(file, raw); return finish({ rolledBack: true, dir: path.resolve(j.from) });
+  } catch (e) {
+    if (e && (e.aivnDestBlock || (isDestBlock(e) && e.code !== 'ENOENT'))) return pendingOf(j, e);
+    heavyRecover.delete(id); throw e;
   }
-  await rollbackJournal(j); pruneEmpty(j.to); journalClear(file); return { rolledBack: true, dir: path.resolve(j.from) };
 }
 function openExcl(tmp) {
   const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NONBLOCK || 0);
@@ -472,4 +590,12 @@ function deleteModelFiles(m, all, root) {
   for (let d = path.dirname(m.path); inRoot(d) && path.resolve(d) !== path.resolve(root); d = path.dirname(d)) { try { fs.rmdirSync(d); } catch { break; } }
   return gone;
 }
-module.exports = { deleteModelFiles, freeBytes, checkSpace, spaceError, validateTarget, listFiles, moveModels, driveOf, MARGIN, recoverMove, journalClear, dirProgressGate, STALL_MSG, ABORT_MSG, conflictMessage, beforeQuitMove, armHardExit, ALIAS_MSG };
+// dir-apply: thông báo phải đúng lý do. Gắn lại ổ và lần chuyển xong → không còn chờ. Mô hình đang dùng chặn thử lại là một lý do khác.
+function applyMoveBlock({ journalExists = false, rec = null, modelInUse = false } = {}) {
+  if (rec && !rec.pending && (rec.resumed || rec.rolledBack)) return journalExists ? { ok: false, code: 'EJOURNAL', error: JOURNAL_BUSY } : null;
+  if (modelInUse && journalExists) return { ok: false, code: 'EMODEL', error: MODEL_BUSY };
+  if (rec && rec.pending) return { ok: false, code: 'EDEST', error: rec.notice || PREV_WAIT };
+  if (journalExists) return { ok: false, code: 'EDEST', error: PREV_WAIT };
+  return null;
+}
+module.exports = { deleteModelFiles, freeBytes, checkSpace, spaceError, validateTarget, listFiles, moveModels, driveOf, MARGIN, recoverMove, journalClear, dirProgressGate, STALL_MSG, ABORT_MSG, conflictMessage, beforeQuitMove, armHardExit, ALIAS_MSG, applyMoveBlock, PREV_WAIT, MODEL_BUSY, JOURNAL_BUSY };
