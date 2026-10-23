@@ -195,26 +195,79 @@ test('không có tệp cho máy này: không lấy phiên bản từ newest(); n
   assert.match(html, /DLX\.viewFor\(mobile\?null:os,macArch,staticHref\)/);
 });
 
-test('INCLUDE_PRERELEASE=true: publish-beta không sửa trang và không thêm link tải thứ hai', () => {
+test('INCLUDE_PRERELEASE=true: publish-beta chỉ --clear, không chèn khối beta và không thêm link tải thứ hai', () => {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'nobin-'));
-  for (const cmd of ['git', 'gh', 'curl']) {
-    fs.writeFileSync(path.join(bin, cmd), '#!/bin/sh\necho "' + cmd + ' bị gọi — publish-beta không được đụng mạng" >&2\nexit 99\n');
-    fs.chmodSync(path.join(bin, cmd), 0o755);
-  }
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'ghp-'));
+  const fixture = path.join(work, 'fixture');
+  const cleared = path.join(work, 'cleared.html');
+  const gitLog = path.join(work, 'git.log');
+  const ghLog = path.join(work, 'gh.log');
+  const curlLog = path.join(work, 'curl.log');
+  fs.mkdirSync(fixture);
+  fs.copyFileSync(path.join(root, 'site/index.html'), path.join(fixture, 'index.html'));
+  execFileSync('python3', [path.join(root, 'tools/site_beta.py'), '--html', path.join(fixture, 'index.html'), '--version', '0.16.0-beta.9', '--url', 'https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.9/AIVN-Setup-0.16.0-beta.9.exe', '--sha256', 'ab'.repeat(32), '--size', '1000']);
+  assert.match(fs.readFileSync(path.join(fixture, 'index.html'), 'utf8'), /AIVN-BETA/);
+  execFileSync('git', ['init', '-q', '-b', 'gh-pages'], { cwd: fixture });
+  execFileSync('git', ['-c', 'user.name=AIVN test', '-c', 'user.email=test@aivn.local', 'add', 'index.html'], { cwd: fixture });
+  execFileSync('git', ['-c', 'user.name=AIVN test', '-c', 'user.email=test@aivn.local', 'commit', '-q', '-m', 'fixture'], { cwd: fixture });
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/bash
+printf '%s\\n' "$*" >> ${JSON.stringify(gitLog)}
+if [ "$1" = clone ]; then
+  dest="\${!#}"
+  rm -rf "$dest"
+  mkdir -p "$dest"
+  cp -a ${JSON.stringify(fixture)}/. "$dest"/
+  exit 0
+fi
+if [ "$1" = push ]; then
+  cp -f index.html ${JSON.stringify(cleared)}
+  echo pushed >> ${JSON.stringify(gitLog)}
+  exit 0
+fi
+exec /usr/bin/git "$@"
+`);
+  fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/bash
+printf '%s\\n' "$*" >> ${JSON.stringify(ghLog)}
+if [ "$1" = api ]; then echo v0.15.3; exit 0; fi
+if [ "$1" = auth ]; then exit 0; fi
+if [ "$1" = release ]; then
+  case "$*" in
+    *v0.16.0-beta.99*) echo "gh bị hỏi bản thử nghiệm" >&2; exit 99;;
+  esac
+  printf '%s\\n' '{"tagName":"v0.15.3","isDraft":false,"isPrerelease":false,"assets":[{"name":"AIVN-Setup.exe","size":1000000},{"name":"AIVN-mac-arm64.zip","size":2000000},{"name":"AIVN-mac-x64.zip","size":3000000}]}'
+  exit 0
+fi
+echo "gh lạ: $*" >&2
+exit 99
+`);
+  fs.writeFileSync(path.join(bin, 'curl'), `#!/bin/bash
+printf '%s\\n' "$*" >> ${JSON.stringify(curlLog)}
+case "$*" in
+  *releases/download*) echo "curl tải tài sản" >&2; exit 99;;
+esac
+echo '<html>trang da go khoi beta</html>'
+exit 0
+`);
+  for (const cmd of ['git', 'gh', 'curl']) fs.chmodSync(path.join(bin, cmd), 0o755);
   const before = fs.readFileSync(path.join(root, 'site/index.html'));
   const r = spawnSync('bash', [path.join(root, 'tools/publish-beta-site.sh'), 'khoik647-ai', 'v0.16.0-beta.99'], {
-    encoding: 'utf8', cwd: root, timeout: 8000,
-    env: { ...process.env, PATH: `${bin}:/usr/bin:/bin`, GIT_TERMINAL_PROMPT: '0' },
+    encoding: 'utf8', cwd: root, timeout: 20000,
+    env: { ...process.env, PATH: `${bin}:/usr/bin:/bin`, GIT_TERMINAL_PROMPT: '0', SITE_CHECK_PY: '' },
   });
   assert.strictEqual(r.status, 0, (r.stdout || '') + (r.stderr || ''));
-  assert.match(r.stdout, /BỎ QUA publish-beta:/); assert.match(r.stdout, /INCLUDE_PRERELEASE=true/);
-  assert.match(r.stdout, /không đẩy gh-pages/);
-  assert.ok(!/git bị gọi|gh bị gọi|curl bị gọi/.test(r.stderr || ''), r.stderr);
+  assert.match(r.stdout, /BỎ QUA chèn beta:/); assert.match(r.stdout, /INCLUDE_PRERELEASE=true/);
+  assert.match(r.stdout, /--clear/); assert.match(r.stdout, /đã gỡ khối beta/);
+  assert.ok(!/releases\/download/.test(fs.readFileSync(curlLog, 'utf8')), 'không tải tài sản bản thử nghiệm');
+  assert.ok(!/v0\.16\.0-beta\.99/.test(fs.readFileSync(ghLog, 'utf8')), 'không hỏi GitHub về bản thử nghiệm');
+  assert.match(fs.readFileSync(gitLog, 'utf8'), /pushed/);
+  const gone = fs.readFileSync(cleared, 'utf8');
+  assert.ok(!/AIVN-BETA|beta-link|data-beta-version|tai-beta|AIVN-Setup-0\.16\.0-beta/.test(gone), 'khối beta cũ còn sau --clear');
   assert.deepStrictEqual(fs.readFileSync(path.join(root, 'site/index.html')), before);
   const rel = fs.readFileSync(path.join(root, 'release.sh'), 'utf8');
   const iFlag = rel.indexOf("grep -qE 'var INCLUDE_PRERELEASE=true;'");
   const iCall = rel.indexOf('tools/publish-beta-site.sh "$OWNER" "$TAG"');
-  assert.ok(iFlag > 0 && iCall > iFlag, 'release.sh phải xét cờ trước khi gọi publish-beta');
+  const iClear = rel.indexOf('tools/publish-beta-site.sh "$OWNER" --clear');
+  assert.ok(iFlag > 0 && iClear > iFlag && iCall > iFlag, 'release.sh phải xét cờ, gọi --clear, và vẫn giữ lời gọi khi cờ tắt');
   // Luồng phát hành: release.sh chỉ đổi href tĩnh; publish-beta không chèn link beta.N.
   const base = 'https://github.com/khoik647-ai/aivn/releases/latest/download';
   const page = before.toString()
@@ -222,6 +275,10 @@ test('INCLUDE_PRERELEASE=true: publish-beta không sửa trang và không thêm 
     .replaceAll('href="AIVN-mac-arm64.zip"', `href="${base}/AIVN-mac-arm64.zip"`)
     .replaceAll('href="AIVN-mac-x64.zip"', `href="${base}/AIVN-mac-x64.zip"`);
   assert.ok(!/AIVN-BETA|beta-link|data-beta-version|tai-beta|id="tai-beta"/.test(page));
+  assert.match(page, /data-os="windows" href="#tai-ve"/);
+  assert.ok(!/\.cta \.dl-btn\[data-os="windows"\]/.test(page), 'nút Windows cuối trang không được tự đổi href thành bộ cài');
+  const outside = page.replace(/id="tai-ve"[\s\S]*?<!--\/AIVN-DL-LATEST-->/, '');
+  assert.ok(!/href="[^"]*AIVN-Setup[^"]*\.exe"/.test(outside), 'ngoài nút tự động không còn href bộ cài Windows');
   const exe = [...page.matchAll(/href="([^"]*AIVN-Setup[^"]*\.exe)"/g)].map((m) => m[1]);
   assert.ok(exe.length >= 1); assert.ok(exe.every((h) => h === `${base}/AIVN-Setup.exe`), exe.join('\n'));
   assert.ok(!exe.some((h) => /-beta/.test(h)), 'không chèn link beta.N');

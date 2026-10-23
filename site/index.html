@@ -661,7 +661,7 @@ console.<span class="f">log</span>(data.choices[<span class="n">0</span>].messag
 <h2 data-i18n="cta.1">Sẵn sàng có trợ lý AI <span class="grad-text">của riêng bạn?</span></h2>
 <p class="lead" data-i18n="cta.2" style="margin:0 auto">Tải AIVN, chọn một mô hình và bắt đầu trò chuyện chỉ trong vài phút.</p>
 <div class="dl-row">
-<a class="btn dl-btn" data-i18n-title="@title.9" data-os="windows" download="" href="AIVN-Setup.exe" title="Tải bộ cài AIVN cho Windows 10/11 (64-bit, ~__MB_WIN__ MB)"><span class="os-main">Windows</span></a>
+<a class="btn dl-btn" data-i18n-title="@title.9" data-os="windows" href="#tai-ve" title="Tải bộ cài AIVN cho Windows 10/11 (64-bit, ~__MB_WIN__ MB)"><span class="os-main">Windows</span></a>
 <div class="mac-wrap"><button aria-expanded="false" aria-haspopup="true" class="btn dl-btn mac-toggle" data-os="mac" type="button"><span class="os-main">macOS ▾</span></button>
 <div class="mac-menu" role="menu">
 <a data-i18n="cta.arm" download="" href="AIVN-mac-arm64.zip" role="menuitem"><b>Apple Silicon</b><small>Chip M1, M2, M3, M4… · ~__MB_ARM__ MB</small></a>
@@ -801,6 +801,9 @@ window.AIVNDL=(function(){
   document.querySelectorAll('.dl-btn.soon').forEach(function(b){b.addEventListener('click',function(e){e.preventDefault();});});
   // Nút “Tải về / Tải miễn phí” ở đầu trang (href="#tai-ve") chỉ là neo cuộn tới khối tải (M8): không tải thẳng tệp nào.
   var row=document.getElementById('tai-ve');
+  // Ghi href tĩnh ngay khi trang mở, trước mọi lần render. Lần render sau có thể đã đổi href thành tệp của một bản cụ thể.
+  function rememberStatic(a){if(!a||a.hasAttribute('data-static'))return;var h=a.getAttribute('href')||'';if(/\/releases\/download\/v[^/?#]+\//.test(h))return;a.setAttribute('data-static',h);}
+  if(row){rememberStatic(row.querySelector('a.dl-main'));row.querySelectorAll('.dl-other a[data-k]').forEach(rememberStatic);}
   function setHdr(){if(hd)document.documentElement.style.setProperty('--hdr',hd.getBoundingClientRect().height+'px');}
   var hd=document.querySelector('header');setHdr();window.addEventListener('resize',setHdr,{passive:true});
   var mobile=phone;
@@ -829,7 +832,7 @@ window.AIVNDL=(function(){
     var kind=mobile?'mobile':os==='windows'?'win':os==='mac'?'mac':os==='linux'?'linux':'other';
     row.setAttribute('data-os',kind==='linux'?'other':kind);row.classList.toggle('is-linux',kind==='linux');
     row.setAttribute('data-arch',os==='mac'?(macArch||'unknown'):'');
-    function statHref(a){if(!a)return null;if(!a.hasAttribute('data-static'))a.setAttribute('data-static',a.getAttribute('href')||'');return a.getAttribute('data-static');}
+    function statHref(a){return a&&a.hasAttribute('data-static')?a.getAttribute('data-static'):null;}
     var staticHref=kind==='win'?statHref(main):kind==='mac'?statHref(row.querySelector('.o-'+((macArch||'arm64')==='x64'?'x64':'arm'))):null;
     var p=DLX.target(mobile?null:os,macArch), view=DLX.viewFor(mobile?null:os,macArch,staticHref), rel=view.rel;
     row.setAttribute('data-state',view.state);row.setAttribute('data-pre',rel&&rel.prerelease?'1':'0');
@@ -846,7 +849,7 @@ window.AIVNDL=(function(){
     var tm=row.querySelector('.dl-date'), iso=view.state==='ok'&&rel&&rel.published_at&&!isNaN(Date.parse(rel.published_at))?rel.published_at:'';
     tm.textContent=iso?dlDate(iso):'';if(iso)tm.setAttribute('datetime',iso);else tm.removeAttribute('datetime');
     row.querySelector('.dl-size').textContent=p?dlSize(p.asset.size):'';
-    if(s.state==='ok')document.querySelectorAll('.dl-other a[data-k],.cta .dl-btn[data-os="windows"],.cta .mac-menu a[href]').forEach(function(a){
+    if(s.state==='ok')document.querySelectorAll('.dl-other a[data-k],.cta .mac-menu a[href]').forEach(function(a){
       var k=a.getAttribute('data-k')||(a.classList.contains('dl-btn')?'win':/x64/.test(a.getAttribute('href'))?'x64':'arm64');a.setAttribute('data-k',k);
       var u=DLX.urlFor(k);if(u)a.href=u;});
     fixSizes();

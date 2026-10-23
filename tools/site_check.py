@@ -66,7 +66,8 @@ JS = r'''() => {
   dlNotes:[...document.querySelectorAll('.dl-mnote')].filter(vis).map(e=>e.innerText.trim()),
   outsideOverflow:[...document.querySelectorAll('body *')].some(e=>!e.closest('header')&&e.getBoundingClientRect().width&&e.getBoundingClientRect().right>cw+0.5&&getComputedStyle(e).position!=='fixed'&&getComputedStyle(e).display!=='none'),
   creditCount:(foot.match(/NGUYỄN NGỌC KHÔI SINH VIÊN VLU/g)||[]).length, footPhone:(foot.match(/(Điện thoại|Phone|电话)[:：]?\s*[^\n]*/)||[''])[0],
-  footSub:((document.querySelector('[data-i18n="footer.sub"]')||{}).innerText||'').trim()};
+  footSub:((document.querySelector('[data-i18n="footer.sub"]')||{}).innerText||'').trim(),
+  heroText:(()=>{const a=document.querySelector('.beta-hero a');return a?a.innerText:'';})()};
 }'''
 res = []
 bad_band = []
@@ -156,6 +157,8 @@ for r in res:
     if r.get('menuOpen') and r['menuOpen']['sw'] > r['menuOpen']['cw']: bad.append(f'{k}: mở menu bị tràn')
     if r.get('overflowAfter'): bad.append(f'{k}: tràn ngang sau khi mở menu')
     if r['single'] != 1 or r['betaBlock']: bad.append(f'{k}: phải có đúng một nút tải chính, không còn khối beta ({r["single"]}, beta={r["betaBlock"]})')
+    # B145: chỉ khi khối beta còn trên trang (INCLUDE_PRERELEASE=false vẫn chèn khối đó). Nút tự động không có dòng này.
+    if r.get('heroText') and r['heroText'].lower().count('beta') > 1: bad.append(f'{k}: link đầu trang lặp “beta”: {r["heroText"]}')  # B145
     if r['creditCount'] < 3: bad.append(f'{k}: dòng ghi công chỉ còn {r["creditCount"]}')
     if not r['footPhone'].startswith(LABEL.get(r['lang'], '?')): bad.append(f'{k}: nhãn điện thoại “{r["footPhone"]}”')
     if (r['lang'] != 'vi') != bool(r['footSub']): bad.append(f'{k}: phụ đề ghi công “{r["footSub"]}” (en/zh phải có, vi để trống)')
