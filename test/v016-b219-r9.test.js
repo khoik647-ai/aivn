@@ -37,7 +37,7 @@ test('R9-4 over-length query is fail-closed and under 200ms', () => {
   assert.strictEqual(SV.allowsSend(q), false);
   assert.strictEqual(SV.lookOnly(q), false);
   assert.strictEqual(SV.hasSendVerb(q), false);
-  assert.strictEqual(SV.msgSend(q), true);
+  assert.strictEqual(SV.msgSend(q), false);
   assert.strictEqual(SV.missingRecipient(q), true);
   assert.strictEqual(SV.intentText(q), '');
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
