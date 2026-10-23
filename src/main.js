@@ -207,10 +207,12 @@ function noteRecover(rec, live) {
     pendingAnnounced = true;
     LOG.log('app', T(rec.log));
     const text = T(rec.notice);
-    setTimeout(() => { try { send('app:notice', { text, kind: 'warn' }); } catch {} }, 2500);
+    setTimeout(() => { try { send('app:notice', { id: 'move-pending', text, kind: 'warn' }); } catch {} }, 2500);
     return;
   }
+  const wasPending = pendingAnnounced;
   pendingAnnounced = false;
+  if (wasPending) { try { send('app:notice', { id: 'move-pending', clear: true }); } catch {} }
   if (rec.resumed) { settings.data.modelsDir = rec.dir; settings.save(); if (live) paths.models = rec.dir; LOG.log('app', 'Tiếp tục chuyển thư mục mô hình còn dở → ' + rec.dir); return; }
   if (rec.rolledBack) LOG.log('app', 'Đã hoàn tác chuyển thư mục mô hình còn dở; dữ liệu vẫn ở ' + rec.dir);
 }
@@ -1316,8 +1318,15 @@ function registerIpc() {
       if (downloader.list().some(j => j.status === 'downloading' || j.status === 'queued')) return { ok: false, error: 'Đang tải mô hình: hãy tạm dừng hoặc đợi tải xong rồi đổi thư mục.' };
       try { await recoverChain; } catch {}
       const journal = path.join(paths.userData, 'models-move.json');
-      let journalLeft = false; try { journalLeft = fs.existsSync(journal); } catch { journalLeft = true; }
-      if (journalLeft) return { ok: false, error: T('Đang chờ ổ đích của lần chuyển trước.') };
+      let journalExists = false; try { journalExists = fs.existsSync(journal); } catch { journalExists = true; }
+      // Ổ vừa gắn lại: hoàn tất lần chuyển trước trước khi từ chối. Mô hình đang nạp thì không đụng tệp — báo đúng lý do đó.
+      let rec = null;
+      if (journalExists && !modelInUse()) {
+        try { rec = await finishPendingMove(true); } catch {}
+        try { journalExists = fs.existsSync(journal); } catch { journalExists = true; }
+      }
+      const block = MD.applyMoveBlock({ journalExists, rec, modelInUse: modelInUse() });
+      if (block) return { ok: false, error: T(block.error || 'Đang chờ ổ đích của lần chuyển trước.'), code: block.code || '' };
       const old = paths.models;
       if (mode === 'move') {
         const st = engine.status(); if (st.loaded && st.path && path.resolve(st.path).startsWith(path.resolve(old) + path.sep)) { await engine.unloadModel(); send('model:status', engine.status()); }

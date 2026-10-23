@@ -298,9 +298,18 @@ if (process.argv.includes('--child')) {
     assert.match(main, /recoverChain\.then\(\(\) => \{ if \(dirMove\) return null; return finishPendingMove\(true\); \}\)/);
     assert.match(main, /dirMove = hold/);
     assert.match(main, /await recoverChain/);
-    assert.match(main, /T\('Đang chờ ổ đích của lần chuyển trước\.'\)/);
+    assert.match(main, /T\(block\.error \|\| 'Đang chờ ổ đích của lần chuyển trước\.'\)/);
+    assert.match(main, /MD\.applyMoveBlock\(/);
+    assert.match(main, /journalExists && !modelInUse\(\)/);
+    assert.match(main, /id: 'move-pending', clear: true/);
     assert.strictEqual(tr.tr('Đang chờ ổ đích của lần chuyển trước.', 'en'), 'Waiting for the destination drive of the previous move.');
     assert.strictEqual(tr.tr('Đang chờ ổ đích của lần chuyển trước.', 'zh'), '正在等待上一次移动的目标磁盘。');
+    assert.strictEqual(tr.tr(MD.MODEL_BUSY, 'en'), 'A model is in use, so the previous move cannot be finished. Unload the model, then try again.');
+    assert.strictEqual(tr.tr(MD.MODEL_BUSY, 'zh'), '正在使用模型，所以上一次移动还不能完成。请先卸载模型，然后再试。');
+    assert.strictEqual(tr.tr(MD.JOURNAL_BUSY, 'en'), 'Could not delete the log of the previous move. Close the program that has that file open, then try again.');
+    assert.strictEqual(tr.tr(MD.JOURNAL_BUSY, 'zh'), '未能删除上一次移动的日志。请关闭正在打开该文件的程序后再试。');
+    const enN = Object.keys(require('../src/i18n/en')).length, zhN = Object.keys(require('../src/i18n/zh')).length;
+    assert.strictEqual(enN, zhN, 'en/zh cùng số khoá');
   });
 
   async function crashRepro(name, { copy, cross, point, resumed }) {
@@ -378,6 +387,136 @@ if (process.argv.includes('--child')) {
       sameTree(fromBefore, tree(box.from), 'nguồn không đổi');
       assertNoLoss(srcBefore, box.from, box.to);
     } finally { rmAll(box.d, box.parent, box.away); }
+  });
+
+  // Đưa thư mục đích ra ngoài điểm gắn, để điểm gắn còn lại và trống (fstab /Volumes để lại thư mục rỗng).
+  function parkDest(box) {
+    const away = path.join(box.d, 'parked-' + path.basename(box.to));
+    fs.renameSync(box.to, away);
+    box.away = away;
+    return away;
+  }
+  function freshMount() {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b218-mnt-'));
+    const from = path.join(d, 'from');
+    const mnt = path.join(d, 'mnt', 'usb');
+    const to = path.join(mnt, 'models');
+    fs.mkdirSync(from, { recursive: true }); fs.mkdirSync(to, { recursive: true });
+    return { d, parent: mnt, from, to, journal: path.join(d, 'move.json'), away: null };
+  }
+  function freshVolume() {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b218-vol-'));
+    const from = path.join(d, 'from');
+    const volumes = path.join(d, 'Volumes');
+    const to = path.join(volumes, 'USB');
+    fs.mkdirSync(from, { recursive: true }); fs.mkdirSync(to, { recursive: true });
+    return { d, parent: volumes, from, to, journal: path.join(d, 'move.json'), away: null };
+  }
+
+  test('B218 điểm gắn trống, commit đã rời f1/f2: vẫn pending, giữ nhật ký; gắn lại thì hết chờ', async () => {
+    const box = freshMount();
+    try {
+      const srcBefore = handCommit(box);
+      const fromBefore = tree(box.from), toBefore = tree(box.to);
+      const raw = fs.readFileSync(box.journal);
+      const parked = parkDest(box);
+      assert.ok(fs.existsSync(box.parent), 'điểm gắn còn');
+      assert.deepStrictEqual(fs.readdirSync(box.parent), [], 'điểm gắn trống');
+      assert.ok(!fs.existsSync(box.to));
+      assert.ok(!fs.existsSync(path.join(box.from, RELS[0])) && !fs.existsSync(path.join(box.from, RELS[1])), 'f1/f2 đã rời nguồn');
+      let rec;
+      const hits = await countMutations(async () => {
+        rec = await MD.recoverMove(box.journal);
+        assertPending(rec, box.from, box.to);
+        const again = await MD.recoverMove(box.journal);
+        assertPending(again, box.from, box.to);
+      });
+      assert.deepStrictEqual(hits, [], 'không xoá hay dời: ' + hits.join(','));
+      assert.deepStrictEqual(fs.readFileSync(box.journal), raw);
+      sameTree(fromBefore, tree(box.from), 'from');
+      sameTree(toBefore, tree(parked), 'parked');
+      assertNoLoss(srcBefore, box.from, parked);
+      const waiting = MD.applyMoveBlock({ journalExists: true, rec, modelInUse: false });
+      assert.strictEqual(waiting.code, 'EDEST');
+      assert.match(waiting.error, /chờ ổ đích/);
+      const busy = MD.applyMoveBlock({ journalExists: true, rec: null, modelInUse: true });
+      assert.strictEqual(busy.code, 'EMODEL');
+      assert.strictEqual(busy.error, MD.MODEL_BUSY);
+      assert.doesNotMatch(busy.error, /chờ ổ đích/);
+      fs.renameSync(parked, box.to);
+      box.away = null;
+      const done = await MD.recoverMove(box.journal);
+      assert.strictEqual(done.resumed, true);
+      assert.ok(!done.pending);
+      assert.ok(!done.notice, 'hết thông báo chờ ổ');
+      assert.ok(!fs.existsSync(box.journal));
+      const cleared = MD.applyMoveBlock({ journalExists: fs.existsSync(box.journal), rec: done, modelInUse: false });
+      assert.strictEqual(cleared, null, 'gắn lại thì không còn chặn dir-apply');
+      assertNoLoss(srcBefore, box.from, box.to);
+      assert.strictEqual(tree(box.from).size, 0);
+      assert.strictEqual(tree(box.to).size, 5);
+    } finally { rmAll(box.d, box.parent, box.away); }
+  });
+
+  test('B218 gốc volume vắng giữa commit: vẫn pending, giữ nhật ký', async () => {
+    const box = freshVolume();
+    try {
+      const srcBefore = handCommit(box);
+      const raw = fs.readFileSync(box.journal);
+      const parked = parkDest(box);
+      assert.strictEqual(path.basename(path.dirname(box.to)), 'Volumes');
+      assert.ok(fs.existsSync(box.parent));
+      assert.ok(!fs.existsSync(box.to), 'gốc volume không còn');
+      assert.ok(!fs.existsSync(path.join(box.from, RELS[0])));
+      const rec = await MD.recoverMove(box.journal);
+      assertPending(rec, box.from, box.to);
+      assert.strictEqual(rec.fsCode, 'ENOENT');
+      assert.deepStrictEqual(fs.readFileSync(box.journal), raw, 'giữ nhật ký');
+      assertNoLoss(srcBefore, box.from, parked);
+      const block = MD.applyMoveBlock({ journalExists: true, rec, modelInUse: false });
+      assert.match(block.error, /chờ ổ đích/);
+      fs.renameSync(parked, box.to);
+      box.away = null;
+      const done = await MD.recoverMove(box.journal);
+      assert.strictEqual(done.resumed, true);
+      assert.ok(!done.notice);
+      assert.ok(!fs.existsSync(box.journal));
+      assert.strictEqual(MD.applyMoveBlock({ journalExists: false, rec: done, modelInUse: false }), null);
+      assertNoLoss(srcBefore, box.from, box.to);
+    } finally { rmAll(box.d, box.parent, box.away); }
+  });
+
+  test('B218 xoá nhật ký EBUSY/EPERM: lần recover sau không báo chờ ổ đích /', async () => {
+    for (const code of ['EBUSY', 'EPERM']) {
+      const box = fresh(false);
+      const orig = fs.rmSync;
+      try {
+        handCommit(box);
+        fs.rmSync = function (p, ...a) {
+          const s = String(p);
+          if (s === box.journal || s === box.journal + '.tmp') { const e = new Error(code); e.code = code; throw e; }
+          return orig.call(this, p, ...a);
+        };
+        const first = await MD.recoverMove(box.journal);
+        assert.strictEqual(first.resumed, true, code + ' lần 1');
+        assert.ok(!first.pending, code);
+        assert.ok(fs.existsSync(box.journal), code + ' nhật ký còn vì chưa xoá được');
+        const second = await MD.recoverMove(box.journal);
+        assert.ok(second && !second.pending, code + ' lần 2 không pending');
+        assert.strictEqual(second.resumed, true, code + ' lần 2 vẫn là đã chuyển xong');
+        assert.doesNotMatch(JSON.stringify(second), /chờ ổ đích/);
+        assert.notStrictEqual(second.drive, '/');
+        const stuck = MD.applyMoveBlock({ journalExists: true, rec: second, modelInUse: false });
+        assert.strictEqual(stuck.code, 'EJOURNAL');
+        assert.strictEqual(stuck.error, MD.JOURNAL_BUSY);
+        assert.doesNotMatch(stuck.error, /chờ ổ đích/);
+        fs.rmSync = orig;
+        const third = await MD.recoverMove(box.journal);
+        assert.ok(third && third.resumed && !third.pending, code + ' lần 3');
+        assert.ok(!fs.existsSync(box.journal), code + ' xoá được nhật ký khi tệp không còn bị giữ');
+        assert.strictEqual(MD.applyMoveBlock({ journalExists: false, rec: third, modelInUse: false }), null);
+      } finally { fs.rmSync = orig; rmAll(box.d, box.parent, box.away); }
+    }
   });
 
   test('B218 QA cùng ổ commit:2', { timeout: 30000 }, () => crashRepro('same commit:2', { copy: false, point: 'commit:2', resumed: true }));
