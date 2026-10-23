@@ -2,7 +2,9 @@
 // B10 (b): POST /v1/messages chuẩn Anthropic, dịch sang engine.generate / engine.chatStep.
 const test = require('node:test');
 const assert = require('node:assert');
+const fs = require('fs');
 const http = require('http');
+const path = require('path');
 const { createApiServer } = require('../src/server');
 
 function parseSse(text) {
@@ -220,4 +222,147 @@ test('tool_use / tool_result đi qua chatStep; stream có input_json_delta', asy
     assert.strictEqual(start.data.content_block.type, 'tool_use');
     assert.ok(ev.findIndex((e) => e.event === 'ping') > ev.findIndex((e) => e.event === 'content_block_start'));
   }, { engineExtra: { chatResult } });
+});
+
+test('khối thinking và redacted_thinking trong lịch sử assistant bị bỏ qua', async () => {
+  await withServer(async ({ url, calls }) => {
+    const r = await post(url, {
+      model: 'm1', max_tokens: 8,
+      messages: [
+        { role: 'user', content: 'câu hỏi' },
+        { role: 'assistant', content: [
+          { type: 'thinking', thinking: 'suy nghĩ nội bộ' },
+          { type: 'redacted_thinking', data: 'bí mật' },
+          { type: 'text', text: 'Xin' },
+          { type: 'text', text: 'chào' },
+        ] },
+        { role: 'user', content: 'tiếp' },
+      ],
+    });
+    assert.strictEqual(r.status, 200, await r.clone().text());
+    const assistant = calls[0].messages.find((m) => m.role === 'assistant');
+    assert.strictEqual(assistant.content, 'Xin\nchào');
+    assert.doesNotMatch(JSON.stringify(calls[0].messages), /suy nghĩ nội bộ|bí mật/);
+  });
+});
+
+test('khối text nối bằng xuống dòng, kể cả trong tool_result', async () => {
+  await withServer(async ({ url, calls }) => {
+    const r = await post(url, {
+      model: 'm1', max_tokens: 8,
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'Xin' }, { type: 'text', text: 'chào' }] }],
+    });
+    assert.strictEqual(r.status, 200, await r.clone().text());
+    assert.strictEqual(calls[0].messages[0].content, 'Xin\nchào');
+  });
+  await withServer(async ({ url, calls }) => {
+    const r = await post(url, {
+      model: 'm1', max_tokens: 8,
+      messages: [
+        { role: 'user', content: 'Thời tiết?' },
+        { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'get_weather', input: {} }] },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: [{ type: 'text', text: 'nắng' }, { type: 'text', text: '34 độ' }] }] },
+      ],
+    });
+    assert.strictEqual(r.status, 200, await r.clone().text());
+    const tool = calls[0].messages.find((m) => m.role === 'tool');
+    assert.strictEqual(tool.content, 'nắng\n34 độ');
+  });
+});
+
+test('tool_result is_error thêm tiền tố Lỗi', async () => {
+  await withServer(async ({ url, calls }) => {
+    const r = await post(url, {
+      model: 'm1', max_tokens: 8,
+      messages: [
+        { role: 'user', content: 'Thời tiết?' },
+        { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'get_weather', input: {} }] },
+        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', is_error: true, content: 'hết thời gian' }] },
+      ],
+    });
+    assert.strictEqual(r.status, 200, await r.clone().text());
+    const tool = calls[0].messages.find((m) => m.role === 'tool');
+    assert.strictEqual(tool.content, 'Lỗi: hết thời gian');
+  });
+});
+
+test('usage có cache_creation_input_tokens và cache_read_input_tokens bằng 0', async () => {
+  await withServer(async ({ url }) => {
+    const r = await post(url, { model: 'm1', max_tokens: 8, messages: [{ role: 'user', content: 'x' }] });
+    const j = await r.json();
+    assert.strictEqual(j.usage.cache_creation_input_tokens, 0);
+    assert.strictEqual(j.usage.cache_read_input_tokens, 0);
+    const s = await post(url, { model: 'm1', max_tokens: 8, stream: true, messages: [{ role: 'user', content: 'x' }] });
+    const ev = parseSse(await s.text());
+    const start = ev.find((e) => e.event === 'message_start').data.message.usage;
+    const delta = ev.find((e) => e.event === 'message_delta').data.usage;
+    assert.strictEqual(start.cache_creation_input_tokens, 0);
+    assert.strictEqual(start.cache_read_input_tokens, 0);
+    assert.strictEqual(delta.cache_creation_input_tokens, 0);
+    assert.strictEqual(delta.cache_read_input_tokens, 0);
+  });
+});
+
+test('client ngắt trong lúc ensureModel thì không nạp và không giữ mô hình', async () => {
+  let held = false;
+  let entered = false;
+  await withServer(async ({ port, calls }) => {
+    await new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/v1/messages', headers: { 'content-type': 'application/json' } }, (res) => {
+        res.resume();
+        res.on('close', () => resolve());
+      });
+      req.on('error', () => resolve());
+      req.on('close', () => resolve());
+      req.end(JSON.stringify({ model: 'm-slow', max_tokens: 8, messages: [{ role: 'user', content: 'x' }] }));
+      const wait = setInterval(() => {
+        if (!entered) return;
+        clearInterval(wait);
+        req.destroy();
+      }, 10);
+      setTimeout(() => { clearInterval(wait); reject(new Error('ensureModel không chạy')); }, 4000);
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.strictEqual(held, false);
+    assert.ok(!calls.some((c) => c.fn === 'generate' || c.fn === 'chatStep'));
+  }, {
+    ensureModel: (_model, opts) => new Promise((resolve) => {
+      const signal = opts && opts.signal;
+      if (!signal) { held = true; entered = true; return resolve(); }
+      entered = true;
+      const t = setTimeout(() => { if (!signal.aborted) held = true; resolve(); }, 1500);
+      signal.addEventListener('abort', () => { clearTimeout(t); held = false; resolve(); }, { once: true });
+    }),
+  });
+  const main = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8');
+  const slice = main.slice(main.indexOf('async function ensureModel'), main.indexOf('async function ensureModel') + 1400);
+  const stopAt = slice.indexOf('signal.aborted');
+  const loadAt = slice.indexOf('loadById(m.id)');
+  const jitAt = slice.indexOf('apiJit =');
+  assert.ok(stopAt > 0 && loadAt > stopAt && jitAt > loadAt, 'ngắt kết nối thì không loadById và không giữ apiJit');
+  assert.match(main, /signal: extra && extra\.signal/);
+});
+
+test('đường không có và mô hình không có trả 404 kiểu Anthropic', async () => {
+  await withServer(async ({ url }) => {
+    const g = await fetch(url + '/v1/messages');
+    assert.strictEqual(g.status, 404);
+    const j = await g.json();
+    assert.strictEqual(j.type, 'error');
+    assert.strictEqual(j.error.type, 'not_found_error');
+    assert.match(j.error.message, /GET \/v1\/messages/);
+    const other = await fetch(url + '/v1/audio/speech', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.strictEqual(other.status, 404);
+    const jo = await other.json();
+    assert.notStrictEqual(jo.type, 'error');
+    assert.notStrictEqual(jo.error.type, 'not_found_error');
+  });
+  await withServer(async ({ url }) => {
+    const r = await post(url, { model: 'khong-co', max_tokens: 8, messages: [{ role: 'user', content: 'x' }] });
+    assert.strictEqual(r.status, 404);
+    const j = await r.json();
+    assert.strictEqual(j.type, 'error');
+    assert.strictEqual(j.error.type, 'not_found_error');
+    assert.match(j.error.message, /chưa có trên máy/);
+  }, { ensureModel: async (model) => { throw new Error(`Mô hình "${model}" chưa có trên máy`); } });
 });

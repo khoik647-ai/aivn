@@ -225,7 +225,14 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
         });
       } catch (e) { return err(res, 500, e.message, 'server_error'); }
     }
-    if (req.method === 'POST' && isAnthropic) return handleMessages({ req, res, engine, ensureModel, log, cors, readBody });
+    if (isAnthropic) {
+      if (req.method !== 'POST') {
+        const message = `Không tìm thấy ${req.method} ${p}`;
+        log(`  → 404 ${message}`);
+        return anthropicError(res, 404, 'not_found_error', message, cors());
+      }
+      return handleMessages({ req, res, engine, ensureModel, log, cors, readBody });
+    }
     return err(res, 404, `Không tìm thấy ${req.method} ${p}`);
   }
 

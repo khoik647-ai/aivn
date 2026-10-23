@@ -553,15 +553,25 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
   } catch (e) { send('model:status', engine.status()); throw e; }
 }
 
-async function ensureModel(requested, { api = false } = {}) {
+async function ensureModel(requested, { api = false, signal = null } = {}) {
+  const stopped = () => !!(signal && signal.aborted);
+  if (stopped()) return;
   const st = engine.status();
   if (requested) {
     const req = String(requested).toLowerCase().replace(/\.gguf$/, '');
     if (st.loaded && (st.id === req || st.id.includes(req))) return;
     const m = listModels().find(x => x.id === req) || listModels().find(x => x.id.includes(req));
-    if (m) { await loadById(m.id); if (api) { apiJit = { id: m.id, at: Date.now() }; log(`Nạp theo yêu cầu API (JIT): ${m.id}${settings.data.apiTtlMin > 0 ? ` · tự gỡ sau ${settings.data.apiTtlMin} phút không dùng` : ''}`); } return; }
+    if (m) {
+      if (stopped()) return;
+      await loadById(m.id);
+      if (stopped()) { try { await engine.unloadModel(); } catch {} return; }
+      if (api) { apiJit = { id: m.id, at: Date.now() }; log(`Nạp theo yêu cầu API (JIT): ${m.id}${settings.data.apiTtlMin > 0 ? ` · tự gỡ sau ${settings.data.apiTtlMin} phút không dùng` : ''}`); }
+      return;
+    }
     if (st.loaded) return; // dùng mô hình đang nạp nếu tên không khớp
-    throw new Error(`Mô hình "${requested}" chưa có trên máy`);
+    const missing = new Error(`Mô hình "${requested}" chưa có trên máy`);
+    missing.status = 404; missing.type = 'not_found_error';
+    throw missing;
   }
   if (!st.loaded) throw new Error('Chưa nạp mô hình nào. Hãy nạp mô hình trong AIVN hoặc chỉ định "model".');
 }
@@ -993,7 +1003,7 @@ function withParts(orig, text) {
   return [{ type: 'text', text }, ...orig.filter(x => x && x.type === 'image_url')];
 }
 
-const api = createApiServer({ engine, models: listModels, ensureModel: (m) => ensureModel(m, { api: true }), log, getOpts: () => ({ cors: !!settings.data.apiCors, apiKey: settings.data.apiKey || null }), isBlocked: () => !activated() ? 'AIVN chưa được kích hoạt trên máy này.' : isLocked() ? 'AIVN đang khoá. Hãy mở khoá ứng dụng để dùng máy chủ API.' : null, embeddings: {
+const api = createApiServer({ engine, models: listModels, ensureModel: (m, extra) => ensureModel(m, { api: true, signal: extra && extra.signal }), log, getOpts: () => ({ cors: !!settings.data.apiCors, apiKey: settings.data.apiKey || null }), isBlocked: () => !activated() ? 'AIVN chưa được kích hoạt trên máy này.' : isLocked() ? 'AIVN đang khoá. Hãy mở khoá ứng dụng để dùng máy chủ API.' : null, embeddings: {
   info: () => embedInfo(),
   async ensure(model) {
     // B80: tên mô hình nhúng kiểu OpenAI/LangChain (text-embedding-3-small, nomic-embed…) → dùng mô hình nhúng đã cài (như LM Studio);

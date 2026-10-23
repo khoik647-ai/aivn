@@ -33,7 +33,7 @@ function toolResultText(content) {
   if (Array.isArray(content)) {
     const bits = content.map(asText);
     if (bits.some((x) => x == null)) throw new AnthropicError('tool_result.content chỉ nhận chuỗi hoặc khối text');
-    return bits.join('');
+    return bits.join('\n');
   }
   throw new AnthropicError('tool_result.content chỉ nhận chuỗi hoặc khối text');
 }
@@ -58,7 +58,11 @@ function partsOf(content, role) {
     } else if (b.type === 'tool_result') {
       if (role !== 'user') throw new AnthropicError('tool_result chỉ nằm trong tin nhắn user');
       if (b.tool_use_id == null || b.tool_use_id === '') throw new AnthropicError('tool_result thiếu "tool_use_id"');
-      out.push({ kind: 'tool_result', id: String(b.tool_use_id), text: toolResultText(b.content) });
+      let text = toolResultText(b.content);
+      if (b.is_error === true) text = 'Lỗi: ' + text;
+      out.push({ kind: 'tool_result', id: String(b.tool_use_id), text });
+    } else if ((b.type === 'thinking' || b.type === 'redacted_thinking') && role === 'assistant') {
+      // Claude Code gửi lại khối suy luận ở lượt sau. Bỏ qua, không trả 400.
     } else throw new AnthropicError(`Khối "${b.type}" chưa được hỗ trợ. AIVN nhận text, tool_use và tool_result.`);
   }
   return out;
@@ -136,15 +140,15 @@ function translateRequest(body) {
     const parts = partsOf(m.content, m.role);
     if (m.role === 'user') {
       sawUser = true;
-      let text = '';
-      const flush = () => { if (text) { messages.push({ role: 'user', content: text }); text = ''; } };
+      const texts = [];
+      const flush = () => { const joined = texts.join('\n'); texts.length = 0; if (joined) messages.push({ role: 'user', content: joined }); };
       for (const p of parts) {
         if (p.kind === 'tool_result') { flush(); messages.push({ role: 'tool', tool_call_id: p.id, content: p.text }); }
-        else text += p.text;
+        else texts.push(p.text);
       }
       flush();
     } else {
-      const text = parts.filter((p) => p.kind === 'text').map((p) => p.text).join('');
+      const text = parts.filter((p) => p.kind === 'text').map((p) => p.text).join('\n');
       const calls = parts.filter((p) => p.kind === 'tool_use');
       const msg = { role: 'assistant', content: text };
       if (calls.length) msg.tool_calls = calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(c.input || {}) } }));
@@ -205,6 +209,16 @@ function stopReasonOf(finishReason, stopSequence, toolCalls) {
   return 'end_turn';
 }
 
+function withCache(usage) {
+  return { ...usage, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
+}
+
+function missingModel(e) {
+  if (!e) return false;
+  if (e.status === 404 || e.type === 'not_found_error') return true;
+  return /chưa có trên máy/.test(String(e.message || ''));
+}
+
 function messageBody({ id, model, text, toolCalls, stopReason, stopSequence, inputTokens, outputTokens }) {
   const content = [];
   if (text) content.push({ type: 'text', text });
@@ -213,7 +227,7 @@ function messageBody({ id, model, text, toolCalls, stopReason, stopSequence, inp
   return {
     id, type: 'message', role: 'assistant', model, content,
     stop_reason: stopReason, stop_sequence: stopSequence,
-    usage: { input_tokens: inputTokens, output_tokens: outputTokens },
+    usage: withCache({ input_tokens: inputTokens, output_tokens: outputTokens }),
   };
 }
 
@@ -231,14 +245,21 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
   try { body = JSON.parse(await readBody(req) || '{}'); } catch { return fail(400, 'invalid_request_error', 'JSON không hợp lệ'); }
   let translated;
   try { translated = translateRequest(body); } catch (e) { return fail(e.status || 400, e.type || 'invalid_request_error', e.message); }
-  try { await ensureModel(translated.model); } catch (e) { return fail(e.status || 400, 'invalid_request_error', e.message); }
+  const ac = new AbortController();
+  const onClose = () => { if (!res.writableEnded) ac.abort(); };
+  res.on('close', onClose);
+  if (ac.signal.aborted || req.destroyed) return;
+  try { await ensureModel(translated.model, { signal: ac.signal }); }
+  catch (e) {
+    if (ac.signal.aborted) return;
+    if (missingModel(e)) return fail(404, 'not_found_error', e.message);
+    return fail(e.status || 400, 'invalid_request_error', e.message);
+  }
+  if (ac.signal.aborted || res.writableEnded || req.destroyed) return;
   const st = engine.status ? engine.status() : {};
   const id = 'msg_' + crypto.randomBytes(12).toString('hex');
   const model = translated.model || (st && st.id) || '';
   const inputTokens = countInput(engine, translated.messages);
-  const ac = new AbortController();
-  const onClose = () => { if (!res.writableEnded) ac.abort(); };
-  res.on('close', onClose);
 
   if (!translated.stream) {
     try {
@@ -259,7 +280,7 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
   }
 
   res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', ...headers });
-  sse(res, 'message_start', { type: 'message_start', message: { id, type: 'message', role: 'assistant', content: [], model, stop_reason: null, stop_sequence: null, usage: { input_tokens: inputTokens, output_tokens: 0 } } });
+  sse(res, 'message_start', { type: 'message_start', message: { id, type: 'message', role: 'assistant', content: [], model, stop_reason: null, stop_sequence: null, usage: withCache({ input_tokens: inputTokens, output_tokens: 0 }) } });
   let acc = ''; let emitted = 0; let stopSequence = null; let textOpen = false; let pinged = false; let fromTokens = false;
   const openText = () => {
     if (textOpen || res.writableEnded) return;
@@ -314,7 +335,7 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
     }
     const stopReason = stopReasonOf(r.finishReason, stopSequence, toolCalls);
     const outputTokens = r.usage && Number.isFinite(r.usage.completion_tokens) ? r.usage.completion_tokens : countOutput(engine, finalCut.text, toolCalls);
-    sse(res, 'message_delta', { type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: stopSequence }, usage: { output_tokens: outputTokens } });
+    sse(res, 'message_delta', { type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: stopSequence }, usage: withCache({ output_tokens: outputTokens }) });
     sse(res, 'message_stop', { type: 'message_stop' });
     log(`  → 200 message stream ${stopReason}`);
   } catch (e) {
