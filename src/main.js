@@ -3418,7 +3418,7 @@ else {
     if (q && q.enabled && q.args && q.runId && q.kind !== 'qa-ui') { const v = q.kind === 'input-diag' ? { ok: true, args: q.args } : QAR.validate(q.args); if (v.ok) { LOG.log('qa', `Nhận việc QA chuyển từ bản mở thứ hai (lượt ${q.runId})`); qaRun({ ...q, args: v.args }).catch(e => LOG.log('qa', 'QA runner lỗi: ' + e.message)); return; } LOG.log('qa', 'Bỏ qua việc QA chuyển sang: ' + v.error); }
     showWindow();
   });
-  app.on('before-quit', () => { quitting = true; });
+  app.on('before-quit', () => { quitting = true; try { require('./models-dir').beforeQuitMove({ exit: (c) => { try { app.exit(c || 0); } catch { process.exit(c || 0); } } }); } catch {} });
   app.whenReady().then(async () => {
     initStores();
     registerIpc();

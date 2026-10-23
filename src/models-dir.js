@@ -2,7 +2,7 @@
 // Đổi thư mục mô hình (beta.3; máy thật: C: còn 11,8 GB, D: 325,8 GB): chọn thư mục → kiểm tra ghi được + dung lượng trống →
 // chuyển mô hình hiện có sang (có tiến độ; cùng ổ thì đổi tên tức thì, khác ổ thì chép rồi kiểm kích thước rồi mới xoá bản cũ)
 // hoặc chỉ trỏ sang thư mục mới (thư mục cũ vẫn được quét để mô hình cũ còn hiện).
-const fs = require('fs'); const path = require('path');
+const fs = require('fs'); const path = require('path'); const crypto = require('crypto');
 const { Transform } = require('stream');
 const { pipeline } = require('stream/promises');
 const GB = 1024 ** 3; const MARGIN = 512 * 1024 ** 2; // chừa 512 MB cho hệ điều hành / tệp tạm
@@ -33,6 +33,9 @@ function listFiles(root) {
 const sameDevice = (a, b) => { try { return fs.statSync(existingAncestor(a)).dev === fs.statSync(existingAncestor(b)).dev; } catch { return false; } };
 const STALL_MSG = 'Chuyển thư mục mô hình bị dừng vì quá lâu không thấy tiến triển. Mô hình vẫn nằm ở thư mục cũ, không mất tệp. Hãy bấm Thử lại.';
 const ABORT_MSG = 'Đã huỷ chuyển mô hình.';
+// B198: từ chối CẢ lượt trước khi đụng tệp nào. {0} là danh sách tệp xung đột.
+const conflictMessage = (rels) => `Không chuyển được vì thư mục đích đã có tệp cùng tên nhưng không giống hệt. Mọi tệp vẫn ở thư mục cũ và cài đặt chưa đổi. Hãy đổi tên hoặc dời các tệp này rồi thử lại: ${rels.join(', ')}`;
+let moveActive = null; // { journal, snap, stalled } — before-quit khi watchdog đã cắt một lần mở đích bị treo
 function pruneEmpty(d) {
   let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
   for (const e of es) if (e.isDirectory()) { const p = path.join(d, e.name); pruneEmpty(p); try { fs.rmdirSync(p); } catch {} }
@@ -49,10 +52,48 @@ function dirProgressGate(job, p) {
   if (!p || p.finished) return { moving: false, show: false, hide: true, error: (p && p.error) || null, code: (p && p.code) || null };
   return { moving: true, show: true };
 }
-// Bản chuyển dở (sập giữa chừng): đủ tệp ở đích → trỏ sang đích; thiếu → đưa tệp đã đổi tên về chỗ cũ, xoá bản chép dở.
-function recoverMove(file) {
-  let j; try { j = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
-  if (!j || !j.from || !j.to || !Array.isArray(j.rels)) { journalClear(file); return null; }
+function hashFileSync(p) {
+  const h = crypto.createHash('sha256'); const fd = fs.openSync(p, 'r');
+  try { const buf = Buffer.alloc(1 << 20); let n; while ((n = fs.readSync(fd, buf, 0, buf.length, null)) > 0) h.update(buf.subarray(0, n)); }
+  finally { fs.closeSync(fd); }
+  return h.digest('hex');
+}
+function hashFile(p) {
+  return new Promise((resolve, reject) => {
+    const h = crypto.createHash('sha256'); const s = fs.createReadStream(p);
+    s.on('error', reject); s.on('data', (c) => h.update(c)); s.on('end', () => resolve(h.digest('hex')));
+  });
+}
+// Đúng tệp lần chuyển này ghi: cùng kích thước VÀ cùng sha256. Thiếu hash thì không xoá — cùng kích thước chưa đủ (tệp đã có sẵn có thể khác nội dung).
+function writtenMatch(p, meta) {
+  try {
+    const st = fs.statSync(p);
+    if (!st.isFile() || !meta || !meta.sha256 || st.size !== meta.size) return false;
+    return hashFileSync(p) === meta.sha256;
+  } catch { return false; }
+}
+function cleanTemps(j) {
+  for (const f of j.rels || []) { try { fs.rmSync(path.join(j.to, f.rel) + '.aivn-moving', { force: true }); } catch {} }
+}
+// Chỉ xoá / đưa về những tệp trong journal.created, và chỉ khi nội dung vẫn là bản lần chuyển này ghi.
+function rollbackJournal(j) {
+  const items = Array.isArray(j.created) ? j.created.slice().reverse() : [];
+  for (const m of items) {
+    const src = path.join(j.from, m.rel), dst = path.join(j.to, m.rel);
+    try { fs.rmSync(dst + '.aivn-moving', { force: true }); } catch {}
+    if (!writtenMatch(dst, m)) continue;
+    // Nguồn đã mất (đổi tên, hoặc đã xoá ở pha commit) → đưa bản đích về lại, không xoá.
+    if (!fs.existsSync(src)) {
+      try {
+        fs.mkdirSync(path.dirname(src), { recursive: true });
+        try { fs.renameSync(dst, src); }
+        catch { fs.copyFileSync(dst, src); if (writtenMatch(src, m)) fs.rmSync(dst, { force: true }); }
+      } catch {}
+    } else { try { fs.rmSync(dst, { force: true }); } catch {} }
+  }
+  cleanTemps(j);
+}
+function recoverMoveLegacy(j, file) {
   const destOk = (f) => { try { return fs.statSync(path.join(j.to, f.rel)).size === f.size; } catch { return false; } };
   const srcOk = (f) => { try { return fs.statSync(path.join(j.from, f.rel)).size === f.size; } catch { return false; } };
   if (j.rels.length && j.rels.every(destOk)) {
@@ -68,24 +109,92 @@ function recoverMove(file) {
   }
   pruneEmpty(j.to); journalClear(file); return { rolledBack: true, dir: path.resolve(j.from) };
 }
-async function copyOne(src, tmp, { signal, onBytes, copyFile }) {
-  if (copyFile) return copyFile(src, tmp, { signal, onBytes });
-  let n = 0;
-  const count = new Transform({ transform(chunk, _enc, cb) { n += chunk.length; try { if (onBytes) onBytes(n); } catch {} cb(null, chunk); } });
-  await pipeline(fs.createReadStream(src, { highWaterMark: 4 << 20 }), count, fs.createWriteStream(tmp), { signal });
+// Bản chuyển dở (sập giữa chừng). Nhật ký mới (có created): chỉ đụng tệp lần chuyển này tạo ra.
+// Đủ sha256 ở đích → xoá nguồn. Thiếu → hoàn tác. phase quit (thoát khi đang treo) luôn hoàn tác.
+function recoverMove(file) {
+  let j; try { j = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+  if (!j || !j.from || !j.to || !Array.isArray(j.rels)) { journalClear(file); return null; }
+  if (!Array.isArray(j.created)) return recoverMoveLegacy(j, file);
+  const verified = j.rels.length > 0 && j.rels.every((f) => writtenMatch(path.join(j.to, f.rel), f));
+  if (j.phase !== 'quit' && (j.phase === 'commit' || verified) && verified) {
+    for (const f of j.rels) { if (writtenMatch(path.join(j.to, f.rel), f)) { try { fs.rmSync(path.join(j.from, f.rel), { force: true }); } catch {} } }
+    cleanTemps(j); pruneEmpty(j.from); journalClear(file); return { resumed: true, dir: path.resolve(j.to) };
+  }
+  rollbackJournal(j); pruneEmpty(j.to); journalClear(file); return { rolledBack: true, dir: path.resolve(j.from) };
+}
+function openExcl(tmp) {
+  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NONBLOCK || 0);
+  return fs.promises.open(tmp, flags, 0o644);
+}
+async function isPrefix(src, dst, n) {
+  if (!(n > 0)) return false;
+  const a = await fs.promises.open(src, 'r'); const b = await fs.promises.open(dst, 'r');
+  try {
+    const bs = Buffer.alloc(64 * 1024), bd = Buffer.alloc(64 * 1024); let off = 0;
+    while (off < n) {
+      const c = Math.min(bs.length, n - off);
+      const rs = await a.read(bs, 0, c, off); const rd = await b.read(bd, 0, c, off);
+      if (rs.bytesRead !== c || rd.bytesRead !== c || !bs.subarray(0, c).equals(bd.subarray(0, c))) return false;
+      off += c;
+    }
+    return true;
+  } finally { await a.close(); await b.close(); }
+}
+// link rồi xoá nguồn: rename không bao giờ ghi đè tệp đã có. false = phải chép (khác ổ / không link được).
+async function renameExclusive(src, dst) {
+  try { await fs.promises.link(src, dst); }
+  catch (e) {
+    if (e.code === 'EEXIST') { const err = new Error('Đích đã có tệp cùng tên.'); err.code = 'ECONFLICT'; throw err; }
+    if (e.code === 'EXDEV' || e.code === 'EPERM' || e.code === 'ENOTSUP' || e.code === 'ENOSYS' || e.code === 'EOPNOTSUPP') return false;
+    if (fs.existsSync(dst)) { const err = new Error('Đích đã có tệp cùng tên.'); err.code = 'ECONFLICT'; throw err; }
+    await fs.promises.rename(src, dst); return true;
+  }
+  await fs.promises.unlink(src); return true;
+}
+async function placeNew(tmp, dst, replace) {
+  if (replace) { await fs.promises.rename(tmp, dst); return; }
+  try { await fs.promises.link(tmp, dst); }
+  catch (e) {
+    if (e.code === 'EEXIST' || fs.existsSync(dst)) { const err = new Error('Đích đã có tệp cùng tên.'); err.code = 'ECONFLICT'; throw err; }
+    await fs.promises.rename(tmp, dst); return;
+  }
+  await fs.promises.unlink(tmp);
+}
+async function copyOne(src, tmp, { signal, onBytes, copyFile, expectHash }) {
+  if (copyFile) { await copyFile(src, tmp, { signal, onBytes }); return hashFile(tmp); }
+  await fs.promises.rm(tmp, { force: true });
+  const fh = await openExcl(tmp);
+  const hash = crypto.createHash('sha256'); let n = 0;
+  const count = new Transform({ transform(chunk, _enc, cb) { hash.update(chunk); n += chunk.length; try { if (onBytes) onBytes(n); } catch {} cb(null, chunk); } });
+  await pipeline(fs.createReadStream(src, { highWaterMark: 64 * 1024 }), count, fh.createWriteStream(), { signal });
+  const sha = hash.digest('hex');
+  if (expectHash && sha !== expectHash) throw new Error(`Chép không khớp nội dung nguồn`);
+  if (await hashFile(tmp) !== sha) throw new Error(`Bản vừa chép không khớp khi đọc lại`);
+  return sha;
+}
+// Thoát ứng dụng khi watchdog đã cắt mà một luồng libuv vẫn kẹt trong open() (FIFO / ổ mạng treo).
+function beforeQuitMove({ exit = (c) => process.exit(c || 0), graceMs = 400 } = {}) {
+  if (!moveActive || !moveActive.stalled) return false;
+  try {
+    if (moveActive.journal && moveActive.snap && fs.existsSync(moveActive.journal)) {
+      if (moveActive.snap.phase !== 'commit') moveActive.snap.phase = 'quit';
+      journalWrite(moveActive.journal, moveActive.snap);
+    }
+  } catch {}
+  setTimeout(() => { try { exit(0); } catch { try { process.exit(0); } catch {} } }, graceMs);
+  return true;
 }
 // chuyển mô hình: onProgress({ done, total, file, bytesDone, bytesTotal }); signal để huỷ.
-// Bản gốc chỉ xoá sau khi MỌI tệp đã nằm đủ ở đích. Lỗi / hết hạn / huỷ → đổi tên ngược hoặc xoá bản chép dở, không mất tệp.
-async function moveModels(from, to, { onProgress = () => {}, signal = null, statfs, copy = false, stallMs = 60000, journal = null, copyFile = null, afterEach = null } = {}) {
-  const files = listFiles(from).filter(f => !String(f.rel).endsWith('.aivn-moving'));
+// Không ghi đè tệp đã có ở đích. Chỉ xoá nguồn sau khi đích do CHÍNH lần chuyển này ghi ra đã khớp kích thước + sha256.
+async function moveModels(from, to, { onProgress = () => {}, signal = null, statfs, copy = false, stallMs = 60000, journal = null, copyFile = null, afterEach = null, killAt = null } = {}) {
+  const files = listFiles(from).filter(f => !String(f.rel).endsWith('.aivn-moving')).sort((a, b) => a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
   const bytesTotal = files.reduce((s, f) => s + f.size, 0);
-  const same = !copy && sameDevice(from, to); // copy: buộc chép (kiểm thử đường khác ổ)
+  const same = !copy && sameDevice(from, to);
   if (!same) checkSpace(to, bytesTotal, statfs);
-  const rels = files.map(f => ({ rel: f.rel, size: f.size }));
-  journalWrite(journal, { from: path.resolve(from), to: path.resolve(to), rels, phase: 'moving' });
-  const made = []; let bytesDone = 0, done = 0; const moved = [], skipped = [];
+  const kill = killAt || '';
+  const hit = (point) => { if (kill && kill === point) { process.kill(process.pid, 'SIGKILL'); } };
   const stallAc = new AbortController(); let timer = null; let lastTell = 0;
-  const arm = () => { if (!(stallMs > 0)) return; clearTimeout(timer); timer = setTimeout(() => { try { stallAc.abort('stall'); } catch {} }, stallMs); };
+  const arm = () => { if (!(stallMs > 0)) return; clearTimeout(timer); timer = setTimeout(() => { if (moveActive) moveActive.stalled = true; try { stallAc.abort('stall'); } catch {} }, stallMs); };
   const onUserAbort = () => { try { stallAc.abort('user'); } catch {} };
   if (signal) { if (signal.aborted) onUserAbort(); else signal.addEventListener('abort', onUserAbort, { once: true }); }
   const asStall = () => Object.assign(new Error(STALL_MSG), { code: 'ESTALL' });
@@ -106,45 +215,93 @@ async function moveModels(from, to, { onProgress = () => {}, signal = null, stat
     const now = Date.now(); if (!force && now - lastTell < 200) { arm(); return; } lastTell = now; arm();
     try { onProgress(p); } catch {}
   };
-  const rollback = () => {
-    for (const m of made.reverse()) {
-      const src = path.join(from, m.rel), dst = path.join(to, m.rel);
-      try { fs.rmSync(dst + '.aivn-moving', { force: true }); } catch {}
-      if (m.kind === 'rename') {
-        if (!fs.existsSync(src) && fs.existsSync(dst)) { try { fs.mkdirSync(path.dirname(src), { recursive: true }); try { fs.renameSync(dst, src); } catch { fs.copyFileSync(dst, src); if (fs.statSync(src).size === fs.statSync(dst).size) fs.rmSync(dst, { force: true }); } } catch {} }
-      } else { try { fs.rmSync(dst, { force: true }); } catch {} }
-    }
-    journalClear(journal);
-  };
+  let snap = null;
+  // Chưa ghi nhật ký (từ chối vì trùng tên) thì không xoá nhật ký của lần chuyển khác.
+  const rollback = () => { if (!snap) return; rollbackJournal(snap); journalClear(journal); };
   arm();
   try {
+    moveActive = { journal, snap: null, stalled: false };
+    for (const f of files) f.sha256 = await race(hashFile(path.join(from, f.rel)));
+    const conflicts = [];
+    for (const f of files) {
+      const dst = path.join(to, f.rel); let st = null;
+      try { st = await race(fs.promises.stat(dst)); } catch (e) { if (e && (e.code === 'ESTALL' || e.code === 'ABORT')) throw e; st = null; }
+      if (!st) continue;
+      if (!st.isFile()) { conflicts.push(f.rel); continue; }
+      if (st.size === f.size) { const h = await race(hashFile(dst)); if (h === f.sha256) f.identical = true; else conflicts.push(f.rel); }
+      else if (st.size > 0 && st.size < f.size && await race(isPrefix(path.join(from, f.rel), dst, st.size))) f.partial = true;
+      else conflicts.push(f.rel);
+    }
+    if (conflicts.length) { const e = new Error(conflictMessage(conflicts)); e.code = 'ECONFLICT'; e.conflicts = conflicts; throw e; }
+    const rels = files.map(f => ({ rel: f.rel, size: f.size, sha256: f.sha256 }));
+    snap = { from: path.resolve(from), to: path.resolve(to), rels, created: [], phase: 'moving' };
+    journalWrite(journal, snap);
+    moveActive.snap = snap;
+    let bytesDone = 0, done = 0; const moved = [], skipped = [];
     for (const f of files) {
       if (stallAc.signal.aborted || (signal && signal.aborted)) throw fail(new Error('aborted'));
-      const src = path.join(from, f.rel), dst = path.join(to, f.rel); fs.mkdirSync(path.dirname(dst), { recursive: true });
-      if (fs.existsSync(dst) && fs.statSync(dst).size === f.size) {
+      const src = path.join(from, f.rel), dst = path.join(to, f.rel);
+      try { fs.rmSync(dst + '.aivn-moving', { force: true }); } catch {}
+      const idx = done + 1;
+      if (f.identical) {
         skipped.push(f.rel); bytesDone += f.size; done++; tell({ done, total: files.length, file: f.rel, bytesDone, bytesTotal }, true);
+        journalWrite(journal, snap);
+        hit('after:' + done);
         if (afterEach) await race(Promise.resolve().then(() => afterEach({ rel: f.rel, index: done })));
         continue;
       }
-      let renamed = false;
-      if (same) { try { fs.renameSync(src, dst); renamed = true; made.push({ rel: f.rel, kind: 'rename' }); } catch {} }
-      if (!renamed) {
-        const tmp = dst + '.aivn-moving';
-        try {
-          await race(copyOne(src, tmp, { signal: stallAc.signal, copyFile, onBytes: (n) => tell({ done, total: files.length, file: f.rel, bytesDone: bytesDone + Math.min(n, f.size), bytesTotal }, false) }));
-          if (!fs.existsSync(tmp) || fs.statSync(tmp).size !== f.size) throw new Error(`Chép “${f.rel}” không đủ dữ liệu`);
-          fs.renameSync(tmp, dst); made.push({ rel: f.rel, kind: 'copy' });
-        } catch (e) { try { fs.rmSync(tmp, { force: true }); } catch {} throw fail(e); }
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      const meta = { rel: f.rel, size: f.size, sha256: f.sha256, kind: 'copy' };
+      const mid = kill === 'mid:' + idx || (kill === 'midstream' && idx === 1);
+      if (same && !f.partial && !copyFile && !mid) {
+        snap.created.push({ ...meta, kind: 'rename' }); journalWrite(journal, snap);
+        const renamed = await race(renameExclusive(src, dst));
+        if (renamed) {
+          if (!writtenMatch(dst, meta)) throw new Error(`Đổi tên “${f.rel}” không khớp nội dung`);
+          bytesDone += f.size; done++; moved.push(f.rel); tell({ done, total: files.length, file: f.rel, bytesDone, bytesTotal }, true);
+          journalWrite(journal, snap); hit('after:' + done);
+          if (afterEach) await race(Promise.resolve().then(() => afterEach({ rel: f.rel, index: done })));
+          continue;
+        }
+        snap.created.pop(); journalWrite(journal, snap);
       }
+      const tmp = dst + '.aivn-moving';
+      snap.created.push(meta); journalWrite(journal, snap);
+      try { await fs.promises.rm(tmp, { force: true }); } catch {}
+      try {
+        if (mid && !copyFile) {
+          const fh = await openExcl(tmp);
+          const n = Math.max(1, Math.floor(f.size / 2)); const buf = Buffer.alloc(n);
+          const rs = await fs.promises.open(src, 'r');
+          try { await rs.read(buf, 0, n, 0); } finally { await rs.close(); }
+          await fh.write(buf); await fh.sync(); await fh.close();
+          hit(kill);
+        }
+        const sha = await race(copyOne(src, tmp, { signal: stallAc.signal, copyFile, expectHash: f.sha256, onBytes: (n) => tell({ done, total: files.length, file: f.rel, bytesDone: bytesDone + Math.min(n, f.size), bytesTotal }, false) }));
+        if (sha !== f.sha256) throw new Error(`Chép “${f.rel}” không khớp nội dung nguồn`);
+        const st = await fs.promises.stat(tmp);
+        if (st.size !== f.size) throw new Error(`Chép “${f.rel}” không đủ dữ liệu`);
+        await placeNew(tmp, dst, !!f.partial);
+        if (!writtenMatch(dst, meta)) throw new Error(`Đích “${f.rel}” không khớp sau khi đọc lại`);
+      } catch (e) { try { fs.rmSync(tmp, { force: true }); } catch {} throw fail(e); }
       bytesDone += f.size; done++; moved.push(f.rel); tell({ done, total: files.length, file: f.rel, bytesDone, bytesTotal }, true);
+      journalWrite(journal, snap); hit('after:' + done);
       if (afterEach) await race(Promise.resolve().then(() => afterEach({ rel: f.rel, index: done })));
     }
-    journalWrite(journal, { from: path.resolve(from), to: path.resolve(to), rels, phase: 'commit' });
-    for (const f of files) { try { fs.rmSync(path.join(from, f.rel), { force: true }); } catch {} }
-    pruneEmpty(from);
+    snap.phase = 'commit'; journalWrite(journal, snap);
+    for (const f of files) {
+      if (!writtenMatch(path.join(to, f.rel), f)) throw new Error(`Chưa xác minh được “${f.rel}” ở đích, không xoá bản gốc`);
+    }
+    for (let i = 0; i < files.length; i++) {
+      hit('commit:' + i);
+      const f = files[i];
+      if (!writtenMatch(path.join(to, f.rel), f)) throw new Error(`Chưa xác minh được “${f.rel}” ở đích, không xoá bản gốc`);
+      try { fs.rmSync(path.join(from, f.rel), { force: true }); } catch {}
+    }
+    cleanTemps(snap); pruneEmpty(from);
     return { moved: moved.length, skipped: skipped.length, files: files.length, bytes: bytesTotal, sameDrive: same };
-  } catch (e) { rollback(); throw (e && (e.code === 'ESTALL' || e.code === 'ABORT')) ? e : fail(e); }
-  finally { clearTimeout(timer); if (signal) try { signal.removeEventListener('abort', onUserAbort); } catch {} }
+  } catch (e) { rollback(); throw (e && (e.code === 'ESTALL' || e.code === 'ABORT' || e.code === 'ECONFLICT')) ? e : fail(e); }
+  finally { clearTimeout(timer); if (!moveActive || !moveActive.stalled) moveActive = null; if (signal) try { signal.removeEventListener('abort', onUserAbort); } catch {} }
 }
 // B79 (QA lượt 8): xoá mô hình đã tải — tệp mô hình (mọi phần nếu tách), tệp thị giác mmproj nếu KHÔNG mô hình nào khác dùng chung, rồi dọn thư mục trống.
 // Không bao giờ xoá gì ngoài thư mục mô hình. Trả về danh sách tệp đã xoá.
@@ -158,4 +315,4 @@ function deleteModelFiles(m, all, root) {
   for (let d = path.dirname(m.path); inRoot(d) && path.resolve(d) !== path.resolve(root); d = path.dirname(d)) { try { fs.rmdirSync(d); } catch { break; } }
   return gone;
 }
-module.exports = { deleteModelFiles, freeBytes, checkSpace, spaceError, validateTarget, listFiles, moveModels, driveOf, MARGIN, recoverMove, journalClear, dirProgressGate, STALL_MSG, ABORT_MSG };
+module.exports = { deleteModelFiles, freeBytes, checkSpace, spaceError, validateTarget, listFiles, moveModels, driveOf, MARGIN, recoverMove, journalClear, dirProgressGate, STALL_MSG, ABORT_MSG, conflictMessage, beforeQuitMove };
