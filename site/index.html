@@ -337,6 +337,22 @@ html.is-mobile .dl-share{display:inline-flex}
   .dl-main{width:100%;justify-content:center;min-height:48px}
   .dl-other a{min-height:44px}
 }
+/* B162: Fold 280 px và màn ≤380 px — nút và chữ nằm trong khung, không bị cắt */
+@media (max-width:380px){
+  .badge{max-width:100%;overflow-wrap:anywhere}
+  .dl-main{max-width:100%;white-space:normal;text-align:center}
+  .dl-main span{min-width:0}
+  .code-tabs{flex-wrap:wrap;max-width:100%}
+  .code-tabs button{flex:0 1 auto;padding:10px 12px;white-space:nowrap}
+  .code-tabs .copy{margin-left:0}
+  .steps-mock{width:100%;max-width:100%}
+  .steps-mock .st{flex-wrap:wrap;align-items:flex-start}
+  .steps-mock .st span{white-space:normal;min-width:0}
+  .steps-mock .st em{flex:1 0 100%;min-width:0;overflow-wrap:anywhere}
+  .feat-grid,.model-grid{min-width:0}
+  .feat,.model{min-width:0;max-width:100%}
+  .feat h3,.feat p,.model h4,.model p,.disclaimer,.tag{overflow-wrap:anywhere}
+}
 </style>
 </head>
 <body>
