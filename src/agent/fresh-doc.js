@@ -145,6 +145,16 @@ function splitClauses(line) {
 // phủ định đứng đầu mệnh đề (“Don't type…”, “Đừng gõ…”, “Không được viết…”, “不要输入…”) — không bao giờ là lệnh tắt bảo vệ
 const NEGATED = /^\s*(?:(?:please|hãy|xin|请)\s+)?(?:don't|do\s+not|never|đừng|chớ|không\s+được|không|别|別|不要|勿|不准)(?![\p{L}])/iu;
 const negated = (s) => NEGATED.test(String(s || ''));
+// “do not / đừng / 不要” đứng ngay trước động từ ghi — kể cả khi không đứng đầu câu (“Open Notepad and do not type into notes.txt”)
+function verbNegatedAt(text, v) {
+  const pre = String(text).slice(Math.max(0, v.at - 40), v.at);
+  return /(?:^|[^\p{L}])(?:don't|do\s+not|never|đừng|chớ|không(?:\s+được)?|别|別|不要|勿|不准)\s*$/iu.test(pre);
+}
+function clauseNegated(text) {
+  if (negated(text)) return true;
+  const v = firstVerb(text);
+  return !!(v && verbNegatedAt(text, v));
+}
 function withFileClause(parts, idx) {
   let text = parts[idx].text;
   if (idx > 0 && parts[idx - 1].sep === 'comma' && !writeTask(parts[idx - 1].text) && !negated(parts[idx - 1].text)) {
@@ -155,7 +165,7 @@ function withFileClause(parts, idx) {
 }
 // không có động từ đã biết: mệnh đề lệnh là mệnh đề còn lại sau khi bỏ phủ định; nhiều mệnh đề không rõ → '' (bảo vệ bật)
 function unknownCommand(parts) {
-  const live = []; parts.forEach((p, i) => { if (p.text.trim() && !negated(p.text)) live.push(i); });
+  const live = []; parts.forEach((p, i) => { if (p.text.trim() && !clauseNegated(p.text)) live.push(i); });
   if (live.length === 1) return withFileClause(parts, live[0]);
   const opens = live.filter(i => OPEN_START.test(parts[i].text.trim()));
   if (opens.length === 1) return withFileClause(parts, opens[0]);
@@ -173,7 +183,7 @@ function commandPart(q) {
   const line = commandLine(q); if (!line) return '';
   const known = writeTask(line);
   const c0 = line.search(CUT); const parts = splitClauses(c0 >= 0 ? line.slice(0, c0) : line); // cắt nội dung TRƯỚC khi tách câu
-  const vi = []; parts.forEach((p, i) => { if (writeTask(p.text) && !negated(p.text)) vi.push(i); });
+  const vi = []; parts.forEach((p, i) => { if (writeTask(p.text) && !clauseNegated(p.text)) vi.push(i); });
   if (!vi.length) {
     if (known && !parts.some(p => writeTask(p.text))) return ''; // động từ chỉ nằm trong nội dung (sau dấu cắt) → bảo vệ
     return unknownCommand(parts);
@@ -255,14 +265,32 @@ function targetAfterCounts(tail, allowTo) {
   if (!allowTo && /^\s*(?:(?:tiếp(?!\s+(?:theo|tục))|thêm)\s*)?to(?![\p{L}])/iu.test(tail)) return false;
   return true;
 }
-// câu lệnh (đã cắt nội dung, đã bỏ phủ định) có NÊU RÕ chỗ gõ không. Không nhận ra → bảo vệ bật.
+// tên tệp đứng TRƯỚC động từ, sau in/into/vào/trong/在/到, là đích phải GHIM. “mở notes.txt rồi gõ” vẫn không ghim (file null).
+const DEST_FILE_PREP = /(?:^|[^\p{L}])(?:in|into|vào)\s+(?:(?:the|my|cái)\s+)?(?:(?:tệp|tập tin|file)\s+)?$|(?:^|[^\p{L}])trong\s+(?:(?:tệp|tập tin|file)\s+)?$|(?:在|到)[^\n。，,.]{0,24}$/iu;
+function pinnedDestFile(text) {
+  const s = String(text || ''); let found = null;
+  const consider = (name, index) => {
+    if (!name || SAVE_BEFORE.test(s.slice(0, index)) || contentBefore(s, index) || recipientGoverned(s, index)) return;
+    const pre = s.slice(Math.max(0, index - 40), index);
+    if (!DEST_FILE_PREP.test(pre)) return;
+    if (/(?:^|[^\p{L}])(?:mở|open|打开|打開|edit|sửa)\s+$/iu.test(pre)) return;
+    found = String(name).split(/[\\/]/).pop();
+  };
+  for (const m of s.matchAll(new RegExp(FILE_RE.source, FILE_RE.flags))) consider(m[0], m.index);
+  for (const m of s.matchAll(new RegExp(NAMED_DOC.source, NAMED_DOC.flags))) consider(m[1], m.index + m[0].lastIndexOf(m[1]));
+  return found;
+}
+// câu lệnh (đã cắt nội dung, đã bỏ phủ định) có NÊU RÕ chỗ gõ không. Không nhận ra, hoặc đích bị phủ định → bảo vệ bật.
+// Tắt chỉ khi đích rõ. Tên tệp thì phải ghim (file), để thẻ đang mở khác tệp đó không bị gõ.
 function existingTarget(c) {
   const ON = { fresh: true, file: null }; if (!c || negated(c)) return ON;
   const bare = c.replace(URL_RE, ' '); const v = firstVerb(bare);
   if (!v) return CONTINUE_CMD.test(bare) ? { fresh: false, file: null } : ON;
+  if (verbNegatedAt(bare, v)) return ON;
   const word = verbWord(bare, v); const allowTo = isInsertion(word);
   const head = bare.slice(0, v.end); const tail = c.slice(v.end);
   // to/on/gửi/cho/给 + tài liệu là người nhận hoặc chủ đề — không tắt bảo vệ. “mở tệp…”, “tài liệu đang mở”, “在当前文档中” vẫn tắt.
+  const pin = pinnedDestFile(head); if (pin) return { fresh: false, file: pin };
   if (realExistingIn(head) || realFileIn(head)) return { fresh: false, file: null };
   const nd = docFile(tail, allowTo); if (nd) return { fresh: false, file: nd };
   if (targetAfterCounts(tail, allowTo)) return { fresh: false, file: null };
