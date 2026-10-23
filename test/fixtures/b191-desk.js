@@ -40,6 +40,7 @@ U.focus = async () => true; U.setCursor = async (x, y) => { mpos = { x, y }; ret
 const { createDesktopAgent } = require(path.join(ROOT, 'src/desktop-agent'));
 const logs = [];
 
+// opts.selMode 'missing': cây UIA không cho biết thẻ nào đang chọn (không có SelectionItem) — review #64 vòng 5 M2
 // Notepad Win11 GIẢ: các thẻ (TabItem + selected), vùng soạn thảo (value đọc được hay không), Ctrl+N, Ctrl+V dán bảng nhớ vào thẻ đang chọn.
 function notepad(opts = {}) {
   const st = { tabs: (opts.tabs || [{ name: 'secret.txt', text: 'KHOI-SECRET' }]).map(t => ({ ...t })), active: opts.active || 0, app: opts.app || 'Notepad',
@@ -49,7 +50,7 @@ function notepad(opts = {}) {
     st,
     tree: () => {
       st.treeCalls++; if (w.onTree) w.onTree(st);
-      const els = st.tabs.map((t, i) => ({ r: 'TabItem', n: (t.dirty ? '*' : '') + t.name, b: [10 + i * 130, 30, 120, 24], e: true, sl: i === st.active }));
+      const els = st.tabs.map((t, i) => ({ r: 'TabItem', n: (t.dirty ? '*' : '') + t.name, b: [10 + i * 130, 30, 120, 24], e: true, ...(opts.selMode === 'missing' ? {} : { sl: i === st.active }) }));
       els.push({ r: 'Document', n: 'Text editor', b: [0, 60, 1280, 700], e: true, v: st.valueReadable ? st.tabs[st.active].text : null });
       return { win: { title: title(), proc: 'Notepad.exe', pid: 77, hwnd: 7, b: [0, 0, 1280, 800] }, els };
     },

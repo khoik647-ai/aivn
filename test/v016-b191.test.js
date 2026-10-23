@@ -267,7 +267,9 @@ test('QA #64 v3 P64-3b: đã gõ, không đọc được nội dung, thẻ đang
   assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 0)), { ok: false, why: 'focus' });
   assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 0, { sel: false })), { ok: false, why: 'unsure' }, 'trước đây: unread → OK (sai)');
   assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 1, { sel: false })), { ok: false, why: 'unsure' }, 'cả khi đúng thẻ nhưng không chứng minh được → dừng (fail closed)');
-  assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 1, { sel: false, value: 'dòng 1' })), { ok: true }, 'đọc được nội dung chứa chữ AIVN đã gõ');
+  assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 1, { sel: false, value: 'dòng 1' })), { ok: false, why: 'unsure' }, 'review #64 vòng 5 M2: có chứa chữ đã gõ nhưng không biết thẻ đang chọn → không chắc → dừng');
+  assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 1, { value: 'dòng 1' })), { ok: true }, 'biết thẻ đang chọn + chứa chữ đã gõ → gõ tiếp');
+  assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 1, { value: 'khác' })), { ok: false, why: 'content' }, 'nội dung không khớp → dừng');
   // Word: mỗi tài liệu một cửa sổ → cùng hwnd là bằng chứng đủ
   const wobs = (title, hwnd) => ({ win: { title, proc: 'WINWORD.EXE', pid: 9, hwnd }, elements: [{ role: 'Document', kind: 'edit', name: 'Page 1', editable: true, value: null, b: NOTEPAD_BOX }], dialog: null });
   const wrec = { hwnd: '30', title: 'Document1 - Word', print: { ...FD.docPrint(wobs('Document1 - Word', 30)), newIdx: null }, typed: true, texts: ['x'] };
@@ -414,3 +416,64 @@ for (const lang of ['vi', 'en', 'zh']) {
     else { assert.ok(!VI.test(r.text), r.text); assert.match(r.text, lang === 'en' ? /not the new document AIVN opened — nothing typed/ : /不是 AIVN 打开的新文档 — 未输入任何内容/); }
   });
 }
+
+// ── review #64 vòng 5 ──
+const OLD_DIRTY = () => DK.notepad({ tabs: [{ name: 'Untitled', text: 'KHOI-SECRET', dirty: true }], valueReadable: false });
+const LEAKS = [
+  ['xuống dòng', 'mở Notepad và gõ\nĐừng xoá tệp này', 'Đừng xoá tệp này'],
+  ['xuống dòng en', 'mở Notepad và gõ dòng sau\nappend this file to the report', 'append this file to the report'],
+  ["don't trong nháy đơn", "open Notepad and type 'don't delete this file'", "don't delete this file"],
+  ["don't không nháy", "type don't delete this file in Notepad", "don't delete this file"],
+  ['URL có tên tệp', 'open Notepad and type http://x.com/readme.txt', 'http://x.com/readme.txt'],
+  ['URL .md', 'mở Notepad và gõ link https://github.com/a/b/blob/main/README.md', 'https://github.com/a/b/blob/main/README.md'],
+  ['đường dẫn', 'mở Notepad và gõ đường dẫn C:\\Users\\khoi\\notes.txt', 'C:\\Users\\khoi\\notes.txt'],
+  ['ngoặc ()', 'mở Notepad và gõ (tệp này là của tôi)', '(tệp này là của tôi)'],
+  ['backtick', 'open Notepad and type `this file`', '`this file`'],
+  ['<<…>>', 'open Notepad and type <<this file is mine>>', '<<this file is mine>>'],
+  ['﹕ U+FE55', 'mở Notepad và gõ﹕ Đừng xoá tệp này', 'Đừng xoá tệp này'],
+  ['∶ U+2236', 'mở Notepad và gõ∶ Đừng xoá tệp này', 'Đừng xoá tệp này'],
+  ['không ngoặc', 'mở Notepad và gõ tệp này là của tôi', 'tệp này là của tôi'],
+];
+test('review #64 vòng 5 M1: nội dung (xuống dòng, don\'t, URL/đường dẫn, (), `…`, <<…>>, ﹕, ∶) KHÔNG tắt bảo vệ — hành vi: thẻ cũ nguyên, chữ vào thẻ mới', async () => {
+  for (const [name, q, text] of LEAKS) {
+    assert.strictEqual(FD.freshDocTask(q), true, name);
+    const w = OLD_DIRTY(); const ag = DK.make(w);
+    await DK.run(ag, q, [T(text)]);
+    assert.ok(!w.oldTouched(), name); assert.strictEqual(w.st.tabs.length, 2, name); assert.strictEqual(w.st.tabs[1].text, text, name);
+  }
+});
+
+test('review #64 vòng 5 M1 (E26): thêm/chèn/add/put/không dấu cũng là việc ghi → bảo vệ bật — hành vi', async () => {
+  for (const [q, text] of [['add a line "buy milk" in Notepad', 'buy milk'], ['put hello into Notepad', 'hello'], ['thêm dòng mua sữa vào Notepad', 'mua sữa'],
+    ['chèn chữ xin chào vào Notepad', 'xin chào'], ['mo notepad, go hello world', 'hello world'], ['mo notepad va them dong mua sua', 'mua sua'], ['note down my todo in Notepad', 'todo'], ['在记事本里添加一行', '你好']]) {
+    assert.strictEqual(FD.freshDocTask(q), true, q);
+    const w = OLD_DIRTY(); const ag = DK.make(w);
+    await DK.run(ag, q, [T(text)]);
+    assert.ok(!w.oldTouched(), q); assert.strictEqual(w.st.tabs[1].text, text, q);
+  }
+});
+
+test('review #64 vòng 5 M1: ngoại lệ hẹp — chỉ khi phần LỆNH (dòng đầu, trước động từ ghi) nói rõ tệp/tài liệu có sẵn', async () => {
+  for (const q of ['mở notes.txt trong Notepad và thêm dòng', 'gõ vào tài liệu đang mở', 'mở Notepad và gõ tiếp vào cuối: abc', 'open C:\\work\\notes.txt and type hello',
+    'gõ tiếp vào tài liệu đang mở: xin chào', 'continue typing in Notepad', 'type into the current document: hi', '在当前文档末尾输入一行', 'mở Word và đăng nhập', 'mở Notepad'])
+    assert.strictEqual(FD.freshDocTask(q), false, q);
+  // tên tệp trong ngoặc / URL / sau động từ không tính (fail closed: mở tài liệu mới)
+  for (const q of ['open "notes.txt" and type hi', 'open https://x.com/a.txt in Notepad and type hi', 'type hi into notes.txt', 'mở Notepad và gõ tiếp theo nội dung: tệp này'])
+    assert.strictEqual(FD.freshDocTask(q), true, q);
+  // hành vi: ngoại lệ thật → gõ vào tài liệu đang mở (không Ctrl+N)
+  const w = DK.notepad({ tabs: [{ name: 'notes.txt', text: 'a' }] }); const ag = DK.make(w);
+  await DK.run(ag, 'mở notes.txt trong Notepad và thêm dòng', [T('b')]);
+  assert.strictEqual(w.st.tabs.length, 1); assert.strictEqual(w.st.tabs[0].text, 'ab');
+});
+
+test('review #64 vòng 5 M2 (probe C1): không biết thẻ đang chọn, thẻ *Untitled cũ cũng chứa "hello", tiêu điểm về đó → dòng 2 DỪNG, thẻ cũ nguyên', async () => {
+  const w = DK.notepad({ tabs: [{ name: 'Untitled', text: 'hello', dirty: true }], selMode: 'missing' }); const ag = DK.make(w);
+  const out = await DK.run(ag, 'mở Notepad và gõ hello', [T('hello'), (w) => { w.st.active = 0; }, T('line2')]);
+  assert.strictEqual(w.st.tabs[1].text, 'hello', 'dòng 1 vào thẻ mới');
+  assert.ok(!w.oldTouched(), 'thẻ cũ nguyên: ' + JSON.stringify(w.st.tabs));
+  assert.ok(out[1].refused && out[1].stop, JSON.stringify(out[1]).slice(0, 200));
+  // đúng thẻ mới nhưng vẫn không chứng minh được → cũng dừng (fail closed)
+  const w2 = DK.notepad({ tabs: [{ name: 'Untitled', text: 'hello', dirty: true }], selMode: 'missing' }); const ag2 = DK.make(w2);
+  const out2 = await DK.run(ag2, 'mở Notepad và gõ hello', [T('hello'), T('line2')]);
+  assert.ok(!w2.oldTouched()); assert.strictEqual(w2.st.tabs[1].text, 'hello'); assert.ok(out2[1].refused && out2[1].stop);
+});

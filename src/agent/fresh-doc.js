@@ -85,19 +85,38 @@ function namesExistingFile(t) {
   for (const m of t.matchAll(CODE_FILE_RE)) if (CODE_BEFORE.test(t.slice(0, m.index)) && !SAVE_BEFORE.test(t.slice(0, m.index))) return true;
   return false;
 }
-// review #64 vòng 4 (3): NỘI DUNG cần gõ (trong ngoặc kép, sau dấu “:” đầu tiên) không được tắt bảo vệ (“gõ: Đừng xoá tệp này”, “type: see readme.txt”)
-// → chỉ xét phần LỆNH khi tìm cách nói “tệp/tài liệu có sẵn” và tên tệp. “:” trong đường dẫn (C:\, http://) hay giờ (10:30) không tính.
-const QUOTED = /"[^"\n]*"|“[^”\n]*”|„[^“”\n]*[“”]|「[^」\n]*」|『[^』\n]*』|‘[^’\n]*’|«[^»\n]*»|(?<![\p{L}\d])'[^'\n]*'(?![\p{L}\d])/gu;
+// review #64 vòng 5 (M1): KHÔNG vá thêm từng kiểu nội dung (xuống dòng, don't, URL/đường dẫn, (), `…`, <<…>>, ﹕, ∶…). Nguyên tắc đơn giản, fail closed:
+// việc GHI chữ trong trình soạn thảo LUÔN mở tài liệu mới, TRỪ KHI phần LỆNH nói rõ tệp/tài liệu có sẵn. Phần lệnh = dòng đầu, cắt ở dấu phân cách
+// nội dung đầu tiên (mọi kiểu “:”, ngoặc/nháy mở, backtick, <, gạch ngang rời); chỉ xét phần TRƯỚC động từ ghi đầu tiên (nội dung luôn đứng sau động từ),
+// cộng một cụm đích đứng NGAY sau động từ (“gõ vào tài liệu đang mở”, “gõ tiếp vào cuối”, “type into the current document”). URL không tính là tệp.
+// thêm/chèn/add/put/insert/note down… cũng là việc ghi (E26)
+const ADD = /(?:^|[^\p{L}])(?:thêm|chèn|add|insert|note\s+down|write\s+down|put(?=[^\n]{0,60}?[^\p{L}](?:in|into|on)[^\p{L}]))(?![\p{L}])|添加|加上|插入|记下|記下|补充|補充/iu;
+const ADD_ASCII = /(?:^|[,;]\s*|[^\p{L}](?:va|roi|hay|sau do|xong|de|giup)\s+)(?:them|chen|go|viet|ghi)\s+(?!to\b|on\b|out\b)\S/iu;
+const WRITE_SRC = [TYPE, TYPE_ASCII, ADD, ADD_ASCII];
+const writeTask = (t) => WRITE_SRC.some(re => re.test(t));
+// vị trí đầu tiên một động từ ghi xuất hiện → { at, end } | null
+function firstVerb(t) {
+  let best = null;
+  for (const re of WRITE_SRC) { const m = new RegExp(re.source, re.flags.replace('g', '')).exec(t); if (m && (!best || m.index < best.at)) best = { at: m.index, end: m.index + m[0].length }; }
+  return best;
+}
+const CUT = /[\r\n]|[:：﹕∶꞉˸︓](?![\\/]|\d)|["“”„«»‹「『‘’`(（\[【{<＜《〈]|(?<![\p{L}\d])'|\s[-–—]+\s/u;
 function commandPart(q) {
-  let t = String(q || '').replace(QUOTED, ' ');
-  t = t.replace(/["“„「『‘«][^\n]*$/u, ' '); // ngoặc mở không đóng → phần sau là nội dung
-  const i = t.search(/[:：](?![\\/]|\d)/u); if (i >= 0) t = t.slice(0, i);
+  let t = String(q || '');
+  t = t.replace(/(\d)[:：﹕∶](?=\d)/gu, '$1\u2009'); // giờ 10:30 không phải dấu phân cách
+  const i = t.search(CUT); if (i >= 0) t = t.slice(0, i);
   return t;
 }
+const URL_RE = /(?:[a-z][a-z\d+.-]*:\/\/|www\.)\S*/giu;
+// cụm đích NGAY sau động từ ghi (không có nội dung xen giữa)
+const TARGET_AFTER = /^\s*(?:(?:tiếp(?!\s+theo)|thêm)\s*)?(?:(?:vào|into|to|in|on)\s+(?:(?:the|my|cái)\s+)?(?:(?:tài liệu|tệp|tập tin|file|thẻ)\s+(?:đang mở|hiện tại|hiện có|có sẵn|sẵn có|cũ|này|đó)|(?:current|existing|already[- ]open|same|this|that)\s+(?:file|document|doc|tab)|cuối|the end of))(?![\p{L}])|^\s*tiếp(?!\s+theo)(?![\p{L}])|^\s*(?:at the end of|vào cuối)(?![\p{L}])/iu;
 function freshDocTask(q) {
-  const t = String(q || ''); if (!t.trim()) return false;
-  const c = commandPart(t);
-  return (TYPE.test(t) || TYPE_ASCII.test(t)) && !EXISTING.test(c) && !namesExistingFile(c);
+  const t = String(q || ''); if (!t.trim() || !writeTask(t)) return false;
+  const c = commandPart(t); const v = firstVerb(c);
+  const head = (v ? c.slice(0, v.end) : c).replace(URL_RE, ' '); // tới HẾT động từ (“continue typing”, “继续输入”)
+  if (EXISTING.test(head) || namesExistingFile(head)) return false;
+  if (v && TARGET_AFTER.test(c.slice(v.end))) return false;
+  return true;
 }
 
 // vùng soạn thảo chính: phần tử soạn được lớn nhất (không phải OCR, không phải ô mật khẩu/hộp chọn)
@@ -180,7 +199,9 @@ function sameDoc(rec, obs) {
   if (!rec.typed) { const st = blankState(obs); if (st.blank === false) return { ok: false, why: st.why }; if (st.why === 'ocr-failed') return { ok: false, why: 'unsure' }; if (st.blank === true || proven) return { ok: true }; return { ok: false, why: 'unsure' }; }
   // đã gõ: đọc được nội dung thì nó phải chứa đúng các đoạn AIVN đã gõ (thẻ “*Untitled” cũ của người dùng cũng có dấu * — phân biệt bằng nội dung)
   const el = docEl(obs); const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim();
-  if (el && el.value != null) return (rec.texts || []).some(t => norm(t) && !norm(el.value).includes(norm(t))) ? { ok: false, why: 'content' } : { ok: true };
+  // review #64 vòng 5 (M2): “có chứa chữ đã gõ” KHÔNG chứng minh đúng thẻ (thẻ cũ của người dùng cũng có thể chứa “hello”) → chỉ dùng để CHẶN;
+  // không biết thẻ đang chọn → 'unsure' → dừng.
+  if (el && el.value != null && (rec.texts || []).some(t => norm(t) && !norm(el.value).includes(norm(t)))) return { ok: false, why: 'content' };
   return proven ? { ok: true } : { ok: false, why: 'unsure' };
 }
 module.exports = { EDITORS, editorOf, untitled, dirty, docName, tabsOf, docPrint, newDocEvidence, newDocAt, ownTitle, TABBED, freshDocTask, commandPart, docEl, blankState, ensureFresh, sameDoc };
