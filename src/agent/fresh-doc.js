@@ -21,7 +21,9 @@ const SOFFICE = /^soffice(\.bin|\.exe)?$/i;
 function editorOf(win) {
   if (!win) return null; const p = String(win.proc || '').trim(); const t = String(win.title || '');
   if (SOFFICE.test(p)) return /LibreOffice Writer/i.test(t) ? EDITORS.find(e => e.id === 'writer') : null;
-  return EDITORS.find(e => (p && e.proc.test(p)) || (e.title && e.title.test(t))) || null;
+  // tiến trình đã biết mà không phải trình soạn thảo (Edge “Document - Word”, Zalo…) → không lấy theo tiêu đề
+  if (p) return EDITORS.find(e => e.proc.test(p)) || null;
+  return EDITORS.find(e => e.title && e.title.test(t)) || null;
 }
 
 // tên tài liệu MỚI chưa lưu (tiếng Anh/Việt/Trung; VS Code bản địa: “无标题-1”, “未命名-1”, “Không có tiêu đề-1”) — phần đầu tiêu đề trước “ - Ứng dụng”; bỏ dấu “chưa lưu” (*, ●) ở đầu
@@ -71,7 +73,8 @@ const newDocEvidence = (a, b) => !!newDocAt(a, b);
 // “hiện tại/current/cũ/end of” đứng một mình (ngày giờ hiện tại, bạn cũ, end of day) không còn chặn — chỉ khi người dùng NÓI RÕ tài liệu/tệp có sẵn.
 const TYPE = /(?:^|[^\p{L}])(?:gõ|viết|(?<!đăng\s)nhập|ghi|soạn|điền|dán|type(?!\s+of\b)|write|jot|input|(?<!press\s)enter|paste)(?![\p{L}])|输入|键入|写|粘贴|贴上|輸入|鍵入|寫|貼上/iu;
 const TYPE_ASCII = /(?:^|[\s,;:])(?:va|roi|hay|sau do|xong|de|giup|cho)\s+(?:go|viet|nhap|soan|dien|dan|ghi)(?![\p{L}])|(?:^|[^\p{L}])(?:go|viet|nhap|soan|dien|dan)\s+(?:vao|len|chu|dong|cau|doan|noi dung|van ban|xin chao|loi|thu|bai)(?![\p{L}])/iu;
-const EXISTING = /(?:^|[^\p{L}])(?:(?:tài liệu|tệp|tập tin|file|thẻ)\s+(?:đang mở|hiện tại|hiện có|có sẵn|sẵn có|cũ|này|đó)|đang mở sẵn|tiếp vào|vào cuối|nối vào|gõ tiếp|viết tiếp|(?:current|existing|already[- ]open|same|this|that)\s+(?:file|document|doc|tab)|already open|append|at the end of (?:the|this|my)|continue (?:typing|writing))(?![\p{L}])|当前(?:文档|文件|标签)|當前(?:文檔|文件|標籤)|已打开|已打開|现有|現有|末尾|追加|原来的|原來的|继续(?:输入|写)|繼續(?:輸入|寫)/iu;
+// “append/追加/chép/记录…” một mình KHÔNG phải tên tài liệu có sẵn — chỉ tắt bảo vệ khi câu lệnh nêu rõ tệp/tài liệu
+const EXISTING = /(?:^|[^\p{L}])(?:(?:tài liệu|tệp|tập tin|file|thẻ)\s+(?:đang mở|hiện tại|hiện có|có sẵn|sẵn có|cũ|này|đó)|đang mở sẵn|tiếp vào|vào cuối|nối vào|gõ tiếp|viết tiếp|(?:current|existing|already[- ]open|same|this|that)\s+(?:file|document|doc|tab)|already open|at the end of (?:the|this|my)|continue (?:typing|writing))(?![\p{L}])|当前(?:文档|文件|标签)|當前(?:文檔|文件|標籤)|已打开|已打開|现有|現有|末尾|原来的|原來的|继续(?:输入|写)|繼續(?:輸入|寫)/iu;
 const OPEN_FILE = /(?:^|[^\p{L}])(?:mở|open|打开|打開)\s+(?:(?:cái|the|a|my)\s+)?(?:tệp|tập tin|file|文件)(?![\p{L}])/iu;
 const FILE_RE = /[\p{L}\d_\-]+\.(?:txt|md|docx?|rtf|odt|log|csv|ini)(?![A-Za-z\d])/giu;
 // đuôi tệp mã (js/ts/py/json/html…) trùng tên công nghệ (“node.js”) → chỉ tính là tệp khi có đường dẫn hoặc đứng ngay sau “mở/open/vào/into”
@@ -79,17 +82,25 @@ const CODE_FILE_RE = /[\p{L}\d_\-]+\.(?:js|ts|py|json|html?|xml|css)(?![A-Za-z\d
 const CODE_BEFORE = /(?:[\\/:]|(?:^|[^\p{L}])(?:mở|open|edit|sửa|vào|into|打开|打開|在)\s*)$/iu;
 // tên tệp đi sau “lưu (thành)/save as/保存为” là nơi LƯU tài liệu mới, không phải tệp có sẵn
 const SAVE_BEFORE = /(?:lưu|save|保存|另存)[^.,;!?\n]{0,24}$/iu;
+// “the open report.docx” / “file ghi-chu.txt” / “文件 notes.txt” — tên tệp nói rõ, kể cả khi đứng sau động từ
+const NAMED_DOC = /(?:^|[^\p{L}])(?:the\s+open|file|tệp|tập tin|文件|檔案)\s*([\p{L}\d_\-]+\.(?:txt|md|docx?|rtf|odt|log|csv|ini))(?![A-Za-z\d])/giu;
+function docFile(t) {
+  const re = new RegExp(NAMED_DOC.source, NAMED_DOC.flags);
+  for (const m of String(t || '').matchAll(re)) if (!SAVE_BEFORE.test(String(t).slice(0, m.index))) return m[1];
+  return null;
+}
 function namesExistingFile(t) {
   if (OPEN_FILE.test(t)) return true;
+  if (docFile(t)) return true;
   for (const m of t.matchAll(FILE_RE)) if (!SAVE_BEFORE.test(t.slice(0, m.index))) return true;
   for (const m of t.matchAll(CODE_FILE_RE)) if (CODE_BEFORE.test(t.slice(0, m.index)) && !SAVE_BEFORE.test(t.slice(0, m.index))) return true;
   return false;
 }
-// review #64 vòng 5 (M1): KHÔNG vá thêm từng kiểu nội dung (xuống dòng, don't, URL/đường dẫn, (), `…`, <<…>>, ﹕, ∶…). Nguyên tắc đơn giản, fail closed:
-// việc GHI chữ trong trình soạn thảo LUÔN mở tài liệu mới, TRỪ KHI phần LỆNH nói rõ tệp/tài liệu có sẵn. Phần lệnh = dòng đầu, cắt ở dấu phân cách
-// nội dung đầu tiên (mọi kiểu “:”, ngoặc/nháy mở, backtick, <, gạch ngang rời); chỉ xét phần TRƯỚC động từ ghi đầu tiên (nội dung luôn đứng sau động từ),
-// cộng một cụm đích đứng NGAY sau động từ (“gõ vào tài liệu đang mở”, “gõ tiếp vào cuối”, “type into the current document”). URL không tính là tệp.
-// thêm/chèn/add/put/insert/note down… cũng là việc ghi (E26)
+// review #64: bảo vệ BẬT mặc định cho mọi việc gõ — kể cả động từ chưa có trong danh sách (append, draft, chép, 记录…).
+// Tắt CHỈ khi phần LỆNH nêu rõ tệp/tài liệu có sẵn. Phần lệnh cắt ở dấu phân cách nội dung TRƯỚC khi tách câu
+// (mọi kiểu “:”, ngoặc/nháy mở, backtick, <, gạch ngang rời). Câu phủ định và chữ trong ngoặc không tắt bảo vệ.
+// Hai câu đều có động từ ghi → không rõ lệnh → bảo vệ. Cụm đích ngay sau động từ (“gõ vào tài liệu đang mở”,
+// “type into the current document”, “the open report.docx”) vẫn là ngoại lệ. URL không tính là tệp.
 const ADD = /(?:^|[^\p{L}])(?:thêm|chèn|add|insert|note\s+down|write\s+down|put(?=[^\n]{0,60}?[^\p{L}](?:in|into|on)[^\p{L}]))(?![\p{L}])|添加|加上|插入|记下|記下|补充|補充/iu;
 const ADD_ASCII = /(?:^|[,;]\s*|[^\p{L}](?:va|roi|hay|sau do|xong|de|giup)\s+)(?:them|chen|go|viet|ghi)\s+(?!to\b|on\b|out\b)\S/iu;
 const WRITE_SRC = [TYPE, TYPE_ASCII, ADD, ADD_ASCII];
@@ -115,40 +126,100 @@ function splitClauses(line) {
   parts.push({ text: line.slice(start), sep: null });
   return parts;
 }
-function commandPart(q) {
-  const line = linesOf(q).find(l => writeTask(l)); if (line == null) return '';
-  const parts = splitClauses(line);
-  const vi = []; parts.forEach((p, i) => { if (writeTask(p.text)) vi.push(i); });
-  if (!vi.length) { const i = line.search(CUT); return i >= 0 ? line.slice(0, i) : line; }
-  // hai câu đều có động từ ghi (“Đừng gõ vào tệp này. Mở Notepad và gõ…”) → câu sau là lệnh; phẩy thì giữ câu đầu (“gõ vào tài liệu đang mở, rồi viết…”)
-  const hard = vi.length > 1 && parts.slice(vi[0], vi[vi.length - 1]).some(p => p.sep === 'stop');
-  const idx = hard ? vi[vi.length - 1] : vi[0];
+// phủ định đứng đầu mệnh đề (“Don't type…”, “Đừng gõ…”, “Không được viết…”, “不要输入…”) — không bao giờ là lệnh tắt bảo vệ
+const NEGATED = /^\s*(?:(?:please|hãy|xin|请)\s+)?(?:don't|do\s+not|never|đừng|chớ|không\s+được|không|别|別|不要|勿|不准)(?![\p{L}])/iu;
+const negated = (s) => NEGATED.test(String(s || ''));
+function withFileClause(parts, idx) {
   let text = parts[idx].text;
-  // “mở notes.txt, gõ abc” / “open the existing document, type hi”: mệnh đề mở tệp ngay trước động từ vẫn là lệnh
-  if (idx > 0 && parts[idx - 1].sep === 'comma' && !writeTask(parts[idx - 1].text)) {
+  if (idx > 0 && parts[idx - 1].sep === 'comma' && !writeTask(parts[idx - 1].text) && !negated(parts[idx - 1].text)) {
     const prev = parts[idx - 1].text;
     if (OPEN_START.test(prev) && (namesExistingFile(prev) || EXISTING.test(prev))) text = prev + ',' + text;
   }
-  const cut = text.search(CUT); return (cut >= 0 ? text.slice(0, cut) : text).trim();
+  return text.trim();
+}
+// không có động từ đã biết: mệnh đề lệnh là mệnh đề còn lại sau khi bỏ phủ định; nhiều mệnh đề không rõ → '' (bảo vệ bật)
+function unknownCommand(parts) {
+  const live = []; parts.forEach((p, i) => { if (p.text.trim() && !negated(p.text)) live.push(i); });
+  if (live.length === 1) return withFileClause(parts, live[0]);
+  const opens = live.filter(i => OPEN_START.test(parts[i].text.trim()));
+  if (opens.length === 1) return withFileClause(parts, opens[0]);
+  return '';
+}
+function commandLine(q) {
+  const lines = linesOf(q);
+  const w = lines.find(l => writeTask(l)); if (w != null) return w;
+  const nonempty = lines.map(l => l.trim()).filter(Boolean);
+  if (nonempty.length === 1) return nonempty[0];
+  const opened = nonempty.filter(l => OPEN_START.test(l));
+  return opened.length === 1 ? opened[0] : '';
+}
+function commandPart(q) {
+  const line = commandLine(q); if (!line) return '';
+  const known = writeTask(line);
+  const c0 = line.search(CUT); const parts = splitClauses(c0 >= 0 ? line.slice(0, c0) : line); // cắt nội dung TRƯỚC khi tách câu
+  const vi = []; parts.forEach((p, i) => { if (writeTask(p.text) && !negated(p.text)) vi.push(i); });
+  if (!vi.length) {
+    if (known && !parts.some(p => writeTask(p.text))) return ''; // động từ chỉ nằm trong nội dung (sau dấu cắt) → bảo vệ
+    return unknownCommand(parts);
+  }
+  // hai câu đều có động từ ghi, cách nhau bởi dấu hết câu → không rõ câu nào là lệnh → bảo vệ (không lấy câu sau)
+  const hard = vi.length > 1 && parts.slice(vi[0], vi[vi.length - 1]).some(p => p.sep === 'stop');
+  if (hard) return '';
+  return withFileClause(parts, vi[0]);
 }
 const URL_RE = /(?:[a-z][a-z\d+.-]*:\/\/|www\.)\S*/giu;
 // cụm đích NGAY sau động từ ghi (không có nội dung xen giữa)
 const TARGET_AFTER = /^\s*(?:(?:tiếp(?!\s+(?:theo|tục))|thêm)\s*)?(?:(?:vào|into|to|in|on)\s+(?:(?:the|my|cái)\s+)?(?:(?:tài liệu|tệp|tập tin|file|thẻ)\s+(?:đang mở|hiện tại|hiện có|có sẵn|sẵn có|cũ|này|đó)|(?:current|existing|already[- ]open|same|this|that)\s+(?:file|document|doc|tab)|cuối|the end of))(?![\p{L}])|^\s*tiếp(?!\s+(?:theo|tục))(?![\p{L}])|^\s*(?:at the end of|vào cuối)(?![\p{L}])/iu;
 const TARGET_END = /(?:^|[^\p{L}])(?:vào|into)\s+(?:(?:tệp|tập tin|file)\s+)?((?:[a-z]:)?[^\s]*?[\p{L}\d_\-]+\.(?:txt|md|docx?|rtf|odt|log|csv|ini))[\s.!]*$/iu;
-// → { fresh: có bật bảo vệ, file: tên tệp nêu ở “gõ X vào <tệp>” (ngoại lệ 2) hoặc null }
-function taskMode(q) {
-  const t = String(q || ''); const ON = { fresh: true, file: null }; if (!t.trim() || !writeTask(t)) return { fresh: false, file: null };
-  // nhiều dòng có động từ ghi → không rõ dòng nào là lệnh → bảo vệ (fail closed)
-  if (linesOf(t).filter(l => writeTask(l)).length !== 1) return ON;
-  const c = commandPart(t); const v = firstVerb(c); if (!v) return ON; // động từ nằm sau dấu phân cách (trong nội dung) → bảo vệ
-  const head = c.slice(0, v.end).replace(URL_RE, ' '); // tới HẾT động từ (“continue typing”, “继续输入”)
-  if (EXISTING.test(head) || namesExistingFile(head)) return { fresh: false, file: null };
-  if (TARGET_AFTER.test(c.slice(v.end))) return { fresh: false, file: null };
-  // “gõ X vào D:\\…\\named.txt” / “type X into notes.txt”: dòng lệnh KẾT THÚC bằng vào/into + tên tệp/đường dẫn (không phải URL, không phải nơi lưu)
-  // review #64 vòng 6 (X7): ngoại lệ này chỉ dùng khi tài liệu đang hiện ĐÚNG là tệp đó (sameFile) — desktop-agent kiểm
+// chỉ MỞ ứng dụng / đăng nhập / hỏi “type of” / bấm một phím — không phải việc gõ chữ
+function isOpenOnly(t) {
+  const m = /^\s*(?:(?:please|hãy|xin|请)\s+)?(?:mở|open|khởi động|launch|start|打开|打開|開啟)(?![\p{L}])\s+([^,，;；.!?。！？]+)$/iu.exec(String(t || '').trim());
+  if (!m) return false;
+  const rest = m[1].trim();
+  if (/^(?:\S+(?:\s+\S+){0,5})\s+(?:và|and|并|並)\s+(?:đăng nhập|log\s*in|sign\s*in|登录|登入|登陸)\s*$/iu.test(rest)) return true;
+  if (/(?:^|[^\p{L}])(?:và|and|rồi|roi|then|sau\s+đó|并|並|然后|然後)(?![\p{L}])/iu.test(rest)) return false;
+  return true;
+}
+function isNonTyping(t) {
+  const s = String(t || '').trim(); if (!s) return true;
+  if (/^(?:what|which)\s+type\s+of\b/iu.test(s)) return true;
+  if (/^(?:press|bấm|nhấn|ấn)\s+(?:enter|escape|tab|delete|backspace)(?:\s+key)?\s*$/iu.test(s)) return true;
+  return isOpenOnly(s);
+}
+// việc gõ: động từ đã biết, HOẶC bất kỳ động từ nào khác (append, draft, chép, 记录…) — mặc định là việc gõ, không cần nằm trong danh sách
+const typingTask = (t) => writeTask(t) || !isNonTyping(t);
+function fileAtEnd(c, v) {
   const m = TARGET_END.exec(c);
-  if (m && m.index >= v.end && !/:\/\/|^www\./i.test(m[1]) && !SAVE_BEFORE.test(c.slice(0, m.index))) return { fresh: false, file: m[1].split(/[\\/]/).pop() };
+  if (m && (v ? m.index >= v.end : true) && !/:\/\/|^www\./i.test(m[1]) && !SAVE_BEFORE.test(c.slice(0, m.index))) return m[1].split(/[\\/]/).pop();
+  return null;
+}
+// câu lệnh (đã cắt nội dung, đã bỏ phủ định) có NÊU RÕ tệp/tài liệu có sẵn không
+function existingTarget(c) {
+  const ON = { fresh: true, file: null }; if (!c || negated(c)) return ON;
+  const bare = c.replace(URL_RE, ' '); const v = firstVerb(bare);
+  if (v) {
+    const head = bare.slice(0, v.end); const tail = c.slice(v.end);
+    if (EXISTING.test(head) || namesExistingFile(head)) return { fresh: false, file: null };
+    const nd = docFile(tail); if (nd) return { fresh: false, file: nd };
+    if (TARGET_AFTER.test(tail)) return { fresh: false, file: null };
+    const f = fileAtEnd(c, v); if (f) return { fresh: false, file: f };
+    return ON;
+  }
+  if (EXISTING.test(bare) || namesExistingFile(bare)) return { fresh: false, file: fileAtEnd(c, null) || docFile(bare) };
+  const nd = docFile(bare); if (nd) return { fresh: false, file: nd };
+  const f = fileAtEnd(c, null); if (f) return { fresh: false, file: f };
   return ON;
+}
+// → { fresh: có bật bảo vệ, file: tên tệp nêu ở “gõ X vào <tệp>” (ngoại lệ 2) hoặc null }
+// Bảo vệ BẬT mặc định cho mọi việc gõ. Chỉ TẮT khi phần LỆNH (sau khi cắt nội dung, không tính câu phủ định) nêu rõ tệp/tài liệu có sẵn.
+function taskMode(q) {
+  const t = String(q || ''); const ON = { fresh: true, file: null };
+  if (!t.trim() || !typingTask(t)) return { fresh: false, file: null };
+  // nhiều dòng có động từ ghi đã biết → không rõ dòng nào là lệnh → bảo vệ (fail closed)
+  if (writeTask(t) && linesOf(t).filter(l => writeTask(l)).length !== 1) return ON;
+  const c = commandPart(t); if (!c) return ON;
+  if (writeTask(t) && !firstVerb(c)) return ON; // động từ nằm sau dấu phân cách (trong nội dung) → bảo vệ
+  return existingTarget(c);
 }
 const freshDocTask = (q) => taskMode(q).fresh;
 const namedTarget = (q) => taskMode(q).file;

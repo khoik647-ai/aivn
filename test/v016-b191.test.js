@@ -21,6 +21,9 @@ test('B191: trình soạn thảo + tiêu đề tài liệu mới chưa đặt t�
   assert.strictEqual(FD.editorOf({ proc: 'WINWORD.EXE', title: 'Document1 - Word' }).id, 'word');
   assert.strictEqual(FD.editorOf({ proc: 'soffice.bin', title: 'Untitled 1 - LibreOffice Calc' }), null, 'LibreOffice Calc không phải trình soạn văn bản');
   assert.strictEqual(FD.editorOf({ proc: 'Zalo.exe', title: 'Zalo' }), null);
+  assert.strictEqual(FD.editorOf({ proc: 'msedge.exe', title: 'Document - Word' }), null, 'Edge mở Word Online: tiến trình không phải trình soạn thảo');
+  assert.strictEqual(FD.editorOf({ proc: 'Zalo.exe', title: 'Untitled - Notepad' }), null, 'tiêu đề giống Notepad không được lấn tiến trình đã biết');
+  assert.strictEqual(FD.editorOf({ proc: 'soffice.bin', title: 'Untitled 1 - LibreOffice Writer' }).id, 'writer');
   for (const t of ['Untitled - Notepad', '*Untitled - Notepad', 'Không có tiêu đề - Notepad', '无标题 - 记事本', 'Document1 - Word', 'new 3 - Notepad++', 'Untitled-1 - Visual Studio Code', '● Untitled-2 - Visual Studio Code'])
     assert.strictEqual(FD.untitled(t), true, t);
   for (const t of ['secret.txt - Notepad', '*matkhau.txt - Notepad', 'Báo cáo quý 3.docx - Word', 'notes.md - Visual Studio Code']) assert.strictEqual(FD.untitled(t), false, t);
@@ -543,4 +546,54 @@ test('review #64 vòng 6 X6/X7: “gõ X vào <tệp>” chỉ bỏ bảo vệ k
   }
   assert.strictEqual(FD.sameFile('notes.txt', '*notes.txt - Notepad'), true);
   assert.strictEqual(FD.sameFile('Untitled.txt', '*Untitled - Notepad'), false);
+});
+
+// ── review #64: câu sau / nội dung trong ngoặc không tắt bảo vệ; động từ lạ mặc định vẫn bật ──
+test('review #64: phủ định và nội dung trích dẫn không tắt bảo vệ — hành vi: thẻ cũ nguyên', async () => {
+  for (const [name, q, text] of [
+    ['N1', "Open Notepad and type hello. Don't type into the current document.", 'hello'],
+    ['N2', 'Mở Notepad và gõ xin chào. Đừng gõ vào tài liệu đang mở.', 'xin chào'],
+    ['N6', 'Mở Notepad và gõ xin chào. Không được viết tiếp vào tệp này.', 'xin chào'],
+    ['N7', 'Open Notepad and type hello? Never type into the current document', 'hello'],
+    ['Q1', 'Mở Notepad và gõ: Ghi chú. Gõ tiếp vào cuối tệp này', 'Ghi chú. Gõ tiếp vào cuối tệp này'],
+    ['Q2', 'mở Notepad và gõ "Xin chào. Gõ tiếp vào cuối nhé"', 'Xin chào. Gõ tiếp vào cuối nhé'],
+    ['Q4', '打开记事本并输入：“你好。在当前文档末尾输入签名。”', '你好。在当前文档末尾输入签名。'],
+    ['Q6', 'open Notepad and type: hi. Type into the current document', 'hi. Type into the current document'],
+    ['Q7', 'Open Notepad: "Hi. Type into the current document"', 'Hi. Type into the current document'],
+    ['Z3', '打开记事本输入你好。继续输入到当前文档', '你好'],
+  ]) {
+    assert.strictEqual(FD.freshDocTask(q), true, name + ' ' + JSON.stringify(FD.commandPart(q)));
+    const w = OLD_DIRTY(); const ag = DK.make(w);
+    await DK.run(ag, q, [T(text)]);
+    assert.ok(!w.oldTouched(), name); assert.strictEqual(w.st.tabs.length, 2, name); assert.strictEqual(w.st.tabs[1].text, text, name);
+  }
+});
+
+test('review #64: bảo vệ bật mặc định với động từ chưa biết (vi/en/zh) — không cần nằm trong danh sách', async () => {
+  for (const [name, q, text] of [
+    ['en append', 'Open Notepad and append hi', 'hi'],
+    ['en draft', 'Open Notepad and draft a short poem', 'Roses are red'],
+    ['en compose', 'Open Notepad and compose a letter to my boss', 'Dear boss'],
+    ['en list', 'Open Notepad and make a shopping list', 'milk'],
+    ['en list verb', 'Open Notepad and list three fruits', 'apple'],
+    ['vi chép', 'Mở Notepad rồi chép bài thơ Bánh trôi nước', 'Thân em vừa trắng lại vừa tròn'],
+    ['vi danh sách', 'Mở Notepad, làm danh sách đi chợ', 'trứng'],
+    ['zh 记录', '打开记事本，记录今天的待办', '买菜'],
+  ]) {
+    assert.strictEqual(FD.freshDocTask(q), true, name);
+    const w = OLD_DIRTY(); const ag = DK.make(w);
+    await DK.run(ag, q, [T(text)]);
+    assert.ok(!w.oldTouched(), name); assert.strictEqual(w.st.tabs.length, 2, name); assert.strictEqual(w.st.tabs[1].text, text, name);
+  }
+  // phủ định / chữ trong ngoặc không tắt; câu lệnh nêu rõ tệp có sẵn thì vẫn tắt
+  for (const q of ["Open Notepad and append hi. Don't type into the current document.", 'Mở Notepad rồi chép: "gõ tiếp vào cuối tệp này"', "Don't type into the current document"])
+    assert.strictEqual(FD.freshDocTask(q), true, q);
+  for (const q of ['append a line to the existing file', 'type into the open report.docx', 'gõ vào file ghi-chu.txt', '在文件 notes.txt 里输入一行', 'continue typing in Notepad'])
+    assert.strictEqual(FD.freshDocTask(q), false, q);
+  assert.strictEqual(FD.namedTarget('type into the open report.docx'), 'report.docx');
+  assert.strictEqual(FD.namedTarget('gõ vào file ghi-chu.txt'), 'ghi-chu.txt');
+  // đúng tệp đang mở → gõ vào tệp đó
+  const w = DK.notepad({ tabs: [{ name: 'report.docx', text: 'a' }] }); const ag = DK.make(w);
+  await DK.run(ag, 'type into the open report.docx', [T('b')]);
+  assert.strictEqual(w.st.tabs.length, 1); assert.strictEqual(w.st.tabs[0].text, 'ab');
 });
