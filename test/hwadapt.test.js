@@ -41,8 +41,9 @@ test('ghi đè số lớp thủ công được thử trước', () => {
 test('nhãn Kho mô hình cho laptop của người dùng', () => {
   const h = { ram: 16 * GB, gpu: 'vulkan', vram: { total: 4 * GB } };
   // quy tắc 0.16: “Chạy mượt” chỉ khi nằm trọn trong VRAM cùng ngữ cảnh; tràn sang RAM là “Chạy chậm”
-  // B38: hiệu chỉnh theo VRAM đo thật (KV ở 8K + bộ đệm tính toán + bộ máy): 1,4 GB (vd. 1,7B Q6) còn nằm trọn 4 GB, 1,88 GB thì không
+  // B38 + #81: KV và bộ đệm tính toán theo llama.cpp (không còn cộng ~1 GB đệm giả). 1,4 GB và 1,88 GB (cỡ Llama 3.2 3B) nằm trọn 4 GB ở ngữ cảnh 8K; 4,68 GB (cỡ 8B) thì tràn.
   assert.strictEqual(hf.fitFor(1.4 * GB, h).label, 'Chạy mượt');
+  assert.strictEqual(hf.fitFor(1.88 * GB, h).label, 'Chạy mượt');
   assert.strictEqual(hf.fitFor(4.68 * GB, h).label, 'Chạy chậm');
   assert.strictEqual(hf.fitFor(9 * GB, h).label, 'Chạy chậm');
   assert.strictEqual(hf.fitFor(20 * GB, h).label, 'Không chạy được');
