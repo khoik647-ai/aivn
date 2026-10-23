@@ -2729,7 +2729,15 @@
     "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "对话正在运行 — 请等它结束，或切到对话点击停止",
     "Không chuyển xong thư mục mô hình": "未能完成移动模型文件夹",
     "Thử lại": "重试",
-    "Chuyển thư mục mô hình bị dừng vì quá lâu không thấy tiến triển. Mô hình vẫn nằm ở thư mục cũ, không mất tệp. Hãy bấm Thử lại.": "移动模型文件夹已停止，因为太久没有进展。模型仍在原文件夹中，没有丢失文件。请点击重试。"
+    "Chuyển thư mục mô hình bị dừng vì quá lâu không thấy tiến triển. Mô hình vẫn nằm ở thư mục cũ, không mất tệp. Hãy bấm Thử lại.": "移动模型文件夹已停止，因为太久没有进展。模型仍在原文件夹中，没有丢失文件。请点击重试。",
+    "Bản vừa chép không khớp khi đọc lại": "刚写入的副本重新读取后不一致。",
+    "Chép không khớp nội dung nguồn": "副本与源文件内容不一致。",
+    "Chép “{0}” không khớp nội dung nguồn": "“{0}” 的副本与源文件内容不一致。",
+    "Chưa xác minh được “{0}” ở đích, không xoá bản gốc": "未能在目标位置验证“{0}”，因此未删除原文件。",
+    "Không chuyển được vì thư mục đích đã có tệp cùng tên nhưng không giống hệt. Mọi tệp vẫn ở thư mục cũ và cài đặt chưa đổi. Hãy đổi tên hoặc dời các tệp này rồi thử lại: {0}": "无法移动模型文件夹，因为目标位置已有同名但内容不同的文件。所有文件仍在原文件夹中，设置未更改。请重命名或移走这些文件后再试：{0}",
+    "Đích đã có tệp cùng tên.": "目标位置已有同名文件。",
+    "Đích “{0}” không khớp sau khi đọc lại": "重新读取后，目标文件“{0}”不一致。",
+    "Đổi tên “{0}” không khớp nội dung": "重命名“{0}”后内容不一致。"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

@@ -2729,7 +2729,15 @@
     "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "Chat is running — wait until it finishes, or switch to Chat and click Stop",
     "Không chuyển xong thư mục mô hình": "Could not finish moving the models folder",
     "Thử lại": "Try again",
-    "Chuyển thư mục mô hình bị dừng vì quá lâu không thấy tiến triển. Mô hình vẫn nằm ở thư mục cũ, không mất tệp. Hãy bấm Thử lại.": "The model move stopped because it made no progress for too long. The models are still in the old folder and no file was lost. Click Try again."
+    "Chuyển thư mục mô hình bị dừng vì quá lâu không thấy tiến triển. Mô hình vẫn nằm ở thư mục cũ, không mất tệp. Hãy bấm Thử lại.": "The model move stopped because it made no progress for too long. The models are still in the old folder and no file was lost. Click Try again.",
+    "Bản vừa chép không khớp khi đọc lại": "The copy just written does not match when read back.",
+    "Chép không khớp nội dung nguồn": "The copy does not match the source contents.",
+    "Chép “{0}” không khớp nội dung nguồn": "The copy of “{0}” does not match the source contents.",
+    "Chưa xác minh được “{0}” ở đích, không xoá bản gốc": "Could not verify “{0}” at the destination, so the original was not deleted.",
+    "Không chuyển được vì thư mục đích đã có tệp cùng tên nhưng không giống hệt. Mọi tệp vẫn ở thư mục cũ và cài đặt chưa đổi. Hãy đổi tên hoặc dời các tệp này rồi thử lại: {0}": "Could not move the models folder because the destination already has a file with the same name that is not identical. Every file is still in the old folder and settings were not changed. Rename or move these files, then try again: {0}",
+    "Đích đã có tệp cùng tên.": "The destination already has a file with the same name.",
+    "Đích “{0}” không khớp sau khi đọc lại": "The destination “{0}” does not match when read back.",
+    "Đổi tên “{0}” không khớp nội dung": "Renaming “{0}” did not keep the same contents."
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.en = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

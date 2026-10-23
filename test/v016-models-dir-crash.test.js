@@ -427,8 +427,9 @@ if (process.argv.includes('--child')) {
       fs.writeFileSync(cfg, JSON.stringify({ quitFifo: true, from, to, fifo, journal: path.join(d, 'move.json'), stallMs: 250 }));
       const t0 = Date.now();
       const r = spawnSync(process.execPath, [__filename, '--child', cfg], { encoding: 'utf8', timeout: 8000 });
-      assert.ok(Date.now() - t0 < 7000, 'process.exit sau grace, không kẹt luồng libuv');
-      assert.strictEqual(r.status, 0, `signal=${r.signal} stderr=${(r.stderr || '').slice(-500)}`);
+      assert.ok(Date.now() - t0 < 7000, 'thoát sau grace, không kẹt luồng libuv');
+      // process.exit() treo khi open() chiếm threadpool; SIGKILL từ tiến trình rời là lối thoát còn lại.
+      assert.ok(r.status === 0 || r.signal === 'SIGKILL', `signal=${r.signal} status=${r.status} stderr=${(r.stderr || '').slice(-500)}`);
       expectSafe(srcBefore, new Map(), from, to);
     } finally { rmAll(d); }
   });

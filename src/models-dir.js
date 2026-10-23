@@ -172,6 +172,14 @@ async function copyOne(src, tmp, { signal, onBytes, copyFile, expectHash }) {
   if (await hashFile(tmp) !== sha) throw new Error(`Bản vừa chép không khớp khi đọc lại`);
   return sha;
 }
+// process.exit() / app.exit() nối threadpool trước khi tắt. open() kẹt trên FIFO hoặc ổ mạng thì lời gọi đó không bao giờ trở lại,
+// và timer trên luồng chính cũng không chạy nữa. Tiến trình rời này đã được spawn từ trước nên vẫn gửi được SIGKILL.
+function armHardExit(waitMs) {
+  const { spawn } = require('child_process');
+  const ms = Math.max(0, waitMs | 0);
+  const script = `setTimeout(function(){try{process.kill(${process.pid},'SIGKILL')}catch(e){}},${ms})`;
+  try { const k = spawn(process.execPath, ['-e', script], { detached: true, stdio: 'ignore' }); k.unref(); } catch {}
+}
 // Thoát ứng dụng khi watchdog đã cắt mà một luồng libuv vẫn kẹt trong open() (FIFO / ổ mạng treo).
 function beforeQuitMove({ exit = (c) => process.exit(c || 0), graceMs = 400 } = {}) {
   if (!moveActive || !moveActive.stalled) return false;
@@ -181,7 +189,9 @@ function beforeQuitMove({ exit = (c) => process.exit(c || 0), graceMs = 400 } = 
       journalWrite(moveActive.journal, moveActive.snap);
     }
   } catch {}
-  setTimeout(() => { try { exit(0); } catch { try { process.exit(0); } catch {} } }, graceMs);
+  const wait = Math.max(0, graceMs | 0);
+  armHardExit(wait + 250);
+  setTimeout(() => { try { exit(0); } catch { try { process.exit(0); } catch {} } }, wait);
   return true;
 }
 // chuyển mô hình: onProgress({ done, total, file, bytesDone, bytesTotal }); signal để huỷ.
