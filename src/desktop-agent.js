@@ -414,12 +414,17 @@ function createDesktopAgent(deps) {
   async function clearFocused() { try { const n = SC.libnut(); n.keyTap('a', require('./agent/keys').primaryOf(process.platform)); await sleep(120); n.keyTap('delete'); await sleep(150); } catch (e) { deps.log && deps.log('desk', 'Không xoá được chữ trong ô: ' + e.message); } }
   async function performAt(action, x, y, a) {
     // B69: chốt cuối, không dựa vào lời nhắc — thao tác có thể GỬI mà chưa qua chốt gửi trong act() thì không bao giờ được bấm
+    {
+      const qRaw = (session && session.ctx && session.ctx.userQuery) || '';
+      // B219: chỉ chặn bước thực sự gửi tin (Enter/nút gửi trong chỗ soạn). Enter ô tìm kiếm và bước chỉ gõ thì cho qua.
+      if (blocksUnaskedSend(action, a, a && a.__el ? { el: a.__el } : null, null, qRaw)) { deps.log && deps.log('desk', `CHẶN (B219): không phải lệnh gửi — ${action} ${String((a && (a.keys || a.text)) || '').slice(0, 60)}`); throw new Error('AIVN chặn: câu này không phải lệnh gửi.'); }
+    }
     if (a && !a.__sendOk && !a.__notSend) {
-      const SG = require('./agent/send-gate'); const k = SG.normKeys(a.keys); const sess = session || {};
+      const SendGate = require('./agent/send-gate'); const k = SendGate.normKeys(a.keys); const sess = session || {};
       const nm = `${a.__el ? a.__el.name || '' : ''} ${a.__q || ''}`;
       const sendLike = (action === 'type_text' && (a.__submit || a.submit || /\n\s*$/.test(String(a.text || ''))))
-        || (action === 'hotkey' && (SG.SEND_COMBO.test(k) || /(^|\+)(enter|return)$/.test(k)) && !!(sess.lastTyped || sess.chatOpen))
-        || (['click', 'double_click'].includes(action) && SG.SEND_NAME.test(nm));
+        || (action === 'hotkey' && (SendGate.SEND_COMBO.test(k) || /(^|\+)(enter|return)$/.test(k)) && !!(sess.lastTyped || sess.chatOpen))
+        || (['click', 'double_click'].includes(action) && SendGate.SEND_NAME.test(nm));
       if (sendLike) { deps.log && deps.log('desk', `CHẶN (B69): thao tác có thể gửi chưa qua chốt duyệt: ${action} ${String(a.keys || a.text || nm).slice(0, 60)}`); throw new Error('AIVN chặn: thao tác có thể GỬI tin chưa được duyệt.'); }
     }
     const n = SC.libnut();
@@ -503,6 +508,38 @@ function createDesktopAgent(deps) {
     return `${(ACT_LABEL[action] || action).toLowerCase()} ${who}`.trim();
   }
 
+  // B219: true khi bước này là GỬI tin mà câu không cho gửi. Enter ô tìm kiếm và bước chỉ gõ thì false.
+  function blocksUnaskedSend(action, a, t, focusedEl, q) {
+    const query = String(q || '');
+    if (!query) return false;
+    if (!SV.allowsSend(query)) {
+      const ax = a || {};
+      if (ax.__searchOk || searchConfirmed(t, focusedEl, ax)) return false;
+      const SendGate = require('./agent/send-gate');
+      const kl = SendGate.normKeys(ax.keys);
+      const nm = `${t && t.el ? t.el.name || '' : ''} ${t && t.query ? t.query : ''} ${ax.__el ? ax.__el.name || '' : ''} ${ax.__q || ''} ${ax.element || ''} ${ax.target || ''}`;
+      const combo = action === 'hotkey' && SendGate.SEND_COMBO.test(kl);
+      const enter = action === 'hotkey' && /(^|\+)(enter|return|numpad_enter|kp_enter)$/i.test(kl);
+      const typeSubmit = action === 'type_text' && !!(ax.submit || ax.__submit || /\n\s*$/.test(String(ax.text || '')));
+      const clickSend = (action === 'click' || action === 'double_click') && SendGate.SEND_NAME.test(nm);
+      if (combo || clickSend) return true;
+      if (!(enter || typeSubmit)) return false;
+      return composeSendContext(query, t, focusedEl, ax);
+    }
+    return false;
+  }
+  function composeSendContext(q, t, focusedEl, a) {
+    const s = session || {};
+    if (s.chatOpen || s.composerFocus) return true;
+    if (SV.lookOnly(q)) return true;
+    const win = s.obs && s.obs.win;
+    const el = (t && t.el) || (focusedEl && !focusedEl.ocr ? focusedEl : null) || (a && a.__el) || null;
+    if (el && SV.isComposerEl(el, win)) return true;
+    const proc = (win && win.proc) || (s.target && s.target.proc) || '';
+    const title = (win && win.title) || (s.target && s.target.title) || '';
+    if (SV.isChatContext(q, proc, title)) return true;
+    return /outlook|gmail|thu moi|soan thu|compose/iu.test(SV.fold(`${title} ${proc} ${el ? `${el.name || ''} ${el.placeholder || ''}` : ''}`));
+  }
   // B21: ô sắp nhận chữ có CHẮC là ô tìm kiếm không. Chỉ tin: (1) phần tử đích/đang chọn mang tên/gợi ý “Tìm kiếm/Search”;
   // (2) không đọc được ô đang chọn, nhưng thao tác NGAY TRƯỚC (≤ 60 giây) là bấm vào ô/chữ “Tìm kiếm” hoặc Ctrl+F/K, hoặc đang gõ tìm dở (chưa bấm chỗ khác).
   // Ô đang chọn đọc được mà là ô nhập KHÁC (ô soạn tin) → không phải ô tìm kiếm, dù trước đó có bấm “Tìm kiếm”.
@@ -877,17 +914,24 @@ function createDesktopAgent(deps) {
       a = { ...a, submit: true, __autoSubmit: true };
       deps.log && deps.log('desk', `B101: việc gửi tin, người nhận đã chốt — AIVN tự bấm Enter sau khi gõ và kiểm chữ trong ô soạn (bước GỬI, qua thẻ xin phép)`);
     }
+    // B219: chỉ chặn bước thực sự GỬI tin. Enter ở ô tìm kiếm và bước chỉ gõ (chưa bấm gửi) không bị chặn.
+    a.__searchOk = searchConfirmed(t, focusedEl, a);
+    if (blocksUnaskedSend(action, a, t, focusedEl, ctx && ctx.userQuery)) {
+      const why = SV.lookOnly(String(ctx.userQuery)) ? SV.LOOK_REFUSE : SV.SEND_BLOCK;
+      deps.log && deps.log('desk', `Chặn gửi (B219): không phải lệnh gửi — ${action} ${String(a.keys || a.text || '').slice(0, 60)}`);
+      return { refused: true, stop: true, error: 'không phải lệnh gửi', forModel: why, summary: why };
+    }
     // B24: gõ tên/từ khoá (+ Enter) vào ô tìm kiếm ĐÃ XÁC NHẬN là TÌM, không phải gửi — không coi là bước rủi ro, kể cả chế độ “chỉ soạn, đừng gửi”
     // B69: MỘT chốt quyết định thao tác nào là GỬI (agent/send-gate.js) — gõ + Enter, phím Enter/Ctrl+Enter sau khi gõ, bấm nút Gửi…
-    const SG = require('./agent/send-gate');
+    const SendGate = require('./agent/send-gate');
     const gateState = () => {
       const qG = ctx && ctx.userQuery ? String(ctx.userQuery) : '';
       const tName = `${t && t.el ? t.el.name || '' : ''} ${t && t.query ? t.query : String(a.element || a.target || '')}`;
       const W = s.obs && s.obs.win && Array.isArray(s.obs.win.b) && s.obs.win.b[3] > 50 ? s.obs.win.b : null;
       const inComposerRow = !!(t && t.el && Array.isArray(t.el.b) && W && (t.el.b[1] + t.el.b[3] / 2 - W[1]) / W[3] > 0.8);
-      return { chatOpen: !!s.chatOpen, recipient: qG ? SV.recipientOf(qG) : null, messaging: !!(qG && SV.msgSend(qG)), searchTarget: searchConfirmed(t, focusedEl, a), lastTyped: s.lastTyped || '', targetName: tName, inComposerRow };
+      return { chatOpen: !!s.chatOpen, recipient: qG ? SV.recipientOf(qG) : null, messaging: !!(qG && SV.allowsSend(qG)), searchTarget: searchConfirmed(t, focusedEl, a), lastTyped: s.lastTyped || '', targetName: tName, inComposerRow };
     };
-    const gate = SG.classify(action, a, gateState());
+    const gate = SendGate.classify(action, a, gateState());
     const gateRcp = (ctx && ctx.userQuery ? SV.recipientOf(ctx.userQuery) : null) || s.chatOpen || s.currentChat || '';
     // B108: bước GỬI (gõ + Enter, phím Enter, nút Gửi, thẻ xin phép gửi) chỉ khi nội dung tin lấy từ yêu cầu của người dùng.
     // Ứng dụng chat: chữ phải có trong yêu cầu. Nơi khác (thư điện tử…): yêu cầu phải là việc gửi/soạn tin.
@@ -905,7 +949,7 @@ function createDesktopAgent(deps) {
       const sendText = gate.text || s.lastTyped || '';
       // B70: đã bấm gửi (người nhận, nội dung) này một lần trong việc → không bao giờ tự gửi lại (tránh gửi TRÙNG cho người thật)
       s.sentKeys = s.sentKeys || new Set();
-      if (s.sentKeys.has(SG.sendKey(gateRcp, sendText)) || (gate.kind !== 'type_enter' && s.sentAny && !s.lastTyped)) {
+      if (s.sentKeys.has(SendGate.sendKey(gateRcp, sendText)) || (gate.kind !== 'type_enter' && s.sentAny && !s.lastTyped)) {
         const msgDup = `Mình đã bấm gửi tin “${String(sendText || s.lastSent || '').slice(0, 60)}”${gateRcp ? ` tới “${gateRcp}”` : ''} một lần rồi. Để tránh gửi TRÙNG, mình không gửi lại — bạn mở cuộc trò chuyện kiểm tra giúp mình nhé.`;
         deps.log && deps.log('desk', `Chặn gửi lại (B70): ${describeAct(action, a, t)} — đã gửi một lần trong việc này`);
         return { refused: true, stop: true, error: 'không gửi lại', ask: msgDup, forModel: msgDup, summary: 'không gửi lại (đã gửi một lần)' };
@@ -914,7 +958,7 @@ function createDesktopAgent(deps) {
       if (action === 'type_text' && !(t && t.x != null)) {
         const SEARCHY = /tìm|tim kiem|search|find/iu; const la = s.lastAction;
         const focusSearch = (focusedEl && SEARCHY.test(`${focusedEl.name || ''} ${focusedEl.autoId || ''} ${focusedEl.placeholder || ''}`))
-          || (!focusedEl && la && ((la.action === 'hotkey' && /^(ctrl|cmd|command|meta|control)\+(f|k|e)$/i.test(SG.normKeys(la.keys))) || (['click', 'double_click'].includes(la.action) && SEARCHY.test(`${la.query || ''} ${la.el ? la.el.name || '' : ''}`)) || (la.action === 'type_text' && s.inSearch)));
+          || (!focusedEl && la && ((la.action === 'hotkey' && /^(ctrl|cmd|command|meta|control)\+(f|k|e)$/i.test(SendGate.normKeys(la.keys))) || (['click', 'double_click'].includes(la.action) && SEARCHY.test(`${la.query || ''} ${la.el ? la.el.name || '' : ''}`)) || (la.action === 'type_text' && s.inSearch)));
         if (focusSearch) {
           const comp = (s.obs ? s.obs.elements : []).find(e => /nhập.*tin nhắn|nhap.*tin nhan|tin nhắn tới|type a message|write a message|send a message|^message\b|输入消息|发消息|^aa$/iu.test(String(e.name || e.placeholder || '').trim()));
           if (comp && Array.isArray(comp.b)) { t = { el: comp, x: comp.b[0] + comp.b[2] / 2, y: comp.b[1] + comp.b[3] / 2, via: comp.ocr ? 'OCR' : 'cây giao diện', query: comp.name }; deps.log && deps.log('desk', `Ô đang chọn có thể là ô TÌM KIẾM — bấm vào ô soạn tin “${String(comp.name || '').slice(0, 30)}” trước khi gõ + Enter`); }
@@ -1040,7 +1084,7 @@ function createDesktopAgent(deps) {
       const w = preSend && preSend.wrongEl;
       return { refused: true, error: 'chữ vào nhầm ô', forModel: `Tin CHƯA được gửi: chữ vừa gõ đã vào NHẦM ô (“${String((w && w.name) || 'ô khác').slice(0, 40)}”), không phải ô soạn tin — AIVN KHÔNG bấm Enter và đã xoá chữ gõ nhầm. Bấm vào ô soạn tin (“Nhập @, tin nhắn tới …”) rồi gõ lại nội dung tin.`, summary: 'chữ vào nhầm ô — chưa gửi, đã xoá' };
     }
-    if (gate.send) { s.sentKeys.add(SG.sendKey(gateRcp, gate.text || s.lastTyped || '')); s.sentAny = true; s.lastSent = gate.text || s.lastTyped || ''; }
+    if (gate.send) { s.sentKeys.add(SendGate.sendKey(gateRcp, gate.text || s.lastTyped || '')); s.sentAny = true; s.lastSent = gate.text || s.lastTyped || ''; }
     const prevAction = s.lastAction;
     // bấm vào kết quả tìm kiếm khớp người nhận → coi như đã mở cuộc trò chuyện (kiểm lại tiêu đề ngay bên dưới)
     const rcp = ctx && ctx.userQuery ? (SV.recipientOf(ctx.userQuery) || (SV.CURRENT_CHAT.test(ctx.userQuery) && s.currentChat ? s.currentChat : null)) : null; // B59: “cuộc trò chuyện hiện tại” = chat đã đọc chắc lúc gõ
