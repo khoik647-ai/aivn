@@ -367,12 +367,16 @@ function negatedBefore(s, index) {
 // Riêng trong nội dung sau dấu hai chấm: lời rút lại (“À thôi, đừng gửi”, “never mind, don't send”, “算了别发”) vẫn cấm.
 const isSpace = (c) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\u00a0' || c === '\u3000';
 const isColon = (c) => c === ':' || c === '\uff1a' || c === '\ufe55' || c === '\ufe13';
-// Ký tự rộng bằng không. Một mình “đổi thành khoảng trắng” làm vỡ từ cấm nằm trong một từ
-// (“đừ\u200dng” → “đừ ng”, rồi lệnh gửi lọt). Một mình “xoá” thì dính hai từ (“đừng\u2060gửi” → “đừnggửi”).
-// allowsSend đọc CẢ HAI và chỉ cho gửi khi cả hai đều cho. Gạch nối mềm (U+00AD) luôn xoá.
-const ZW_ALL = /[\u200b\u200c\u200d\u2060\ufeff]/g;
-const ZW_SOFT = /\u00ad/g;
-function stripZw(s) { return String(s || '').replace(ZW_ALL, '').replace(ZW_SOFT, ''); }
+// Mọi chữ vô hình: Cf, Default_Ignorable (ZWJ, ZWSP, gạch nối mềm, CGJ, biến thể, tag…),
+// và chữ điền Hangul (U+115F/U+1160/U+3164/U+FFA0) — vẽ trống nhưng là Lo, vẫn liệt kê cho chắc.
+// Một lớp cho cả hai cách đọc. Chỉ xoá thì “đừng⁠gửi” dính thành “đừnggửi”; chỉ đổi thành khoảng trắng
+// thì “đừ⁠ng” vỡ thành “đừ ng”. allowsSend cho gửi chỉ khi CẢ HAI cách đọc đều cho.
+const INVIS_SRC = String.raw`[\p{Default_Ignorable_Code_Point}\p{Cf}\u3164\u115f\u1160\uffa0]`;
+const INVIS = new RegExp(INVIS_SRC, 'gu');
+const INVIS_ONE = new RegExp(INVIS_SRC, 'u');
+function stripZw(s) { return String(s || '').replace(INVIS, ''); }
+function spaceZw(s) { return String(s || '').replace(INVIS, ' '); }
+function hasInvis(s) { return INVIS_ONE.test(String(s || '')); }
 const SEND_CAP = 16384;
 function overCap(q) { return String(q || '').length > SEND_CAP; }
 // Gấp chữ để so từ cấm không dấu: bỏ dấu, đ→d, thường, mọi kiểu dấu lược → '. Giữ nguyên ranh giới từ.
@@ -389,6 +393,9 @@ function quoteSkip(s) {
   const diff = new Int32Array(n + 1);
   const stack = [];
   for (let i = 0; i < n; i++) {
+    const cp = s.codePointAt(i);
+    const ch0 = cp > 0xFFFF ? String.fromCodePoint(cp) : s[i];
+    if (INVIS_ONE.test(ch0)) { if (cp > 0xFFFF) i++; continue; }
     const ch = s[i];
     const top = stack.length ? stack[stack.length - 1] : null;
     if (top && ch === top.close) {
@@ -405,8 +412,8 @@ function quoteSkip(s) {
   return skip;
 }
 function commandSurface(q, skip) {
-  const s = String(q || '');
-  if (!skip) skip = quoteSkip(s);
+  const s = stripZw(q);
+  if (!skip || skip.length !== s.length) skip = quoteSkip(s);
   let out = '';
   for (let i = 0; i < s.length; i++) {
     if (skip[i]) { if (out.charAt(out.length - 1) !== ' ') out += ' '; continue; }
@@ -421,8 +428,8 @@ function commandSurface(q, skip) {
 }
 // Phần tin không ngoặc sau dấu hai chấm đầu tiên. Dấu hai chấm mở ngoặc ĐÃ ĐÓNG thì đó là tin trong ngoặc.
 function messageTail(q, skip) {
-  const s = String(q || '');
-  if (!skip) skip = quoteSkip(s);
+  const s = stripZw(q);
+  if (!skip || skip.length !== s.length) skip = quoteSkip(s);
   for (let i = 0; i < s.length; i++) {
     if (skip[i] || !isColon(s[i])) continue;
     let j = i + 1; while (j < s.length && isSpace(s[j])) j++;
@@ -549,9 +556,9 @@ function allowsSendCore(q) {
 // Ký tự rộng bằng không: cho gửi chỉ khi CẢ bản xoá hẳn VÀ bản đổi thành khoảng trắng đều cho.
 function allowsSend(q) {
   if (overCap(q)) return false; // câu quá dài: từ chối gửi, không quét
-  const raw = String(q || '').replace(ZW_SOFT, '');
-  if (!/[\u200b\u200c\u200d\u2060\ufeff]/.test(raw)) return allowsSendCore(raw);
-  return allowsSendCore(raw.replace(ZW_ALL, '')) && allowsSendCore(raw.replace(ZW_ALL, ' '));
+  const raw = String(q || '');
+  if (!hasInvis(raw)) return allowsSendCore(raw);
+  return allowsSendCore(stripZw(raw)) && allowsSendCore(spaceZw(raw));
 }
 // Việc nhắn/gửi tin thật. MSG_SEND xét trên câu GỐC (như trước B219): gỡ “ô soạn tin” cũng gỡ mất động từ “soạn tin”,
 // cổng Ctrl+Enter hết biết đây là gửi. intentText chỉ dùng trong lookOnly. Câu chỉ nhìn thì không phải lệnh gửi.
