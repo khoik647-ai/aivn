@@ -378,10 +378,10 @@ test('client ngắt trong lúc ensureModel thì không nạp và không giữ m�
   const start = main.indexOf('async function ensureModel');
   const slice = main.slice(start, main.indexOf('function apiHost', start));
   const stopAt = slice.indexOf('if (stopped()) return;');
-  const loadAt = slice.indexOf('await loadById(m.id)');
+  const loadAt = slice.includes('await shareLoad(m.id') ? slice.indexOf('await shareLoad(m.id') : slice.indexOf('await loadById(m.id)');
   const dropAt = slice.indexOf('jitGuard.shouldUnload(');
   const jitAt = slice.indexOf('apiJit = {');
-  assert.ok(stopAt > 0 && loadAt > stopAt, 'đã ngắt trước khi nạp thì không gọi loadById');
+  assert.ok(stopAt > 0 && loadAt > stopAt, 'đã ngắt trước khi nạp thì không gọi load');
   assert.ok(dropAt > loadAt && jitAt > dropAt, 'nạp xong mới xét gỡ; apiJit chỉ khi còn giữ mô hình');
   assert.doesNotMatch(slice, /if \(stopped\(\)\) \{\s*try \{\s*await engine\.unloadModel\(\)/);
   assert.match(main, /signal: extra && extra\.signal/);

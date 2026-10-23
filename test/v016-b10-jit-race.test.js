@@ -1,5 +1,5 @@
 'use strict';
-// B10: ensureModel thật + jit-load thật, chỉ loadById được thay. Các kịch bản S1–S11
+// B10: ensureModel thật + jit-load thật, chỉ loadById được thay. Các kịch bản S1–S14
 // là bản chạy được của harness jit-race (UI chọn mô hình đi qua noteUiPick, như IPC models:load).
 const test = require('node:test');
 const assert = require('node:assert');
@@ -29,6 +29,9 @@ function world() {
     W.opts.push({ id, api: !!opts.api });
     await sleep(50);
     if (W.loading) { await W.cur; }
+    // engine.loadModel của lần nạp thứ hai gỡ mô hình ngay khi bắt đầu. Chỉ S12 bật cờ này.
+    if (W.dropOnOverlap && W.seenLoad) { W.loaded = null; ev.push('RACE-CLEAR ' + id); }
+    W.seenLoad = true;
     W.loading = id; ev.push('load-start ' + id);
     W.cur = (async () => {
       await sleep(200);
@@ -44,15 +47,24 @@ function world() {
     require: (m) => (m === './jit-load' ? require(path.join(__dirname, '..', 'src', 'jit-load')) : require(m)),
     engine, settings, loadById,
     listModels: () => [{ id: 'a' }, { id: 'b' }],
-    busy: 0, generations: new Map(), apiJit: null, log: () => {}, send: () => {}, console,
+    busy: 0, generations: new Map(), apiJit: null, lastUse: 0, log: () => {}, send: () => {}, console,
     setTimeout, clearTimeout,
   };
   vm.createContext(ctx);
-  vm.runInContext(src + '\n;globalThis.ensureModel = ensureModel; globalThis.noteUiPick = noteUiPick; globalThis.getApiJit = () => apiJit;', ctx);
+  vm.runInContext(src + '\n;globalThis.ensureModel = ensureModel; globalThis.noteUiPick = noteUiPick; globalThis.shareLoad = (typeof shareLoad === "function") ? shareLoad : null; globalThis.getApiJit = () => apiJit;', ctx);
   W.ctx = ctx; W.settings = settings; W.loadById = loadById;
   W.api = (id, ac) => ctx.ensureModel(id, { api: true, signal: ac.signal }).then(() => 'ok', (e) => 'ERR ' + e.message);
-  W.ui = (id) => { ctx.noteUiPick(id); return loadById(id); };
+  // IPC models:load: noteUiPick rồi nạp. shareLoad (nếu có) gom UI và API vào một lần nạp đang chạy.
+  W.ui = (id) => { ctx.noteUiPick(id); return typeof ctx.shareLoad === 'function' ? ctx.shareLoad(id, {}) : loadById(id); };
   return W;
+}
+
+// TTL thật trong main.js. lastUse = 0 trong harness nên hết hạn ngay nếu apiJit còn trỏ vào mô hình.
+function runTtl(ctx) {
+  const i = mainSrc.indexOf('setInterval(() => { // TTL:');
+  const j = mainSrc.indexOf('}, 30000)', i);
+  const body = mainSrc.slice(i + 'setInterval(() => '.length, j + 1);
+  vm.runInContext('(function () ' + body + ')()', ctx);
 }
 
 function snapshot(W, out) {
@@ -203,13 +215,53 @@ test('shouldUnload matches the loaded id exactly', () => {
   assert.strictEqual(g.shouldUnload('m1', { triggered: true, status: { loaded: true, id: 'm1' } }), true);
 });
 
+test('S12 API request for B waits for the in-flight load while the UI picks B, no abort', async () => {
+  await scen({ loaded: 'b', apiResult: 'ok' }, async (W) => {
+    W.dropOnOverlap = true;
+    const ac = new AbortController();
+    const pa = W.api('b', ac);
+    await sleep(60);
+    const ui = W.ui('b');
+    const apiResult = await pa;
+    assert.strictEqual(W.loaded, 'b', 'request would generate before B is loaded: ' + JSON.stringify(W.ev));
+    await ui;
+    return { apiResult };
+  });
+});
+
+test('S13 UI pick of B during the API load is not JIT, so TTL leaves B loaded', async () => {
+  await scen({ loaded: 'b', apiJit: null, unloads: 0, lastModel: 'b' }, async (W) => {
+    const ac = new AbortController();
+    const pa = W.api('b', ac);
+    await sleep(60);
+    const ui = W.ui('b');
+    const apiResult = await Promise.all([pa, ui]);
+    assert.strictEqual(apiResult[0], 'ok');
+    W.ctx.lastUse = 0;
+    runTtl(W.ctx);
+    await sleep(0);
+  });
+});
+
+test('S14 UI and API share one in-flight load of the same model', async () => {
+  await scen({ loaded: 'b', loads: 1 }, async (W) => {
+    const ac = new AbortController();
+    const pa = W.api('b', ac);
+    await sleep(30);
+    const ui = W.ui('b');
+    await Promise.all([pa, ui]);
+    return { loads: W.ev.filter((e) => e.startsWith('load-start')).length };
+  });
+});
+
 test('loadById skips lastModel for api loads; models:load notes the UI pick first', () => {
   const loadFn = mainSrc.slice(mainSrc.indexOf('async function loadById'), mainSrc.indexOf('const { createJitGuard }'));
   assert.match(loadFn, /api = false/);
   assert.match(loadFn, /if \(!api\) \{ settings\.data\.lastModel = m\.id; settings\.save\(\); \}/);
   const i = mainSrc.indexOf("ipcMain.handle('models:load'");
   const h = mainSrc.slice(i, mainSrc.indexOf('ipcMain.handle', i + 20));
-  assert.ok(h.indexOf('noteUiPick(id)') < h.indexOf('loadById'), h);
+  const callAt = h.includes('shareLoad') ? h.indexOf('shareLoad') : h.indexOf('loadById');
+  assert.ok(h.indexOf('noteUiPick(id)') >= 0 && callAt > h.indexOf('noteUiPick(id)'), h);
   const ens = mainSrc.slice(mainSrc.indexOf('async function ensureModel'), mainSrc.indexOf('function apiHost'));
   assert.ok(ens.indexOf('await Promise.resolve()') < ens.indexOf('jitGuard.shouldUnload('));
   assert.ok(ens.indexOf('uiPick.seq') < ens.indexOf('jitGuard.shouldUnload('));
