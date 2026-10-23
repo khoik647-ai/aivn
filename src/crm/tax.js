@@ -24,26 +24,43 @@ const floatRound = N.floatRound; // dùng chung với giao diện (src/crm/num.j
 //   'line' (Odoo round_per_line, mọi chứng từ mới): như account.tax.compute_all — đơn giá sau CK = price × (1 − CK/100),
 //          base = float_round(đơn giá sau CK × SL), thuế dòng = float_round(base × mức / 100).
 //   'global' (chứng từ trước 0.16): GIỮ NGUYÊN công thức cũ Math.round(SL × giá × (1 − CK/100)) để tổng cũ không đổi một đồng.
-const lineSubtotal = (l, rounding = 'line') => {
+// #42 K3: “Giá đã gồm thuế” (Odoo account.tax price_include = “Included in price”): dòng có price_include = 1 thì đơn giá ĐÃ GỒM thuế.
+//   'line' — như Odoo 18 _add_tax_details_in_base_line (round_per_line), cùng kết quả với compute_all 17.0:
+//          tổng gồm thuế = float_round(đơn giá sau CK × SL); thuế = float_round(tổng gồm thuế × 1/(1 + mức/100) × mức/100);
+//          thành tiền trước thuế = tổng gồm thuế − thuế (nên trước thuế + thuế luôn đúng bằng số khách trả).
+//   'global' (chứng từ cũ): công thức cũ Math.round cho tổng gồm thuế, thuế của dòng gồm thuế vẫn tách theo dòng để tổng không lệch.
+const inclOf = (l) => { const v = l && l.price_include; return v === true || v === 1 || v === '1' || v === 'true' || v === 'on' ? 1 : 0; };
+const lineGross = (l, rounding) => {
   const q = Number(l.qty) || 0, p = Number(l.price) || 0, d = Number(l.discount_pct) || 0;
   return rounding === 'global' ? Math.round(q * p * (1 - d / 100)) : floatRound((p * (1 - d / 100.0)) * q);
 };
+const inclTax = (gross, r, rounding) => { if (!r) return 0; const v = gross * (1 / (1 + r / 100.0)) * r / 100.0; return rounding === 'global' ? Math.round(v) : floatRound(v); };
+const lineSubtotal = (l, rounding = 'line') => {
+  const g = lineGross(l, rounding);
+  return inclOf(l) ? g - inclTax(g, Number(l.vat_pct) || 0, rounding) : g;
+};
 const lineTax = (l, rounding = 'line') => {
-  const sub = lineSubtotal(l, rounding), r = Number(l.vat_pct) || 0;
+  const r = Number(l.vat_pct) || 0;
+  if (inclOf(l)) return inclTax(lineGross(l, rounding), r, rounding);
+  const sub = lineSubtotal(l, rounding);
   return rounding === 'global' ? Math.round(sub * r / 100) : floatRound(sub * r / 100);
 };
+// tổng gồm thuế của dòng (cột “Thành tiền gồm thuế”; giá gồm thuế thì đúng bằng đơn giá sau CK × SL)
+const lineTotal = (l, rounding = 'line') => lineSubtotal(l, rounding) + lineTax(l, rounding);
 // tổng chứng từ + nhóm thuế theo mức (Odoo: tax_totals → groups_by_subtotal)
 function totals(lines, rounding = 'line') {
   rounding = roundingOf(rounding);
   const groups = new Map(); let untaxed = 0, taxLine = 0;
   for (const l of lines || []) {
     const sub = lineSubtotal(l, rounding); const rate = Number(l.vat_pct) || 0; untaxed += sub;
-    const g = groups.get(rate) || { rate, base: 0, tax: 0 }; g.base += sub;
+    const g = groups.get(rate) || { rate, base: 0, tax: 0, ex: 0, inTax: 0 }; g.base += sub;
     if (rounding === 'line') { const t = lineTax(l, 'line'); g.tax += t; taxLine += t; }
+    else if (inclOf(l)) g.inTax += lineTax(l, rounding); else g.ex += sub; // K3: dòng gồm thuế đã tách thuế theo dòng
     groups.set(rate, g);
   }
   const list = [...groups.values()].sort((a, b) => a.rate - b.rate);
-  if (rounding !== 'line') for (const g of list) g.tax = Math.round(g.base * g.rate / 100);
+  if (rounding !== 'line') for (const g of list) g.tax = Math.round(g.ex * g.rate / 100) + g.inTax;
+  for (const g of list) { delete g.ex; delete g.inTax; }
   const tax = rounding === 'line' ? taxLine : list.reduce((a, g) => a + g.tax, 0);
   return { amount_untaxed: untaxed, amount_tax: tax, amount_total: untaxed + tax, tax_groups: list };
 }
@@ -66,4 +83,6 @@ const fmtRate = (r) => `${T.round3(r)}%`;
 const blank = (v) => v == null || String(v).trim() === '';
 function moneyIn(v, dflt = 0) { if (blank(v)) return dflt; const n = N.parseMoney(v); if (!Number.isFinite(n)) throw fail(`“${String(v).trim()}” không phải là số tiền hợp lệ.`); return n; }
 function pctIn(v, dflt = 0) { if (blank(v)) return dflt; const n = N.parsePct(String(v).replace(/%\s*$/, '')); if (!Number.isFinite(n)) throw fail(`Chiết khấu “${String(v).trim()}” không phải là số.`); return Math.max(0, Math.min(100, N.round3(n))); }
-module.exports = { floatRound, moneyIn, pctIn, VAT_RATES, ROUNDING, vatOf, roundingOf, lineSubtotal, lineTax, totals, singleRate, splitGross, fmtRate };
+// K3: ô “Giá đã gồm thuế” (0/1); bỏ trống → mặc định
+const inclIn = (v, dflt = 0) => (v === undefined || v === null || v === '' ? (dflt ? 1 : 0) : inclOf({ price_include: v }));
+module.exports = { floatRound, moneyIn, pctIn, VAT_RATES, ROUNDING, vatOf, roundingOf, inclOf, inclIn, lineSubtotal, lineTax, lineTotal, totals, singleRate, splitGross, fmtRate };

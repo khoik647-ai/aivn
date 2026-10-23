@@ -299,10 +299,11 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
       const given = l.vat_pct !== undefined && l.vat_pct !== null && l.vat_pct !== '';
       const vat = given ? vatOf(l.vat_pct) : !docVatGiven && pr && pr.vat_pct != null ? vatOf(pr.vat_pct) : docVat;
       return { product_id: pr ? pr.id : null, so_line_id: l.so_line_id || null, po_line_id: l.po_line_id || null, name: str(l.name || (pr && pr.name), 300), unit: UOM.canon(str(l.unit || (pr && pr.unit), 30)) || 'cái', qty: Number.isFinite(qty) ? qty : 0,
-        price: Math.max(0, TAX.moneyIn(l.price, (pr && (side === 'in' ? pr.cost : pr.price)) || 0)), discount_pct: TAX.pctIn(l.discount_pct), vat_pct: vat, pos: i }; })
+        price: Math.max(0, TAX.moneyIn(l.price, (pr && (side === 'in' ? pr.cost : pr.price)) || 0)), discount_pct: TAX.pctIn(l.discount_pct), vat_pct: vat,
+        price_include: l.price_include !== undefined && l.price_include !== null && l.price_include !== '' ? TAX.inclIn(l.price_include) : side === 'in' ? 0 : TAX.inclIn(pr && pr.price_include), pos: i }; }) // #42 K3: giá bán của SP gồm thuế; giá mua (giá vốn) chưa thuế
       .filter(l => l.name && Math.abs(l.qty) > EPS);
   }
-  function writeLines(invId, lines) { db.run('DELETE FROM invoice_lines WHERE invoice_id = ?', [invId]); for (const l of lines) db.run('INSERT INTO invoice_lines(id, invoice_id, so_line_id, po_line_id, product_id, name, unit, qty, price, discount_pct, vat_pct, pos) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [newId('il'), invId, l.so_line_id || null, l.po_line_id || null, l.product_id, l.name, l.unit, l.qty, l.price, l.discount_pct, l.vat_pct == null ? 10 : l.vat_pct, l.pos]); }
+  function writeLines(invId, lines) { db.run('DELETE FROM invoice_lines WHERE invoice_id = ?', [invId]); for (const l of lines) db.run('INSERT INTO invoice_lines(id, invoice_id, so_line_id, po_line_id, product_id, name, unit, qty, price, discount_pct, vat_pct, price_include, pos) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [newId('il'), invId, l.so_line_id || null, l.po_line_id || null, l.product_id, l.name, l.unit, l.qty, l.price, l.discount_pct, l.vat_pct == null ? 10 : l.vat_pct, TAX.inclOf(l), l.pos]); }
   function refreshAmounts(invId) { const a = amounts(invId); db.run('UPDATE invoices SET amount_untaxed = ?, amount_tax = ?, amount_total = ?, updated_at = ? WHERE id = ?', [a.amount_untaxed, a.amount_tax, a.amount_total, now(), invId]); }
   // hoá đơn nhập tay hoặc sửa hoá đơn nháp
   function saveInvoice(input = {}) {
@@ -333,7 +334,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
     const id = db.tx(() => {
       const iid = newId('inv');
       db.run('INSERT INTO invoices(id, kind, partner_id, so_id, state, vat_pct, notes, tax_rounding, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)', [iid, 'out_invoice', so.contact_id, soId, 'draft', so.vat_pct, '', TAX.roundingOf(so.tax_rounding), now(), now()]);
-      writeLines(iid, todo.map((l, i) => ({ product_id: l.product_id, so_line_id: l.id, name: l.name, unit: l.unit, qty: l.qty_to_invoice, price: l.price, discount_pct: l.discount_pct, vat_pct: l.vat_pct, pos: i })));
+      writeLines(iid, todo.map((l, i) => ({ product_id: l.product_id, so_line_id: l.id, name: l.name, unit: l.unit, qty: l.qty_to_invoice, price: l.price, discount_pct: l.discount_pct, vat_pct: l.vat_pct, price_include: TAX.inclOf(l), pos: i })));
       refreshAmounts(iid); return iid;
     });
     hist(so.contact_id, `Tạo hoá đơn nháp cho đơn ${so.number}`);
