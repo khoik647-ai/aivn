@@ -10,6 +10,26 @@ const gb = (n) => (n / GB).toFixed(1).replace('.', ',');
 // ổ đĩa / gốc gắn kết để hiện cho người dùng (“ổ D:”)
 const driveOf = (p) => { const w = /^([A-Za-z]):/.exec(String(p)); if (w) return w[1].toUpperCase() + ':'; const r = path.parse(path.resolve(p)).root; return /^[A-Za-z]:\\?$/.test(r) ? r.slice(0, 2).toUpperCase() : r; }; // “D:” hoặc “/” (chữ “ổ” nằm trong câu để dịch được)
 function existingAncestor(p) { let d = path.resolve(p); while (!fs.existsSync(d)) { const up = path.dirname(d); if (up === d) break; d = up; } return d; }
+// S3: danh tính ổ đích (số dev + gốc volume). Số dev có thể đổi khi gắn lại đúng chỗ; gốc volume thì giữ nguyên.
+function volumeIdentity(dir) {
+  try {
+    let d = path.resolve(String(dir || ''));
+    if (!d) return null;
+    if (!fs.existsSync(d)) d = existingAncestor(d);
+    const st = fs.statSync(d);
+    let root = d;
+    const dev = st.dev;
+    while (true) {
+      const up = path.dirname(root);
+      if (up === root) break;
+      let upSt;
+      try { upSt = fs.statSync(up); } catch { break; }
+      if (upSt.dev !== dev) break;
+      root = up;
+    }
+    return { dev: String(dev), root };
+  } catch { return null; }
+}
 function freeBytes(p, statfs = fs.statfsSync) { try { const s = statfs(existingAncestor(p)); return Number(s.bavail) * Number(s.bsize); } catch { return null; } }
 // lỗi rõ ràng khi không đủ chỗ (dùng cho tải mô hình và chuyển thư mục)
 function spaceError(need, free, dir) {
@@ -235,6 +255,28 @@ function destRootBlocked(dir, j) {
   }
   return null;
 }
+// Ổ khác gắn đúng đường dẫn, hoặc điểm gắn trống của fstab, có gốc volume khác ổ đã ghi.
+// Không sửa điều kiện destRootBlocked: nhật ký cũ không có destVol vẫn đi đúng luật #86.
+function destVolumeBlocked(j) {
+  const rec = j && j.destVol;
+  if (!rec || typeof rec.root !== 'string' || !rec.root) return null;
+  const cur = volumeIdentity(j.to);
+  if (!cur || path.resolve(cur.root) !== path.resolve(rec.root)) return Object.assign(new Error('ENODEV'), { code: 'ENODEV' });
+  return null;
+}
+function relOf(f) { return typeof f === 'string' ? f : (f && typeof f.rel === 'string' ? f.rel : ''); }
+// Tệp liệt kê trong nhật ký không còn mục nào ở nguồn và cũng không còn ở đích.
+function filesMissingBoth(j) {
+  if (!j || !Array.isArray(j.rels)) return [];
+  const missing = []; const seen = new Set();
+  for (const f of j.rels) {
+    const rel = relOf(f);
+    if (!rel || seen.has(rel)) continue;
+    seen.add(rel);
+    if (!lstatOrNull(path.join(j.from, rel)) && !lstatOrNull(path.join(j.to, rel))) missing.push(rel);
+  }
+  return missing;
+}
 async function destChildBlocked(j) {
   const rels = new Set();
   for (const f of j.rels) if (f && typeof f.rel === 'string') rels.add(f.rel);
@@ -253,6 +295,25 @@ function pendingOf(j, err) {
     fsCode: (err && err.code) || 'ENOENT',
     log: `Chuyển mô hình đang chờ ổ đích. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu. Sẽ thử lại khi thư mục này truy cập được: ${to}`,
     notice: `Chuyển mô hình đang chờ ổ đích ${drive}, thư mục “${base}”. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu, và sẽ được phục hồi khi ổ này có lại.`,
+  };
+}
+// S3: không hoàn tác, không xoá nhật ký, không xoá tệp. Tệp có thể chỉ còn trên ổ chưa gắn.
+function pendingMissing(j, err) {
+  const to = path.resolve(j.to), from = path.resolve(j.from), drive = driveOf(to), base = path.basename(to);
+  return {
+    pending: true, state: 'pending', reason: 'files missing both', code: 'EDEST', dir: from, to, drive,
+    fsCode: (err && err.code) || 'ENOENT',
+    log: `Chuyển mô hình đang chờ vì có tệp trong nhật ký không còn ở thư mục cũ và cũng không thấy ở thư mục đích hiện tại. Nhật ký được giữ, không hoàn tác. Sẽ thử lại khi đúng thư mục đích truy cập được: ${to}`,
+    notice: `Chuyển mô hình đang chờ ổ đích ${drive}, thư mục “${base}”. Có tệp không thấy ở cả hai thư mục nên chưa hoàn tác. Sẽ thử lại khi đúng ổ này có lại.`,
+  };
+}
+function pendingVolume(j, err) {
+  const to = path.resolve(j.to), from = path.resolve(j.from), drive = driveOf(to), base = path.basename(to);
+  return {
+    pending: true, state: 'pending', reason: 'destination volume mismatch', code: 'EDEST', dir: from, to, drive,
+    fsCode: (err && err.code) || 'ENODEV',
+    log: `Chuyển mô hình đang chờ vì thư mục đích hiện tại không nằm trên ổ đã ghi trong nhật ký. Nhật ký được giữ, không hoàn tác. Sẽ thử lại khi đúng ổ đích truy cập được: ${to}`,
+    notice: `Chuyển mô hình đang chờ ổ đích ${drive}, thư mục “${base}”. Thư mục đang thấy không phải ổ đã ghi trong nhật ký nên chưa hoàn tác. Sẽ thử lại khi đúng ổ này có lại.`,
   };
 }
 // Bản chuyển dở (sập giữa chừng). Nhật ký mới (có created): chỉ đụng tệp lần chuyển này tạo ra.
@@ -274,8 +335,12 @@ async function recoverMove(file) {
   }
   const rootErr = destRootBlocked(j.to, j);
   if (rootErr) return pendingOf(j, rootErr);
+  const volErr = destVolumeBlocked(j);
+  if (volErr) return pendingVolume(j, volErr);
   const childErr = await destChildBlocked(j);
   if (childErr) return pendingOf(j, childErr);
+  // Đích trống hoặc ổ khác: tệp mất cả hai phía thì hoàn tác sẽ xoá nhật ký và quên tệp còn trên ổ thật.
+  if (filesMissingBoth(j).length) return pendingMissing(j, { code: 'ENOENT' });
   const stamp = stampEarly;
   if (heavyRecover.get(id) === stamp) return pendingOf(j, { code: 'EIO' });
   let didHash = false;
@@ -310,6 +375,8 @@ async function recoverMove(file) {
     }
     const gone = destRootBlocked(j.to, j);
     if (gone) return pendingOf(j, gone);
+    const volLater = destVolumeBlocked(j);
+    if (volLater) return pendingVolume(j, volLater);
     if (j.phase !== 'quit' && (j.phase === 'commit' || verified) && verified) {
       for (const f of j.rels) {
         const src = path.join(j.from, f.rel), dst = path.join(j.to, f.rel);
@@ -324,6 +391,7 @@ async function recoverMove(file) {
       if (still) return pendingOf(j, still);
       pruneEmpty(j.from); journalClearIfSame(file, raw); return finish({ resumed: true, dir: path.resolve(j.to) });
     }
+    if (filesMissingBoth(j).length) return pendingMissing(j, { code: 'ENOENT' });
     await rollbackJournal(j);
     const after = destRootBlocked(j.to, j);
     if (after) return pendingOf(j, after);
@@ -500,7 +568,7 @@ async function moveModels(from, to, { onProgress = () => {}, signal = null, stat
     if (conflicts.length) { const e = new Error(conflictMessage(conflicts)); e.code = 'ECONFLICT'; e.conflicts = conflicts; throw e; }
     const rels = files.map(f => ({ rel: f.rel, size: f.size, sha256: f.sha256 }));
     const moveId = crypto.randomBytes(8).toString('hex');
-    snap = { from: path.resolve(from), to: path.resolve(to), rels, created: [], temps: [], moveId, phase: 'moving' };
+    snap = { from: path.resolve(from), to: path.resolve(to), rels, created: [], temps: [], moveId, phase: 'moving', destVol: volumeIdentity(to) };
     journalWrite(journal, snap);
     moveActive.snap = snap;
     let bytesDone = 0, done = 0; const moved = [], skipped = [];
@@ -559,6 +627,8 @@ async function moveModels(from, to, { onProgress = () => {}, signal = null, stat
       journalWrite(journal, snap); hit('after:' + done);
       if (afterEach) await race(Promise.resolve().then(() => afterEach({ rel: f.rel, index: done })));
     }
+    const volNow = volumeIdentity(to);
+    if (volNow) snap.destVol = volNow;
     snap.phase = 'commit'; journalWrite(journal, snap);
     for (let i = 0; i < files.length; i++) {
       hit('commit:' + i);
@@ -598,4 +668,4 @@ function applyMoveBlock({ journalExists = false, rec = null, modelInUse = false 
   if (journalExists) return { ok: false, code: 'EDEST', error: PREV_WAIT };
   return null;
 }
-module.exports = { deleteModelFiles, freeBytes, checkSpace, spaceError, validateTarget, listFiles, moveModels, driveOf, MARGIN, recoverMove, journalClear, dirProgressGate, STALL_MSG, ABORT_MSG, conflictMessage, beforeQuitMove, armHardExit, ALIAS_MSG, applyMoveBlock, PREV_WAIT, MODEL_BUSY, JOURNAL_BUSY };
+module.exports = { deleteModelFiles, freeBytes, checkSpace, spaceError, validateTarget, listFiles, moveModels, driveOf, volumeIdentity, MARGIN, recoverMove, journalClear, dirProgressGate, STALL_MSG, ABORT_MSG, conflictMessage, beforeQuitMove, armHardExit, ALIAS_MSG, applyMoveBlock, PREV_WAIT, MODEL_BUSY, JOURNAL_BUSY };
