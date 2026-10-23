@@ -92,6 +92,8 @@ test('[r7 M1] nhãn không bí mật đứng trước không nuốt header', () 
     ['ERROR: Authorization: Bearer ' + KEY, 'ERROR:'],
     ['info: token: ' + KEY, 'info:'],
     ['failed: api_key: ' + KEY, 'failed:'],
+    ['ERROR: Authorization: token ' + KEY, 'ERROR:'],
+    ['Error: X-Api-Key: ' + KEY + ' tail', 'Error:'],
   ];
   for (const [line, keep] of lines) {
     assertGone(keep, line, [KEY]);

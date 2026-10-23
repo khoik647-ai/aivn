@@ -776,7 +776,7 @@ function maskAssignments(text, depth = 0) {
     if (i < 0) return m;
     return m.slice(0, i + 1) + '••••' + m.slice(i + 1 + value.length);
   });
-  s = s.replace(/(^|[^\w"'-])([A-Za-z][A-Za-z0-9_-]*)([ \t]*:[ \t]*)([|>][-+]?[ \t]*\r?\n[ \t]+\S+|\S+(?:[ \t]+\S+)?)/g, (m, pre, name, sep, value) => {
+  s = s.replace(/(^|[^\w"'-])([A-Za-z][A-Za-z0-9_-]*)([ \t]*:[ \t]*)([|>][-+]?[ \t]*\r?\n[ \t]+\S+|\S+(?:[ \t]+\S+)*)/g, (m, pre, name, sep, value) => {
     if (!value || isRedactedValue(value)) return m;
     if (!headerValueIsSecret(name, value) && !headerValueIsSecret(name, value.split(/\s+/)[0])) {
       if (depth < 8 && value.length < m.length && /[ \t]*:/.test(value)) return pre + name + sep + maskAssignments(value, depth + 1);
