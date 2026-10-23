@@ -210,11 +210,36 @@ async function fillWindowText(wins, read, { timeoutMs = 8000 } = {}) {
     ]);
     if (timer) clearTimeout(timer);
     if (!textR || !textR.ok) throw new Error('window-text');
-    const v = textR.v;
-    if (v && typeof v === 'object' && v.unread) { out.push({ ...w, unread: true }); continue; }
-    out.push({ ...w, text: v == null ? '' : String(v) });
+    const got = uiaRead(textR.v);
+    if (got && typeof got === 'object' && got.unread) { out.push({ ...w, unread: true }); continue; }
+    out.push({ ...w, text: String(got) });
   }
   return out;
+}
+// Khung cửa sổ không phải nội dung. 0 phần tử, không có chữ, hoặc chỉ có khung → chưa đọc được.
+const CHROME_ROLE = /^(window|pane|titlebar|menubar|menu|scrollbar|thumb|separator|grip|tooltip)$/i;
+function uiaHasContent(els) {
+  if (!Array.isArray(els) || !els.length) return false;
+  for (const e of els) {
+    if (!e || typeof e !== 'object') continue;
+    const v = e.v != null ? e.v : e.value;
+    if (v != null && String(v).trim()) return true;
+    const role = String(e.r || e.role || '');
+    const name = String(e.n || e.name || '').trim();
+    if (name && !CHROME_ROLE.test(role)) return true;
+  }
+  return false;
+}
+// Kết quả UIA → chuỗi chữ, hoặc { unread: true } khi đọc rỗng / lỗi. Chuỗi rỗng không phải “đã đọc, không có mã”.
+function uiaRead(raw) {
+  if (raw == null) return { unread: true };
+  if (typeof raw === 'string') return raw.trim() ? raw : { unread: true };
+  if (typeof raw !== 'object') return { unread: true };
+  if (raw.unread || raw.error || raw.noTree) return { unread: true };
+  const els = Array.isArray(raw.els) ? raw.els : (Array.isArray(raw) ? raw : null);
+  if (!els || !uiaHasContent(els)) return { unread: true };
+  const text = els.map(e => [e && (e.n || e.name), e && (e.v != null ? e.v : e.value)].filter(x => x != null && String(x).trim()).join(' ')).filter(Boolean).join('\n');
+  return text.trim() ? text : { unread: true };
 }
 // Danh sách cửa sổ + chữ, đã đọc xong. Lỗi hoặc quá hạn → ok:false (không được coi là “không có cửa sổ”).
 async function readWindows({ windows = null, loadWindows = null, loadText = null, timeoutMs = 8000 } = {}) {
@@ -404,4 +429,4 @@ function prune(dir, { maxAgeMs = 24 * 3600e3, maxBytes = 200 * 1024 * 1024, now 
   while (left.length && total > maxBytes) { const f = left.shift(); if (del(f)) total -= f.size; }
   res.kept = left.length; return res;
 }
-module.exports = { scan, screenSecrets, reveal, readWindows, snapshotsDiffer, fillWindowText, codeSpans, reasonList, redactSecrets, redactTitles, guardStep, rectInShot, shot, dropShotPixels, forgetShots, prune, electronImage, WARN, MASK, SHOT_NAME, onScreen };
+module.exports = { scan, screenSecrets, reveal, readWindows, snapshotsDiffer, fillWindowText, uiaRead, uiaHasContent, codeSpans, reasonList, redactSecrets, redactTitles, guardStep, rectInShot, shot, dropShotPixels, forgetShots, prune, electronImage, WARN, MASK, SHOT_NAME, onScreen };

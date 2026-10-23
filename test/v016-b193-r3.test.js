@@ -51,9 +51,9 @@ for (const [k, ocr] of Object.entries({
   const r = await runQA(baseDeps({ windows: async () => unreadWin, windowText: async () => ({ unread: true }), ocr, runAgentTurn: steps2() }));
   assert.deepStrictEqual(r.raw, [], k);
 });
-test('OCR trả rỗng (đã đọc, sạch) → ghi ảnh gốc (đúng, không dương tính giả)', async () => {
+test('OCR trả rỗng (không có nội dung) → che ảnh', async () => {
   const r = await runQA(baseDeps({ windows: async () => unreadWin, windowText: async () => ({ unread: true }), ocr: async () => '', runAgentTurn: steps2() }));
-  assert.strictEqual(r.raw.length, 1);
+  assert.deepStrictEqual(r.raw, []); assert.ok(r.res.steps[0].shotRedacted);
 });
 for (const [k, extra] of Object.entries({
   'windows() ném': { windows: async () => { throw new Error('x'); } },

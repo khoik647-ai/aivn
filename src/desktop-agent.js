@@ -267,9 +267,10 @@ function createDesktopAgent(deps) {
   }
   async function readWindowText(w) {
     if (!w || w.hwnd == null || (process.platform !== 'win32' && process.platform !== 'darwin')) return { unread: true };
-    const rawW = await U.tree({ hwnd: w.hwnd, app: w.proc || '', max: 400, vmax: 500000 });
-    const els = rawW && Array.isArray(rawW.els) ? rawW.els : [];
-    return els.map(e => [e && e.n, e && e.v].filter(Boolean).join(' ')).join('\n');
+    try {
+      const rawW = await U.tree({ hwnd: w.hwnd, app: w.proc || '', max: 400, vmax: 500000 });
+      return ShotGuard.uiaRead(rawW);
+    } catch { return { unread: true }; }
   }
   // B193: một lần đọc mọi cửa sổ đang hiện + chữ, để so trước/sau ảnh chụp.
   function windowsPrior() {
@@ -282,8 +283,10 @@ function createDesktopAgent(deps) {
     let imageText = ''; let ocrDone = false;
     const canOcr = !!(shot && shot.dataUrl && deps.engine && typeof deps.engine.ocrLines === 'function');
     if (mustOcr && canOcr) {
-      try { imageText = (await ocrShot(shot, null)).map(l => l && l.text).filter(Boolean).join('\n'); ocrDone = true; }
+      try { imageText = (await ocrShot(shot, null)).map(l => l && l.text).filter(Boolean).join('\n'); }
       catch { return { reasons: ['text:unreadable'], titles: [], failed: true, unread: [] }; }
+      if (!String(imageText).trim()) return { reasons: ['text:unreadable'], titles: [], failed: true, unread: [] };
+      ocrDone = true;
     }
     const after = await ShotGuard.readWindows({ loadWindows: () => U.windows(), loadText: readWindowText });
     const snapFail = !after.ok || (prior && prior.ok === false);
@@ -291,12 +294,15 @@ function createDesktopAgent(deps) {
     if (snapFail) return { reasons: ['text:unreadable'], titles: [], failed: true, unread: [] };
     const wins = [...((prior && prior.wins) || []), ...after.wins];
     const sec = ShotGuard.screenSecrets({ title, proc, text: String(text || '') + (imageText ? '\n' + imageText : ''), windows: wins });
-    if (sec.failed || ocrDone || (!torn && (!sec.unread || !sec.unread.length))) return sec;
+    // Tranh chấp (cửa sổ hoặc chữ đổi giữa hai lần đọc) → luôn che, kể cả khi OCR không thấy mã.
+    if (torn) return { reasons: [...new Set([...(sec.reasons || []), 'text:unreadable'])], titles: sec.titles || [], failed: true, unread: sec.unread || [] };
+    if (sec.failed || ocrDone || !sec.unread || !sec.unread.length) return sec;
     const mergeFail = () => ({ reasons: [...new Set([...(sec.reasons || []), 'text:unreadable'])], titles: sec.titles || [], failed: true, unread: sec.unread });
     if (sec.reasons && sec.reasons.length) return sec;
     if (!canOcr) return mergeFail();
     try {
       const more = (await ocrShot(shot, null)).map(l => l && l.text).filter(Boolean).join('\n');
+      if (!String(more).trim()) return mergeFail();
       const extra = ShotGuard.scan({ text: more }).filter(x => String(x).startsWith('text:'));
       return { ...sec, reasons: [...new Set([...(sec.reasons || []), ...extra])], failed: false };
     } catch { return mergeFail(); }

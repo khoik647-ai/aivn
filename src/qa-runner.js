@@ -188,12 +188,13 @@ function windowTextReader(deps) {
   if (process.platform !== 'win32' && process.platform !== 'darwin') return null;
   return async (w) => {
     if (!w || w.hwnd == null) return { unread: true };
-    const r = await require('./agent/uitree').tree({ hwnd: w.hwnd, app: w.proc || '', max: 400, vmax: 500000 });
-    const els = r && Array.isArray(r.els) ? r.els : [];
-    return els.map(e => [e && e.n, e && e.v].filter(Boolean).join(' ')).join('\n');
+    try {
+      const r = await require('./agent/uitree').tree({ hwnd: w.hwnd, app: w.proc || '', max: 400, vmax: 500000 });
+      return SG.uiaRead(r);
+    } catch { return { unread: true }; }
   };
 }
-// OCR ảnh đã chụp. Không có bộ OCR / lỗi / quá hạn → null (người gọi xoá ảnh). Chuỗi rỗng = đã đọc, không thấy chữ.
+// OCR ảnh đã chụp. Không có bộ OCR / lỗi / quá hạn → null. Chuỗi rỗng không phải bằng chứng đã đọc nội dung.
 async function ocrCaptured(deps, captured) {
   const fn = typeof deps.ocr === 'function' ? deps.ocr : (deps.engine && typeof deps.engine.ocrLines === 'function' ? deps.engine.ocrLines : null);
   if (!fn || !captured || !captured.dataUrl) return null;
@@ -270,6 +271,7 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
             const after = before.ok ? await snapState(deps, tgt) : { ok: false, info: null, wins: [] };
             let unsafe = !before.ok || !after.ok;
             const torn = !unsafe && SG.snapshotsDiffer(before, after);
+            if (torn) unsafe = true; // cửa sổ hoặc chữ đổi giữa hai lần đọc → che, không giữ ảnh gốc
             const info = (after.ok && after.info) || before.info || null;
             const bi = before.info || {}, ai = after.info || {};
             for (const t of [bi.title, ai.title]) if (t) titles.add(String(t));
@@ -277,9 +279,9 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
             let sec = { reasons: [], titles: [], unread: [] };
             const join = (...xs) => xs.filter(x => typeof x === 'string' && x).join('\n');
             try { sec = SG.screenSecrets({ title: join(bi.title, ai.title) || (tgt && tgt.title) || '', proc: join(bi.proc, ai.proc) || (tgt && tgt.proc) || '', text: join(bi.text, ai.text), windows: wins }); } catch { unsafe = true; }
-            if (!unsafe && (torn || (sec.unread && sec.unread.length)) && !(sec.reasons && sec.reasons.length)) {
+            if (!unsafe && sec.unread && sec.unread.length && !(sec.reasons && sec.reasons.length)) {
               const ocrText = await ocrCaptured(deps, captured);
-              if (ocrText == null) unsafe = true;
+              if (ocrText == null || !String(ocrText).trim()) unsafe = true;
               else { const extra = SG.scan({ text: ocrText }).filter(x => String(x).startsWith('text:')); sec.reasons = [...(sec.reasons || []), ...extra]; }
             }
             for (const t of sec.titles || []) titles.add(t);
