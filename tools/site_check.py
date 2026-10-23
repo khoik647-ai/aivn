@@ -1,4 +1,4 @@
-"""Kiểm bố cục trang web AIVN (B143–B150, B162, B174) ở 280/320/375/1280 px × vi/en/zh bằng Playwright + Chrome. Thoát 1 nếu có lỗi.
+"""Kiểm bố cục trang web AIVN (B143–B150, B162, B174, B185) ở 280/320/375/1280 px và dải 768–900 px × vi/en/zh bằng Playwright + Chrome. Thoát 1 nếu có lỗi.
 B174: máy Mac (Safari Apple Silicon và Intel — Safari không cho biết chip; Chrome trên Mac Apple Silicon), iPhone, Android, Linux, Windows:
 khối beta và link đầu trang KHÔNG mời tải .exe trên máy không phải Windows; Mac thấy tệp Mac đúng chip (hoặc được chọn khi không biết chip)
 — tệp Mac của bản beta nếu release có, nếu không thì dòng “chỉ có cho Windows” + tệp Mac của bản ổn định — kèm cách mở lần đầu (Gatekeeper).
@@ -52,6 +52,10 @@ JS = r'''() => {
 }'''
 ONLYWIN = {'vi': 'Bản thử nghiệm hiện chỉ có cho Windows', 'en': 'available for Windows only', 'zh-CN': '仅提供 Windows'}
 res = []
+bad_band = []
+band_log = []
+BAND = list(range(768, 901, 2))  # B185: 768, 780, 800, 810, 820, 834, 850, 880, 900 và mọi bước 2 px
+CTA = {'vi': 'Tải miễn phí', 'en': 'Download free', 'zh': '免费下载'}
 with sync_playwright() as p:
     b = p.chromium.launch(channel='chrome')
     for name, kw, init, kind in CONF:
@@ -78,6 +82,38 @@ with sync_playwright() as p:
             r['afterUrl'] = pg.url; r['requests'] = list(reqs)
             if SHOTS: pg.locator('.beta-dl').scroll_into_view_if_needed(); pg.screenshot(path=f'{SHOTS}/{name}-{lang}.png')
             res.append(r); c.close()
+    # B185 (#45): 768–900 px, bước 2 px, vi/en/zh. Nút tải ở đầu trang không đẩy trang cuộn ngang và vẫn bấm tới #tai-ve.
+    band_js = r'''() => {
+      const d=document.documentElement, cw=d.clientWidth;
+      const a=document.querySelector('header .nav-cta a.btn');
+      const rc=a.getBoundingClientRect(), cs=getComputedStyle(a);
+      const vis=!!(rc.width && cs.display!=='none' && cs.visibility!=='hidden');
+      const hit=vis?document.elementFromPoint(Math.min(cw-2, rc.left+rc.width/2), rc.top+rc.height/2):null;
+      return {sw:d.scrollWidth, cw, vis, left:rc.left, right:rc.right, h:rc.height, text:(a.innerText||'').replace(/\s+/g,' ').trim(),
+        hit:!!(hit && (hit===a || a.contains(hit)))};
+    }'''
+    bc = b.new_context(viewport={'width': 900, 'height': 1000}, user_agent=LNX)
+    bc.add_init_script(nav('Linux x86_64'))
+    bp = bc.new_page()
+    for lang in ('vi', 'en', 'zh'):
+        bp.goto(URL + ('&' if '?' in URL else '?') + 'lang=' + lang, wait_until='load')
+        bp.evaluate('() => document.fonts.ready')
+        bp.evaluate("() => { document.documentElement.style.scrollBehavior = 'auto'; }")
+        for w in BAND:
+            bp.set_viewport_size({'width': w, 'height': 1000})
+            br = bp.evaluate(band_js)
+            k = f'band-{w} {lang}'
+            if br['sw'] > br['cw'] or br['right'] > br['cw'] + 0.5 or br['left'] < -0.5:
+                bad_band.append(f'{k}: tràn ngang {br["sw"]}>{br["cw"]} nút {br["left"]:.0f}..{br["right"]:.0f}')
+            if (not br['vis']) or br['text'] != CTA[lang] or (not br['hit']) or not (32 <= br['h'] <= 48):
+                bad_band.append(f'{k}: nút tải đầu trang không bấm được {br["text"]!r} vis={br["vis"]} hit={br["hit"]} h={br["h"]:.0f}')
+        bp.set_viewport_size({'width': 820, 'height': 1000})
+        bp.locator('header .nav-cta a.btn').click()
+        bp.wait_for_timeout(300)
+        if not bp.evaluate('()=>{const e=document.getElementById("tai-ve"); if(!e) return false; const b=e.getBoundingClientRect(); return b.top<innerHeight && b.bottom>0}'):
+            bad_band.append(f'band-820 {lang}: bấm nút đầu trang không tới #tai-ve')
+        band_log.append(f'band {lang} 768..900 bước 2: {len(BAND)} bề rộng, nút “{CTA[lang]}” trong khung')
+    bc.close()
     b.close()
 json.dump(res, open(OUT, 'w'), ensure_ascii=False, indent=1)
 for r in res:
@@ -125,5 +161,7 @@ for r in res:
             if r['macLinks']: bad.append(f'{k}: {kind} mà hiện tệp Mac')
         if kind == 'linux' and not r['lnote']: bad.append(f'{k}: Linux không hiện dòng “chỉ có cho Windows …”')
         if not (kind.startswith('mac') and mac_beta) and 'Windows' not in (r['heroText'] or ''): bad.append(f'{k}: link đầu trang chưa nói bản beta chỉ có cho Windows: {r["heroText"]}')
-print('\n'.join(bad) if bad else f'KIỂM BỐ CỤC OK: {len(res)} cấu hình')
+bad.extend(bad_band)
+for line in band_log: print(line)
+print('\n'.join(bad) if bad else f'KIỂM BỐ CỤC OK: {len(res)} cấu hình; dải 768–900 px × vi/en/zh ({len(BAND)} bề rộng) không tràn')
 sys.exit(1 if bad else 0)
