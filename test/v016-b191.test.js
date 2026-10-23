@@ -455,10 +455,10 @@ test('review #64 vòng 5 M1 (E26): thêm/chèn/add/put/không dấu cũng là vi
 
 test('review #64 vòng 5 M1: ngoại lệ hẹp — chỉ khi phần LỆNH (dòng đầu, trước động từ ghi) nói rõ tệp/tài liệu có sẵn', async () => {
   for (const q of ['mở notes.txt trong Notepad và thêm dòng', 'gõ vào tài liệu đang mở', 'mở Notepad và gõ tiếp vào cuối: abc', 'open C:\\work\\notes.txt and type hello',
-    'gõ tiếp vào tài liệu đang mở: xin chào', 'continue typing in Notepad', 'type into the current document: hi', '在当前文档末尾输入一行', 'mở Word và đăng nhập', 'mở Notepad'])
+    'gõ tiếp vào tài liệu đang mở: xin chào', 'continue typing in Notepad', 'type hi into notes.txt', 'gõ X vào D:\\AIVN-QA\\named.txt', 'type into the current document: hi', '在当前文档末尾输入一行', 'mở Word và đăng nhập', 'mở Notepad'])
     assert.strictEqual(FD.freshDocTask(q), false, q);
   // tên tệp trong ngoặc / URL / sau động từ không tính (fail closed: mở tài liệu mới)
-  for (const q of ['open "notes.txt" and type hi', 'open https://x.com/a.txt in Notepad and type hi', 'type hi into notes.txt', 'mở Notepad và gõ tiếp theo nội dung: tệp này'])
+  for (const q of ['open "notes.txt" and type hi', 'open https://x.com/a.txt in Notepad and type hi', 'gõ "x" vào notes.txt', 'gõ abc rồi lưu vào a.txt', 'type the link into http://x.com/a.txt', 'mở Notepad và gõ tiếp theo nội dung: tệp này'])
     assert.strictEqual(FD.freshDocTask(q), true, q);
   // hành vi: ngoại lệ thật → gõ vào tài liệu đang mở (không Ctrl+N)
   const w = DK.notepad({ tabs: [{ name: 'notes.txt', text: 'a' }] }); const ag = DK.make(w);
