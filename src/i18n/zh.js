@@ -2895,6 +2895,7 @@
     "“{0}”: nhận {1}, đơn mua cần {2}": "“{0}”：收货 {1}，采购订单需要 {2}",
     "“{0}” không phải là số tiền hợp lệ.": "“{0}” 不是有效的金额。",
     "Chiết khấu “{0}” không phải là số.": "折扣 “{0}” 不是数字。",
+    "đã trừ giấy báo có khách hàng {0}": "已扣除客户贷项通知单 {0}",
     "AIVN tự đọc trang": "AIVN 自动读取网页",
     "Bỏ qua “{0}” (không liên quan tới việc được giao)": "已跳过“{0}”（与任务无关）",
     "Chưa mở được trong {0}": "未能在 {0} 中打开",

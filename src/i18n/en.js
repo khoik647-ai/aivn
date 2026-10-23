@@ -2895,6 +2895,7 @@
     "“{0}”: nhận {1}, đơn mua cần {2}": "“{0}”: receiving {1}, the purchase order needs {2}",
     "“{0}” không phải là số tiền hợp lệ.": "“{0}” is not a valid amount.",
     "Chiết khấu “{0}” không phải là số.": "Discount “{0}” is not a number.",
+    "đã trừ giấy báo có khách hàng {0}": "{0} customer credit deducted",
     "AIVN tự đọc trang": "AIVN reads the page itself",
     "Bỏ qua “{0}” (không liên quan tới việc được giao)": "Skipped “{0}” (not related to the task)",
     "Chưa mở được trong {0}": "Could not open it in {0}",
