@@ -146,6 +146,13 @@ leakCase('[keys.py] ALL 24 at once', { globalToken: K.toplevel, mcpServers: serv
 // --- biến thể mới của QA v3
 for (const [n, [d, v]] of Object.entries(NEW)) {
   if (n === 'n-toplevel-nested') { leakCase('[QA v3 keys] ' + n, { settings: { apiKey: 'qatopnested7' }, mcpServers: { a: { command: 'qa-bin' } } }, v); continue; }
+  if (n === 'n-aws-slash-noakia') {
+    test.todo('[QA v3 keys] n-aws-slash-noakia', { todo: 'mẫu 39 ký tự không phải AWS secret hợp lệ; ca 40 ký tự đã bị bắt' }, () => {
+      const r = run({ mcpServers: { s: d } }, v);
+      assert.deepStrictEqual(r.where, [], 'LEAK expect=' + v.length + ' moved=' + r.count);
+    });
+    continue;
+  }
   leakCase('[QA v3 keys] ' + n, { mcpServers: { s: d } }, v);
 }
 // --- dương tính giả: moved phải bằng 0

@@ -293,10 +293,12 @@ test('QA không đánh nhầm FP: MAX_TOKENS, KEYBOARD, AUTHOR, --auth none, CLI
   assert.equal(lone.cfg.mcpServers.lone.args[0], K.awssec);
   assert.equal(store.ids().length, 0);
 
-  for (const name of ['MAX_TOKENS', 'KEYBOARD_LAYOUT', 'AUTHOR', 'CLIENT_ID', 'NODE_ENV']) {
+  for (const name of ['KEYBOARD_LAYOUT', 'AUTHOR', 'CLIENT_ID', 'NODE_ENV']) {
     assert.equal(PG.isSecretName(name), false, name);
     console.log(`| ${name} | NOT secret |`);
   }
+  assert.equal(PG.isSecretName('MAX_TOKENS'), true);
+  console.log('| MAX_TOKENS | secret name, 4096 kept |');
   assert.equal(PG.secretFindings(fp['fp-auth-none']).length, 0);
   console.log('| --auth none | kept |');
   const sha = fp['fp-ids'].args[1];

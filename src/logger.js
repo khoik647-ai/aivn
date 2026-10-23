@@ -4,17 +4,59 @@ const fs = require('fs');
 const path = require('path');
 const MAX = 5 * 1024 * 1024;
 let dir = null, file = null, engineFile = null, broken = null;
+function plugins() {
+  try { return require('./plugins'); } catch { return null; }
+}
+function flagBody(a) {
+  if (typeof a !== 'string' || !a.startsWith('-')) return null;
+  const body = a.replace(/^-+/, '');
+  if (!body || body.includes('=')) return null;
+  return body;
+}
+// Đối số kề cờ trong mảng: '--apiKey' rồi giá trị, '-p' rồi giá trị, '-H' rồi 'Cookie: …'.
+function redactListedArg(arr, i, PG) {
+  const cur = String(arr[i]);
+  const glued = /^-p(.+)$/i.exec(cur);
+  if (glued && !cur.startsWith('--') && PG.isSecret('password', glued[1])) return '-p***';
+  const fname = flagBody(i > 0 ? arr[i - 1] : '');
+  if (fname && /^(h|header)$/i.test(fname)) {
+    const h = /^([A-Za-z][A-Za-z0-9-]*)(\s*:\s*)([\s\S]+)$/.exec(cur);
+    if (h && PG.isSecret(h[1], h[3])) return h[1] + h[2] + '***';
+    const masked = PG.maskKnownSecrets(cur);
+    if (masked !== cur) return masked;
+    return null;
+  }
+  if (fname && /^p$/i.test(fname) && !cur.startsWith('-') && PG.isSecret('password', cur)) return '***';
+  if (fname && (PG.isSecretName(fname) || /^k$/i.test(fname)) && !cur.startsWith('--') && !/^-[A-Za-z]$/.test(cur) && PG.isSecret(fname, cur)) return '***';
+  if (i >= 2 && /^--api$/i.test(String(arr[i - 2])) && /^key$/i.test(String(arr[i - 1])) && !cur.startsWith('-') && PG.isSecret('key', cur)) return '***';
+  return null;
+}
+function redactList(arr, depth) {
+  const PG = plugins();
+  const out = [];
+  const n = Math.min(arr.length, 50);
+  for (let i = 0; i < n; i++) {
+    const cur = arr[i];
+    if (typeof cur === 'string' && PG) {
+      const hit = redactListedArg(arr, i, PG);
+      if (hit != null) { out.push(hit); continue; }
+    }
+    out.push(redact(cur, depth + 1));
+  }
+  return out;
+}
 function redact(v, depth = 0) {
   if (v == null) return v;
   if (typeof v === 'string') {
     let s = v.replace(/\bhf_[A-Za-z0-9]{8,}\b/g, 'hf_***').replace(/\b(gh[pousr]_)[A-Za-z0-9]{10,}\b/g, '$1***');
-    try { return require('./plugins').maskKnownSecrets(s); }
+    const PG = plugins();
+    try { return PG ? PG.maskKnownSecrets(s) : s; }
     catch { return s; }
   }
-  if (typeof v !== 'object' || depth > 4) return v;
-  if (Array.isArray(v)) return v.slice(0, 50).map(x => redact(x, depth + 1));
-  let PG = null;
-  try { PG = require('./plugins'); } catch { /* giữ nguyên khi thiếu */ }
+  if (typeof v !== 'object') return v;
+  if (depth > 12) return '[…]';
+  if (Array.isArray(v)) return redactList(v, depth);
+  const PG = plugins();
   const o = {};
   for (const [k, x] of Object.entries(v)) {
     if (typeof x === 'string' && PG && PG.isSecret(k, x)) o[k] = '***';

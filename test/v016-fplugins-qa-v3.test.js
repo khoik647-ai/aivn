@@ -195,7 +195,7 @@ test('điều kiện 1: danh sách từ, mọi kiểu tên', () => {
   assert.equal(PG.isSecretName('authentication'), true);
 });
 
-test('điều kiện 2: tên dính nhau bị che; AUTHOR, KEYBOARD, MAX_TOKENS không', () => {
+test('điều kiện 2: tên dính nhau bị che; AUTHOR, KEYBOARD không; số nhiều và passphrase là bí mật', () => {
   const joined = ['apitoken', 'accesstoken', 'authtoken', 'clientsecret', 'xapikey', 'APIKEY'];
   const value = 'joinedval99';
   for (const name of joined) {
@@ -204,13 +204,17 @@ test('điều kiện 2: tên dính nhau bị che; AUTHOR, KEYBOARD, MAX_TOKENS k
     assert.equal(r.where.length, 0, name + ' ' + r.where.join(','));
     console.log(`| joined ${name} | masked |`);
   }
-  for (const name of ['AUTHOR', 'KEYBOARD', 'KEYBOARD_LAYOUT', 'MAX_TOKENS']) {
+  for (const name of ['AUTHOR', 'KEYBOARD', 'KEYBOARD_LAYOUT']) {
     assert.equal(PG.isSecretName(name), false, name);
     console.log(`| ${name} | not secret |`);
   }
-  assert.equal(PG.isSecretName('tokens'), false);
-  assert.equal(PG.isSecretName('keys'), false);
-  assert.equal(PG.isSecretName('PASSPHRASE'), false);
+  assert.equal(PG.isSecretName('MAX_TOKENS'), true);
+  assert.equal(PG.isSecretName('tokens'), true);
+  assert.equal(PG.isSecretName('keys'), true);
+  assert.equal(PG.isSecretName('secrets'), true);
+  assert.equal(PG.isSecretName('PASSPHRASE'), true);
+  assert.equal(PG.isSecretName('passphrase'), true);
+  console.log('| MAX_TOKENS | secret name, int exempt |');
 });
 
 test('điều kiện 3: ngoại lệ giá trị, số 8 chữ số vẫn che, đường dẫn chỉ khi giống path', () => {
@@ -354,7 +358,6 @@ test('bảng FP: tên không bí mật và ngoại lệ giá trị giữ nguyên
     ['KEYBOARD', { command: 'qa-bin', env: { KEYBOARD: 'us' }, args: ['run'] }, ['us']],
     ['KEYBOARD_LAYOUT', { command: 'qa-bin', env: { KEYBOARD_LAYOUT: 'us' }, args: ['run'] }, ['KEYBOARD_LAYOUT']],
     ['MAX_TOKENS int', { command: 'qa-bin', env: { MAX_TOKENS: '4096' }, args: ['run'] }, ['4096']],
-    ['MAX_TOKENS text', { command: 'qa-bin', env: { MAX_TOKENS: 'not-an-integer' }, args: ['run'] }, ['not-an-integer']],
     ['CLIENT_ID', { command: 'qa-bin', env: { CLIENT_ID: 'aivn-desktop' }, args: ['run'] }, ['aivn-desktop']],
     ['NODE_ENV', { command: 'qa-bin', env: { NODE_ENV: 'production' }, args: ['run'] }, ['production']],
     ['--auth none', { command: 'qa-bin', args: ['--auth', 'none'] }, ['none']],
@@ -373,6 +376,12 @@ test('bảng FP: tên không bí mật và ngoại lệ giá trị giữ nguyên
     const red = LOG.redact(JSON.stringify(def));
     for (const n of needles) assert.equal(red.includes(n), true, label + ' redact mất ' + n);
     console.log(`| FP ${label} | kept |`);
+  }
+  {
+    const r = checkDef({ command: 'qa-bin', env: { MAX_TOKENS: 'not-an-integer' }, args: ['run'] }, ['not-an-integer'], { rich: true });
+    assert.equal(r.where.length, 0, 'MAX_TOKENS text ' + r.where.join(','));
+    assert.ok(r.count >= 1, 'MAX_TOKENS không phải số nhỏ phải bị che');
+    console.log('| FP MAX_TOKENS text | masked |');
   }
   const lone = aws40().slice(0, 39);
   const loneCfg = { mcpServers: { lone: { command: 'qa-bin', args: [lone.replace('/', '/')] } } };

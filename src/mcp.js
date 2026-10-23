@@ -153,19 +153,50 @@ function validate(cfg) {
   if (bad) throw new Error(bad[1]);
   return cfg;
 }
-function expandSecrets(text, resolveSecret) {
+// Chỉ mã hoá khi chỗ giữ nằm trong query, fragment hoặc userinfo của một URL.
+function secretInUrlPosition(text, offset) {
+  const s = String(text || '');
+  const re = /[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]*/gi;
+  let m;
+  while ((m = re.exec(s))) {
+    const start = m.index;
+    const end = start + m[0].length;
+    if (offset < start || offset >= end) continue;
+    const url = m[0];
+    const rel = offset - start;
+    const rest = url.indexOf('://') + 3;
+    let userEnd = -1;
+    for (let i = rest; i < url.length; i++) {
+      const c = url[i];
+      if (c === '@') { userEnd = i; break; }
+      if (c === '/' || c === '?' || c === '#') break;
+    }
+    if (userEnd >= 0 && rel >= rest && rel < userEnd) return true;
+    const hash = url.indexOf('#');
+    const q = url.indexOf('?');
+    if (hash >= 0 && rel > hash) return true;
+    if (q >= 0 && rel > q && (hash < 0 || rel < hash)) return true;
+    return false;
+  }
+  return false;
+}
+function expandSecrets(text, resolveSecret, note) {
   if (typeof text !== 'string' || !text.includes('${secret:')) return text;
-  return text.replace(/\$\{secret:([^}]+)\}/g, (full, id) => {
+  const mark = (v) => { try { if (typeof note === 'function' && v) note(v); } catch { /* kho không nhận */ } };
+  return text.replace(/\$\{secret:([^}]+)\}/g, (full, id, offset) => {
     let got;
     try { got = typeof resolveSecret === 'function' ? resolveSecret(id) : undefined; } catch { got = undefined; }
     if (typeof got !== 'string' || got === '') throw new Error(`Không giải được khoá bí mật “${String(id).split(':').pop() || id}”.`);
-    return encodeURIComponent(got);
+    if (!secretInUrlPosition(text, offset)) return got;
+    const enc = encodeURIComponent(got);
+    if (enc !== got) mark(enc);
+    return enc;
   });
 }
-function materializeValue(slot, v, resolveSecret) {
+function materializeValue(slot, v, resolveSecret, note) {
   const id = secretIdOf(v);
   if (!id) {
-    if (typeof v === 'string') return v.includes('${secret:') ? expandSecrets(v, resolveSecret) : v;
+    if (typeof v === 'string') return v.includes('${secret:') ? expandSecrets(v, resolveSecret, note) : v;
     throw new Error(`Không giải được khoá bí mật “${slot}”.`);
   }
   let got;
@@ -173,9 +204,9 @@ function materializeValue(slot, v, resolveSecret) {
   if (typeof got !== 'string' || got === '') throw new Error(`Không giải được khoá bí mật “${slot}”.`);
   return got;
 }
-function materializeMap(obj, resolveSecret) {
+function materializeMap(obj, resolveSecret, note) {
   const out = {};
-  for (const [k, v] of Object.entries(obj || {})) out[k] = materializeValue(k, v, resolveSecret);
+  for (const [k, v] of Object.entries(obj || {})) out[k] = materializeValue(k, v, resolveSecret, note);
   return out;
 }
 function callTimeout(def) {
@@ -244,7 +275,7 @@ function claimCatalogId(def, { catalog = ADVANCED_CATALOG, taken = [] } = {}) {
   }
   return null;
 }
-function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null, resolveSecret = null, getExcelFolders = null, scrub = null }) {
+function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null, resolveSecret = null, noteSecret = null, getExcelFolders = null, scrub = null }) {
   const file = path.join(dir, 'mcp.json');
   const servers = new Map(); // tên → { state, client, transport, tools, error, logs[] }
   let lastRead = { mcpServers: {}, fileError: null, problems: {}, lan: {} };
@@ -268,6 +299,7 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
   function config() { load(); return lastRaw; }
   function fileError() { load(); return lastRead.fileError; }
   const clean = (s) => { const raw = s == null ? '' : String(s); try { return typeof scrub === 'function' ? String(scrub(raw)) : raw; } catch { return '••••'; } };
+  const note = (v) => { try { if (typeof noteSecret === 'function') noteSecret(v); } catch { /* kho không nhận */ } };
   const entry = (n) => { if (!servers.has(n)) servers.set(n, { state: 'off', tools: [], error: null, logs: [] }); return servers.get(n); };
   const addLog = (n, line) => { const e = entry(n); for (const l of clean(line).split(/\r?\n/)) if (l.trim()) e.logs.push(`${new Date().toLocaleTimeString('vi-VN')} ${l.slice(0, 400)}`); if (e.logs.length > 200) e.logs.splice(0, e.logs.length - 200); };
   function fail(name, message) {
@@ -297,16 +329,16 @@ function createMcpManager({ dir, log = () => {}, onChange = () => {}, sdk = null
         if (!st || !st.isDirectory()) throw new Error(`"cwd" của "${name}" phải là thư mục có sẵn.`);
       }
       let env = {}; let headers = null;
-      if (!def.url) env = materializeMap(def.env, resolveSecret);
-      else if (def.headers) headers = materializeMap(def.headers, resolveSecret);
+      if (!def.url) env = materializeMap(def.env, resolveSecret, note);
+      else if (def.headers) headers = materializeMap(def.headers, resolveSecret, note);
       let transport;
       if (def.url) {
-        const u = new URL(expandSecrets(def.url, resolveSecret));
+        const u = new URL(expandSecrets(def.url, resolveSecret, note));
         const opts = headers ? { requestInit: { headers } } : undefined;
         transport = def.type === 'sse' || /\/sse\/?$/.test(u.pathname) ? new Sse(u, opts) : new Http(u, opts);
         addLog(name, clean(`Kết nối ${def.type === 'sse' ? 'SSE' : 'HTTP'} ${u.origin}${u.pathname}`));
       } else {
-        const args = (def.args || []).map((a, i) => materializeValue(`arg${i}`, a, resolveSecret));
+        const args = (def.args || []).map((a, i) => materializeValue(`arg${i}`, a, resolveSecret, note));
         const r = resolveCommand(def.command, args);
         addLog(name, clean(`Chạy: ${def.command} ${(def.args || []).join(' ')}${r.bundled ? ' (dùng Node đi kèm AIVN)' : ''}`));
         transport = new Stdio({ command: r.command, args: r.args, env: { ...process.env, ...r.env, ...env }, stderr: 'pipe', cwd: def.cwd || undefined });

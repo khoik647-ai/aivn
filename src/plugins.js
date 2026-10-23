@@ -14,9 +14,15 @@ const SECRET_WORDS = new Set([
   'key', 'apikey', 'token', 'secret', 'pass', 'password', 'passwd', 'pwd',
   'auth', 'authorization', 'authentication', 'bearer', 'credential', 'credentials',
   'cookie', 'session', 'jwt', 'pat', 'dsn', 'private', 'signature', 'sig',
-  'otp', 'totp', 'pin', 'appid',
+  'otp', 'totp', 'pin', 'appid', 'passphrase',
+  'keys', 'tokens', 'secrets', 'passwords',
 ]);
 const SECRET_SUFFIXES = ['password', 'secret', 'token', 'pass', 'key'];
+// Từ thường dính hậu tố key/pass/secret/token, không phải tên bí mật khi không tách được.
+const ORDINARY_WORDS = new Set([
+  'monkey', 'donkey', 'turkey', 'whiskey', 'hockey', 'jockey', 'turnkey',
+  'bypass', 'compass', 'overpass', 'surpass', 'trespass', 'underpass',
+]);
 const SECRET_VALUE = /^(?:sk-|sk_|ghp_|github_pat_|hf_|AKIA[0-9A-Z]{16}|xox[baprs]-)/;
 const BEARER_VALUE = /^bearer\s+\S/i;
 const JWT_VALUE = /^(?:eyJ[A-Za-z0-9_-]{8,}|[A-Za-z0-9_-]{20,})\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}$/;
@@ -133,9 +139,9 @@ function flatWords(name) {
   return String(name || '').toLowerCase().split(/[^a-z]+/).filter(Boolean);
 }
 function joinedSuffix(word) {
+  if (ORDINARY_WORDS.has(word)) return false;
   for (const suf of SECRET_SUFFIXES) {
     if (word.length <= suf.length || !word.endsWith(suf)) continue;
-    if (word === suf + 's') continue;
     return true;
   }
   return false;
@@ -156,9 +162,28 @@ function looksLikeSecretValue(v) {
 function looksLikeAwsSecret(v) {
   return typeof v === 'string' && /^[A-Za-z0-9/+]{39,40}$/.test(v) && /[/+]/.test(v) && !v.startsWith('/');
 }
+// Base64 của chữ thường (gợi ý cấu hình, không phải khoá). JSON giữ cho bộ dò blob.
+function decodesToLowercaseText(v) {
+  if (typeof v !== 'string' || v.length < 16 || v.length % 4 !== 0) return false;
+  if (!/^[A-Za-z0-9+/]+=*$/.test(v)) return false;
+  let raw;
+  try { raw = Buffer.from(v, 'base64'); } catch { return false; }
+  if (!raw.length) return false;
+  const back = raw.toString('base64').replace(/=+$/, '');
+  if (back !== v.replace(/=+$/, '')) return false;
+  const text = raw.toString('utf8');
+  if (!text || text.includes('\uFFFD') || /[A-Z]/.test(text) || !/[a-z]/.test(text)) return false;
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text)) return false;
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object') return false;
+  } catch { /* chữ thường, không phải JSON */ }
+  return true;
+}
 function likelySecretValue(v) {
   if (looksLikeSecretValue(v)) return true;
   if (typeof v !== 'string' || secretIdOf(v)) return false;
+  if (decodesToLowercaseText(v)) return false;
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) return false;
   if (FILE_EXT.test(v)) return false;
   if (v.length < 20 || v.length > 500) return false;
@@ -250,6 +275,18 @@ function slotFromPlaceholder(v, fallback) {
   const slot = m ? String(m[1]).split(':').pop() : '';
   return slot || fallback;
 }
+// Giá trị nằm ở query, fragment hoặc userinfo: ghi cả dạng mã hoá sẽ gửi cho máy chủ.
+function urlPositionNotes(decoded, original) {
+  const notes = [];
+  const add = (x) => { if (typeof x === 'string' && x !== '' && !notes.includes(x)) notes.push(x); };
+  add(decoded);
+  if (original !== decoded) add(original);
+  try {
+    const enc = encodeURIComponent(decoded);
+    if (enc !== decoded) add(enc);
+  } catch { /* giữ giá trị gốc */ }
+  return notes;
+}
 // Giá trị query và mật khẩu userinfo. Placeholder ${secret:} và dấu che giữ nguyên.
 function urlSecretSpans(text) {
   const s = String(text || '');
@@ -272,7 +309,7 @@ function urlSecretSpans(text) {
     if (isRedactedValue(value)) spans.push({ start, end, already: true, slotHint: slotFromPlaceholder(value, 'userinfo') });
     else {
       const decoded = decodePart(value);
-      spans.push({ start, end, already: false, slotHint: 'userinfo', value: decoded, note: decoded === value ? [decoded] : [decoded, value] });
+      spans.push({ start, end, already: false, slotHint: 'userinfo', value: decoded, note: urlPositionNotes(decoded, value) });
     }
   }
   const bareUserRe = /([a-z][a-z0-9+.-]*:\/\/)([^:/?#@]+)@/gi;
@@ -282,7 +319,7 @@ function urlSecretSpans(text) {
     const end = start + value.length;
     if (!value || isRedactedValue(value)) continue;
     const decoded = decodePart(value);
-    spans.push({ start, end, already: false, slotHint: 'userinfo', value: decoded, note: decoded === value ? [decoded] : [decoded, value] });
+    spans.push({ start, end, already: false, slotHint: 'userinfo', value: decoded, note: urlPositionNotes(decoded, value) });
   }
   const slackRe = /hooks\.slack\.com\/services\/T[A-Za-z0-9]+\/B[A-Za-z0-9]+\/([A-Za-z0-9]+)/g;
   while ((m = slackRe.exec(s))) {
@@ -321,7 +358,7 @@ function urlSecretSpans(text) {
     if (isRedactedValue(value)) spans.push({ start, end, already: true, slotHint: slotFromPlaceholder(value, sanitizeSlot(name)) });
     else {
       const decoded = decodePart(value);
-      spans.push({ start, end, already: false, slotHint: sanitizeSlot(name), value: decoded, note: decoded === value ? [decoded] : [decoded, value] });
+      spans.push({ start, end, already: false, slotHint: sanitizeSlot(name), value: decoded, note: urlPositionNotes(decoded, value) });
     }
   }
   spans.sort((a, b) => a.start - b.start);
@@ -679,8 +716,11 @@ function maskKnownSecrets(text) {
   s = s.replace(/\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, '••••');
   s = maskHexRuns(s);
   s = maskAwsAdjacent(s);
-  s = s.replace(/(^|[^A-Za-z0-9+/])([A-Za-z0-9+/]{40,}={0,2})(?![A-Za-z0-9+/])/g, (m, pre, body) => {
+  s = s.replace(/(^|[^A-Za-z0-9+/])([A-Za-z0-9+/]{40,}={0,2})(?![A-Za-z0-9+/])/g, (m, pre, body, offset) => {
     if (body.startsWith('/')) return m;
+    const at = offset + pre.length;
+    if (/sha(?:256|384|512)-$/i.test(s.slice(Math.max(0, at - 7), at))) return m;
+    if (decodesToLowercaseText(body)) return m;
     const mixed = /[a-z]/.test(body) && /[A-Z]/.test(body) && /\d/.test(body);
     if (!mixed && !b64JsonSecrets(body)) return m;
     return pre + '••••';
@@ -994,7 +1034,11 @@ function noteExtras(store, value) {
   if (!store || typeof value !== 'string') return;
   const inner = b64JsonSecrets(value);
   if (inner) for (const x of inner) if (x && x !== value) store.note(x);
-  for (const sp of urlSecretSpans(value)) if (!sp.already && sp.value && sp.value !== value) store.note(sp.value);
+  for (const sp of urlSecretSpans(value)) {
+    if (sp.already) continue;
+    const list = sp.note && sp.note.length ? sp.note : [sp.value];
+    for (const n of list) if (n && n !== value) store.note(n);
+  }
 }
 function extractSecrets(cfg, store) {
   const next = JSON.parse(JSON.stringify(cfg || {}));
