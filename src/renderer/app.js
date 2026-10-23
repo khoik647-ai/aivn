@@ -1786,6 +1786,7 @@ if (A.onNotice) A.onNotice((n) => {
     for (const el of [...toastStack.children]) if (!id || el.dataset.noticeId === id) el.remove();
     const errEl = $('#mdirErr');
     if (errEl && (errEl.dataset.code === 'EDEST' || errEl.dataset.code === 'EMODEL' || errEl.dataset.code === 'EJOURNAL')) mdirClearErr();
+    if ((n.id || '') === 'move-pending') { const box = $('#mdirPending'); if (box) box.hidden = true; }
     return;
   }
   toast((n.kind === 'warn' ? '⚠ ' : '') + n.text, n.kind === 'warn', { id: (n && n.id) || '' });
@@ -2705,6 +2706,19 @@ $('#setKeys').addEventListener('click', openKeys);
 let mdirJob = null, mdirGen = 0;
 const MDIR_STALL_MSG = 'Chuyển thư mục mô hình bị dừng vì quá lâu không thấy tiến triển. Mô hình vẫn nằm ở thư mục cũ, không mất tệp. Hãy bấm Thử lại.';
 function mdirClearErr() { const e = $('#mdirErr'); if (!e) return; e.hidden = true; delete e.dataset.code; const t = $('#mdirErrTxt'); if (t) t.textContent = ''; }
+const MDIR_PENDING_FALLBACK = 'Đang chờ thư mục đích. Có thể thử lại, về thư mục cũ, hoặc chọn thư mục khác.';
+const MDIR_INFO_WAIT = 8000; // không để ô thư mục mô hình quay mãi khi lần thăm đích không trả lời
+function mdirShowPending(d) {
+  const box = $('#mdirPending'); if (!box) return;
+  const on = !!(d && d.pending);
+  box.hidden = !on;
+  if (!on) return;
+  const prog = $('#mdirProg'); if (prog) prog.hidden = true; // chờ đích không phải thanh tiến độ
+  const t = $('#mdirPendingTxt'); if (t) t.textContent = d.pendingNotice || MDIR_PENDING_FALLBACK;
+  const acts = d.pendingActions || ['retry', 'back', 'choose'];
+  const map = { retry: '#mdirPendingRetry', back: '#mdirPendingBack', choose: '#mdirPendingChoose' };
+  for (const k of Object.keys(map)) { const b = $(map[k]); if (b) b.hidden = acts.indexOf(k) < 0; }
+}
 function mdirShowErr(msg, code) { $('#mdirProg').hidden = true; const e = $('#mdirErr'); if (!e) return; e.hidden = false; if (code) e.dataset.code = code; else delete e.dataset.code; $('#mdirErrTxt').textContent = msg || MDIR_STALL_MSG; }
 function mdirArmStall() {
   if (!mdirJob || !mdirJob.moving) return; clearTimeout(mdirJob.timer); const gen = mdirJob.gen;
@@ -2715,12 +2729,23 @@ function mdirArmStall() {
   }, 90000);
 }
 async function mdirRefresh() {
-  const d0 = await A.modelsDirInfo(); if (!d0) return;
+  let settled = false;
+  const timer = setTimeout(() => {
+    if (settled || (mdirJob && mdirJob.moving)) return;
+    mdirShowPending({ pending: true, pendingNotice: MDIR_PENDING_FALLBACK, pendingActions: ['retry', 'back', 'choose'] });
+  }, MDIR_INFO_WAIT);
+  let d0 = null;
+  try { d0 = await A.modelsDirInfo(); }
+  catch { d0 = null; }
+  finally { settled = true; clearTimeout(timer); }
+  if (!d0) { mdirShowPending({ pending: true, pendingNotice: MDIR_PENDING_FALLBACK, pendingActions: ['retry', 'back', 'choose'] }); return; }
   const d = { ...d0, drive: String(d0.drive || '').replace(/:$/, '') }; // B87: “ổ C” / “drive C: …” / “C 盘”, không còn “drive C::”
   $('#mdirInfo').textContent = `${d.dir} · ổ ${d.drive} còn trống ${d.free == null ? 'không rõ' : fmtBytes(d.free)} · mô hình đang chiếm ${fmtBytes(d.bytes)}`;
-  $('#mdirReset').hidden = d.isDefault || d.moving; $('#mdirChange').disabled = d.moving || d.qaProfile; $('#modelsDirChange').hidden = d.qaProfile;
+  $('#mdirReset').hidden = d.isDefault || d.moving || d.pending; $('#mdirChange').disabled = d.moving || d.qaProfile || d.pending; $('#modelsDirChange').hidden = d.qaProfile || d.pending;
   const w = $('#mdirWarn'); w.hidden = !d.problem; w.textContent = d.problem ? `Thư mục đã chọn không dùng được, đang dùng thư mục mặc định: ${d.problem}` : '';
   $('#modelsDir').textContent = `Thư mục lưu: ${d.dir} (ổ ${d.drive} còn ${d.free == null ? 'không rõ' : fmtBytes(d.free)})`;
+  mdirShowPending(d);
+  if (d.pending) { const prog = $('#mdirProg'); if (prog) prog.hidden = true; }
   return d;
 }
 async function mdirChange() {
@@ -2766,7 +2791,28 @@ A.onModelsDirProgress((p) => {
 });
 $('#mdirChange').addEventListener('click', mdirChange); $('#modelsDirChange').addEventListener('click', mdirChange);
 $('#mdirCancel').addEventListener('click', () => A.modelsDirCancel());
-$('#mdirRetry').addEventListener('click', () => { if (mdirJob && mdirJob.dir && !mdirJob.moving) mdirRun(mdirJob.dir, mdirJob.mode); });
+$('#mdirRetry').addEventListener('click', () => {
+  const code = ($('#mdirErr') && $('#mdirErr').dataset.code) || '';
+  if (code === 'EDEST' || ($('#mdirPending') && !$('#mdirPending').hidden)) { mdirEscape('retry'); return; }
+  if (mdirJob && mdirJob.dir && !mdirJob.moving) mdirRun(mdirJob.dir, mdirJob.mode);
+});
+async function mdirEscape(action) {
+  const sels = ['#mdirPendingRetry', '#mdirPendingBack', '#mdirPendingChoose'];
+  sels.forEach((s) => { const b = $(s); if (b) b.disabled = true; });
+  let x;
+  try { x = await A.modelsDirEscape({ action }); }
+  catch (e) { x = { ok: false, error: (e && e.message) || '' }; }
+  sels.forEach((s) => { const b = $(s); if (b) b.disabled = false; });
+  if (x && x.ok && action === 'back') toast('Đã trỏ lại thư mục mô hình cũ. Các tệp trong nhật ký vẫn còn ở thư mục này và không xoá tệp mô hình nào.');
+  else if (x && x.ok && action === 'retry') toast('Đã xử lý xong lần chuyển đang chờ.');
+  else if (x && x.ok && action === 'choose') toast('Đã chọn thư mục mô hình khác. Không xoá tệp mô hình nào.');
+  else if (x && x.error && !x.canceled) toast(x.error, true);
+  await mdirRefresh(); refreshModels();
+}
+$('#mdirPendingRetry').addEventListener('click', () => mdirEscape('retry'));
+$('#mdirPendingBack').addEventListener('click', () => mdirEscape('back'));
+$('#mdirPendingChoose').addEventListener('click', () => mdirEscape('choose'));
+if (A.onModelsDirState) A.onModelsDirState((s) => { if (!s || !s.pending) { const box = $('#mdirPending'); if (box) box.hidden = true; return; } mdirShowPending({ pending: true, pendingNotice: s.notice, pendingActions: s.actions || ['retry', 'back', 'choose'] }); });
 $('#mdirReset').addEventListener('click', async () => { const x = await A.modelsDirReset(); if (x && x.ok) toast('Đã về thư mục mô hình mặc định ✓'); await mdirRefresh(); refreshModels(); });
 mdirRefresh();
 // Mức hiển thị: Cơ bản ẩn các phần có lớp .adv-only

@@ -2749,7 +2749,23 @@
     "Chuyển mô hình đang chờ ổ đích {0}, thư mục “{1}”. Thư mục đang thấy không phải ổ đã ghi trong nhật ký nên chưa hoàn tác. Sẽ thử lại khi đúng ổ này có lại.": "模型移动正在等待目标磁盘 {0}，文件夹“{1}”。当前看到的文件夹不是日志记录的磁盘，因此尚未回滚。正确的磁盘恢复后会再试。",
     "Đang chờ ổ đích của lần chuyển trước.": "正在等待上一次移动的目标磁盘。",
     "Đang dùng mô hình nên chưa hoàn tất được lần chuyển trước. Hãy gỡ mô hình rồi thử lại.": "正在使用模型，所以上一次移动还不能完成。请先卸载模型，然后再试。",
-    "Chưa xoá được nhật ký lần chuyển trước. Hãy đóng chương trình đang mở tệp đó rồi thử lại.": "未能删除上一次移动的日志。请关闭正在打开该文件的程序后再试。"
+    "Chưa xoá được nhật ký lần chuyển trước. Hãy đóng chương trình đang mở tệp đó rồi thử lại.": "未能删除上一次移动的日志。请关闭正在打开该文件的程序后再试。",
+    "Chọn thư mục khác": "选择其他文件夹",
+    "Lần chuyển đang chờ thư mục đích": "这次移动正在等待目标文件夹",
+    "Về thư mục cũ": "回到原文件夹",
+    "Đang chờ thư mục đích. Có thể thử lại, về thư mục cũ, hoặc chọn thư mục khác.": "正在等待目标文件夹。可以重试、回到原文件夹，或选择其他文件夹。",
+    "Đã chọn thư mục mô hình khác. Không xoá tệp mô hình nào.": "已改用其他模型文件夹。没有删除任何模型文件。",
+    "Đã trỏ lại thư mục mô hình cũ. Các tệp trong nhật ký vẫn còn ở thư mục này và không xoá tệp mô hình nào.": "已指回原来的模型文件夹。日志中的文件仍在此文件夹里，没有删除任何模型文件。",
+    "Đã xử lý xong lần chuyển đang chờ.": "正在等待的移动已经处理完。",
+    "Chuyển mô hình đang chờ vì thư mục đích không trả lời kịp. Có thể thử lại, về thư mục cũ, hoặc chọn thư mục khác.": "模型移动正在等待，因为目标文件夹没有及时响应。可以重试、回到原文件夹，或选择其他文件夹。",
+    "Chuyển mô hình đang chờ vì thư mục đích không trả lời kịp. Có thể thử lại, về thư mục cũ, hoặc chọn thư mục khác. Sẽ thử lại khi thư mục này truy cập được: {0}": "模型移动正在等待，因为目标文件夹没有及时响应。可以重试、回到原文件夹，或选择其他文件夹。此文件夹可访问时会再试：{0}",
+    "Chưa về thư mục cũ được vì chưa kiểm được thư mục đích, nên có thể còn tệp chỉ nằm ở đó. Nhật ký được giữ và không xoá tệp nào.": "还不能回到原文件夹，因为还未能检查目标文件夹，可能有文件只在那里。日志会保留，不会删除任何文件。",
+    "Chưa về thư mục cũ được vì chưa đủ tệp khớp ở thư mục cũ. Có tệp đang nằm ở thư mục đích hoặc không còn đủ ở thư mục cũ. Nhật ký được giữ và không xoá tệp nào.": "还不能回到原文件夹，因为原文件夹里对得上的文件还不齐。有文件在目标文件夹中，或原文件夹里的文件已不完整。日志会保留，不会删除任何文件。",
+    "Chưa về thư mục cũ được vì có tệp không thấy ở cả hai thư mục. Nhật ký được giữ và không xoá tệp nào.": "还不能回到原文件夹，因为有文件在两个文件夹里都没有。日志会保留，不会删除任何文件。",
+    "Không có lần chuyển nào đang chờ.": "没有正在等待的移动。",
+    "Không có thao tác này.": "没有这个操作。",
+    "Không nhận đường dẫn từ giao diện. Chỉ dùng thư mục nguồn và thư mục đích đã ghi trong nhật ký.": "不接受来自界面的路径。只能使用日志里记录的源文件夹和目标文件夹。",
+    "Đang kiểm tra lần chuyển. Hãy đợi một lát rồi thử lại. Nhật ký được giữ và không xoá tệp nào.": "正在检查这次移动。请稍后再试。日志会保留，不会删除任何文件。"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

@@ -223,7 +223,16 @@ function recoverMoveLegacy(j, file, raw) {
 const DEST_BLOCK = new Set(['ENOENT', 'EACCES', 'EIO', 'ENODEV', 'EPERM']);
 const heavyRecover = new Map(); // nhật ký đã băm trong lần chạy này → không băm lại khi đích vẫn kẹt
 const heavyDone = new Map(); // lần chuyển đã xong nhưng chưa xoá được nhật ký (EBUSY/EPERM) → không báo chờ ổ
+let recoverBusy = 0; // đang băm / hoàn tất: về thư mục cũ phải đợi, không xoá nhật ký giữa chừng
+const PENDING_WAIT_MS = 4000; // thăm đích tối đa từng này; hết giờ thì hiện lối thoát, không chờ mãi
 const PREV_WAIT = 'Đang chờ ổ đích của lần chuyển trước.';
+const EPATH_MSG = 'Không nhận đường dẫn từ giao diện. Chỉ dùng thư mục nguồn và thư mục đích đã ghi trong nhật ký.';
+const BACK_BOTH = 'Chưa về thư mục cũ được vì có tệp không thấy ở cả hai thư mục. Nhật ký được giữ và không xoá tệp nào.';
+const BACK_SPLIT = 'Chưa về thư mục cũ được vì chưa đủ tệp khớp ở thư mục cũ. Có tệp đang nằm ở thư mục đích hoặc không còn đủ ở thư mục cũ. Nhật ký được giữ và không xoá tệp nào.';
+const BACK_UNREACH = 'Chưa về thư mục cũ được vì chưa kiểm được thư mục đích, nên có thể còn tệp chỉ nằm ở đó. Nhật ký được giữ và không xoá tệp nào.';
+const BACK_BUSY = 'Đang kiểm tra lần chuyển. Hãy đợi một lát rồi thử lại. Nhật ký được giữ và không xoá tệp nào.';
+const NO_PENDING = 'Không có lần chuyển nào đang chờ.';
+const ESCAPE_ACTIONS = ['retry', 'back', 'choose'];
 const MODEL_BUSY = 'Đang dùng mô hình nên chưa hoàn tất được lần chuyển trước. Hãy gỡ mô hình rồi thử lại.';
 const JOURNAL_BUSY = 'Chưa xoá được nhật ký lần chuyển trước. Hãy đóng chương trình đang mở tệp đó rồi thử lại.';
 function isDestBlock(e) { return !!(e && DEST_BLOCK.has(e.code)); }
@@ -290,9 +299,18 @@ async function destChildBlocked(j) {
 }
 function pendingOf(j, err) {
   const to = path.resolve(j.to), from = path.resolve(j.from), drive = driveOf(to), base = path.basename(to);
+  const timeout = !!(err && err.code === 'ETIMEOUT');
+  if (timeout) {
+    return {
+      pending: true, state: 'pending', reason: 'destination unreachable', code: 'EDEST', dir: from, to, drive,
+      fsCode: 'ETIMEOUT', actions: ESCAPE_ACTIONS.slice(),
+      log: `Chuyển mô hình đang chờ vì thư mục đích không trả lời kịp. Có thể thử lại, về thư mục cũ, hoặc chọn thư mục khác. Sẽ thử lại khi thư mục này truy cập được: ${to}`,
+      notice: 'Chuyển mô hình đang chờ vì thư mục đích không trả lời kịp. Có thể thử lại, về thư mục cũ, hoặc chọn thư mục khác.',
+    };
+  }
   return {
     pending: true, state: 'pending', reason: 'destination missing', code: 'EDEST', dir: from, to, drive,
-    fsCode: (err && err.code) || 'ENOENT',
+    fsCode: (err && err.code) || 'ENOENT', actions: ESCAPE_ACTIONS.slice(),
     log: `Chuyển mô hình đang chờ ổ đích. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu. Sẽ thử lại khi thư mục này truy cập được: ${to}`,
     notice: `Chuyển mô hình đang chờ ổ đích ${drive}, thư mục “${base}”. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu, và sẽ được phục hồi khi ổ này có lại.`,
   };
@@ -302,7 +320,7 @@ function pendingMissing(j, err) {
   const to = path.resolve(j.to), from = path.resolve(j.from), drive = driveOf(to), base = path.basename(to);
   return {
     pending: true, state: 'pending', reason: 'files missing both', code: 'EDEST', dir: from, to, drive,
-    fsCode: (err && err.code) || 'ENOENT',
+    fsCode: (err && err.code) || 'ENOENT', actions: ESCAPE_ACTIONS.slice(),
     log: `Chuyển mô hình đang chờ vì có tệp trong nhật ký không còn ở thư mục cũ và cũng không thấy ở thư mục đích hiện tại. Nhật ký được giữ, không hoàn tác. Sẽ thử lại khi đúng thư mục đích truy cập được: ${to}`,
     notice: `Chuyển mô hình đang chờ ổ đích ${drive}, thư mục “${base}”. Có tệp không thấy ở cả hai thư mục nên chưa hoàn tác. Sẽ thử lại khi đúng ổ này có lại.`,
   };
@@ -311,15 +329,73 @@ function pendingVolume(j, err) {
   const to = path.resolve(j.to), from = path.resolve(j.from), drive = driveOf(to), base = path.basename(to);
   return {
     pending: true, state: 'pending', reason: 'destination volume mismatch', code: 'EDEST', dir: from, to, drive,
-    fsCode: (err && err.code) || 'ENODEV',
+    fsCode: (err && err.code) || 'ENODEV', actions: ESCAPE_ACTIONS.slice(),
     log: `Chuyển mô hình đang chờ vì thư mục đích hiện tại không nằm trên ổ đã ghi trong nhật ký. Nhật ký được giữ, không hoàn tác. Sẽ thử lại khi đúng ổ đích truy cập được: ${to}`,
     notice: `Chuyển mô hình đang chờ ổ đích ${drive}, thư mục “${base}”. Thư mục đang thấy không phải ổ đã ghi trong nhật ký nên chưa hoàn tác. Sẽ thử lại khi đúng ổ này có lại.`,
   };
 }
+function timedOut(ms, work) {
+  if (!(ms > 0)) return work();
+  return new Promise((resolve) => {
+    let done = false;
+    const t = setTimeout(() => {
+      if (done) return;
+      done = true;
+      resolve({ timeout: true, error: Object.assign(new Error('ETIMEOUT'), { code: 'ETIMEOUT' }) });
+    }, ms);
+    Promise.resolve().then(work).then((v) => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      resolve(v);
+    }, (error) => {
+      if (done) return;
+      done = true;
+      clearTimeout(t);
+      resolve({ error });
+    });
+  });
+}
+// waitMs > 0: chỉ dùng lời gọi bất đồng bộ. lstatSync trên ổ đã rút có thể không bao giờ trả về.
+function statBounded(p, ms) {
+  return timedOut(ms, () => {
+    if (!(ms > 0)) { try { return { st: fs.lstatSync(p) }; } catch (error) { return { error }; } }
+    return fs.promises.lstat(p).then((st) => ({ st }), (error) => ({ error }));
+  });
+}
+function readdirBounded(p, ms) {
+  return timedOut(ms, () => {
+    if (!(ms > 0)) { try { return { names: fs.readdirSync(p) }; } catch (error) { return { error }; } }
+    return fs.promises.readdir(p).then((names) => ({ names }), (error) => ({ error }));
+  });
+}
+async function destBlockedBounded(dir, j, waitMs) {
+  const ms = waitMs > 0 ? waitMs : 0;
+  const self = await statBounded(dir, ms);
+  if (self.timeout) return self.error;
+  if (self.error) {
+    if (self.error.code === 'ENOENT') {
+      const parent = await statBounded(path.dirname(dir), ms);
+      if (parent.timeout) return parent.error;
+      if (parent.error || !sourcesAllPresent(j)) return self.error;
+      return null;
+    }
+    return isDestBlock(self.error) ? self.error : null;
+  }
+  const st = self.st;
+  if (st && (st.isSymbolicLink() || st.isDirectory())) {
+    const listed = await readdirBounded(dir, ms);
+    if (listed.timeout) return listed.error;
+    if (listed.error && isDestBlock(listed.error)) return listed.error;
+    return null;
+  }
+  return null;
+}
 // Bản chuyển dở (sập giữa chừng). Nhật ký mới (có created): chỉ đụng tệp lần chuyển này tạo ra.
 // Đủ sha256 ở đích → xoá nguồn (trừ symlink và cùng inode). Thiếu → hoàn tác. phase quit luôn hoàn tác.
 // Đích chưa truy cập được → pending, giữ nhật ký, không đụng tệp. Băm nặng tối đa một lần mỗi nhật ký trong một lần chạy.
-async function recoverMove(file) {
+async function recoverMove(file, opts) {
+  const waitMs = opts && Number(opts.waitMs) > 0 ? Number(opts.waitMs) : 0;
   if (moveActive && moveActive.journal && path.resolve(String(moveActive.journal)) === path.resolve(file)) return null;
   const id = path.resolve(file);
   let raw; try { raw = fs.readFileSync(file, 'utf8'); } catch { heavyDone.delete(id); heavyRecover.delete(id); return null; }
@@ -332,6 +408,10 @@ async function recoverMove(file) {
     try { cleared = journalClearIfSame(file, raw); } catch { cleared = false; }
     if (cleared) { heavyDone.delete(id); heavyRecover.delete(id); }
     return donePrior.result;
+  }
+  if (waitMs) {
+    const early = await destBlockedBounded(j.to, j, waitMs);
+    if (early) return pendingOf(j, early);
   }
   const rootErr = destRootBlocked(j.to, j);
   if (rootErr) return pendingOf(j, rootErr);
@@ -365,7 +445,9 @@ async function recoverMove(file) {
     } catch {}
     return result;
   };
+  let held = false;
   try {
+    recoverBusy++; held = true;
     if (!Array.isArray(j.created)) return finish(recoverMoveLegacy(j, file, raw));
     let verified = j.rels.length > 0;
     if (verified) {
@@ -399,7 +481,7 @@ async function recoverMove(file) {
   } catch (e) {
     if (e && (e.aivnDestBlock || (isDestBlock(e) && e.code !== 'ENOENT'))) return pendingOf(j, e);
     heavyRecover.delete(id); throw e;
-  }
+  } finally { if (held) recoverBusy = Math.max(0, recoverBusy - 1); }
 }
 function openExcl(tmp) {
   const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NONBLOCK || 0);
@@ -660,6 +742,98 @@ function deleteModelFiles(m, all, root) {
   for (let d = path.dirname(m.path); inRoot(d) && path.resolve(d) !== path.resolve(root); d = path.dirname(d)) { try { fs.rmdirSync(d); } catch { break; } }
   return gone;
 }
+function loadJournal(file) {
+  let raw;
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }
+  let j;
+  try { j = JSON.parse(raw); } catch { return null; }
+  if (!j || typeof j.from !== 'string' || typeof j.to !== 'string' || !Array.isArray(j.rels)) return null;
+  return { raw, j };
+}
+// Đường dẫn do giao diện gửi chỉ được là đúng nguồn hoặc đúng đích trong nhật ký. Mọi đường dẫn khác bị từ chối.
+function foreignPath(j, asked) {
+  if (asked == null || asked === '') return null;
+  let p;
+  try { p = path.resolve(String(asked)); } catch { return { ok: false, code: 'EPATH', error: EPATH_MSG, pending: true, state: 'pending' }; }
+  if (p !== path.resolve(j.from) && p !== path.resolve(j.to)) return { ok: false, code: 'EPATH', error: EPATH_MSG, pending: true, state: 'pending' };
+  return null;
+}
+function sourceHolds(root, rel, meta) {
+  const st = lstatOrNull(path.join(root, rel));
+  if (!st || !st.isFile() || st.isSymbolicLink()) return false;
+  if (meta && typeof meta.size === 'number' && Number.isFinite(meta.size) && st.size !== meta.size) return false;
+  return true;
+}
+// Về thư mục cũ chỉ khi MỌI tệp trong nhật ký còn là tệp thường ở nguồn, đúng kích thước. Không xoá tệp mô hình.
+// Thiếu cả hai nơi (S3) hoặc đang chia hai thư mục: giữ nhật ký. Nguồn đủ thì không đụng đích (kể cả khi đích kẹt).
+async function assessBack(j, waitMs) {
+  const missingBoth = []; const split = []; const unreachable = [];
+  const seen = new Set(); const needDest = [];
+  for (const f of j.rels) {
+    const rel = relOf(f);
+    if (!rel || seen.has(rel)) continue;
+    seen.add(rel);
+    const meta = f && typeof f === 'object' ? f : null;
+    if (sourceHolds(j.from, rel, meta)) continue;
+    needDest.push({ rel, meta });
+  }
+  if (!needDest.length) return { ok: true, dir: path.resolve(j.from) };
+  const ms = Number(waitMs) > 0 ? Number(waitMs) : PENDING_WAIT_MS;
+  for (const item of needDest) {
+    const probed = await statBounded(path.join(j.to, item.rel), ms);
+    if (probed.timeout || (probed.error && probed.error.code !== 'ENOENT' && isDestBlock(probed.error))) { unreachable.push(item.rel); continue; }
+    const destThere = !!(probed.st && probed.st.isFile() && !probed.st.isSymbolicLink());
+    const srcThere = !!lstatOrNull(path.join(j.from, item.rel));
+    if (!srcThere && !destThere) missingBoth.push(item.rel);
+    else split.push(item.rel);
+  }
+  if (missingBoth.length) return { ok: false, reason: 'files missing both', error: BACK_BOTH, rels: missingBoth };
+  if (unreachable.length) return { ok: false, reason: 'destination unreachable', error: BACK_UNREACH, rels: unreachable };
+  return { ok: false, reason: 'split', error: BACK_SPLIT, rels: split };
+}
+async function goBackJournal(file, j, waitMs) {
+  if (recoverBusy) return { ok: false, action: 'back', pending: true, state: 'pending', code: 'EKEEP', reason: 'busy', error: BACK_BUSY, actions: ESCAPE_ACTIONS.slice() };
+  const gate = await assessBack(j, waitMs);
+  if (!gate.ok) return { ok: false, action: 'back', pending: true, state: 'pending', code: 'EKEEP', reason: gate.reason, error: gate.error, rels: gate.rels, actions: ESCAPE_ACTIONS.slice() };
+  const again = loadJournal(file);
+  if (!again) return { ok: false, code: 'ENOENT', error: NO_PENDING };
+  if (!journalClearIfSame(file, again.raw)) return { ok: false, pending: true, state: 'pending', code: 'EJOURNAL', error: JOURNAL_BUSY, actions: ESCAPE_ACTIONS.slice() };
+  return { ok: true, action: 'back', dir: path.resolve(j.from), cleared: true, pending: false };
+}
+// action retry | back | choose. path từ giao diện không được là đường dẫn tuỳ ý.
+async function escapePending(file, { action, path: asked, waitMs } = {}) {
+  const loaded = loadJournal(file);
+  if (!loaded) return { ok: false, code: 'ENOENT', error: NO_PENDING };
+  const { j } = loaded;
+  const ms = Number(waitMs) > 0 ? Number(waitMs) : PENDING_WAIT_MS;
+  if (action === 'choose' && asked) return { ok: false, action: 'choose', code: 'EPATH', error: EPATH_MSG, pending: true, state: 'pending', actions: ESCAPE_ACTIONS.slice() };
+  const bad = foreignPath(j, asked);
+  if (bad) return { ...bad, action: action || '', actions: ESCAPE_ACTIONS.slice() };
+  if (action === 'retry') {
+    const rec = await recoverMove(file, { waitMs: ms });
+    if (rec && rec.pending) return { ok: false, action: 'retry', ...rec };
+    if (rec && (rec.resumed || rec.rolledBack)) return { ok: true, action: 'retry', ...rec };
+    return { ok: false, action: 'retry', pending: true, state: 'pending', code: 'EDEST', error: PREV_WAIT, actions: ESCAPE_ACTIONS.slice() };
+  }
+  if (action === 'back') return goBackJournal(file, j, ms);
+  if (action === 'choose') {
+    const gate = await assessBack(j, ms);
+    if (!gate.ok) return { ok: false, action: 'choose', pending: true, state: 'pending', code: 'EKEEP', reason: gate.reason, error: gate.error, rels: gate.rels, actions: ESCAPE_ACTIONS.slice() };
+    return { ok: true, action: 'choose', allow: true, dir: path.resolve(j.from), pending: true, actions: ESCAPE_ACTIONS.slice() };
+  }
+  return { ok: false, code: 'EINVAL', error: 'Không có thao tác này.' };
+}
+// chosenDir là thư mục hộp thoại của tiến trình chính vừa chọn, không phải đường dẫn giao diện gửi lên.
+async function commitChoose(file, chosenDir) {
+  if (!chosenDir || !path.isAbsolute(String(chosenDir))) return { ok: false, code: 'EPATH', error: EPATH_MSG, pending: true, state: 'pending' };
+  const loaded = loadJournal(file);
+  if (!loaded) return { ok: false, code: 'ENOENT', error: NO_PENDING };
+  if (recoverBusy) return { ok: false, action: 'choose', pending: true, state: 'pending', code: 'EKEEP', reason: 'busy', error: BACK_BUSY, actions: ESCAPE_ACTIONS.slice() };
+  const gate = await assessBack(loaded.j, PENDING_WAIT_MS);
+  if (!gate.ok) return { ok: false, action: 'choose', pending: true, state: 'pending', code: 'EKEEP', reason: gate.reason, error: gate.error, actions: ESCAPE_ACTIONS.slice() };
+  if (!journalClearIfSame(file, loaded.raw)) return { ok: false, pending: true, state: 'pending', code: 'EJOURNAL', error: JOURNAL_BUSY, actions: ESCAPE_ACTIONS.slice() };
+  return { ok: true, action: 'choose', dir: path.resolve(loaded.j.from), chosen: path.resolve(chosenDir), cleared: true, pending: false };
+}
 // dir-apply: thông báo phải đúng lý do. Gắn lại ổ và lần chuyển xong → không còn chờ. Mô hình đang dùng chặn thử lại là một lý do khác.
 function applyMoveBlock({ journalExists = false, rec = null, modelInUse = false } = {}) {
   if (rec && !rec.pending && (rec.resumed || rec.rolledBack)) return journalExists ? { ok: false, code: 'EJOURNAL', error: JOURNAL_BUSY } : null;
@@ -668,4 +842,4 @@ function applyMoveBlock({ journalExists = false, rec = null, modelInUse = false 
   if (journalExists) return { ok: false, code: 'EDEST', error: PREV_WAIT };
   return null;
 }
-module.exports = { deleteModelFiles, freeBytes, checkSpace, spaceError, validateTarget, listFiles, moveModels, driveOf, volumeIdentity, MARGIN, recoverMove, journalClear, dirProgressGate, STALL_MSG, ABORT_MSG, conflictMessage, beforeQuitMove, armHardExit, ALIAS_MSG, applyMoveBlock, PREV_WAIT, MODEL_BUSY, JOURNAL_BUSY };
+module.exports = { deleteModelFiles, freeBytes, checkSpace, spaceError, validateTarget, listFiles, moveModels, driveOf, volumeIdentity, MARGIN, recoverMove, journalClear, dirProgressGate, STALL_MSG, ABORT_MSG, conflictMessage, beforeQuitMove, armHardExit, ALIAS_MSG, applyMoveBlock, PREV_WAIT, MODEL_BUSY, JOURNAL_BUSY, escapePending, commitChoose, PENDING_WAIT_MS, ESCAPE_ACTIONS };
