@@ -220,9 +220,10 @@ function createCrm({ db, defaultOwner = () => '', reminders = null, log = () => 
     if (old && old.type !== p.type && db.get("SELECT id FROM moves WHERE product_id = ? AND state = 'done' LIMIT 1", [p.id])) throw new CrmError('Sản phẩm đã có dịch chuyển kho: không đổi loại sản phẩm được nữa.');
     p.vat_pct = TAX.vatOf(p.vat_pct, 10); // 0.16: thuế GTGT mặc định của sản phẩm (Odoo: Thuế khách hàng/nhà cung cấp)
     p.cost = Math.max(0, TAX.moneyIn(p.cost)); p.barcode = str(p.barcode, 60); p.category = str(p.category, 80); p.min_qty = (() => { const n = T.parseQty(p.min_qty); if (!(p.min_qty == null || String(p.min_qty).trim() === '') && !Number.isFinite(n)) throw new CrmError(`Số lượng “${p.min_qty}” không phải là số.`); return Math.max(0, Number.isFinite(n) ? n : 0); })();
+    p.max_qty = (() => { const n = T.parseQty(p.max_qty); if (!(p.max_qty == null || String(p.max_qty).trim() === '') && !Number.isFinite(n)) throw new CrmError(`Số lượng “${p.max_qty}” không phải là số.`); return Math.max(0, Number.isFinite(n) ? n : 0); })(); // #42 K2: tồn tối đa
     if (p.sku && db.get('SELECT id FROM products WHERE sku = ? AND id != ? AND active = 1', [p.sku, p.id || ''])) throw new CrmError(`Mã sản phẩm "${p.sku}" đã dùng cho sản phẩm khác.`);
     if (p.barcode && db.get('SELECT id FROM products WHERE barcode = ? AND id != ? AND active = 1', [p.barcode, p.id || ''])) throw new CrmError(`Mã vạch "${p.barcode}" đã dùng cho sản phẩm khác.`);
-    const cols = ['name', 'sku', 'unit', 'price', 'description', 'active', 'type', 'cost', 'barcode', 'category', 'min_qty', 'vat_pct', 'updated_at'];
+    const cols = ['name', 'sku', 'unit', 'price', 'description', 'active', 'type', 'cost', 'barcode', 'category', 'min_qty', 'max_qty', 'vat_pct', 'updated_at'];
     if (old) db.run(`UPDATE products SET ${cols.map(k => k + '=?').join(', ')} WHERE id=?`, [...cols.map(k => p[k]), p.id]);
     else { p.id = newId('p'); db.run(`INSERT INTO products(id, created_at, ${cols.join(', ')}) VALUES (?, ?, ${cols.map(() => '?').join(', ')})`, [p.id, now(), ...cols.map(k => p[k])]); }
     return db.get('SELECT * FROM products WHERE id = ?', [p.id]);

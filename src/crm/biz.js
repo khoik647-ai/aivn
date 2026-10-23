@@ -66,7 +66,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
   function listStock({ q = '', filter = 'all' } = {}) {
     const where = ["active = 1", "type = 'product'"], p = [];
     if (q) { where.push('(lower(name) LIKE ? OR lower(sku) LIKE ? OR barcode = ?)'); p.push('%' + q.toLowerCase() + '%', '%' + q.toLowerCase() + '%', q.trim()); }
-    let rows = db.all(`SELECT * FROM products WHERE ${where.join(' AND ')} ORDER BY name`, p).map(x => { const s = stockOf(x.id); return { ...x, ...s, value: Math.round(s.on_hand * (x.cost || 0)), below_min: x.min_qty > 0 && s.forecast < x.min_qty }; });
+    let rows = db.all(`SELECT * FROM products WHERE ${where.join(' AND ')} ORDER BY name`, p).map(x => { const s = stockOf(x.id); return { ...x, ...s, value: Math.round(s.on_hand * (x.cost || 0)), below_min: x.min_qty > 0 && s.forecast < x.min_qty, no_vendor: x.min_qty > 0 && s.forecast < x.min_qty && !db.get('SELECT 1 AS x FROM vendor_prices WHERE product_id = ?', [x.id]) }; }); // no_vendor: #42 K2
     if (filter === 'low') rows = rows.filter(r => r.below_min); else if (filter === 'negative') rows = rows.filter(r => r.on_hand < -EPS); else if (filter === 'available') rows = rows.filter(r => r.on_hand > EPS);
     return { rows, totalValue: rows.reduce((a, r) => a + r.value, 0) };
   }
@@ -550,7 +550,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
     saveInvoice, invoiceOrder, getInvoice, listInvoices, postInvoice, resetInvoice, cancelInvoice, registerPayment, creditNote, deleteInvoice,
     salesReport, invoiceReport, stockReport, getCompany, saveCompany, listBanks, invoiceQr, companyQr };
   // Mua hàng (src/crm/purchase.js) dùng chung kho, hoá đơn, thanh toán
-  const P = require('./purchase').createPurchase({ db, crm, now, today, log, h: { insertPicking, seq, hist, partner, product, company, getInvoice, pubInvoice, writeLines, refreshAmounts, listPickings } });
+  const P = require('./purchase').createPurchase({ db, crm, now, today, log, h: { insertPicking, seq, hist, partner, product, company, getInvoice, pubInvoice, writeLines, refreshAmounts, listPickings, stockOf } });
   Object.assign(api, P, { overview: () => ({ ...overview(), ...P.purchaseOverview() }) });
   return api;
 }

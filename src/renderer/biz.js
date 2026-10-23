@@ -157,7 +157,7 @@
   // ---------- Sản phẩm (hộp thoại) ----------
   async function productDialog(p = {}) {
     if (!B.company) B.company = await C('getCompany');
-    const F = [['name', 'Tên sản phẩm *'], ['type', 'Loại sản phẩm', [['product', 'Hàng lưu kho (theo dõi tồn kho)'], ['consu', 'Hàng tiêu dùng (không theo dõi tồn)'], ['service', 'Dịch vụ']]], ['sku', 'Mã nội bộ'], ['barcode', 'Mã vạch'], ['category', 'Nhóm sản phẩm'], ['unit', 'Đơn vị tính'], ['price', 'Giá bán (₫)'], ['cost', 'Giá vốn (₫)'], ['vat_pct', 'Thuế GTGT', VATS.map(v => [v, v + '%'])], ['min_qty', 'Tồn tối thiểu (cảnh báo khi thấp hơn)'], ['description', 'Mô tả', 'area']];
+    const F = [['name', 'Tên sản phẩm *'], ['type', 'Loại sản phẩm', [['product', 'Hàng lưu kho (theo dõi tồn kho)'], ['consu', 'Hàng tiêu dùng (không theo dõi tồn)'], ['service', 'Dịch vụ']]], ['sku', 'Mã nội bộ'], ['barcode', 'Mã vạch'], ['category', 'Nhóm sản phẩm'], ['unit', 'Đơn vị tính'], ['price', 'Giá bán (₫)'], ['cost', 'Giá vốn (₫)'], ['vat_pct', 'Thuế GTGT', VATS.map(v => [v, v + '%'])], ['min_qty', 'Tồn tối thiểu (cảnh báo khi thấp hơn)'], ['max_qty', 'Tồn tối đa (đặt hàng bổ sung đến mức này)'], ['description', 'Mô tả', 'area']];
     dialog(p.id ? 'Sửa sản phẩm' : 'Thêm sản phẩm', F, { unit: 'cái', type: 'product', vat_pct: defVat(), ...p }, async (o) => { await C('saveProduct', { ...o, id: p.id || undefined }); toast('Đã lưu ✓'); render('sales'); });
     if (p.id) vendorSection(p); // #42 K1: phần “Nhà cung cấp” trên form sản phẩm (Odoo: tab Mua hàng)
   }
@@ -197,13 +197,22 @@
   }
 
   // ---------- Kho ----------
+  // #42 K2: nút “Đặt hàng bổ sung” (Odoo: Replenishment → Order) — chỉ tạo / sửa yêu cầu báo giá NHÁP, không tự xác nhận
+  async function reorder() {
+    const r = await C('runReorder'); await rerender();
+    const L = [...r.created.map(n => `Tạo yêu cầu báo giá nháp ${n}`), ...r.updated.map(n => `Cập nhật số lượng trong ${n}`),
+      ...r.items.filter(x => x.action === 'sent').map(x => `${x.name}: đã có yêu cầu báo giá đã gửi ${x.po_number}`), ...r.no_vendor.map(n => `Chưa có NCC: ${n}`)];
+    if (!r.items.length) return toast('Không có sản phẩm nào dưới tồn tối thiểu.');
+    if (!L.length) return toast('Yêu cầu báo giá nháp đã đủ số lượng, không cần sửa.');
+    if (await modalAsk({ icon: '🛒', title: 'Đặt hàng bổ sung', message: L.join('\n'), okLabel: 'Xem yêu cầu báo giá', noLabel: 'Đóng' }) && (r.created.length || r.updated.length)) { crm.tab = 'purchase'; B.sub.purchase = 'rfq'; B.form = null; B.edit = null; renderCrm(); }
+  }
   async function stockList(q) {
     const r = await C('listStock', { q, filter: B.stockFilter || 'all' });
-    const filters = `<div class="biz-filters">${[['all', 'Tất cả'], ['available', 'Còn hàng'], ['low', 'Dưới tồn tối thiểu'], ['negative', 'Tồn âm']].map(([k, n]) => `<button type="button" class="chip ${(B.stockFilter || 'all') === k ? 'on' : ''}" data-biz-filter="${k}">${esc(n)}</button>`).join('')}</div>`;
+    const filters = `<div class="biz-filters">${[['all', 'Tất cả'], ['available', 'Còn hàng'], ['low', 'Dưới tồn tối thiểu'], ['negative', 'Tồn âm']].map(([k, n]) => `<button type="button" class="chip ${(B.stockFilter || 'all') === k ? 'on' : ''}" data-biz-filter="${k}">${esc(n)}</button>`).join('')}<button type="button" class="btn sm" data-biz-act="reorder" title="Tạo yêu cầu báo giá nháp cho hàng có tồn dự báo dưới mức tối thiểu">Đặt hàng bổ sung</button></div>`; // #42 K2
     if (!r.rows.length) return filters + empty('🏬', q || (B.stockFilter && B.stockFilter !== 'all') ? 'Không có sản phẩm nào khớp.' : 'Chưa có hàng lưu kho. Thêm sản phẩm loại “Hàng lưu kho” ở Bán hàng → Sản phẩm.');
     B.lastRows = [['Sản phẩm', 'Mã', 'Tồn thực tế', 'Dự báo', 'Đơn vị', 'Giá vốn', 'Giá trị'], ...r.rows.map(x => [x.name, x.sku || '', x.on_hand, x.forecast, uomL(x.unit), x.cost, x.value])];
     return filters + `<table class="crm-table biz-list"><thead><tr><th>Sản phẩm</th><th>Mã</th><th class="num">Tồn thực tế</th><th class="num">Sắp nhập</th><th class="num">Sắp giao</th><th class="num">Dự báo</th><th class="num">Giá vốn</th><th class="num">Giá trị</th><th></th></tr></thead><tbody>
-      ${r.rows.map(x => `<tr><td><b>${esc(x.name)}</b>${x.below_min ? ' ' + badge('dưới tối thiểu', 'warn') : ''}</td><td>${esc(x.sku || '')}</td><td class="num ${x.on_hand < 0 ? 'neg' : ''}">${qn(x.on_hand)} ${esc(uomL(x.unit, x.on_hand))}</td><td class="num">${qn(x.incoming)}</td><td class="num">${qn(x.outgoing)}</td><td class="num">${qn(x.forecast)}</td><td class="num">${vnd(x.cost)}</td><td class="num">${vnd(x.value)}</td><td><button type="button" class="btn sm" data-biz-act="count" data-id="${esc(x.id)}" data-name="${esc(x.name)}" data-qty="${esc(x.on_hand)}">Kiểm kê</button></td></tr>`).join('')}
+      ${r.rows.map(x => `<tr><td><b>${esc(x.name)}</b>${x.below_min ? ' ' + badge('dưới tối thiểu', 'warn') : ''}${x.no_vendor ? ' ' + badge('chưa có NCC', 'muted') : ''}</td><td>${esc(x.sku || '')}</td><td class="num ${x.on_hand < 0 ? 'neg' : ''}">${qn(x.on_hand)} ${esc(uomL(x.unit, x.on_hand))}</td><td class="num">${qn(x.incoming)}</td><td class="num">${qn(x.outgoing)}</td><td class="num">${qn(x.forecast)}</td><td class="num">${vnd(x.cost)}</td><td class="num">${vnd(x.value)}</td><td><button type="button" class="btn sm" data-biz-act="count" data-id="${esc(x.id)}" data-name="${esc(x.name)}" data-qty="${esc(x.on_hand)}">Kiểm kê</button></td></tr>`).join('')}
       </tbody><tfoot><tr><td colspan="7">Tổng giá trị tồn kho</td><td class="num"><b>${vnd(r.totalValue)}</b></td><td></td></tr></tfoot></table>`;
   }
   async function pickingList(kind, q) {
@@ -407,6 +416,7 @@
       if (a === 'addVendorPrice') { readForm(); B.edit.lines.push({ partner_id: '', min_qty: 0, price: (B.products.find(x => x.id === f.id) || {}).cost || 0, delay: 0 }); return rerender(); }
       if (a === 'saveVendorPrices') { readForm(); await C('saveVendorPrices', f.id, B.edit.lines.map(l => ({ partner_id: l.partner_id, min_qty: l.min_qty, price: parseMoney(l.price), delay: l.delay }))); B.form = null; B.edit = null; B.sub.sales = 'products'; toast('Đã lưu giá nhà cung cấp ✓'); return rerender(); }
       if (a === 'archiveProduct') { if (await modalAsk({ icon: '📦', title: 'Lưu trữ sản phẩm?', message: 'Sản phẩm sẽ ẩn khỏi danh sách và không chọn được cho đơn mới. Đơn, hoá đơn và lịch sử kho cũ vẫn giữ nguyên.', okLabel: 'Lưu trữ', noLabel: 'Giữ lại' })) { const r = await A.crm('deleteProduct', el.dataset.id); if (!r.ok && r.code === 'stock') { if (!await modalAsk({ icon: '⚠', title: 'Sản phẩm còn tồn kho', message: r.error, okLabel: 'Vẫn lưu trữ', noLabel: 'Giữ lại' })) return rerender(); const r2 = await A.crm('deleteProduct', el.dataset.id, { force: true }); if (!r2.ok) throw new Error(r2.error); } else if (!r.ok) throw new Error(r.error); toast('Đã lưu trữ ✓'); } return rerender(); }
+      if (a === 'reorder') return reorder(); // #42 K2
       if (a === 'count') { return dialog(`Kiểm kê: ${el.dataset.name}`, [['counted', 'Số lượng đếm được thực tế'], ['note', 'Ghi chú (vd. Kiểm kê cuối tháng)']], { counted: Number(el.dataset.qty) }, async (o) => { const r = await C('adjustStock', el.dataset.id, o.counted, o.note); toast(r.changed ? `Đã điều chỉnh tồn: ${r.diff > 0 ? '+' : ''}${qn(r.diff)}` : 'Tồn kho đã đúng, không cần điều chỉnh.'); rerender(); }); }
       // Bán hàng
       if (a === 'saveOrder') { readForm(); const o = await C('saveQuote', orderPayload()); B.form = { type: 'order', id: o.id }; B.edit = null; toast('Đã lưu ✓'); return rerender(); }

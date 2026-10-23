@@ -135,6 +135,44 @@ function createPurchase({ db, crm, now, today, log = () => {}, h }) {
     if (!old) h.hist(o.partner_id, `Tạo yêu cầu báo giá ${full.number}: ${T.fmtVnd(full.total)}`);
     return full;
   }
+  // #42 K2: quy tắc tồn tối thiểu / tối đa → yêu cầu báo giá nháp (Odoo stock.warehouse.orderpoint, chạy tay bằng nút “Đặt hàng bổ sung”).
+  // Tồn dự báo (thực tế + sắp nhập − sắp giao) < tối thiểu → đặt đến tối đa (tối đa < tối thiểu thì lấy tối thiểu). NCC ưu tiên = dòng đầu bảng giá NCC
+  // (thứ tự, rồi SL tối thiểu) có “Từ SL” ≤ số cần đặt. Đã có yêu cầu báo giá nháp cho sản phẩm → chỉ sửa số lượng dòng đó; đã gửi → để nguyên.
+  function preferredVendor(pid, qty) {
+    const rows = db.all('SELECT * FROM vendor_prices WHERE product_id = ? ORDER BY sequence, min_qty, created_at', [pid]);
+    const r = rows.find(x => (x.min_qty || 0) <= qty + EPS) || rows[0]; return r ? r.partner_id : null;
+  }
+  function reorderPlan() {
+    const out = [];
+    for (const pr of db.all("SELECT * FROM products WHERE active = 1 AND type = 'product' AND min_qty > 0 ORDER BY name")) {
+      const s = h.stockOf(pr.id); if (s.forecast >= pr.min_qty - EPS) continue;
+      const max = Math.max(pr.max_qty || 0, pr.min_qty); const qty = T.round3(max - s.forecast);
+      const open = db.get("SELECT l.id AS line_id, l.qty, o.id AS po_id, o.number, o.state, o.partner_id FROM purchase_lines l JOIN purchase_orders o ON o.id = l.po_id WHERE l.product_id = ? AND o.state IN ('draft', 'sent') ORDER BY o.state = 'draft' DESC, o.created_at, l.pos LIMIT 1", [pr.id]);
+      const vendor = open ? open.partner_id : preferredVendor(pr.id, qty);
+      out.push({ product_id: pr.id, name: pr.name, unit: pr.unit, forecast: s.forecast, min_qty: pr.min_qty, max_qty: max, qty, partner_id: vendor, partner_name: vendor ? (partner(vendor) || {}).name || '' : '',
+        action: open ? (open.state === 'draft' ? 'update' : 'sent') : vendor ? 'create' : 'no_vendor', po_id: open ? open.po_id : null, po_number: open ? open.number : '', line_id: open ? open.line_id : null, old_qty: open ? open.qty : null });
+    }
+    return out;
+  }
+  const keepLine = (l) => ({ product_id: l.product_id, name: l.name, unit: l.unit, qty: l.qty, price: l.price, discount_pct: l.discount_pct, vat_pct: l.vat_pct });
+  function runReorder() {
+    const items = reorderPlan(); const touched = new Map(); const created = []; const updated = [];
+    const save = (poId, edit) => { const po = getPurchase(poId); const lines = po.lines.map(keepLine); edit(lines, po); return savePurchase({ id: poId, lines }); };
+    for (const it of items.filter(x => x.action === 'update')) {
+      if (Math.abs(it.old_qty - it.qty) < EPS) continue;
+      save(it.po_id, (lines, po) => { const i = po.lines.findIndex(l => l.id === it.line_id); if (i >= 0) lines[i].qty = it.qty; }); touched.set(it.po_id, true);
+    }
+    const byVendor = new Map(); for (const it of items.filter(x => x.action === 'create')) { if (!byVendor.has(it.partner_id)) byVendor.set(it.partner_id, []); byVendor.get(it.partner_id).push(it); }
+    for (const [vid, its] of byVendor) {
+      const draft = db.get("SELECT id FROM purchase_orders WHERE partner_id = ? AND state = 'draft' ORDER BY created_at LIMIT 1", [vid]);
+      const add = its.map(it => ({ product_id: it.product_id, qty: it.qty }));
+      const po = draft ? save(draft.id, (lines) => lines.push(...add)) : savePurchase({ partner_id: vid, lines: add, notes: 'Tạo từ “Đặt hàng bổ sung” (tồn dự báo dưới mức tối thiểu).' });
+      if (draft) touched.set(po.id, true); else created.push(po.number);
+      for (const it of its) { it.po_id = po.id; it.po_number = po.number; }
+    }
+    for (const id of touched.keys()) { const n = (db.get('SELECT number FROM purchase_orders WHERE id = ?', [id]) || {}).number; if (n && !created.includes(n)) updated.push(n); }
+    return { items, created, updated, no_vendor: items.filter(x => x.action === 'no_vendor').map(x => x.name) };
+  }
   const need = (id) => { const po = db.get('SELECT * FROM purchase_orders WHERE id = ?', [id]); if (!po) throw new CrmError('Không tìm thấy đơn mua.'); return po; };
   function sendRfq(id) {
     const po = need(id); if (!['draft', 'sent'].includes(po.state)) throw new CrmError('Chỉ đánh dấu “đã gửi” được với yêu cầu báo giá chưa xác nhận.');
@@ -254,8 +292,8 @@ function createPurchase({ db, crm, now, today, log = () => {}, h }) {
     const orders = listPurchases({ kind: 'orders' });
     return { rfqOpen: db.get("SELECT count(*) AS n FROM purchase_orders WHERE state IN ('draft','sent')").n, poToReceive: orders.filter(o => ['pending', 'partial'].includes(o.receipt_status)).length, poToBill: orders.filter(o => o.invoice_status === 'to_invoice').length };
   }
-  return { PO_STATE, RECEIPT_STATUS, BILL_STATUS, listVendorPrices, saveVendorPrices, deleteVendorPrice, vendorPrice, vendorPriceChanges, applyVendorPrices, listPurchases, getPurchase, savePurchase, sendRfq, confirmPurchase, cancelPurchase, resetPurchase, lockPurchase, deletePurchase, createBill, purchaseReport, payablesReport, purchaseOverview };
+  return { PO_STATE, RECEIPT_STATUS, BILL_STATUS, reorderPlan, runReorder, listVendorPrices, saveVendorPrices, deleteVendorPrice, vendorPrice, vendorPriceChanges, applyVendorPrices, listPurchases, getPurchase, savePurchase, sendRfq, confirmPurchase, cancelPurchase, resetPurchase, lockPurchase, deletePurchase, createBill, purchaseReport, payablesReport, purchaseOverview };
 }
 const PURCHASE_CALLS = ['listPurchases', 'getPurchase', 'savePurchase', 'sendRfq', 'confirmPurchase', 'cancelPurchase', 'resetPurchase', 'lockPurchase', 'deletePurchase', 'createBill', 'purchaseReport', 'payablesReport',
-  'listVendorPrices', 'saveVendorPrices', 'deleteVendorPrice', 'vendorPrice', 'vendorPriceChanges', 'applyVendorPrices']; // #42 K1
+  'listVendorPrices', 'saveVendorPrices', 'deleteVendorPrice', 'vendorPrice', 'vendorPriceChanges', 'applyVendorPrices', 'reorderPlan', 'runReorder' /* #42 K2 */]; // #42 K1
 module.exports = { createPurchase, PURCHASE_CALLS, PO_STATE };

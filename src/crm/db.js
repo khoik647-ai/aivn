@@ -63,7 +63,7 @@ const SCHEMA = [
 ];
 // cột thêm cho bảng cũ (CSDL tạo từ 0.15.x): thêm nếu chưa có, giữ nguyên dữ liệu
 const ADD_COLUMNS = {
-  products: [['type', "TEXT DEFAULT 'product'"], ['cost', 'INTEGER DEFAULT 0'], ['barcode', 'TEXT'], ['min_qty', 'REAL DEFAULT 0'], ['category', 'TEXT'], ['vat_pct', 'REAL DEFAULT 10']],
+  products: [['type', "TEXT DEFAULT 'product'"], ['cost', 'INTEGER DEFAULT 0'], ['barcode', 'TEXT'], ['min_qty', 'REAL DEFAULT 0'], ['category', 'TEXT'], ['vat_pct', 'REAL DEFAULT 10'], ['max_qty', 'REAL DEFAULT 0']], // max_qty: #42 K2
   quotes: [['confirmed_at', 'INTEGER'], ['owner', 'TEXT'], ['payment_days', 'INTEGER DEFAULT 0'], ['commitment_date', 'TEXT'], ['tax_rounding', 'TEXT']],
   // 0.16 (lược đồ 3): thuế GTGT theo từng dòng, Mua hàng (phiếu nhập gắn đơn mua, hoá đơn nhà cung cấp), chiều thanh toán
   quote_lines: [['vat_pct', 'REAL']],
