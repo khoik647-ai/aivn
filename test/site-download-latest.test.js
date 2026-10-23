@@ -325,26 +325,30 @@ test('huy hiệu phiên bản bằng đúng bản nút tải đã chọn: cờ b
   assert.ok(fb && !/__/.test(fb), 'số tĩnh không được là chữ giữ chỗ');
   assert.strictEqual((html.match(/DLX\.resolve\(/g) || []).length, 1, 'huy hiệu không được gọi API lần hai');
   assert.match(html, /DLX\.viewFor\(mobile\?null:os,macArch,staticHref\)/);
-  assert.match(html, /DLX\.applyVersion\(\{button:row\.querySelector\('\.dl-ver'\),pill:pv,badge:badge\},view\.state==='ok'\?rel:null,''\)/);
+  assert.match(html, /DLX\.applyVersion\(\{button:row\.querySelector\('\.dl-ver'\),pill:pv,badge:badge\},view\.state==='ok'\?rel:null,pv&&pv\.getAttribute\('data-fb'\)\)/);
+  assert.match(html, /\.badge\.is-empty\{display:none\}/);
   const viBeta = html.match(/<span class="pill-beta">([^<]*)<\/span>/)[1];
   assert.strictEqual(viBeta, html.match(/<span class="dl-beta" data-i18n="dl\.5">([^<]*)<\/span>/)[1]);
   assert.ok(D.en['hero.1'].includes(`<span class="pill-beta">${D.en['dl.5']}</span>`), 'en: nhãn Beta khác nút');
   assert.ok(D.zh['hero.1'].includes(`<span class="pill-beta">${D.zh['dl.5']}</span>`), 'zh: nhãn Beta khác nút');
   const badgeHtml = html.slice(html.indexOf('class="badge"'), html.indexOf('class="badge"') + 500);
   assert.ok(!/Zalo|mắt nhìn|theme animation|屏幕控制/.test(D.en['hero.1'] + D.zh['hero.1'] + badgeHtml), 'huy hiệu còn mô tả tính năng của một bản cũ');
-  // Cùng chuỗi với dòng phụ: view.state==='ok' && rel, nếu không thì rỗng. Không lấy newest(), không lấy data-fb khi p null.
-  const paint = async (flag, fetchFn, os, arch, href) => {
+  // Có bản đã chọn → đúng số đó. Không có (API lỗi, Linux, đang tải) → data-fb. Không có số nào → ẩn cả cụm.
+  const paint = async (flag, fetchFn, os, arch, href, fallback = fb) => {
     const L = lib(flag); await L.resolve(fetchFn);
     const view = L.viewFor(os, arch, href);
     const rel = view.state === 'ok' ? view.rel : null;
-    const nodes = { button: { textContent: '' }, pill: { textContent: '' }, badge: { on: null, classList: { toggle(_, v) { nodes.badge.on = v; } } } };
-    const shown = L.applyVersion(nodes, rel, '');
+    const flags = {};
+    const nodes = { button: { textContent: '' }, pill: { textContent: '' }, badge: { classList: { toggle(name, v) { flags[name] = !!v; } } }, flags };
+    const shown = L.applyVersion(nodes, rel, fallback);
     assert.strictEqual(nodes.pill.textContent, nodes.button.textContent);
-    assert.strictEqual(nodes.badge.on, shown.pre);
-    const sub = view.state === 'ok' && view.rel ? 'v' + String(view.rel.tag_name).replace(/^v/, '') : '';
-    assert.strictEqual(nodes.pill.textContent, sub, 'huy hiệu phải cùng chuỗi với dòng phụ');
+    const resolved = view.state === 'ok' && view.rel ? 'v' + String(view.rel.tag_name).replace(/^v/, '') : '';
+    const expect = resolved || (fallback && !String(fallback).includes('__') ? String(fallback) : '');
+    assert.strictEqual(nodes.pill.textContent, expect, 'huy hiệu lấy bản đã chọn, không có thì lấy data-fb');
+    assert.strictEqual(flags['is-empty'], !expect, 'không có số thì ẩn cả huy hiệu');
+    assert.strictEqual(flags['is-pre'], !!shown.pre);
     assert.strictEqual(shown.pre, !!(view.state === 'ok' && view.rel && view.rel.prerelease));
-    return { L, view, shown, nodes };
+    return { L, view, shown, nodes, flags };
   };
   const on = await paint(true, ok(API), 'windows', null, 'AIVN-Setup.exe');
   assert.strictEqual(on.view.rel.tag_name, 'v0.16.0-beta.3');
@@ -354,10 +358,14 @@ test('huy hiệu phiên bản bằng đúng bản nút tải đã chọn: cờ b
   assert.strictEqual(off.shown.pre, false);
   const fail = await paint(true, async () => { throw new TypeError('Failed to fetch'); }, 'windows', null, 'AIVN-Setup.exe');
   assert.strictEqual(fail.view.state, 'fail'); assert.strictEqual(fail.view.rel, null); assert.strictEqual(fail.L.newest(), null);
-  assert.strictEqual(fail.nodes.pill.textContent, ''); assert.strictEqual(fail.nodes.button.textContent, '');
-  assert.strictEqual(fail.shown.pre, false);
+  assert.strictEqual(fail.nodes.pill.textContent, fb); assert.strictEqual(fail.nodes.button.textContent, fb);
+  assert.strictEqual(fail.shown.pre, false); assert.strictEqual(fail.flags['is-empty'], false);
   assert.strictEqual(lib().versionFor(null, '__VER__').text, '', 'không hiện chữ giữ chỗ');
   assert.strictEqual(lib().versionFor(null, null).text, '');
+  assert.strictEqual(lib().versionFor(null, fb).text, fb);
+  const blankFlags = {};
+  const blank = lib().applyVersion({ button: { textContent: 'x' }, pill: { textContent: 'x' }, badge: { classList: { toggle(name, v) { blankFlags[name] = !!v; } } } }, null, '');
+  assert.strictEqual(blank.text, ''); assert.strictEqual(blankFlags['is-empty'], true);
   // Bản mới nhất thiếu tệp Mac nhưng bản cũ hơn còn tệp: p khác null, huy hiệu lùi cùng nút
   const noMac = API.filter((r) => r.tag_name !== 'v0.16.0-beta.3' && r.tag_name !== 'v0.16.0-beta.2.8');
   const back = await paint(true, ok(noMac), 'mac', 'arm64', 'AIVN-mac-arm64.zip');
@@ -376,13 +384,15 @@ test('huy hiệu phiên bản bằng đúng bản nút tải đã chọn: cờ b
   assert.strictEqual(none.view.rel.tag_name, 'v0.15.3'); assert.strictEqual(none.view.rel.prerelease, false);
   assert.strictEqual(none.nodes.pill.textContent, 'v0.15.3');
   assert.strictEqual(none.nodes.button.textContent, 'v0.15.3');
-  assert.strictEqual(none.shown.pre, false); assert.strictEqual(none.nodes.badge.on, false);
+  assert.strictEqual(none.shown.pre, false); assert.strictEqual(none.flags['is-pre'], false);
   const noneMac = await paint(true, ok(strip), 'mac', 'x64', 'AIVN-mac-x64.zip');
   assert.strictEqual(noneMac.nodes.pill.textContent, 'v0.15.3');
   assert.strictEqual(noneMac.nodes.button.textContent, noneMac.nodes.pill.textContent);
   assert.strictEqual(noneMac.shown.pre, false);
   const lin = await paint(true, ok(API), 'linux', null, null);
   assert.strictEqual(lin.view.rel, null);
-  assert.strictEqual(lin.nodes.pill.textContent, ''); assert.strictEqual(lin.nodes.button.textContent, '');
-  assert.strictEqual(lin.shown.pre, false);
+  assert.strictEqual(lin.nodes.pill.textContent, fb); assert.strictEqual(lin.nodes.button.textContent, fb);
+  assert.strictEqual(lin.shown.pre, false); assert.strictEqual(lin.flags['is-empty'], false);
+  const phone = await paint(true, ok(API), null, null, null);
+  assert.strictEqual(phone.view.rel, null); assert.strictEqual(phone.nodes.pill.textContent, fb);
 });

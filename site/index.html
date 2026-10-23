@@ -65,6 +65,7 @@ header.scrolled{border-color:var(--line)}
 .badge .pill-ver{white-space:nowrap}
 .badge .pill-beta{display:none;flex:none;font-size:12px;font-weight:700;line-height:1.4;color:#fff;background:#B01C30;border-radius:999px;padding:1px 9px;white-space:nowrap}
 .badge.is-pre .pill-beta{display:inline-block}
+.badge.is-empty{display:none}
 .hero h1{font-size:clamp(2.3rem,5vw,3.7rem);line-height:1.12;font-weight:800;letter-spacing:-.03em;margin-bottom:20px}
 .hero p.lead{margin-bottom:32px}
 .dl-row{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px}
@@ -774,7 +775,8 @@ window.AIVNDL=(function(){
     return {state:'fail',rel:null,fallback:true,asset:null};
   }
   // Cùng một chuỗi cho nút (.dl-ver) và huy hiệu (.pill-ver), từ đúng bản viewFor đã chọn. Không gọi mạng.
-  // rel null → chuỗi rỗng (API lỗi, Linux, đang tải), không lấy newest() và không hiện chữ giữ chỗ (__…__).
+  // Không có bản đã chọn → dùng số ổn định data-fb (kể cả lúc đang tải, API lỗi, Linux, điện thoại). Không lấy newest(), không hiện chữ giữ chỗ.
+  // Vẫn không có số → ẩn cả huy hiệu, không bao giờ để trống.
   function versionFor(rel,fallback){
     var token=rel?('v'+String(rel.tag_name).replace(/^v/,'')):(fallback==null?'':String(fallback));
     if(!token||token.indexOf('__')>=0)token='';
@@ -784,7 +786,7 @@ window.AIVNDL=(function(){
     var shown=versionFor(rel,fallback); nodes=nodes||{};
     if(nodes.button)nodes.button.textContent=shown.text;
     if(nodes.pill)nodes.pill.textContent=shown.text;
-    if(nodes.badge&&nodes.badge.classList)nodes.badge.classList.toggle('is-pre',shown.pre);
+    if(nodes.badge&&nodes.badge.classList){nodes.badge.classList.toggle('is-pre',!!shown.pre);nodes.badge.classList.toggle('is-empty',!shown.text);}
     return shown;
   }
   return {INCLUDE_PRERELEASE:INCLUDE_PRERELEASE,API:API,FALLBACK:FALLBACK,TIMEOUT_MS:TIMEOUT_MS,CACHE_KEY:CACHE_KEY,candidates:candidates,pickRelease:pickRelease,pickAsset:pickAsset,pickFor:pickFor,relPage:relPage,resolve:resolve,target:target,newest:newest,urlFor:urlFor,viewFor:viewFor,versionFor:versionFor,applyVersion:applyVersion,state:st};
@@ -843,7 +845,7 @@ window.AIVNDL=(function(){
     else if(staticHref)main.href=staticHref;                          // không có tệp cho máy này: giữ link tĩnh (bản ổn định release.sh ghi)
     if(p){main.title=p.asset.name;}else{main.removeAttribute('title');}
     var pv=document.querySelector('.badge .pill-ver'), badge=document.querySelector('.badge');
-    DLX.applyVersion({button:row.querySelector('.dl-ver'),pill:pv,badge:badge},view.state==='ok'?rel:null,'');
+    DLX.applyVersion({button:row.querySelector('.dl-ver'),pill:pv,badge:badge},view.state==='ok'?rel:null,pv&&pv.getAttribute('data-fb'));
     var tm=row.querySelector('.dl-date'), iso=view.state==='ok'&&rel&&rel.published_at&&!isNaN(Date.parse(rel.published_at))?rel.published_at:'';
     tm.textContent=iso?dlDate(iso):'';if(iso)tm.setAttribute('datetime',iso);else tm.removeAttribute('datetime');
     row.querySelector('.dl-size').textContent=p?dlSize(p.asset.size):'';
