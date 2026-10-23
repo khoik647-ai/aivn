@@ -195,6 +195,38 @@ function abortGen(reqId, ac, reason) { if (!ac || ac.signal.aborted) return; sto
 const serverLog = [];
 
 let modelsDirProblem = null;
+let recoverChain = Promise.resolve();
+let pendingAnnounced = false;
+let moveRetryTimer = null;
+function modelInUse() { try { const st = engine && engine.status && engine.status(); return !!(st && (st.loaded || st.loading)); } catch { return false; } }
+function noteRecover(rec, live) {
+  if (!rec) return;
+  if (rec.pending) {
+    if (pendingAnnounced) return;
+    pendingAnnounced = true;
+    LOG.log('app', T(rec.log));
+    const text = T(rec.notice);
+    setTimeout(() => { try { send('app:notice', { text, kind: 'warn' }); } catch {} }, 2500);
+    return;
+  }
+  pendingAnnounced = false;
+  if (rec.resumed) { settings.data.modelsDir = rec.dir; settings.save(); if (live) paths.models = rec.dir; LOG.log('app', 'Tiếp tục chuyển thư mục mô hình còn dở → ' + rec.dir); return; }
+  if (rec.rolledBack) LOG.log('app', 'Đã hoàn tác chuyển thư mục mô hình còn dở; dữ liệu vẫn ở ' + rec.dir);
+}
+async function finishPendingMove(live) {
+  const file = path.join(paths.userData, 'models-move.json');
+  let rec = null;
+  try { rec = await require('./models-dir').recoverMove(file); }
+  catch (e) { LOG.log('app', 'Không xử lý được bản chuyển mô hình còn dở: ' + e.message); return null; }
+  noteRecover(rec, live); return rec;
+}
+function retryPendingMove() {
+  try { if (!fs.existsSync(path.join(paths.userData, 'models-move.json'))) return Promise.resolve(null); } catch { return Promise.resolve(null); }
+  if (modelInUse()) return Promise.resolve(null);
+  const run = recoverChain.then(() => finishPendingMove(true));
+  recoverChain = run.then(() => {}, () => {});
+  return run;
+}
 async function initStores() {
   const ud = app.getPath('userData');
   paths = { userData: ud, models: QA_PROFILE ? QA_PROFILE.models : path.join(ud, 'models') }; // hồ sơ QA: dùng chung mô hình của hồ sơ thật
@@ -205,11 +237,9 @@ async function initStores() {
     agentFolders: [], agentWeb: false, agentPython: false, agentMemory: true, agentTemperature: 0.2, agentComputer: true, agentScreen: false, agentScreenMode: 'each', agentAutonomy: false, agentScreenBudget: 40, agentAutoReadOnly: false, keepInTray: false, openAtLogin: false,
   });
   // bản chuyển thư mục mô hình còn dở (sập máy giữa chừng): đủ tệp thì trỏ sang đích, thiếu thì hoàn tác — không để mô hình “biến mất”
-  try {
-    const rec = await require('./models-dir').recoverMove(path.join(ud, 'models-move.json'));
-    if (rec && rec.resumed) { settings.data.modelsDir = rec.dir; settings.save(); LOG.log('app', 'Tiếp tục chuyển thư mục mô hình còn dở → ' + rec.dir); }
-    else if (rec && rec.rolledBack) LOG.log('app', 'Đã hoàn tác chuyển thư mục mô hình còn dở; dữ liệu vẫn ở ' + rec.dir);
-  } catch (e) { LOG.log('app', 'Không xử lý được bản chuyển mô hình còn dở: ' + e.message); }
+  // B218: đích chưa truy cập được thì giữ nhật ký và báo chờ ổ đích; lần mở sau (và khi mở Thư mục mô hình) thử lại
+  await finishPendingMove(false);
+  if (!moveRetryTimer) { moveRetryTimer = setInterval(() => { retryPendingMove().catch(() => {}); }, 60000); if (moveRetryTimer.unref) moveRetryTimer.unref(); }
   // thư mục mô hình do người dùng chọn (Cài đặt → Chung / Mô hình của tôi → Đổi thư mục); ổ đã rút / không ghi được → về mặc định, báo trong nhật ký
   if (!QA_PROFILE && settings.data.modelsDir) { const v = require('./models-dir').validateTarget(settings.data.modelsDir); if (v.ok) paths.models = v.dir; else { modelsDirProblem = `${settings.data.modelsDir}: ${v.error}`; LOG.log('app', 'Thư mục mô hình đã chọn không dùng được, tạm dùng thư mục mặc định: ' + modelsDirProblem); } }
   // B84: --agent-settings-from main — chép cài đặt AIVN AGENT (agent*) từ hồ sơ thật sang hồ sơ QA; hồ sơ thật chỉ ĐỌC
@@ -1267,7 +1297,7 @@ function registerIpc() {
   ipcMain.handle('runtime:install', async () => { const r = await runtimes().install({ onProgress: () => { const n = Date.now(); if (n - rtTick > 300) { rtTick = n; runtimes().status().then(s => send('runtime:progress', s.job)).catch(() => {}); } } }); send('runtime:progress', null); return r; });
   ipcMain.handle('runtime:cancel', () => runtimes().cancel());
   ipcMain.handle('runtime:remove', () => { if (engine.status()?.runtime === 'cuda') return { ok: false, error: 'Runtime CUDA đang chạy mô hình — hãy dỡ mô hình trước khi gỡ.' }; return runtimes().remove(); });
-  ipcMain.handle('models:dir-info', () => dirInfo());
+  ipcMain.handle('models:dir-info', async () => { if (!dirMove) { try { await retryPendingMove(); } catch (e) { LOG.log('app', 'Không xử lý được bản chuyển mô hình còn dở: ' + e.message); } } return dirInfo(); });
   ipcMain.handle('models:dir-pick', async () => {
     if (QA_PROFILE) return { ok: false, error: 'Hồ sơ QA dùng chung thư mục mô hình của hồ sơ thật: không đổi được.' };
     const r = await dialog.showOpenDialog(win, { title: 'Chọn thư mục lưu mô hình', buttonLabel: 'Chọn thư mục này', properties: ['openDirectory', 'createDirectory'], defaultPath: paths.models });

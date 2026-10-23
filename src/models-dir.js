@@ -190,30 +190,99 @@ function recoverMoveLegacy(j, file) {
   }
   pruneEmpty(j.to); journalClear(file); return { rolledBack: true, dir: path.resolve(j.from) };
 }
+// B218: ổ / thư mục đích chưa truy cập được thì KHÔNG xoá nhật ký, KHÔNG xoá hay dời tệp.
+const DEST_BLOCK = new Set(['ENOENT', 'EACCES', 'EIO', 'ENODEV', 'EPERM']);
+const heavyRecover = new Map(); // nhật ký đã băm trong lần chạy này → không băm lại
+function isDestBlock(e) { return !!(e && DEST_BLOCK.has(e.code)); }
+function destRootBlocked(dir) {
+  let st = null;
+  try { st = fs.lstatSync(dir); }
+  catch (e) { return isDestBlock(e) ? e : null; }
+  if (st.isSymbolicLink() || st.isDirectory()) {
+    try { fs.readdirSync(dir); return null; }
+    catch (e) { return isDestBlock(e) ? e : null; }
+  }
+  return null;
+}
+async function destChildBlocked(j) {
+  const rels = new Set();
+  for (const f of j.rels) if (f && typeof f.rel === 'string') rels.add(f.rel);
+  if (Array.isArray(j.created)) for (const c of j.created) if (c && typeof c.rel === 'string') rels.add(c.rel);
+  if (Array.isArray(j.temps)) for (const t of j.temps) if (typeof t === 'string') rels.add(t);
+  for (const rel of rels) {
+    try { await fs.promises.lstat(path.join(j.to, rel)); }
+    catch (e) { if (e && e.code === 'ENOENT') continue; if (isDestBlock(e)) return e; }
+  }
+  return null;
+}
+function pendingOf(j, err) {
+  const to = path.resolve(j.to), from = path.resolve(j.from), drive = driveOf(to), base = path.basename(to);
+  return {
+    pending: true, state: 'pending', reason: 'destination missing', code: 'EDEST', dir: from, to, drive,
+    fsCode: (err && err.code) || 'ENOENT',
+    log: `Chuyển mô hình đang chờ ổ đích. Chưa xoá hay dời tệp nào. Sẽ thử lại khi thư mục này truy cập được: ${to}`,
+    notice: `Chuyển mô hình đang chờ ổ đích ${drive}, thư mục “${base}”. Chưa xoá hay dời tệp nào. Sẽ thử lại khi ổ này có lại.`,
+  };
+}
 // Bản chuyển dở (sập giữa chừng). Nhật ký mới (có created): chỉ đụng tệp lần chuyển này tạo ra.
 // Đủ sha256 ở đích → xoá nguồn (trừ symlink và cùng inode). Thiếu → hoàn tác. phase quit luôn hoàn tác.
+// Đích chưa truy cập được → pending, giữ nhật ký, không đụng tệp. Băm nặng tối đa một lần mỗi nhật ký trong một lần chạy.
 async function recoverMove(file) {
-  let j; try { j = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+  if (moveActive && moveActive.journal && path.resolve(String(moveActive.journal)) === path.resolve(file)) return null;
+  let raw; try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }
+  let j; try { j = JSON.parse(raw); } catch { return null; }
   if (!j || !j.from || !j.to || !Array.isArray(j.rels)) { journalClear(file); return null; }
-  if (!Array.isArray(j.created)) return recoverMoveLegacy(j, file);
-  let verified = j.rels.length > 0;
-  if (verified) {
-    for (const f of j.rels) {
-      if (await symlinkBetween(j.to, f.rel) || !(await writtenMatch(path.join(j.to, f.rel), f))) { verified = false; break; }
+  const rootErr = destRootBlocked(j.to);
+  if (rootErr) return pendingOf(j, rootErr);
+  const childErr = await destChildBlocked(j);
+  if (childErr) return pendingOf(j, childErr);
+  const id = path.resolve(file), stamp = crypto.createHash('sha256').update(raw).digest('hex');
+  if (heavyRecover.get(id) === stamp) return pendingOf(j, { code: 'EIO' });
+  let didHash = false;
+  const match = async (p, meta) => {
+    try {
+      const st = await fs.promises.lstat(p);
+      if (!st.isFile() || st.isSymbolicLink() || !meta || !meta.sha256 || st.size !== meta.size) return false;
+      didHash = true; heavyRecover.set(id, stamp);
+      return (await hashFile(p)) === meta.sha256;
+    } catch (e) {
+      if (e && e.code !== 'ENOENT' && isDestBlock(e)) { if (didHash) heavyRecover.set(id, stamp); e.aivnDestBlock = true; throw e; }
+      return false;
     }
-  }
-  if (j.phase !== 'quit' && (j.phase === 'commit' || verified) && verified) {
-    for (const f of j.rels) {
-      const src = path.join(j.from, f.rel), dst = path.join(j.to, f.rel);
-      if (await symlinkBetween(j.to, f.rel) || !(await writtenMatch(dst, f))) continue;
-      const dstSt = lstatOrNull(dst), srcSt = lstatOrNull(src);
-      if (!dstSt || dstSt.isSymbolicLink() || !dstSt.isFile() || !srcSt || srcSt.isSymbolicLink()) continue;
-      if (srcSt.dev === dstSt.dev && srcSt.ino === dstSt.ino) continue;
-      try { fs.unlinkSync(src); } catch {}
+  };
+  const finish = (result) => { try { if (!fs.existsSync(file)) heavyRecover.delete(id); } catch {} return result; };
+  try {
+    if (!Array.isArray(j.created)) return finish(recoverMoveLegacy(j, file));
+    let verified = j.rels.length > 0;
+    if (verified) {
+      for (const f of j.rels) {
+        if (await symlinkBetween(j.to, f.rel) || !(await match(path.join(j.to, f.rel), f))) { verified = false; break; }
+      }
     }
-    cleanTemps(j); pruneEmpty(j.from); journalClear(file); return { resumed: true, dir: path.resolve(j.to) };
+    const gone = destRootBlocked(j.to);
+    if (gone) return pendingOf(j, gone);
+    if (j.phase !== 'quit' && (j.phase === 'commit' || verified) && verified) {
+      for (const f of j.rels) {
+        const src = path.join(j.from, f.rel), dst = path.join(j.to, f.rel);
+        if (await symlinkBetween(j.to, f.rel) || !(await match(dst, f))) continue;
+        const dstSt = lstatOrNull(dst), srcSt = lstatOrNull(src);
+        if (!dstSt || dstSt.isSymbolicLink() || !dstSt.isFile() || !srcSt || srcSt.isSymbolicLink()) continue;
+        if (srcSt.dev === dstSt.dev && srcSt.ino === dstSt.ino) continue;
+        try { fs.unlinkSync(src); } catch {}
+      }
+      cleanTemps(j);
+      const still = destRootBlocked(j.to);
+      if (still) return pendingOf(j, still);
+      pruneEmpty(j.from); journalClear(file); return finish({ resumed: true, dir: path.resolve(j.to) });
+    }
+    await rollbackJournal(j);
+    const after = destRootBlocked(j.to);
+    if (after) return pendingOf(j, after);
+    pruneEmpty(j.to); journalClear(file); return finish({ rolledBack: true, dir: path.resolve(j.from) });
+  } catch (e) {
+    if (e && (e.aivnDestBlock || (isDestBlock(e) && e.code !== 'ENOENT'))) return pendingOf(j, e);
+    heavyRecover.delete(id); throw e;
   }
-  await rollbackJournal(j); pruneEmpty(j.to); journalClear(file); return { rolledBack: true, dir: path.resolve(j.from) };
 }
 function openExcl(tmp) {
   const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NONBLOCK || 0);
