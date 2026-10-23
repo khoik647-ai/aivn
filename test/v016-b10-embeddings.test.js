@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { createApiServer } = require('../src/server');
-const { createEmbedServer, listEmbeddingModels, gpuLayersFor, inspectFile, inspectCacheStats, chatIdsExcept, contextLimit, EMBED_IDLE_NGL, MAX_STRING_CHARS, MAX_TOTAL_CHARS, MAX_EMBED_BODY } = require('../src/embed-server');
+const { createEmbedServer, listEmbeddingModels, gpuLayersFor, embedGpuChoice, inspectFile, inspectCacheStats, chatIdsExcept, contextLimit, clipByCodePoints, EMBED_IDLE_NGL, META_CACHE_MAX, MAX_STRING_CHARS, MAX_TOTAL_CHARS, MAX_EMBED_BODY } = require('../src/embed-server');
 
 const FAKE = path.join(__dirname, 'fixtures', 'fake-llama', 'llama-server');
 const GB = 1024 * 1024 * 1024;
@@ -196,10 +196,18 @@ test('main.js nối embed-server và giữ câu từ chối mô hình trò chuy�
   assert.match(m, /inspectFile/);
   assert.match(m, /isEmbedGguf/);
   assert.match(m, /chatIdsExcept/);
+  const holdAt = m.indexOf('ep.hold()');
   const stopAt = m.indexOf('embedProc.stop()');
   const vramAt = m.indexOf('idleVramUsed = h0.vram.total');
   const loadAt = m.indexOf('engine.loadModel(m.id');
-  assert.ok(stopAt > 0 && vramAt > stopAt && loadAt > vramAt, 'dừng máy nhúng trước khi đo VRAM và trước engine.loadModel');
+  const releaseAt = m.indexOf('ep.release()');
+  assert.ok(holdAt > 0 && holdAt < stopAt && vramAt > stopAt && loadAt > vramAt && releaseAt > loadAt, 'hold, dừng máy nhúng, đo VRAM, engine.loadModel, rồi release');
+  const gpuAt = m.indexOf('gpuLayers: () => embedGpuChoice');
+  assert.ok(gpuAt > 0, 'chọn -ngl bằng đo VRAM mới, không qua hwCache');
+  const slice = m.slice(gpuAt, gpuAt + 700);
+  assert.match(slice, /engine\.hardwareInfo\(\)/);
+  assert.match(slice, /timeoutMs: GPU_PROBE_MS/);
+  assert.doesNotMatch(slice, /\bhw\(\)/);
 });
 
 function harness(dir, srv) {
@@ -380,5 +388,208 @@ test('cổng bị chiếm một lần thì thử cổng khác và vẫn trả em
   } finally {
     await srv.stop(); await api.stop();
     if (prev == null) delete process.env.AIVN_FAKE_FAIL_ONCE; else process.env.AIVN_FAKE_FAIL_ONCE = prev;
+  }
+});
+
+function unpaired(s) {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xD800 && c <= 0xDBFF) {
+      const n = s.charCodeAt(i + 1);
+      if (!(n >= 0xDC00 && n <= 0xDFFF)) return true;
+      i += 1;
+    } else if (c >= 0xDC00 && c <= 0xDFFF) return true;
+  }
+  return false;
+}
+
+test('embeddings trong lúc nạp mô hình không khởi động -ngl 8 và không chồng tiến trình', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b10-hold-'));
+  writeModels(dir);
+  const logf = path.join(dir, 'spawn.log');
+  const prevLog = process.env.AIVN_FAKE_SPAWN_LOG;
+  const prevHealth = process.env.AIVN_FAKE_HEALTH_MS;
+  process.env.AIVN_FAKE_SPAWN_LOG = logf;
+  process.env.AIVN_FAKE_HEALTH_MS = '400';
+  let chatLoaded = false;
+  const calls = [];
+  const srv = createEmbedServer({
+    findExe: () => FAKE, idleMs: 0, log: () => {},
+    gpuLayers: () => {
+      const ngl = chatLoaded ? 0 : EMBED_IDLE_NGL;
+      calls.push({ chatLoaded, ngl, running: srv.stats().running });
+      return ngl;
+    },
+  });
+  const model = srv.list([dir])[0];
+  try {
+    const inflight = srv.open(model);
+    await sleep(40);
+    srv.hold();
+    await srv.stop();
+    await inflight;
+    assert.equal(srv.stats().running, false, 'start đang bay bị dừng trước khi nạp mô hình');
+    assert.equal(alive(JSON.parse(fs.readFileSync(logf, 'utf8').trim().split('\n').pop()).pid), false);
+    delete process.env.AIVN_FAKE_HEALTH_MS;
+    const spawned = srv.stats().spawns;
+    const called = calls.length;
+    let settled = false;
+    const pending = srv.embed(['xin chào']).then((v) => { settled = true; return v; });
+    for (let i = 0; i < 4; i++) {
+      await sleep(70);
+      assert.equal(settled, false);
+      assert.equal(srv.stats().running, false);
+      assert.equal(srv.stats().held, true);
+      assert.equal(srv.stats().spawns, spawned, 'không spawn trong lúc đang nạp');
+      assert.equal(calls.length, called, 'chưa chọn -ngl khi mô hình trò chuyện chưa nạp xong');
+    }
+    chatLoaded = true;
+    srv.release();
+    const vecs = await pending;
+    assert.equal(vecs.length, 1);
+    assert.equal(calls.length, called + 1);
+    assert.equal(calls[calls.length - 1].chatLoaded, true);
+    assert.equal(calls[calls.length - 1].ngl, 0);
+    const args = srv.stats().lastArgs;
+    assert.equal(args[args.indexOf('-ngl') + 1], '0');
+    const lines = fs.readFileSync(logf, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const last = lines[lines.length - 1];
+    assert.equal(last.argv[last.argv.indexOf('-ngl') + 1], '0');
+    assert.ok(lines.every((row, i) => i === lines.length - 1 || !alive(row.pid)));
+  } finally {
+    try { srv.release(); } catch {}
+    await srv.stop();
+    if (prevLog == null) delete process.env.AIVN_FAKE_SPAWN_LOG; else process.env.AIVN_FAKE_SPAWN_LOG = prevLog;
+    if (prevHealth == null) delete process.env.AIVN_FAKE_HEALTH_MS; else process.env.AIVN_FAKE_HEALTH_MS = prevHealth;
+  }
+});
+
+test('mỗi lần khởi động máy nhúng đo lại VRAM trống; probe lỗi thì -ngl 0', async () => {
+  let free = 11 * GB;
+  let mode = 'ok';
+  const probe = () => {
+    if (mode === 'hang') return new Promise(() => {});
+    if (mode === 'fail') return Promise.reject(new Error('no-gpu'));
+    return { gpu: 'vulkan', vram: { total: 12 * GB, free, integratedOnly: false } };
+  };
+  const wide = await embedGpuChoice({ probe, chatLoaded: true, timeoutMs: 200 });
+  assert.equal(wide, null, '11 GB trống khi trò chuyện đang nạp thì để llama-server tự chọn');
+  free = 1 * GB;
+  const tight = await embedGpuChoice({ probe, chatLoaded: true, timeoutMs: 200 });
+  assert.equal(tight, 0, 'số đo mới 1 GB trống phải ra -ngl 0, không dùng 11 GB lúc mở máy');
+  mode = 'fail';
+  assert.equal(await embedGpuChoice({ probe, chatLoaded: false, timeoutMs: 200 }), 0);
+  mode = 'hang';
+  const t0 = Date.now();
+  assert.equal(await embedGpuChoice({ probe, chatLoaded: false, timeoutMs: 200 }), 0);
+  assert.ok(Date.now() - t0 < 1500, 'probe treo phải hết hạn nhanh');
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b10-vram-'));
+  writeModels(dir);
+  free = 11 * GB;
+  mode = 'ok';
+  const srv = createEmbedServer({
+    findExe: () => FAKE, idleMs: 0, log: () => {},
+    gpuLayers: () => embedGpuChoice({ probe, chatLoaded: () => true, timeoutMs: 200 }),
+  });
+  const model = srv.list([dir])[0];
+  try {
+    await srv.open(model);
+    assert.equal(srv.stats().lastArgs.includes('-ngl'), false);
+    await srv.stop();
+    free = GB;
+    await srv.open(model);
+    assert.equal(srv.stats().lastArgs[srv.stats().lastArgs.indexOf('-ngl') + 1], '0');
+    await srv.stop();
+    mode = 'hang';
+    const t1 = Date.now();
+    await srv.open(model);
+    assert.ok(Date.now() - t1 < 2000);
+    assert.equal(srv.stats().lastArgs[srv.stats().lastArgs.indexOf('-ngl') + 1], '0');
+  } finally { await srv.stop(); }
+});
+
+test('inspectFile là LRU lớn, khoá theo đường dẫn, mtime và kích thước', () => {
+  assert.ok(META_CACHE_MAX >= 512);
+  const body = gguf([
+    kvStr('general.architecture', 'bert'), kvU32('bert.pooling_type', 1), kvU32('bert.embedding_length', 8), kvU32('bert.context_length', 128),
+  ]);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b10-lru-'));
+  const files = [];
+  for (let i = 0; i < 80; i++) {
+    const f = path.join(dir, `bge-small-${i}.gguf`);
+    fs.writeFileSync(f, body);
+    files.push(f);
+  }
+  const before = inspectCacheStats().reads;
+  for (const f of files) assert.ok(inspectFile(f));
+  const mid = inspectCacheStats().reads;
+  assert.equal(mid, before + 80);
+  for (const f of files) inspectFile(f);
+  assert.equal(inspectCacheStats().reads, mid, '80 tệp vẫn trong LRU; trần 64 sẽ đọc lại hết');
+
+  const extra = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b10-lru2-'));
+  const many = [];
+  for (let i = 0; i < META_CACHE_MAX + 1; i++) {
+    const f = path.join(extra, `bge-small-x-${i}.gguf`);
+    fs.writeFileSync(f, body);
+    many.push(f);
+  }
+  const b2 = inspectCacheStats().reads;
+  for (let i = 0; i < META_CACHE_MAX; i++) inspectFile(many[i]);
+  assert.equal(inspectCacheStats().reads, b2 + META_CACHE_MAX);
+  inspectFile(many[0]);
+  assert.equal(inspectCacheStats().reads, b2 + META_CACHE_MAX);
+  inspectFile(many[META_CACHE_MAX]);
+  assert.equal(inspectCacheStats().reads, b2 + META_CACHE_MAX + 1);
+  inspectFile(many[0]);
+  assert.equal(inspectCacheStats().reads, b2 + META_CACHE_MAX + 1, 'mục vừa đọc không bị đẩy');
+  inspectFile(many[1]);
+  assert.equal(inspectCacheStats().reads, b2 + META_CACHE_MAX + 2, 'mục cũ nhất bị đẩy');
+  const later = (Date.now() + 20000) / 1000;
+  fs.utimesSync(many[0], later, later);
+  inspectFile(many[0]);
+  assert.equal(inspectCacheStats().reads, b2 + META_CACHE_MAX + 3, 'đổi mtime là khoá khác');
+  const st = fs.statSync(many[0]);
+  fs.writeFileSync(many[0], Buffer.concat([fs.readFileSync(many[0]), Buffer.from('x')]));
+  fs.utimesSync(many[0], st.atime, st.mtime);
+  inspectFile(many[0]);
+  assert.equal(inspectCacheStats().reads, b2 + META_CACHE_MAX + 4, 'đổi kích thước là khoá khác');
+});
+
+test('cắt dự phòng theo điểm mã nên không tách emoji', async () => {
+  const raw = 'a😀b';
+  assert.equal(clipByCodePoints(raw, 2), 'a😀');
+  assert.equal(unpaired(raw.slice(0, 2)), true);
+  assert.equal(unpaired(clipByCodePoints(raw, 2)), false);
+
+  const prev = process.env.AIVN_FAKE_TOKENIZE_FAIL;
+  process.env.AIVN_FAKE_TOKENIZE_FAIL = '1';
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b10-emoji-'));
+  fs.writeFileSync(path.join(dir, 'bge-small-emoji.gguf'), gguf([
+    kvStr('general.architecture', 'bert'), kvU32('bert.pooling_type', 1), kvU32('bert.embedding_length', 8), kvU32('bert.context_length', 128),
+  ]));
+  const srv = createEmbedServer({ findExe: () => FAKE, idleMs: 0, gpuLayers: () => 0, log: () => {} });
+  const model = srv.list([dir])[0];
+  assert.equal(model.context, 128);
+  const limit = contextLimit(model.context) - 4;
+  const input = 'x' + '😀'.repeat(200);
+  const byPoint = Array.from(input).slice(0, limit).join('');
+  const byUnit = input.slice(0, limit);
+  assert.equal(unpaired(byPoint), false);
+  assert.equal(unpaired(byUnit), true);
+  assert.notEqual(byPoint, byUnit);
+  try {
+    await srv.open(model);
+    const before = srv.stats().truncated;
+    const long = Array.from((await srv.embed([input]))[0]);
+    const point = Array.from((await srv.embed([byPoint]))[0]);
+    const unit = Array.from((await srv.embed([byUnit]))[0]);
+    assert.ok(srv.stats().truncated > before);
+    assert.deepStrictEqual(long, point);
+    assert.notDeepStrictEqual(long, unit);
+  } finally {
+    await srv.stop();
+    if (prev == null) delete process.env.AIVN_FAKE_TOKENIZE_FAIL; else process.env.AIVN_FAKE_TOKENIZE_FAIL = prev;
   }
 });

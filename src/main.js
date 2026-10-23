@@ -512,7 +512,11 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
     if (opts.mmproj) opts.serverExe = await serverExeFor();
     LOG.log('load', `Bắt đầu nạp ${m.file}`, { size: m.size, ctx: opts.contextSize, gpuLayers: opts.gpuLayers ?? 'tự động', vision: !!opts.mmproj, ...(opts.serverArgs && opts.serverArgs.length ? { args: opts.serverArgs.join(' ') } : {}) });
     const tLoad = Date.now();
-    // Tiến trình nhúng giữ VRAM (kể cả -ngl nhỏ). Dừng trước khi đo VRAM rảnh và trước engine.loadModel.
+    // Giữ máy nhúng suốt lúc nạp: yêu cầu /v1/embeddings đến giữa chừng phải đợi xong rồi mới chọn -ngl.
+    // Dừng tiến trình đang chạy (kể cả lần start chưa xong) trước khi đo VRAM rảnh và trước engine.loadModel.
+    const ep = embeddingProc();
+    ep.hold();
+    try {
     if (embedProc) { try { await embedProc.stop(); } catch (e) { log('[embed] không dừng được trước khi nạp mô hình: ' + (e && e.message || e)); } }
     // B38: số đo VRAM thật — VRAM đã dùng lúc chưa nạp mô hình (màn hình, ứng dụng khác) làm mốc
     try { if (!engine.status().loaded) { const h0 = await engine.hardwareInfo(); if (h0 && h0.vram && h0.vram.total > 0 && !h0.vram.integratedOnly) idleVramUsed = h0.vram.total - h0.vram.free; } } catch {}
@@ -559,6 +563,7 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
     settings.data.lastModel = m.id; settings.save(); lastUse = Date.now();
     send('model:status', st);
     return st;
+    } finally { ep.release(); }
   } catch (e) { send('model:status', engine.status()); throw e; }
 }
 
@@ -1003,24 +1008,20 @@ function withParts(orig, text) {
 }
 
 // /v1/embeddings: llama-server --embeddings riêng (src/embed-server.js). RAG vẫn dùng ensureEmbedder() trong tiến trình engine.
-const { createEmbedServer, gpuLayersFor, chatIdsExcept } = require('./embed-server');
+const { createEmbedServer, embedGpuChoice, chatIdsExcept, GPU_PROBE_MS } = require('./embed-server');
 function embeddingProc() {
   if (embedProc) return embedProc;
   embedProc = createEmbedServer({
     log,
-    gpuLayers: async () => {
-      let h = null; try { h = await hw(); } catch {}
-      const v = h && h.vram;
-      let chatLoaded = false; try { chatLoaded = !!engine.status().loaded; } catch {}
-      const metal = !!(h && h.gpu === 'metal' && v && v.total > 0);
-      const discrete = !!(h && h.gpu && h.gpu !== 'metal' && v && !v.integratedOnly && v.total > 0);
-      return gpuLayersFor({
-        vramTotal: discrete || metal ? v.total : 0,
-        vramFree: v ? v.free : null,
-        chatLoaded,
-        integratedOnly: !!(v && v.integratedOnly),
-      });
-    },
+    gpuLayers: () => embedGpuChoice({
+      timeoutMs: GPU_PROBE_MS,
+      chatLoaded: () => { try { return !!engine.status().loaded; } catch { return false; } },
+      probe: async () => {
+        const raw = await engine.hardwareInfo();
+        const h = (process.env.AIVN_QA_FAKEHW && !app.isPackaged) ? { ...raw, ...JSON.parse(process.env.AIVN_QA_FAKEHW) } : raw;
+        return withGpuName(h);
+      },
+    }),
   });
   return embedProc;
 }

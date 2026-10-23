@@ -61,12 +61,14 @@ const server = http.createServer(async (q, r) => {
       return r.end(JSON.stringify({ object: 'list', model: 'fake', data, usage: { prompt_tokens: tokens, total_tokens: tokens } }));
     }
     if (q.method === 'POST' && p === '/tokenize') {
+      if (process.env.AIVN_FAKE_TOKENIZE_FAIL === '1') { r.statusCode = 500; return r.end('{}'); }
       const b = await readBody(q);
       lastWords = words(b.content || '');
       const n = Math.max(1, lastWords.length);
       return r.end(JSON.stringify({ tokens: Array.from({ length: n }, (_, i) => i + 1) }));
     }
     if (q.method === 'POST' && p === '/detokenize') {
+      if (process.env.AIVN_FAKE_DETOKENIZE_FAIL === '1') { r.statusCode = 500; return r.end('{}'); }
       const b = await readBody(q);
       const ids = Array.isArray(b.tokens) ? b.tokens : [];
       const content = ids.map((id) => lastWords[Number(id) - 1] || '').filter(Boolean).join(' ');

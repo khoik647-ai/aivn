@@ -24,7 +24,8 @@ const EMBED_IDLE_NGL = 8;
 const MAX_STRING_CHARS = 100000;
 const MAX_TOTAL_CHARS = 1000000;
 const MAX_EMBED_BODY = 2 * 1024 * 1024;
-const META_CACHE_MAX = 64;
+const META_CACHE_MAX = 512;
+const GPU_PROBE_MS = 2000;
 
 class EmbedError extends Error {
   constructor(msg, status = 500, code) { super(msg); this.status = status; this.code = code; }
@@ -53,17 +54,23 @@ function contextLimit(train) {
   return Math.min(8192, Math.max(128, ctx));
 }
 
-// Đọc siêu dữ liệu theo mtime + kích thước: /v1/models gọi lại nhiều lần, không parse GGUF mỗi lần.
+// Đọc siêu dữ liệu theo đường dẫn + mtime + kích thước. LRU: lần đọc lại không bị đẩy ra trước các tệp ít dùng.
 const metaCache = new Map();
 let metaReads = 0;
+function metaKey(file, st) { return path.resolve(file) + '\0' + st.mtimeMs + '\0' + st.size; }
+function rememberMeta(key, info, mtime, size) {
+  if (metaCache.has(key)) metaCache.delete(key);
+  else if (metaCache.size >= META_CACHE_MAX) metaCache.delete(metaCache.keys().next().value);
+  metaCache.set(key, { mtime, size, info });
+}
 function inspectFile(file) {
   const base = path.basename(file);
   if (!/\.gguf$/i.test(base) || /mmproj/i.test(base)) return null;
   let st;
   try { st = fs.statSync(file); } catch { return null; }
-  const key = path.resolve(file);
+  const key = metaKey(file, st);
   const hit = metaCache.get(key);
-  if (hit && hit.mtime === st.mtimeMs && hit.size === st.size) return hit.info;
+  if (hit) { rememberMeta(key, hit.info, hit.mtime, hit.size); return hit.info; }
   let meta;
   try { meta = gguf.readMeta(file); } catch { return null; }
   metaReads += 1;
@@ -81,9 +88,16 @@ function inspectFile(file) {
     context: num(kv[`${arch}.context_length`]),
     size: meta.size,
   };
-  if (metaCache.size >= META_CACHE_MAX) metaCache.delete(metaCache.keys().next().value);
-  metaCache.set(key, { mtime: st.mtimeMs, size: st.size, info });
+  rememberMeta(key, info, st.mtimeMs, st.size);
   return info;
+}
+
+// Cắt theo điểm mã (không theo đơn vị UTF-16) để không tách cặp surrogate của emoji.
+function clipByCodePoints(text, n) {
+  const chars = Array.from(String(text));
+  const keep = Math.max(0, Math.floor(Number(n) || 0));
+  if (chars.length <= keep) return chars.join('');
+  return chars.slice(0, keep).join('');
 }
 
 // Id mô hình nhúng không được nằm trong danh sách trò chuyện (kể cả khi tên tệp không khớp EMBED_RE).
@@ -146,6 +160,31 @@ function gpuLayersFor({ vramTotal = 0, vramFree = null, chatLoaded = false, inte
   return EMBED_IDLE_NGL;
 }
 
+// Đo VRAM trống ngay trước khi spawn. probe treo hoặc lỗi → -ngl 0, không dùng số đo lúc mở máy.
+function embedGpuChoice({ probe, chatLoaded = false, timeoutMs = GPU_PROBE_MS } = {}) {
+  const ms = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : GPU_PROBE_MS;
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('gpu-probe-timeout')), ms);
+    if (timer && typeof timer.unref === 'function') timer.unref();
+  });
+  const work = Promise.resolve().then(() => (typeof probe === 'function' ? probe() : probe));
+  work.catch(() => {});
+  return Promise.race([work, timeout]).then((h) => {
+    clearTimeout(timer);
+    const v = h && h.vram;
+    const loaded = typeof chatLoaded === 'function' ? !!chatLoaded() : !!chatLoaded;
+    const metal = !!(h && h.gpu === 'metal' && v && v.total > 0);
+    const discrete = !!(h && h.gpu && h.gpu !== 'metal' && v && !v.integratedOnly && v.total > 0);
+    return gpuLayersFor({
+      vramTotal: discrete || metal ? v.total : 0,
+      vramFree: v ? v.free : null,
+      chatLoaded: loaded,
+      integratedOnly: !!(v && v.integratedOnly),
+    });
+  }, () => { clearTimeout(timer); return 0; });
+}
+
 function vectorsFrom(body, n) {
   let rows = null;
   if (body && Array.isArray(body.data)) rows = body.data;
@@ -176,6 +215,30 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
   const locate = findExe || VS.findServer;
   let proc = null, port = 0, key = '', current = null, wanted = null, timer = null, spawns = 0, lastArgs = null, truncatedCount = 0, lastId = null;
   let chain = Promise.resolve();
+  // hold trong lúc nạp mô hình trò chuyện: open/embed chưa vào hàng đợi thì đợi, rồi mới chọn -ngl.
+  let holds = 0;
+  let gate = Promise.resolve();
+  let openGate = () => {};
+  function hold() {
+    holds += 1;
+    if (holds === 1) gate = new Promise((resolve) => { openGate = resolve; });
+  }
+  function release() {
+    if (holds <= 0) return;
+    holds -= 1;
+    if (holds === 0) {
+      const done = openGate;
+      gate = Promise.resolve();
+      openGate = () => {};
+      done();
+    }
+  }
+  // Gọi fn đồng bộ khi không còn hold, để hold() không lọt vào giữa lúc kiểm tra và lúc xếp hàng.
+  function runFree(fn) {
+    if (holds === 0) { try { return Promise.resolve(fn()); } catch (e) { return Promise.reject(e); } }
+    const g = gate;
+    return g.then(() => runFree(fn));
+  }
 
   function enqueue(fn) {
     const run = chain.then(fn, fn);
@@ -251,7 +314,8 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
         if (r.status < 400 && r.json && Array.isArray(r.json.tokens)) tokens = r.json.tokens;
       } catch { tokens = null; }
       if (!tokens) {
-        if (text.length > limit) { out.push(text.slice(0, limit)); n += 1; } else out.push(text);
+        const clipped = clipByCodePoints(text, limit);
+        if (clipped !== text) { out.push(clipped); n += 1; } else out.push(text);
         continue;
       }
       if (tokens.length <= limit) { out.push(text); continue; }
@@ -262,7 +326,7 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
         const content = r.json && (typeof r.json.content === 'string' ? r.json.content : (typeof r.json.text === 'string' ? r.json.text : null));
         if (r.status < 400 && content) next = content;
       } catch { next = null; }
-      if (next == null) next = text.slice(0, Math.max(1, Math.floor(text.length * limit / tokens.length)));
+      if (next == null) next = clipByCodePoints(text, Math.max(1, Math.floor(Array.from(text).length * limit / tokens.length)));
       out.push(next);
       n += 1;
     }
@@ -366,15 +430,15 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
     throw new EmbedError('Chưa có mô hình nhúng. Hãy tải một tệp GGUF nhúng (ví dụ nomic-embed-text hoặc bge-small), hoặc BGE-M3 trong AIVN → Cài đặt → Tìm kiếm tài liệu. AIVN không tự tải mô hình này.', 400, 'NO_MODEL');
   }
 
-  async function open(target) {
+  function open(target) {
     if (!target || !target.path) throw new EmbedError('Thiếu mô hình nhúng.', 400, 'NO_MODEL');
     wanted = target;
-    return enqueue(() => start(target));
+    return runFree(() => enqueue(() => start(target)));
   }
-  async function embed(texts) {
+  function embed(texts) {
     if (!Array.isArray(texts) || !texts.length || texts.some((t) => typeof t !== 'string')) throw new EmbedError('Thiếu văn bản để nhúng.', 400, 'BAD_INPUT');
     assertInputLengths(texts);
-    return enqueue(async () => {
+    return runFree(() => enqueue(async () => {
       if (!proc) {
         if (!wanted) throw new EmbedError('Chưa khởi động được máy nhúng.', 503, 'NOT_STARTED');
         await start(wanted);
@@ -382,7 +446,7 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
       disarm();
       try { return await fetchEmbeddings(await clipTexts(texts)); }
       finally { arm(); }
-    });
+    }));
   }
   async function count(texts) {
     const list = Array.isArray(texts) ? texts : [];
@@ -405,14 +469,15 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
 
   return {
     list: (dirs) => listEmbeddingModels(dirs),
-    resolve, open, embed, count, stop: () => enqueue(() => stop()),
-    stats: () => ({ spawns, running: !!proc, lastArgs, pid: proc && proc.pid || null, idleMs: idle, truncated: truncatedCount }),
+    resolve, open, embed, count, hold, release, stop: () => enqueue(() => stop()),
+    stats: () => ({ spawns, running: !!proc, held: holds > 0, lastArgs, pid: proc && proc.pid || null, idleMs: idle, truncated: truncatedCount }),
   };
 }
 
 function inspectCacheStats() { return { reads: metaReads }; }
 
 module.exports = {
-  createEmbedServer, listEmbeddingModels, gpuLayersFor, inspectFile, inspectCacheStats, EmbedError, EMBED_RE, DEFAULT_IDLE_MS,
-  contextLimit, chatIdsExcept, assertInputLengths, EMBED_IDLE_NGL, MAX_STRING_CHARS, MAX_TOTAL_CHARS, MAX_EMBED_BODY,
+  createEmbedServer, listEmbeddingModels, gpuLayersFor, embedGpuChoice, inspectFile, inspectCacheStats, EmbedError, EMBED_RE, DEFAULT_IDLE_MS,
+  contextLimit, chatIdsExcept, assertInputLengths, clipByCodePoints, EMBED_IDLE_NGL, META_CACHE_MAX, GPU_PROBE_MS,
+  MAX_STRING_CHARS, MAX_TOTAL_CHARS, MAX_EMBED_BODY,
 };
