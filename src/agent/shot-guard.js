@@ -216,30 +216,27 @@ async function fillWindowText(wins, read, { timeoutMs = 8000 } = {}) {
   }
   return out;
 }
-// Nút, mục menu, thanh tiêu đề và khung cửa sổ không phải nội dung đã đọc.
-const SKIP_ROLE = /^(window|pane|titlebar|menubar|menu|menuitem|button|splitbutton|scrollbar|thumb|separator|grip|tooltip|toolbar|statusbar|group|custom|image|menubaritem|axbutton|axmenuitem|axmenubaritem|axmenubutton|aximage|axgroup|axtoolbar)$/i;
-// Ô chữ: v null (không phải ô mật khẩu) nghĩa là Value/TextPattern không đọc được.
+// Chỉ Edit/Document/ComboBox có giá trị khác rỗng mới là đã đọc được thân cửa sổ.
+// Text, TabItem, nút, mục menu và khung không tính. List/Hyperlink vẫn được tin (lỗ hổng đã biết).
 const VALUE_ROLE = /^(edit|document|combobox|axtextfield|axtextarea|axcombobox|axsearchfield)$/i;
-// Phần tử mang chữ thật (tên hoặc giá trị). Nút/menu không nằm ở đây.
-const TEXT_NAME_ROLE = /^(text|hyperlink|listitem|dataitem|treeitem|header|headeritem|tabitem|axstatictext|axlink|axrow|axcell)$/i;
+const TRUSTED_NAME_ROLE = /^(listitem|hyperlink|axlink|axrow)$/i;
 function roleOf(e) { return String((e && (e.r || e.role)) || ''); }
 function nameOf(e) { return String((e && (e.n != null ? e.n : e.name)) || '').trim(); }
 function valueOf(e) { if (!e || typeof e !== 'object') return undefined; if (e.v !== undefined) return e.v; if (e.value !== undefined) return e.value; return undefined; }
 function isPassword(e) { return !!(e && (e.p === true || e.password === true || /secure/i.test(roleOf(e)))); }
-// Có phần tử mang chữ (giá trị khác rỗng, hoặc vai trò chữ có tên). Nút/menu/khung không tính.
+function valueText(e) { const v = valueOf(e); return v != null && String(v).trim() ? String(v).trim() : ''; }
+// Có Edit/Document/ComboBox mang chữ, hoặc List/Hyperlink (lỗ hổng đã biết).
 function uiaHasContent(els) {
   if (!Array.isArray(els) || !els.length) return false;
   for (const e of els) {
     if (!e || typeof e !== 'object' || isPassword(e)) continue;
     const role = roleOf(e);
-    if (SKIP_ROLE.test(role)) continue;
-    const v = valueOf(e);
-    if (v != null && String(v).trim()) return true;
-    if (TEXT_NAME_ROLE.test(role) && nameOf(e)) return true;
+    if (VALUE_ROLE.test(role) && valueText(e)) return true;
+    if (TRUSTED_NAME_ROLE.test(role) && (nameOf(e) || valueText(e))) return true;
   }
   return false;
 }
-// Edit/Document/ComboBox không phải ô mật khẩu mà v null → mới đọc được một phần.
+// Edit/Document/ComboBox không phải ô mật khẩu mà v null → Value/TextPattern không đọc được.
 function uiaValueMissing(els) {
   for (const e of els) {
     if (!e || typeof e !== 'object' || isPassword(e)) continue;
@@ -247,23 +244,20 @@ function uiaValueMissing(els) {
   }
   return false;
 }
-// Kết quả UIA → chuỗi chữ, hoặc { unread: true } khi đọc rỗng, đọc một phần, cây bị cắt, hoặc lỗi.
+// Kết quả UIA → chuỗi chữ, hoặc { unread: true } khi chưa có thân cửa sổ, đọc một phần, cây bị cắt, hoặc lỗi.
 function uiaRead(raw) {
   if (raw == null) return { unread: true };
   if (typeof raw === 'string') return raw.trim() ? raw : { unread: true };
   if (typeof raw !== 'object') return { unread: true };
-  if (raw.unread || raw.error || raw.noTree || raw.truncated || raw.timedOut) return { unread: true };
+  if (raw.unread || raw.error || raw.noTree || raw.partial || raw.truncated || raw.timedOut) return { unread: true };
   const els = Array.isArray(raw.els) ? raw.els : (Array.isArray(raw) ? raw : null);
   if (!els || uiaValueMissing(els) || !uiaHasContent(els)) return { unread: true };
   const text = els.map(e => {
     if (!e || typeof e !== 'object' || isPassword(e)) return '';
     const role = roleOf(e);
-    if (SKIP_ROLE.test(role)) return '';
-    const v = valueOf(e);
-    const parts = [];
-    if (TEXT_NAME_ROLE.test(role) && nameOf(e)) parts.push(nameOf(e));
-    if (v != null && String(v).trim()) parts.push(String(v).trim());
-    return parts.join(' ');
+    if (VALUE_ROLE.test(role)) return valueText(e);
+    if (TRUSTED_NAME_ROLE.test(role)) return nameOf(e) || valueText(e);
+    return '';
   }).filter(Boolean).join('\n');
   return text.trim() ? text : { unread: true };
 }

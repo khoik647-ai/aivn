@@ -52,34 +52,39 @@ $script:seen = 0
 function Walk($walker, $secs) {
   $out = New-Object System.Collections.ArrayList
   $q = New-Object System.Collections.Queue
-  $q.Enqueue(@($root, 0)); $script:seen = 0; $t0 = [DateTime]::UtcNow; $script:cutTrunc = $false; $script:cutTime = $false
+  $q.Enqueue(@($root, 0)); $script:seen = 0; $t0 = [DateTime]::UtcNow; $script:cutTrunc = $false; $script:cutTime = $false; $script:cutPartial = $false
   while ($q.Count -gt 0 -and $out.Count -lt $max -and $script:seen -lt 2500 -and ([DateTime]::UtcNow - $t0).TotalSeconds -lt $secs) {
     $it = $q.Dequeue(); $el = $it[0]; $d = $it[1]; $script:seen++
-    try { $c = $el.Current } catch { continue }
+    try { $c = $el.Current } catch { $script:cutPartial = $true; continue }
     $r = $c.BoundingRectangle
     $vis = (-not $c.IsOffscreen) -and (-not $r.IsEmpty) -and $r.Width -gt 1 -and $r.Height -gt 1
     if ($vis -and $d -gt 0) {
       $ct = $c.ControlType.ProgrammaticName -replace '^ControlType\.', ''
       $v = $null
       if (($ct -eq 'Edit' -or $ct -eq 'ComboBox' -or $ct -eq 'Document') -and -not $c.IsPassword) {
-        try { $v = $el.GetCurrentPattern($VP).Current.Value } catch {}
-        if (-not $v -and $ct -eq 'Document') { try { $TP = [System.Windows.Automation.TextPattern]::Pattern; $v = $el.GetCurrentPattern($TP).DocumentRange.GetText($vmax) } catch {} }
-        if ($null -ne $v -and $v.Length -gt $vmax) { $v = $v.Substring(0, $vmax) }
+        $vpOk = $false
+        try { $v = $el.GetCurrentPattern($VP).Current.Value; $vpOk = $true } catch { $v = $null }
+        if ($ct -eq 'Document' -and (-not $vpOk -or $null -eq $v -or [string]$v -eq '')) {
+          $tpOk = $false
+          try { $TP = [System.Windows.Automation.TextPattern]::Pattern; $v = $el.GetCurrentPattern($TP).DocumentRange.GetText($vmax); $tpOk = $true } catch { $v = $null }
+          if (-not $tpOk) { $v = $null }
+        }
+        if ($null -ne $v -and $v.Length -ge $vmax) { if ($v.Length -gt $vmax) { $v = $v.Substring(0, $vmax) }; $script:cutPartial = $true }
       }
       [void]$out.Add([ordered]@{ r = $ct; n = $c.Name; a = $c.AutomationId; b = @([int]$r.X, [int]$r.Y, [int]$r.Width, [int]$r.Height); e = $c.IsEnabled; p = $c.IsPassword; f = $c.HasKeyboardFocus; v = $v; d = $d })
     }
     if ($d -lt 40 -and ($vis -or $d -eq 0)) {
-      try { $ch = $walker.GetFirstChild($el); while ($ch -ne $null) { $q.Enqueue(@($ch, $d + 1)); $ch = $walker.GetNextSibling($ch) } } catch {}
-    }
+      try { $ch = $walker.GetFirstChild($el); while ($ch -ne $null) { $q.Enqueue(@($ch, $d + 1)); $ch = $walker.GetNextSibling($ch) } } catch { $script:cutPartial = $true }
+    } elseif ($d -ge 40) { $script:cutPartial = $true }
   }
   # Dừng khi còn nút chưa duyệt: hết giờ, hoặc cắt vì đủ $max / đủ 2500 phần tử (dòng điều kiện vòng lặp phía trên).
   if ($q.Count -gt 0) { if (([DateTime]::UtcNow - $t0).TotalSeconds -ge $secs) { $script:cutTime = $true } else { $script:cutTrunc = $true } }
   return ,$out
 }
-$out = Walk ([System.Windows.Automation.TreeWalker]::ControlViewWalker) 10; $via = 'control'; $seen0 = $script:seen; $trunc = [bool]$script:cutTrunc; $timed = [bool]$script:cutTime
+$out = Walk ([System.Windows.Automation.TreeWalker]::ControlViewWalker) 10; $via = 'control'; $seen0 = $script:seen; $trunc = [bool]$script:cutTrunc; $timed = [bool]$script:cutTime; $part = [bool]$script:cutPartial
 $named = @($out | Where-Object { $_.n }).Count
 if ($named -lt 3) {
-  try { $o2 = Walk ([System.Windows.Automation.TreeWalker]::RawViewWalker) 6; $n2 = @($o2 | Where-Object { $_.n }).Count; if ($n2 -gt $named) { $out = $o2; $via = 'raw'; $named = $n2; $trunc = [bool]$script:cutTrunc; $timed = [bool]$script:cutTime } } catch {}
+  try { $o2 = Walk ([System.Windows.Automation.TreeWalker]::RawViewWalker) 6; $n2 = @($o2 | Where-Object { $_.n }).Count; if ($n2 -gt $named) { $out = $o2; $via = 'raw'; $named = $n2; $trunc = [bool]$script:cutTrunc; $timed = [bool]$script:cutTime; $part = [bool]$script:cutPartial } } catch { $part = $true }
 }
 $seen = $script:seen
 # chẩn đoán khi cây nghèo: lớp/framework của gốc + các con cấp 1 (RawView)
@@ -92,7 +97,7 @@ if ($named -lt 3) {
 }
 $rc = $root.Current; $rb = $rc.BoundingRectangle
 $pn = ''; try { $pn = (Get-Process -Id $rc.ProcessId).ProcessName } catch {}
-[ordered]@{ win = [ordered]@{ title = $rc.Name; pid = $rc.ProcessId; proc = $pn; hwnd = $h; b = @([int]$rb.X, [int]$rb.Y, [int]$rb.Width, [int]$rb.Height) }; els = $out; seen = $seen; via = $via; diag = $diag; truncated = [bool]$trunc; timedOut = [bool]$timed; dpi = @{ cx = [AivnW]::GetSystemMetrics(0); cy = [AivnW]::GetSystemMetrics(1) } } | ConvertTo-Json -Depth 6 -Compress
+[ordered]@{ win = [ordered]@{ title = $rc.Name; pid = $rc.ProcessId; proc = $pn; hwnd = $h; b = @([int]$rb.X, [int]$rb.Y, [int]$rb.Width, [int]$rb.Height) }; els = $out; seen = $seen; via = $via; diag = $diag; truncated = [bool]$trunc; timedOut = [bool]$timed; partial = [bool]$part; dpi = @{ cx = [AivnW]::GetSystemMetrics(0); cy = [AivnW]::GetSystemMetrics(1) } } | ConvertTo-Json -Depth 6 -Compress
 `;
 // Mọi cửa sổ nhìn thấy, không bị che (cloaked) — kể cả cửa sổ thứ hai của cùng một tiến trình (Notepad mở hai tệp).
 // EnumWindows + IsWindowVisible + DWMWA_CLOAKED. Cửa sổ thu nhỏ vẫn được liệt kê (min) để người gọi bỏ qua.
@@ -203,11 +208,28 @@ function rescaleTree(raw, k) {
 const JXA_TREE = String.raw`
 function run(argv) {
   const max = Number(argv[0]) || 200; const want = argv[1] || ''; const vmax = Math.max(1, Number(argv[2]) || 200);
+  const hwnd = argv.length > 3 && argv[3] != null ? String(argv[3]) : '';
+  const wantId = hwnd && hwnd !== '0' ? hwnd : '';
   const se = Application('System Events');
   const procs = want ? se.applicationProcesses.whose({ name: want }) : se.applicationProcesses.whose({ frontmost: true });
-  if (!procs.length) return JSON.stringify({ win: null, els: [] });
-  const p = procs[0]; let w = null; try { w = p.windows[0]; w.name(); } catch (e) { return JSON.stringify({ win: { title: '', proc: p.name(), pid: p.unixId() }, els: [] }); }
-  const out = []; const q = [[w, 0]]; let seen = 0; const t0 = Date.now(); let truncated = false, timedOut = false;
+  if (!procs.length) return JSON.stringify({ win: null, els: [], unread: true });
+  const p = procs[0];
+  let list = [];
+  try { const spec = p.windows; list = (typeof spec === 'function' ? spec() : spec) || []; } catch (e) { list = []; }
+  if (!list || typeof list.length !== 'number') list = [];
+  let w = null;
+  if (wantId) {
+    for (let i = 0; i < list.length; i++) {
+      const cand = list[i]; let id = null;
+      try { id = cand && typeof cand.id === 'function' ? cand.id() : (cand ? cand.id : null); } catch (e) { id = null; }
+      if (id != null && String(id) === wantId) { w = cand; break; }
+    }
+    if (!w) return JSON.stringify({ win: null, els: [], unread: true, partial: true });
+  } else {
+    try { w = list[0]; if (w && typeof w.name === 'function') w.name(); } catch (e) { w = null; }
+    if (!w) return JSON.stringify({ win: { title: '', proc: p.name(), pid: p.unixId() }, els: [], unread: true });
+  }
+  const out = []; const q = [[w, 0]]; let seen = 0; const t0 = Date.now(); let truncated = false, timedOut = false, partial = false;
   const g = (f) => { try { const v = f(); return v == null ? null : v; } catch (e) { return null; } };
   while (q.length && out.length < max && seen < 900 && Date.now() - t0 < 12000) {
     const [el, d] = q.shift(); seen++;
@@ -215,15 +237,23 @@ function run(argv) {
     if (d > 0 && pos && size && size[0] > 1 && size[1] > 1) {
       const role = g(() => el.role()) || '', sub = g(() => el.subrole()) || '';
       let name = g(() => el.name()) || g(() => el.title()) || g(() => el.description()) || '';
-      let v = null; if (/AXTextField|AXTextArea|AXComboBox|AXSearchField/.test(role) && sub !== 'AXSecureTextField') { v = g(() => el.value()); if (v != null) v = String(v).slice(0, vmax); }
+      let v = null;
+      if (/AXTextField|AXTextArea|AXComboBox|AXSearchField/.test(role) && sub !== 'AXSecureTextField') {
+        v = g(() => el.value());
+        if (v != null) { const s = String(v); if (s.length >= vmax) { v = s.slice(0, vmax); partial = true; } else v = s; }
+      }
       if (!name && role === 'AXStaticText') name = String(g(() => el.value()) || '');
       out.push({ r: role, s: sub, n: String(name).slice(0, vmax), b: [Math.round(pos[0]), Math.round(pos[1]), Math.round(size[0]), Math.round(size[1])], e: g(() => el.enabled()) !== false, p: sub === 'AXSecureTextField', f: !!g(() => el.focused()), v: v, d: d });
     }
-    if (d < 25) { const kids = g(() => el.uiElements()) || []; for (const k of kids) q.push([k, d + 1]); }
+    if (d < 25) {
+      let kids = null, kidsErr = false;
+      try { kids = el.uiElements(); } catch (e) { kidsErr = true; }
+      if (kidsErr) partial = true; else for (const k of kids || []) q.push([k, d + 1]);
+    } else partial = true;
   }
   if (q.length) { if (Date.now() - t0 >= 12000) timedOut = true; else truncated = true; }
   const wp = g(() => w.position()) || [0, 0], ws = g(() => w.size()) || [0, 0];
-  return JSON.stringify({ win: { title: g(() => w.name()) || '', proc: p.name(), pid: g(() => p.unixId()), b: [wp[0], wp[1], ws[0], ws[1]] }, els: out, seen: seen, truncated: truncated, timedOut: timedOut });
+  return JSON.stringify({ win: { title: g(() => w.name()) || '', proc: p.name(), pid: g(() => p.unixId()), hwnd: wantId || g(() => (typeof w.id === 'function' ? w.id() : w.id)), b: [wp[0], wp[1], ws[0], ws[1]] }, els: out, seen: seen, truncated: truncated, timedOut: timedOut, partial: partial });
 }`;
 const JXA_WINDOWS = String.raw`
 function run() {
@@ -415,7 +445,7 @@ async function tree({ hwnd = 0, app = '', max = 300, vmax = 0 } = {}) {
     if (vmax > 0) env.AIVN_VMAX = String(vmax);
     const o = await ps(PS_TREE, env, 25000); return JSON.parse(o.trim() || '{}');
   }
-  if (process.platform === 'darwin') { const o = await run('osascript', ['-l', 'JavaScript', '-e', JXA_TREE, String(Math.min(max, 220)), app || '', String(vmax > 0 ? vmax : 200)], { timeout: 25000 }); return JSON.parse(o.trim() || '{}'); }
+  if (process.platform === 'darwin') { const o = await run('osascript', ['-l', 'JavaScript', '-e', JXA_TREE, String(Math.min(max, 220)), app || '', String(vmax > 0 ? vmax : 200), hwnd ? String(hwnd) : ''], { timeout: 25000 }); return JSON.parse(o.trim() || '{}'); }
   const wins = await linuxWindows(); const w = wins.find(x => (hwnd ? String(x.hwnd) === String(hwnd) : x.active)) || null;
   return { win: w ? { title: w.title, pid: w.pid, hwnd: w.hwnd, b: w.b } : null, els: [], noTree: true };
 }
