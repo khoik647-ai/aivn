@@ -62,20 +62,25 @@ test('ADV-A5 báo có lớn hơn số còn nợ → phần dư là nợ lại kh
   assert.strictEqual(r.totals.paid, 700000, 'đối trừ báo có không phải tiền thu');
 });
 
-test('ADV-A6 KPI “quá hạn” của báo cáo (total − current) phải khớp ô Tổng quan và không âm', async () => {
+// adapted from the reviewer's probe per the #90 review fix
+test('ADV-A6 KPI “quá hạn” dùng agedTotals.overdue: khớp Tổng quan và không âm', async () => {
   const { biz, c1, c2 } = await setup();
   day = '2026-07-01'; const A = post(biz, c1.id, 1000000); biz.registerPayment(A.id, {}); biz.postInvoice(biz.creditNote(A.id, {}).id); // báo có dư 1.1M, hạn 2026-07-01
   day = '2026-10-23'; post(biz, c2.id, 2000000, { due_date: '2026-11-20' }); // chưa đến hạn
-  const r = biz.invoiceReport({}); const ov = biz.overview(); const overdueKpi = r.agedTotals.total - r.agedTotals.current;
+  const r = biz.invoiceReport({}); const ov = biz.overview(); const overdueKpi = r.agedTotals.overdue;
   console.log('report total', r.agedTotals.total, 'current', r.agedTotals.current, 'quá hạn KPI', overdueKpi, '| overview overdue', JSON.stringify(ov.overdue), 'receivable', ov.receivable);
   assert.strictEqual(overdueKpi, ov.overdue.sum, 'quá hạn báo cáo ≠ Tổng quan');
   assert.ok(overdueKpi >= 0, 'quá hạn âm');
+  assert.strictEqual(r.agedTotals.total - r.agedTotals.current, -1100000, 'báo có vẫn hiện trong bảng tuổi nợ');
 });
 
-test('ADV-A7 báo có đăng hôm qua, thanh toán ngay (payment_days 0) → đã nằm ở nhóm 1–30 ngày', async () => {
+// adapted from the reviewer's probe per the #90 review fix
+test('ADV-A7 báo có đăng hôm qua, thanh toán ngay → nhóm 1–30 ngày −1.100.000, KPI quá hạn = 0', async () => {
   const { biz, c1 } = await setup();
   day = '2026-10-22'; const A = post(biz, c1.id, 1000000); biz.registerPayment(A.id, {}); biz.postInvoice(biz.creditNote(A.id, {}).id);
-  day = '2026-10-23'; const r = biz.invoiceReport({}); console.log('A7 buckets', JSON.stringify(r.agedTotals)); assert.strictEqual(r.agedTotals.d30, 0, 'báo có 1 ngày tuổi bị tính vào nhóm quá hạn 1–30');
+  day = '2026-10-23'; const r = biz.invoiceReport({}); console.log('A7 buckets', JSON.stringify(r.agedTotals));
+  assert.strictEqual(r.agedTotals.d30, -1100000, 'báo có vào nhóm tuổi theo hạn');
+  assert.strictEqual(r.agedTotals.overdue, 0);
 });
 
 test('ADV-A8 ngẫu nhiên 200 thao tác: Tổng quan.receivable = agedTotals.total; tổng các nhóm = total; credit = tổng residual báo có', async () => {
