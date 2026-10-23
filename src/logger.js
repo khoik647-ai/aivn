@@ -31,7 +31,7 @@ function redactListedArg(arr, i, PG) {
   if (i >= 2 && /^--api$/i.test(String(arr[i - 2])) && /^key$/i.test(String(arr[i - 1])) && !cur.startsWith('-') && PG.isSecret('key', cur)) return '***';
   return null;
 }
-function redactList(arr, depth) {
+function redactList(arr, depth, seen) {
   const PG = plugins();
   const out = [];
   const n = Math.min(arr.length, 50);
@@ -41,11 +41,11 @@ function redactList(arr, depth) {
       const hit = redactListedArg(arr, i, PG);
       if (hit != null) { out.push(hit); continue; }
     }
-    out.push(redact(cur, depth + 1));
+    out.push(redact(cur, depth + 1, seen));
   }
   return out;
 }
-function redact(v, depth = 0) {
+function redact(v, depth = 0, seen) {
   if (v == null) return v;
   if (typeof v === 'string') {
     let s = v.replace(/\bhf_[A-Za-z0-9]{8,}\b/g, 'hf_***').replace(/\b(gh[pousr]_)[A-Za-z0-9]{10,}\b/g, '$1***');
@@ -54,15 +54,22 @@ function redact(v, depth = 0) {
     catch { return s; }
   }
   if (typeof v !== 'object') return v;
+  if (!seen) seen = new WeakSet();
+  if (seen.has(v)) return '[Circular]';
   if (depth > 12) return '[…]';
-  if (Array.isArray(v)) return redactList(v, depth);
-  const PG = plugins();
-  const o = {};
-  for (const [k, x] of Object.entries(v)) {
-    if (typeof x === 'string' && PG && PG.isSecret(k, x)) o[k] = '***';
-    else o[k] = redact(x, depth + 1);
+  seen.add(v);
+  try {
+    if (Array.isArray(v)) return redactList(v, depth, seen);
+    const PG = plugins();
+    const o = {};
+    for (const [k, x] of Object.entries(v)) {
+      if (typeof x === 'string' && PG && PG.isSecret(k, x)) o[k] = '***';
+      else o[k] = redact(x, depth + 1, seen);
+    }
+    return o;
+  } finally {
+    seen.delete(v);
   }
-  return o;
 }
 const short = (s, n = 400) => { s = String(s); return s.length > n ? s.slice(0, n) + `…(+${s.length - n} ký tự)` : s; };
 function fmt(x) { if (x === undefined) return ''; if (typeof x === 'string') return short(redact(x), 4000); try { return short(JSON.stringify(redact(x)), 4000); } catch { return String(x); } }

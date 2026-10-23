@@ -173,12 +173,29 @@ function decodesToLowercaseText(v) {
   if (back !== v.replace(/=+$/, '')) return false;
   const text = raw.toString('utf8');
   if (!text || text.includes('\uFFFD') || /[A-Z]/.test(text) || !/[a-z]/.test(text)) return false;
+  // Chỉ miễn base64 của câu chữ (có khoảng trắng). Token hex và URL không có khoảng trắng vẫn là khoá.
+  if (!/\s/.test(text.trim())) return false;
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text)) return false;
   try {
     const parsed = JSON.parse(text);
     if (parsed && typeof parsed === 'object') return false;
   } catch { /* chữ thường, không phải JSON */ }
   return true;
+}
+// Base64 của hex, user:hex, hoặc URL có mật khẩu. Câu chữ có khoảng trắng không đi vào đây.
+function b64CarriesSecret(v) {
+  if (typeof v !== 'string' || v.length < 16 || v.length % 4 !== 0) return false;
+  if (!/^[A-Za-z0-9+/]+=*$/.test(v)) return false;
+  let raw;
+  try { raw = Buffer.from(v, 'base64'); } catch { return false; }
+  if (!raw.length) return false;
+  const back = raw.toString('base64').replace(/=+$/, '');
+  if (back !== v.replace(/=+$/, '')) return false;
+  const text = raw.toString('utf8');
+  if (!text || text.includes('\uFFFD') || /\s/.test(text)) return false;
+  if (/^[0-9a-f]{32,}$/i.test(text)) return true;
+  if (/^[^:@/\s]+:[0-9a-f]{32,}$/i.test(text)) return true;
+  return /^[a-z][a-z0-9+.-]*:\/\/[^/?#\s]*:[^/?#\s]+@/i.test(text);
 }
 function likelySecretValue(v) {
   if (looksLikeSecretValue(v)) return true;
@@ -472,6 +489,43 @@ function secretFindings(def) {
     if (inner) for (const x of inner) if (x && !notes.includes(x)) notes.push(x);
     return notes;
   }
+  function spanCovered(loc, start, end) {
+    const key = locKey(loc);
+    for (const f of out) {
+      if (!f.span || locKey(f.loc) !== key) continue;
+      if (start < f.span.end && f.span.start < end) return true;
+    }
+    return false;
+  }
+  // Gán NAME=value trong đối số hoặc chuỗi lệnh. Tên có biên; không lồng lượng từ.
+  function addAssignmentSpans(text, loc) {
+    const s = String(text || '');
+    const found = [];
+    const qRe = /(?:^|[\s;])(?:export[ \t]+)?([A-Za-z_][\w.-]{0,80})[ \t]*=[ \t]*(['"])([^'"\r\n]*)\2/g;
+    const uRe = /(?:^|[\s;])(?:export[ \t]+)?([A-Za-z_][\w.-]{0,80})[ \t]*=[ \t]*([^\s'"&=;]+)/g;
+    let m;
+    while ((m = qRe.exec(s))) {
+      const value = m[3];
+      if (!value) continue;
+      const end = m.index + m[0].length - 1;
+      found.push({ name: m[1], value, start: end - value.length, end });
+    }
+    while ((m = uRe.exec(s))) {
+      const value = m[2];
+      if (!value) continue;
+      const end = m.index + m[0].length;
+      found.push({ name: m[1], value, start: end - value.length, end });
+    }
+    found.sort((a, b) => a.start - b.start);
+    let last = -1;
+    for (const sp of found) {
+      if (sp.start < last) continue;
+      last = sp.end;
+      if (isRedactedValue(sp.value) || !valueIsSecret(sp.name, sp.value)) continue;
+      if (spanCovered(loc, sp.start, sp.end)) continue;
+      addNew(sanitizeSlot(sp.name), sp.value, loc, { start: sp.start, end: sp.end }, notesFor(sp.value));
+    }
+  }
   function considerString(text, loc, keyName) {
     if (typeof text !== 'string' || text === '') return;
     const whole = secretIdOf(text);
@@ -481,6 +535,7 @@ function secretFindings(def) {
     }
     if (valueIsSecret(keyName, text)) { addNew(keyName || 'secret', text, loc, null, notesFor(text)); return; }
     addSpans(text, loc);
+    addAssignmentSpans(text, loc);
   }
   for (const bag of ['env', 'headers']) {
     const obj = def && def[bag];
@@ -569,6 +624,8 @@ function secretFindings(def) {
     }
     if (valueIsSecret('', a) || (akia && looksLikeAwsSecret(a))) { addNew('arg' + i, a, loc, null, notesFor(a)); return; }
     addSpans(a, loc);
+    // NAME=value là bí mật khi tên là tên bí mật, kể cả không có -e/--env đứng trước.
+    addAssignmentSpans(a, loc);
   });
   if (def && typeof def.url === 'string' && def.url) {
     const loc = { type: 'url' };
@@ -689,9 +746,27 @@ function maskAssignments(text) {
     return pre + flag + sep + '••••';
   });
   if (mysql) s = s.replace(/(^|\s)-p(\S+)/gi, (m, pre, val) => (val && !isRedactedValue(val) ? pre + '-p••••' : m));
+  if (mysql) s = s.replace(/(^|[\s"])-p([^"\s]+)/gi, (m, pre, val) => (val && !isRedactedValue(val) ? pre + '-p••••' : m));
+  if (mysql) s = s.replace(/"-p"(\s*,\s*)"([^"]+)"/gi, (m, sep, val) => (val && !isRedactedValue(val) && !isBenignLiteral(val) ? '"-p"' + sep + '"••••"' : m));
   s = s.replace(/(^|\s)(--api)(\s+)(key)(\s+)(\S+)/gi, (m, pre, a, s1, k, s2, val) => {
     if (!val || isRealFlag(val) || isRedactedValue(val) || isBenignLiteral(val)) return m;
     return pre + a + s1 + k + s2 + '••••';
+  });
+  s = s.replace(/"--api"(\s*,\s*)"key"(\s*,\s*)"([^"]*)"/gi, (m, s1, s2, val) => {
+    if (!val || isRealFlag(val) || isRedactedValue(val) || isBenignLiteral(val)) return m;
+    return '"--api"' + s1 + '"key"' + s2 + '"••••"';
+  });
+  s = s.replace(/(^|[\s;])((?:export\s+)?)([A-Za-z_][\w.-]{0,80})([ \t]*=[ \t]*)(['"])([^'"\r\n]*)\5/g, (m, pre, ex, name, eq, q, value) => {
+    if (!value || isRedactedValue(value) || !valueLooksSecret(name, value)) return m;
+    return pre + ex + name + eq + q + '••••' + q;
+  });
+  s = s.replace(/(^|[\s;])([A-Za-z_][\w.-]{0,80})([ \t]+=[ \t]*|=[ \t]+)([^\s'"`&]+)/g, (m, pre, name, eq, value) => {
+    if (!value || isRedactedValue(value) || !valueLooksSecret(name, value)) return m;
+    return pre + name + eq + '••••';
+  });
+  s = s.replace(/(\\*["'])([A-Za-z][A-Za-z0-9_-]*)\1\s*:\s*(\\*["'])([^"'\\]*)\3/g, (m, q1, name, q2, value) => {
+    if (!value || isRedactedValue(value) || !headerValueIsSecret(name, value)) return m;
+    return q1 + name + q1 + ': ' + q2 + '••••' + q2;
   });
   s = s.replace(/"([A-Za-z][A-Za-z0-9_-]*)"\s*:\s*"([^"]*)"/g, (m, name, value) => {
     if (!value || isRedactedValue(value) || !headerValueIsSecret(name, value)) return m;
@@ -699,7 +774,7 @@ function maskAssignments(text) {
     if (i < 0) return m;
     return m.slice(0, i + 1) + '••••' + m.slice(i + 1 + value.length);
   });
-  s = s.replace(/(^|[^\w"'-])([A-Za-z][A-Za-z0-9-]*)(\s*:\s*)(\S+(?:\s+\S+)?)/g, (m, pre, name, sep, value) => {
+  s = s.replace(/(^|[^\w"'-])([A-Za-z][A-Za-z0-9_-]*)([ \t]*:[ \t]*)([|>][-+]?[ \t]*\r?\n[ \t]+\S+|\S+(?:[ \t]+\S+)?)/g, (m, pre, name, sep, value) => {
     if (!value || isRedactedValue(value)) return m;
     if (!headerValueIsSecret(name, value) && !headerValueIsSecret(name, value.split(/\s+/)[0])) return m;
     return pre + name + sep + '••••';
@@ -722,7 +797,7 @@ function maskKnownSecrets(text) {
     if (/sha(?:256|384|512)-$/i.test(s.slice(Math.max(0, at - 7), at))) return m;
     if (decodesToLowercaseText(body)) return m;
     const mixed = /[a-z]/.test(body) && /[A-Z]/.test(body) && /\d/.test(body);
-    if (!mixed && !b64JsonSecrets(body)) return m;
+    if (!mixed && !b64JsonSecrets(body) && !b64CarriesSecret(body)) return m;
     return pre + '••••';
   });
   s = maskAssignments(s);
