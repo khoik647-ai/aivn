@@ -1062,7 +1062,7 @@ function registerIpc() {
   ah('admin:issue', (_e, o) => admin.issue(o || {}));
   const saveDoc = async (r) => {
     if (r.published) return { published: true, state: r.state };
-    const d = await dialog.showSaveDialog(win, { buttonLabel: 'Lưu', title: 'Lưu revoked.json (chưa có token GitHub để tự đăng)', defaultPath: 'revoked.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
+    const d = await dialog.showSaveDialog(win, { buttonLabel: 'Lưu', title: 'Lưu revoked-v2.json (chưa có token GitHub để tự đăng)', defaultPath: 'revoked-v2.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
     if (!d.canceled && d.filePath) fs.writeFileSync(d.filePath, JSON.stringify(r.doc, null, 2) + '\n');
     return { published: false, savedTo: d.canceled ? null : d.filePath, state: r.state };
   };

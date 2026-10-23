@@ -2410,7 +2410,7 @@ function paintAdmin(a) {
       <div class="row"><button class="btn primary" type="submit">Tạo mã</button><button class="btn" type="button" id="admMine">Dùng Mã máy của máy này</button></div>
       <div id="admOut" hidden></div></form>
     <div class="sec-form"><h4>Đăng danh sách thu hồi</h4>
-      <p class="small muted">Thu hồi một mã sẽ ký lại <code>revoked.json</code>. ${a.hasToken ? 'Đã có token GitHub: AIVN tự đăng lên trang web.' : 'Chưa có token GitHub: AIVN sẽ lưu tệp revoked.json để bạn tự tải lên nhánh gh-pages.'} Máy đã bị thu hồi sẽ bị khoá ở lần kiểm tra tiếp theo (tối đa 4 giờ khi có mạng).</p>
+      <p class="small muted">Thu hồi một mã sẽ ký lại <code>revoked-v2.json</code>. ${a.hasToken ? 'Đã có token GitHub: AIVN tự đăng lên trang web.' : 'Chưa có token GitHub: AIVN sẽ lưu tệp revoked-v2.json để bạn tự tải lên nhánh gh-pages.'} Máy đã bị thu hồi sẽ bị khoá ở lần kiểm tra tiếp theo (tối đa 4 giờ khi có mạng).</p>
       <input type="password" id="admToken" placeholder="${a.hasToken ? 'Đã lưu token (nhập để thay, để trống + Lưu để xoá)' : 'Token GitHub (fine-grained, quyền Contents: Read and write cho ' + esc(a.repo) + ')'}" autocomplete="off">
       <div class="row"><button class="btn sm" id="admSaveToken">Lưu token</button><button class="btn sm" id="admPublish">Ký và đăng lại</button><button class="btn sm" id="admLock">Khoá trang Quản trị</button></div></div></div>
     <h4>Mã đã cấp từ máy này (${a.codes.length})</h4>
@@ -2429,7 +2429,7 @@ $('[data-spane="security"]').addEventListener('click', async (e) => {
     if (t.id === 'admLock') paintAdmin(await A.adminLock());
     if (t.id === 'admMine') $('#admMc').value = $('#secMachine').textContent;
     if (t.id === 'admSaveToken') { paintAdmin(await A.adminSetToken($('#admToken').value)); toast('Đã lưu ✓'); }
-    if (t.id === 'admPublish') { const r = await A.adminPublish(); toast(r.published ? 'Đã đăng revoked.json ✓ (trang web cập nhật sau 1–2 phút)' : r.savedTo ? 'Đã lưu ' + r.savedTo : 'Chưa đăng'); }
+    if (t.id === 'admPublish') { const r = await A.adminPublish(); toast(r.published ? 'Đã đăng revoked-v2.json ✓ (trang web cập nhật sau 1–2 phút)' : r.savedTo ? 'Đã lưu ' + r.savedTo : 'Chưa đăng'); }
     if (t.dataset.copycode) { await A.copyText(t.dataset.copycode); toast('Đã chép mã kích hoạt ✓'); }
     if (t.dataset.revoke) await doRevoke(t.dataset.revoke, t.dataset.name);
   } catch (err) { toast(cleanErr(err.message), true); }
@@ -2437,7 +2437,7 @@ $('[data-spane="security"]').addEventListener('click', async (e) => {
 async function doRevoke(id, name) {
   if (!(await modalAsk({ icon: '⛔', title: 'Thu hồi mã kích hoạt?', message: `Thu hồi mã ${id}${name ? ' của ' + name : ''}. Máy đó sẽ không mở được AIVN sau lần kiểm tra tiếp theo. Không hoàn tác được (muốn cho dùng lại thì cấp mã mới).`, okLabel: 'Thu hồi', noLabel: 'Huỷ' }))) return;
   const r = await A.adminRevoke(id);
-  toast(r.published ? 'Đã thu hồi và đăng revoked.json ✓' : r.savedTo ? 'Đã thu hồi, lưu revoked.json tại ' + r.savedTo + '. Hãy tải lên gh-pages.' : 'Đã thu hồi trên máy này nhưng CHƯA đăng.', !r.published && !r.savedTo);
+  toast(r.published ? 'Đã thu hồi và đăng revoked-v2.json ✓' : r.savedTo ? 'Đã thu hồi, lưu revoked-v2.json tại ' + r.savedTo + '. Hãy tải lên gh-pages.' : 'Đã thu hồi trên máy này nhưng CHƯA đăng.', !r.published && !r.savedTo);
   paintAdmin(r.state);
 }
 $('[data-spane="security"]').addEventListener('submit', async (e) => {

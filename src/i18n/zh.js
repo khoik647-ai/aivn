@@ -344,7 +344,7 @@
     "Chưa có số lượng nào được làm.": "还没有处理任何数量。",
     "Chưa có thư mục được phép": "还没有允许的文件夹",
     "Chưa có token": "还没有令牌",
-    "Chưa có token GitHub: AIVN sẽ lưu tệp revoked.json để bạn tự tải lên nhánh gh-pages.": "没有 GitHub 令牌：AIVN 会保存 revoked.json，由你自行上传到 gh-pages 分支。",
+    "Chưa có token GitHub: AIVN sẽ lưu tệp revoked-v2.json để bạn tự tải lên nhánh gh-pages.": "没有 GitHub 令牌：AIVN 会保存 revoked-v2.json，由你自行上传到 gh-pages 分支。",
     "Chưa có việc nào sắp tới.": "没有即将进行的任务。",
     "Chưa có việc nào được làm": "还没有完成任何任务",
     "Chưa có đơn bán hàng đã xác nhận trong khoảng này.": "此期间没有已确认的销售订单。",
@@ -945,7 +945,7 @@
     "Lưu & kết nối lại": "保存并重新连接",
     "Lưu lịch": "保存日程",
     "Lưu nháp": "保存草稿",
-    "Lưu revoked.json (chưa có token GitHub để tự đăng)": "保存 revoked.json（未设置 GitHub 令牌，无法自动发布）",
+    "Lưu revoked-v2.json (chưa có token GitHub để tự đăng)": "保存 revoked-v2.json（未设置 GitHub 令牌，无法自动发布）",
     "Lưu thay đổi vào cấu hình mẫu này": "将更改保存到此预设",
     "Lưu thành cấu hình mẫu mới": "另存为新预设",
     "Lưu thành cấu hình mẫu mới…": "另存为新预设……",
@@ -2346,8 +2346,8 @@
     "Đã thu": "已收款",
     "Đã thu hồi": "已撤销",
     "Đã thu hồi trên máy này nhưng CHƯA đăng.": "已在本机撤销，但尚未发布。",
-    "Đã thu hồi và đăng revoked.json ✓": "已撤销并发布 revoked.json ✓",
-    "Đã thu hồi, lưu revoked.json tại": "已撤销，revoked.json 保存在",
+    "Đã thu hồi và đăng revoked-v2.json ✓": "已撤销并发布 revoked-v2.json ✓",
+    "Đã thu hồi, lưu revoked-v2.json tại": "已撤销，revoked-v2.json 保存在",
     "Đã thêm máy chủ “{0}” — đang kết nối (lần đầu có thể mất 30–60 giây để tải gói).": "已添加服务器“{0}” — 正在连接（首次可能需要 30–60 秒下载软件包）。",
     "Đã thấy \"{0}\". AIVN AGENT sẽ mở được ứng dụng này.": "已找到“{0}”。AIVN AGENT 可以打开此应用。",
     "Đã thử lại quá nhiều lần mà bước này vẫn lỗi.": "这一步重试太多次，仍然失败。",
@@ -2383,7 +2383,7 @@
     "Đã điều chỉnh tồn: {0}{1}": "库存已调整：{0}{1}",
     "Đã đánh dấu báo giá đã gửi": "报价单已标记为已发送",
     "Đã đóng {0}": "已关闭 {0}",
-    "Đã đăng revoked.json ✓ (trang web cập nhật sau 1–2 phút)": "已发布 revoked.json ✓（网站将在 1–2 分钟后更新）",
+    "Đã đăng revoked-v2.json ✓ (trang web cập nhật sau 1–2 phút)": "已发布 revoked-v2.json ✓（网站将在 1–2 分钟后更新）",
     "Đã đảo": "已冲销",
     "Đã đặt con trỏ vào ô nhập {0} — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.": "已将光标放入输入框 {0}——输入框被选中时通常外观不变，因此这一步已经生效。下一步：使用不带 element 的 type_text 在此输入框中输入。",
     "Đã đặt con trỏ vào ô nhập — ô nhập thường không đổi hình khi được chọn, đây là ĐÃ có tác dụng. Bước tiếp: type_text KHÔNG kèm element để gõ vào ô này.": "已将光标放入输入框——输入框被选中时通常外观不变，因此这一步已经生效。下一步：使用不带 element 的 type_text 在此输入框中输入。",
@@ -2740,7 +2740,8 @@
     "Đích “{0}” không khớp sau khi đọc lại": "重新读取后，目标文件“{0}”不一致。",
     "Đổi tên “{0}” không khớp nội dung": "重命名“{0}”后内容不一致。",
     "Thư mục này trỏ tới chính thư mục mô hình hiện tại (đường tắt, liên kết, hoặc cùng một thư mục với tên khác). Hãy chọn thư mục khác.": "此文件夹指向当前的模型文件夹（快捷方式、链接，或同一文件夹的另一个名称）。请选择其他文件夹。",
-    "Không chuyển liên kết “{0}”. Đây là đường tắt, không phải tệp mô hình. Liên kết và tệp mà nó trỏ tới vẫn còn nguyên. Hãy thay bằng tệp thật hoặc dời liên kết đi rồi thử lại.": "无法移动链接“{0}”，因为它是快捷方式，不是模型文件。链接及其指向的文件均未改动。请换成真实文件，或先移走该链接再试。"
+    "Không chuyển liên kết “{0}”. Đây là đường tắt, không phải tệp mô hình. Liên kết và tệp mà nó trỏ tới vẫn còn nguyên. Hãy thay bằng tệp thật hoặc dời liên kết đi rồi thử lại.": "无法移动链接“{0}”，因为它是快捷方式，不是模型文件。链接及其指向的文件均未改动。请换成真实文件，或先移走该链接再试。",
+    "Khoá này không khớp với bản AIVN này. Bạn có thể cần bản AIVN mới hơn.": "此密钥与当前 AIVN 版本不匹配。你可能需要更新的 AIVN 版本。"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

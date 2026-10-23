@@ -22,14 +22,14 @@ function createAdmin({ dir, fetchJson, fetchRaw, publicX = L.PUBLIC_KEY_X, log =
 
   function state() {
     const st = read(FILE, null); const iss = issued();
-    return { imported: !!st, unlocked: alive(), hasToken: !!(st && st.token), repo, revokedUrl: L.REVOKED_URL,
+    return { imported: !!st, unlocked: alive(), hasToken: !!(st && st.token), repo, revokedUrl: L.REVOKED_URL_NEXT,
       codes: alive() ? iss.codes.map(c => ({ ...c, revoked: iss.revoked.includes(c.id) })).reverse() : [], revokedCount: iss.revoked.length, lastPublish: st ? st.lastPublish || null : null };
   }
   async function importKey(json, pass) {
     if (typeof pass !== 'string' || [...pass].length < 8) throw new Error('Cụm mật khẩu quản trị cần ít nhất 8 ký tự');
     let k; try { k = typeof json === 'string' ? JSON.parse(json) : json; } catch { throw new Error('Tệp khoá không phải JSON hợp lệ'); }
     if (!k || k.type !== 'aivn-admin-key' || typeof k.privateKey !== 'string') throw new Error('Đây không phải tệp khoá quản trị AIVN (aivn-admin-key.json)');
-    if (k.publicKey !== publicX) throw new Error('Khoá này không khớp với khoá công khai trong ứng dụng AIVN');
+    if (k.publicKey !== publicX) throw new Error(L.ADMIN_KEY_MISMATCH);
     let priv; try { priv = crypto.createPrivateKey(k.privateKey); } catch { throw new Error('Khoá riêng bị hỏng'); }
     const probe = Buffer.from('aivn-probe'); if (!crypto.verify(null, probe, crypto.createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: publicX }, format: 'jwk' }), crypto.sign(null, probe, priv))) throw new Error('Khoá riêng không khớp khoá công khai');
     const salt = crypto.randomBytes(16); const key = await kdf(pass, salt);
@@ -63,15 +63,25 @@ function createAdmin({ dir, fetchJson, fetchRaw, publicX = L.PUBLIC_KEY_X, log =
     log(`[quản trị] đã cấp mã ${r.info.id} cho máy ${L.fmtMachine(r.info.machineCode)}`);
     return { code: r.code, info: r.info, state: state() };
   }
-  // Danh sách thu hồi hiện hành = bản đang công khai (đã kiểm chữ ký) ∪ bản trên máy này
+  // Khoá thử chỉ tin đúng khoá đó. Bản phát hành tin cả khoá cũ: revoked.json công khai vẫn do khoá cũ ký.
+  const revokedKeys = () => publicX === L.PUBLIC_KEY_X ? L.TRUSTED_KEYS : publicX;
+  // Danh sách thu hồi hiện hành = bản cũ (đóng băng) ∪ bản mới ∪ bản trên máy này. Chỉ ĐĂNG bản mới.
   async function currentRevoked() {
     const ids = new Set(issued().revoked);
-    try { const doc = await fetchJson(L.REVOKED_URL + '?t=' + now()); L.verifyRevoked(doc, publicX).revoked.forEach(i => ids.add(i)); } catch (e) { log('[quản trị] không tải được revoked.json đang công khai: ' + e.message); }
+    const keys = revokedKeys();
+    for (const url of [L.REVOKED_URL, L.REVOKED_URL_NEXT]) {
+      try {
+        const doc = await fetchJson(url + (String(url).includes('?') ? '&' : '?') + 't=' + now());
+        L.verifyRevoked(doc, keys).revoked.forEach(i => ids.add(i));
+      } catch (e) { log('[quản trị] không tải được danh sách thu hồi (' + String(url).replace(/\?.*$/, '') + '): ' + e.message); }
+    }
     return [...ids];
   }
   async function publishDoc(doc) {
     const s = need(); if (!s.token) return { published: false, doc };
-    const api = `https://api.github.com/repos/${repo}/contents/revoked.json`;
+    // revoked-v2.json, không phải revoked.json: bản cũ coi chữ ký khoá mới là kiểm tra thất bại và khoá sau GRACE_DAYS.
+    const file = L.REVOKED_URL_NEXT.split('/').pop();
+    const api = `https://api.github.com/repos/${repo}/contents/${file}`;
     const h = { Authorization: 'Bearer ' + s.token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'AIVN' };
     let sha; try { const r = await fetchRaw(api + '?ref=gh-pages', { headers: h }); if (r.ok) sha = (await r.json()).sha; } catch {}
     const body = { message: `Cập nhật danh sách thu hồi (${JSON.parse(Buffer.from(doc.payload, 'base64')).revoked.length})`, branch: 'gh-pages', content: Buffer.from(JSON.stringify(doc, null, 2) + '\n').toString('base64'), ...(sha ? { sha } : {}) };
@@ -87,7 +97,7 @@ function createAdmin({ dir, fetchJson, fetchRaw, publicX = L.PUBLIC_KEY_X, log =
     const ids = await currentRevoked(); if (!ids.includes(id)) ids.push(id);
     const doc = L.signRevoked(s.pem, ids, now());
     const r = await publishDoc(doc);
-    log(`[quản trị] đã thu hồi ${id}${r.published ? ' và đăng revoked.json' : ' (chưa đăng: chưa có token GitHub)'}`);
+    log(`[quản trị] đã thu hồi ${id}${r.published ? ' và đăng revoked-v2.json' : ' (chưa đăng: chưa có token GitHub)'}`);
     return { ...r, state: state() };
   }
   async function publish() { const s = need(); const doc = L.signRevoked(s.pem, await currentRevoked(), now()); return { ...(await publishDoc(doc)), state: state() }; }
