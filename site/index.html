@@ -117,6 +117,11 @@ html.is-mobile .dl-row>.dl-btn,html.is-mobile .dl-row>.mac-wrap{display:none}
 .app-input .send{margin-left:auto;width:28px;height:28px;border-radius:8px;background:var(--accent);display:grid;place-items:center;color:#fff;font-weight:800}
 .app-status{display:flex;gap:16px;font-size:.68rem;color:var(--faint);background:var(--bg2);padding:8px 16px;border-top:1px solid var(--line);font-family:'JetBrains Mono',monospace}
 .app-status .ok{color:#1a7f37}
+/* redesign (hero): one-line version pill, tighter hero rhythm so the download row sits higher on the first screen */
+.hero .badge{display:inline-block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:top;line-height:1.5}
+.hero .badge .dot{display:inline-block;vertical-align:middle;margin:-2px 8px 0 0}
+.hero h1{margin-bottom:16px}.hero p.lead{margin-bottom:28px}
+@media (max-width:760px){section.hero{padding-top:24px}.hero .badge{margin-bottom:12px}.hero h1{font-size:clamp(1.9rem,8.2vw,2.4rem);line-height:1.15}.hero p.lead{font-size:1rem;margin-bottom:22px}}
 
 /* stats strip */
 .strip{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:28px 0;background:var(--bg2)}
