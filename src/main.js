@@ -74,6 +74,9 @@ function findNode() {
   }
   return cands.find(p => { try { return fs.statSync(p).isFile(); } catch { return false; } }) || null;
 }
+// Bản đóng gói: llama-server ở resources/llama. Tiến trình con nhận AIVN_RESOURCES qua engine-proxy;
+// tiến trình chính (embeddings) cũng cần, không chỉ khi chạy llama.cpp ngay trong Electron.
+if (process.resourcesPath && !process.env.AIVN_RESOURCES) process.env.AIVN_RESOURCES = process.resourcesPath;
 const hostScript = path.join(__dirname, 'engine-host.js').replace(/app\.asar([\\/])/, 'app.asar.unpacked$1');
 const nodePath = process.env.AIVN_INPROC === '1' ? null : findNode();
 // B13 (QA lượt 2): ghi pid llama-server ra tệp; lần mở sau dọn tiến trình còn sót khi AIVN bị tắt đột ngột (kill, sập, mất điện…)
@@ -88,7 +91,6 @@ if (nodePath) {
     onCrash: (e) => { engineDied = true; send('model:status', { loaded: false }); send('engine:crash', { message: e.message }); } });
 } else {
   console.warn('[engine] không tìm thấy Node.js đi kèm, chạy llama.cpp ngay trong Electron (mô hình > 2 GB chạy CPU có thể lỗi)');
-  if (process.resourcesPath && !process.env.AIVN_RESOURCES) process.env.AIVN_RESOURCES = process.resourcesPath;
   const inproc = require('./engine');
   inproc.setLoadProgress((p) => send('model:progress', { id: p.id, pct: p.pct, mode: p.mode }));
   engine = { ...inproc, external: false, calibrate: async () => {}, ocr: (b) => require('./ocr').recognize(b), start: async () => {}, stop: async () => {} };
@@ -358,15 +360,18 @@ const log = (msg) => { LOG.log('app', msg); const e = { t: Date.now(), msg }; se
 
 const SPLIT_RE = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i;
 // Mô hình nhúng (dùng cho tìm kiếm tài liệu), không phải mô hình trò chuyện
-const EMBED_RE = /(^|[-_.])(embed|embedding|bge-m3|bge-small|bge-base|bge-large|multilingual-e5|e5-(small|base|large)|nomic-embed|gte-)/i;
 const NAMES = require('./model-names'); // mục 5: tên tệp chung (q4_k_m.gguf) → id/khớp danh mục kèm tên repo
 function modelIdFromFile(f) { return NAMES.idFor(f, SPLIT_RE); }
+// Ẩn khỏi danh sách trò chuyện khi tên tệp khớp EMBED_RE hoặc siêu dữ liệu chắc là mô hình nhúng.
+function isEmbedGguf(full) {
+  try { return require('./embed-server').isEmbedGguf(full); } catch { return false; }
+}
 
 // Quét thư mục mô hình (models/<tác giả>/<repo>/<tệp>.gguf và tệp ở gốc). Mô hình chia phần chỉ hiện một dòng.
 function scanDir(dir, depth, out, root = paths.models) {
   let ents = [];
   try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  const files = ents.filter(e => e.isFile() && /\.gguf$/i.test(e.name) && !/mmproj/i.test(e.name) && !EMBED_RE.test(e.name));
+  const files = ents.filter(e => e.isFile() && /\.gguf$/i.test(e.name) && !/mmproj/i.test(e.name) && !isEmbedGguf(path.join(dir, e.name)));
   const mmName = hf.pickMmprojFile(ents.filter(e => e.isFile()).map(e => e.name));
   const mmproj = mmName ? path.join(dir, mmName) : null;
   for (const e of files) {
@@ -395,6 +400,7 @@ function listModels() {
   // “chỉ trỏ sang thư mục mới”: thư mục mô hình cũ vẫn được quét (mô hình cũ vẫn hiện, vẫn nạp được)
   for (const d of settings.data.modelDirsExtra || []) if (d && path.resolve(d) !== path.resolve(paths.models) && fs.existsSync(d)) scanDir(d, 3, out, d);
   for (const full of settings.data.imported) {
+    if (isEmbedGguf(full)) continue;
     try { const s = fs.statSync(full); let mm = null; try { const n = hf.pickMmprojFile(fs.readdirSync(path.dirname(full))); if (n) mm = path.join(path.dirname(full), n); } catch {}
       out.push({ id: modelIdFromFile(full), file: path.basename(full), path: full, size: s.size, mtime: s.mtimeMs, source: 'imported', parts: 1, mmproj: mm, vision: !!mm }); } catch {}
   }
@@ -486,6 +492,7 @@ function cleanLoad(o) {
 }
 const modelLoadFor = (id) => cleanLoad(((settings.data.modelLoad || {})[id]) || {});
 let idleVramUsed = null;
+let embedProc = null; // llama-server --embeddings; dừng trước khi đo VRAM và nạp mô hình trò chuyện
 // sau khi nạp TRỌN lên GPU: VRAM tăng thêm = số đo thật cho mô hình này ở ngữ cảnh đã nạp (Khám phá / Mô hình của tôi dùng số này thay cho ước tính)
 async function measureVram(id, st) {
   if (idleVramUsed == null || !st || st.mode === 'cpu-only' || !(Number.isInteger(st.gpuLayers) && st.gpuLayers > 0 && st.gpuLayers >= (st.totalLayers || 0))) return;
@@ -544,6 +551,12 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
     if (opts.mmproj) opts.serverExe = await serverExeFor();
     LOG.log('load', `Bắt đầu nạp ${m.file}`, { size: m.size, ctx: opts.contextSize, gpuLayers: opts.gpuLayers ?? 'tự động', vision: !!opts.mmproj, ...(opts.serverArgs && opts.serverArgs.length ? { args: opts.serverArgs.join(' ') } : {}) });
     const tLoad = Date.now();
+    // Giữ máy nhúng suốt lúc nạp: yêu cầu /v1/embeddings đến giữa chừng phải đợi xong rồi mới chọn -ngl.
+    // Dừng tiến trình đang chạy (kể cả lần start chưa xong) trước khi đo VRAM rảnh và trước engine.loadModel.
+    const ep = embeddingProc();
+    ep.hold(HOLD_MS);
+    try {
+    if (embedProc) { try { await embedProc.stop(); } catch (e) { log('[embed] không dừng được trước khi nạp mô hình: ' + (e && e.message || e)); } }
     // B38: số đo VRAM thật — VRAM đã dùng lúc chưa nạp mô hình (màn hình, ứng dụng khác) làm mốc
     try { if (!engine.status().loaded) { const h0 = await engine.hardwareInfo(); if (h0 && h0.vram && h0.vram.total > 0 && !h0.vram.integratedOnly) idleVramUsed = h0.vram.total - h0.vram.free; } } catch {}
     try {
@@ -589,6 +602,7 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
     settings.data.lastModel = m.id; settings.save(); lastUse = Date.now();
     send('model:status', st);
     return st;
+    } finally { ep.release(); }
   } catch (e) { send('model:status', engine.status()); throw e; }
 }
 
@@ -1032,20 +1046,48 @@ function withParts(orig, text) {
   return [{ type: 'text', text }, ...orig.filter(x => x && x.type === 'image_url')];
 }
 
+// /v1/embeddings: llama-server --embeddings riêng (src/embed-server.js). RAG vẫn dùng ensureEmbedder() trong tiến trình engine.
+const { createEmbedServer, embedGpuChoice, chatIdsExcept, GPU_PROBE_MS, HOLD_MS } = require('./embed-server');
+function embeddingProc() {
+  if (embedProc) return embedProc;
+  embedProc = createEmbedServer({
+    log,
+    gpuLayers: () => embedGpuChoice({
+      timeoutMs: GPU_PROBE_MS,
+      chatLoaded: () => { try { return !!engine.status().loaded; } catch { return false; } },
+      probe: async () => {
+        const raw = await engine.hardwareInfo();
+        const h = (process.env.AIVN_QA_FAKEHW && !app.isPackaged) ? { ...raw, ...JSON.parse(process.env.AIVN_QA_FAKEHW) } : raw;
+        return withGpuName(h);
+      },
+    }),
+  });
+  return embedProc;
+}
+function embeddingDirs() {
+  const dirs = [];
+  try { if (paths && paths.models) dirs.push(paths.models); } catch {}
+  try { for (const d of (settings && settings.data && settings.data.modelDirsExtra) || []) if (d && !dirs.includes(d)) dirs.push(d); } catch {}
+  return dirs;
+}
 const api = createApiServer({ engine, models: listModels, ensureModel: (m) => ensureModel(m, { api: true }), log, getOpts: () => ({ cors: !!settings.data.apiCors, apiKey: settings.data.apiKey || null }), isBlocked: () => !activated() ? 'AIVN chưa được kích hoạt trên máy này.' : isLocked() ? 'AIVN đang khoá. Hãy mở khoá ứng dụng để dùng máy chủ API.' : null, embeddings: {
   info: () => embedInfo(),
+  list: () => embeddingProc().list(embeddingDirs()),
   async ensure(model) {
     // B80: tên mô hình nhúng kiểu OpenAI/LangChain (text-embedding-3-small, nomic-embed…) → dùng mô hình nhúng đã cài (như LM Studio);
     // chỉ báo lỗi khi tên là một mô hình TRÒ CHUYỆN đã cài (gọi nhầm endpoint).
-    if (model && String(model).toLowerCase() !== EMBED.id && listModels().some(m => m.id === model)) {
-      const e = new Error(`"${model}" là mô hình trò chuyện, không tạo embeddings được. Dùng "${EMBED.id}" (hoặc bỏ trường "model").`); e.status = 400; throw e;
-    }
-    if (!embedInfo().installed) { const e = new Error(`Chưa tải mô hình nhúng "${EMBED.id}". Hãy mở AIVN → Cài đặt → Tìm kiếm tài liệu để tải.`); e.status = 400; throw e; }
-    await ensureEmbedder();
-    return { id: EMBED.id };
+    const srv = embeddingProc();
+    const embedRows = srv.list(embeddingDirs());
+    const target = srv.resolve(model, {
+      models: embedRows,
+      fallbackId: EMBED.id,
+      chatIds: chatIdsExcept(listModels().map(m => m.id), embedRows),
+      chatMessage: (m) => `"${m}" là mô hình trò chuyện, không tạo embeddings được. Dùng "${EMBED.id}" (hoặc bỏ trường "model").`,
+    });
+    return srv.open(target);
   },
-  embed: (texts) => engine.embed(texts, 'passage'),
-  count: (texts) => Promise.resolve(engine.embedCount(texts)).then(a => a.reduce((s, x) => s + x, 0)), // engine trong tiến trình trả mảng ngay, qua proxy trả Promise
+  embed: (texts) => embeddingProc().embed(texts),
+  count: (texts) => embeddingProc().count(texts),
 } });
 const updater = createUpdater({ send, log: (m) => console.log(m) });
 
