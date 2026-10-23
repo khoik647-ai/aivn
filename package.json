@@ -16,6 +16,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
+    "@modelcontextprotocol/server-filesystem": "2.0.0",
+    "@modelcontextprotocol/server-memory": "2.0.0",
+    "@modelcontextprotocol/server-sequential-thinking": "2.0.0",
+    "@negokaz/excel-mcp-server": "0.12.0",
     "@node-llama-cpp/mac-arm64-metal": "3.22.2",
     "@node-llama-cpp/mac-x64": "3.22.2",
     "@node-llama-cpp/win-x64": "3.22.2",
@@ -28,6 +32,7 @@
     "electron-updater": "6.8.9",
     "fflate": "0.8.2",
     "mammoth": "1.13.0",
+    "mcp-fetch-server": "1.1.2",
     "node-llama-cpp": "3.22.2",
     "npm": "^10.9.9",
     "pdfjs-dist": "5.6.205",
