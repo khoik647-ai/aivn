@@ -416,14 +416,21 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
     const sign = (i) => i.kind === 'out_refund' ? -1 : 1;
     const byMonth = new Map(); for (const i of all) { const k = i.invoice_date.slice(0, 7); const g = byMonth.get(k) || { key: k, untaxed: 0, tax: 0, total: 0, count: 0 }; g.untaxed += sign(i) * i.amount_untaxed; g.tax += sign(i) * i.amount_tax; g.total += sign(i) * i.amount_total; g.count++; byMonth.set(k, g); }
     const t = today(); const aged = new Map();
-    for (const i of db.all("SELECT * FROM invoices WHERE state = 'posted' AND kind = 'out_invoice'").map(pubInvoice).filter(i => i.residual > 0)) {
+    // #51: giấy báo có khách hàng chưa đối trừ / chưa hoàn tiền (vd. báo có cho hoá đơn đã thu đủ) là tiền mình nợ lại khách → trừ vào công nợ phải thu (Odoo Aged Receivable cũng vậy)
+    for (const i of db.all("SELECT * FROM invoices WHERE state = 'posted' AND kind IN ('out_invoice','out_refund')").map(pubInvoice).filter(i => i.residual > 0)) {
       const late = isDate(i.due_date) ? daysBetween(i.due_date, t) : 0; const b = late <= 0 ? 'current' : late <= 30 ? 'd30' : late <= 60 ? 'd60' : late <= 90 ? 'd90' : 'older';
-      const g = aged.get(i.partner_id) || { partner_id: i.partner_id, partner_name: i.partner_name, current: 0, d30: 0, d60: 0, d90: 0, older: 0, total: 0 }; g[b] += i.residual; g.total += i.residual; aged.set(i.partner_id, g);
+      const amt = sign(i) * i.residual;
+      const g = aged.get(i.partner_id) || { partner_id: i.partner_id, partner_name: i.partner_name, current: 0, d30: 0, d60: 0, d90: 0, older: 0, total: 0, credit: 0 }; g[b] += amt; g.total += amt; if (amt < 0) g.credit -= amt; aged.set(i.partner_id, g);
     }
     const agedRows = [...aged.values()].sort((a, b) => b.total - a.total);
     const sum = (k) => all.reduce((a, i) => a + sign(i) * i[k], 0);
-    return { byMonth: [...byMonth.values()].sort((a, b) => a.key.localeCompare(b.key)), totals: { untaxed: sum('amount_untaxed'), tax: sum('amount_tax'), total: sum('amount_total'), paid: db.get('SELECT COALESCE(SUM(p.amount), 0) AS s FROM payments p JOIN invoices i ON i.id = p.invoice_id WHERE i.kind = \'out_invoice\'').s },
-      aged: agedRows, agedTotals: ['current', 'd30', 'd60', 'd90', 'older', 'total'].reduce((o, k) => (o[k] = agedRows.reduce((a, r) => a + r[k], 0), o), {}) };
+    // #51: “Đã thu” chỉ cộng tiền thu có NGÀY trong khoảng lọc (trước đây cộng mọi lần thu từ trước tới nay, kể cả hoá đơn đã huỷ); thêm “refunded” (hoàn tiền cho khách)
+    const payIn = (kind) => db.all("SELECT p.amount, p.date FROM payments p JOIN invoices i ON i.id = p.invoice_id WHERE i.kind = ? AND i.state = 'posted'", [kind]).filter(p => inRange(p.date || '', from, to)).reduce((a, p) => a + p.amount, 0);
+    const agedTotals = ['current', 'd30', 'd60', 'd90', 'older', 'total', 'credit'].reduce((o, k) => (o[k] = agedRows.reduce((a, r) => a + r[k], 0), o), {});
+    // KPI “quá hạn” chỉ cộng số còn lại của hoá đơn khách đã quá hạn. Giấy báo có vẫn nằm trong bảng tuổi nợ (số âm theo hạn) nhưng không được kéo KPI này xuống âm — cùng số với Tổng quan.
+    agedTotals.overdue = db.all("SELECT * FROM invoices WHERE state = 'posted' AND kind = 'out_invoice'").map(pubInvoice).filter(i => i.overdue).reduce((a, i) => a + i.residual, 0);
+    return { byMonth: [...byMonth.values()].sort((a, b) => a.key.localeCompare(b.key)), totals: { untaxed: sum('amount_untaxed'), tax: sum('amount_tax'), total: sum('amount_total'), paid: payIn('out_invoice'), refunded: payIn('out_refund') },
+      aged: agedRows, agedTotals };
   }
   function stockReport() { const s = listStock({}); return { rows: s.rows, totalValue: s.totalValue, low: s.rows.filter(r => r.below_min), negative: s.rows.filter(r => r.on_hand < -EPS) }; }
   // số liệu nhanh cho Tổng quan
@@ -431,13 +438,14 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
     const t = today(); const m = t.slice(0, 7);
     const orders = listOrders({ kind: 'orders' });
     const inv = db.all("SELECT * FROM invoices WHERE state = 'posted'").map(pubInvoice);
+    const customerCredit = inv.filter(i => i.kind === 'out_refund').reduce((a, i) => a + i.residual, 0); // #51: khớp báo cáo công nợ phải thu
     return {
       quotesDraft: db.get("SELECT count(*) AS n FROM quotes WHERE status IN ('draft','sent')").n,
       toInvoice: orders.filter(o => o.invoice_status === 'to_invoice').length,
       deliveriesReady: db.get("SELECT count(*) AS n FROM pickings WHERE kind = 'out' AND state = 'ready'").n,
       receiptsReady: db.get("SELECT count(*) AS n FROM pickings WHERE kind = 'in' AND state = 'ready'").n,
       overdue: { n: inv.filter(i => i.overdue && i.kind === 'out_invoice').length, sum: inv.filter(i => i.overdue && i.kind === 'out_invoice').reduce((a, i) => a + i.residual, 0) },
-      receivable: inv.filter(i => i.kind === 'out_invoice').reduce((a, i) => a + i.residual, 0),
+      receivable: inv.filter(i => i.kind === 'out_invoice').reduce((a, i) => a + i.residual, 0) - customerCredit, customerCredit, // #51: trừ giấy báo có khách hàng chưa đối trừ, cùng số với báo cáo
       salesMonth: orders.filter(o => monthOf(o.confirmed_at || o.updated_at) === m).reduce((a, o) => a + o.subtotal, 0),
       invoicedMonth: inv.filter(i => (i.invoice_date || '').slice(0, 7) === m).reduce((a, i) => a + (i.kind === 'out_refund' ? -1 : 1) * i.amount_untaxed, 0),
       lowStock: listStock({ filter: 'low' }).rows.length,

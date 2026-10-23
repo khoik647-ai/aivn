@@ -148,7 +148,7 @@ test('B69: chốt GỬI — mọi đường có thể gửi đều là “gửi�
 });
 test('B69: chốt nằm trong mã (act + performAt), áp cho chuỗi then[], lời gọi in ra chữ, open_chat; nhật ký ghi xin phép/cho phép/từ chối + người nhận', () => {
   const src = fs.readFileSync(path.join(root, 'src/desktop-agent.js'), 'utf8');
-  assert.match(src, /const gate = SG\.classify\(action, a, gateState\(\)\)/);
+  assert.match(src, /const gate = SendGate\.classify\(action, a, gateState\(\)\)/);
   assert.match(src, /const searchTyping = !gate\.send && /, 'gõ “tìm kiếm” không còn bỏ qua chốt gửi');
   assert.match(src, /const isSend = gate\.send;/);
   assert.match(src, /CHẶN \(B69\): thao tác có thể gửi chưa qua chốt duyệt/); assert.match(src, /if \(a && !a\.__sendOk && !a\.__notSend\)/);
