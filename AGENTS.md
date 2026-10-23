@@ -1,6 +1,6 @@
 # Quy tắc làm việc cho bot AIVN
 
-Dành cho bot trên kho `khoik647-ai/aivn`. Thuật ngữ trong room: [`docs/GLOSSARY.md`](docs/GLOSSARY.md).
+Dành cho bot trên kho `khoik647-ai/aivn`. Thuật ngữ trong room: [`docs/room-terms.md`](docs/room-terms.md).
 
 ## Nhánh
 
@@ -50,5 +50,5 @@ Nhận task từ bảng Notion Tasks hoặc từ Quản Lý. Claim: Bot = mình,
 
 1. **TEST ĐỎ TRƯỚC.** Mỗi bản sửa lỗi có test tái hiện đúng lỗi: test đỏ trên code cũ, rồi mới sửa cho xanh. Mô tả PR ghi tên test và kết quả đỏ (base) / xanh (head). Trưởng trả về PR thiếu phần này.
 2. **HỎI KỸ TRƯỚC KHI LÀM.** Trước khi code việc mới hoặc tính năng, gửi Quản Lý một loạt câu hỏi làm rõ (phạm vi, việc không làm, cách kiểm tra), gộp một lần. Sửa theo review thì không cần hỏi lại.
-3. **THUẬT NGỮ CHUNG** trong room, xem `docs/GLOSSARY.md`. Tin ngắn. Không nhắc lại nội dung cũ.
+3. **THUẬT NGỮ CHUNG** trong room, xem `docs/room-terms.md`. Tin ngắn. Không nhắc lại nội dung cũ.
 4. **HỌC ĐỐI THỦ.** Khi làm tính năng mới, sau khi Khôi cho phép: mổ xẻ cách LM Studio, Ollama, Jan và sản phẩm cùng loại làm, từ tài liệu và code công khai, rồi ghi nguồn làm bằng chứng. Chỉ học ý tưởng. Không chép code. Tôn trọng license.
