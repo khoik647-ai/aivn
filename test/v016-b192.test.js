@@ -143,9 +143,9 @@ test('B192 re-review #68 (2): write_file rồi open_app mở ứng dụng TRỐN
   assert.strictEqual(RT.effectOf([wf, { name: 'open_app', args: { name: 'notepad "C:\\Users\\A\\xin-chao.txt"' }, status: 'ok' }, st2('click')], 'mở Notepad và gõ xin chào').ok, true, 'open_app với tệp làm đối số');
 });
 test('B192 re-review #68 (3): typeTask bắt các câu gõ thường gặp; vẫn không bắt nhầm các câu đã loại', () => {
-  for (const q of ['mở Word viết bài thơ', 'mở Notepad viết một bài thơ', 'mở notepad gõ xin chào', 'copy this and type it in notepad', 'open notepad typing hello', '在记事本里写"你好"', '在记事本里写你好'])
+  for (const q of ['mở Word viết bài thơ', 'mở Notepad viết một bài thơ', 'mở notepad gõ xin chào', 'copy this and type it in notepad', 'open notepad typing hello', '在记事本里写"你好"', '在记事本里写你好', '在 Word 文档里写一首诗', '在Notepad中写你好'])
     assert.strictEqual(RT.typeTask(q), true, q);
-  for (const q of ['mở bài viết mới nhất trên Facebook', 'tra giá nhập khẩu', 'đăng nhập Zalo', 'what type of file is this', 'open input settings', '去写字楼', '切换输入法'])
+  for (const q of ['mở bài viết mới nhất trên Facebook', 'tra giá nhập khẩu', 'đăng nhập Zalo', 'what type of file is this', 'open input settings', '去写字楼', '切换输入法', '在家里写作业', '我在公司里写代码，帮我打开浏览器', '在网上写评论的人很多，帮我查天气'])
     assert.strictEqual(RT.typeTask(q), false, q);
   // và có tác dụng: việc gõ mà chỉ bấm menu → failed
   assert.strictEqual(RT.effectOf([st2('click')], 'mở Word viết bài thơ').why, 'typed');

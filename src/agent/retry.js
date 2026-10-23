@@ -101,12 +101,13 @@ function blamesApp(text) { return BLAME_RE.test(String(text || '')); }
 // Việc chỉ XONG khi thao tác quyết định đã có tác dụng ĐÃ KIỂM trên màn hình (step.check = kiểm tra tự động thấy chưa có tác dụng):
 //   (a) việc cần GÕ chữ vào ứng dụng mà không có bước nào được kiểm là đã có chữ (gõ / dán / ghi tệp rồi mở) → 'typed'
 //   (b) bước màn hình cuối cùng (bỏ qua phím lưu/đóng/Enter) báo lỗi hoặc có dấu hiệu CHẮC CHẮN chưa có tác dụng → 'last'
+// review #68 (15c7090): zh “在…里写” chỉ khi phần 在…里 có tên trình soạn thảo (记事本/Notepad/Word/文档…) — không bắt “在家里写作业”, “在公司里写代码”
 // review #68: chỉ coi là việc GÕ khi động từ ở đầu mệnh đề (mệnh lệnh: “…và gõ”, “then type”) hoặc có tân ngữ/chuỗi trích dẫn đi kèm;
 // không tính “bài viết”, “nhập khẩu”, “what type”, “input settings”, “写字楼”, “输入法”…
 const TYPE_NOT = /bài\s+viết|người\s+viết|nhà\s+văn|nhập\s+(?:khẩu|cảnh|học|viện|ngũ|môn|tâm|vai|gia)|đăng\s+nhập|(?:what|which|this|that|file|data|any|the)\s+type\b|type\s+(?:of|is|was)\b|\binput\s+(?:settings?|methods?|devices?|sources?|languages?|lag)\b|写字楼|输入法|输入设置|描写|写真/giu;
 const TYPE_VI = /(?:^|[,.;:!?\n]\s*|(?:^|[^\p{L}])(?:và|rồi|sau đó|xong|hãy|giúp|cho|để|thì|vào|lên|mình|tôi|em|bạn)\s+)(?:gõ|viết|nhập|điền|soạn)(?![\p{L}])|(?:^|[^\p{L}])(?:gõ|viết|nhập|điền|soạn)(?:\s+(?:vào|lên|thêm|lại|một|1|hai|vài|mấy|các|những))*\s+(?:["“'«]|(?:chữ|câu|dòng|nội dung|văn bản|đoạn|thư|tin|lời|số|tên|địa chỉ|ghi chú|tiêu đề|từ|thơ|bài thơ|bài văn|bài luận|email|e-mail|mail|đoạn văn)(?![\p{L}]))|(?:^|[^\p{L}])(?:notepad|word|wordpad|sổ tay|ghi chú|notes|textedit|gedit|google docs|docs)\s+(?:(?:và|rồi|để|lên|ra|vào)\s+)?(?:gõ|viết|nhập|soạn|điền)(?![\p{L}])/iu;
 const TYPE_EN = /(?:^|[,.;:!?\n]\s*|\b(?:and|then|please|to|also|now)\s+)(?:type|write|enter|input|jot)\b|\b(?:notepad|word|wordpad|textedit|gedit|docs|notes)\s+(?:and\s+|then\s+|to\s+)?(?:type|typing|write|writing)\b|\b(?:type|typing|write|writing|enter|input|jot)\s+(?:(?:in|into|down|out)\s+)?(?:["“']|(?:a|an|the|some|this|my)\s+(?:line|sentence|text|note|message|word|paragraph|letter|list|poem)\b|(?:hello|hi)\b)/iu;
-const TYPE_ZH = /输入|键入|写(?:一|下|上|入|几|段|句|行|个|封|首|篇|点)|填写|写\s*["“'「『]|在[^。，,.!?！？\n]{0,12}?(?:里|中|上)(?:面)?写|(?:记事本|文档|备忘录|写字板|notepad|word)[^。，,.!?！？\n]{0,3}?写/iu;
+const TYPE_ZH = /输入|键入|写(?:一|下|上|入|几|段|句|行|个|封|首|篇|点)|填写|写\s*["“'「『]|在[^。，,.!?！？\n]{0,8}?(?:记事本|notepad|word|wps|文档|备忘录|写字板|编辑器|便签|文本框|输入框)[^。，,.!?！？\n]{0,4}?(?:里|中|上)(?:面)?写|(?:记事本|文档|备忘录|写字板|notepad|word)[^。，,.!?！？\n]{0,3}?写/iu;
 function typeTask(q) { const t = String(q || '').replace(TYPE_NOT, ' '); return TYPE_VI.test(t) || TYPE_EN.test(t) || TYPE_ZH.test(t); }
 const TYPE_TASK = { test: typeTask }; // giữ tên cũ (.test) cho chỗ gọi cũ
 const actOf = (x) => String((x && x.args && x.args.action) || '').toLowerCase();
