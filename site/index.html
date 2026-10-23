@@ -281,6 +281,12 @@ footer li a{display:inline-flex;align-items:center;min-height:32px}
 @media (max-width:760px){.lang button{min-height:32px}}
 @media (max-width:900px) and (min-width:761px){.nav ul a{padding:0 2px}}
 @media (max-width:300px){.lang button[data-lang]{font-size:.74rem}}
+/* M9: the closed phone menu is out of the Tab order and hidden from screen readers (JS also sets menu.inert) */
+@media (max-width:760px){.mobile-menu:not(.open){visibility:hidden;transition:max-height .35s ease,padding .35s ease,visibility 0s .35s}.mobile-menu.open{visibility:visible}}
+/* M10: model search shows keyboard focus */
+.search:focus-within{outline:2px solid var(--accent-ink);outline-offset:2px;border-color:var(--accent)}
+/* M16: badge text readable (>= 11.5px, CJK 12.8px) */
+.new-tag{font-size:.72rem;padding:2px 8px}.tag{font-size:.78rem}html[lang="zh-CN"] .new-tag,html[lang="zh-CN"] .tag{font-size:.8rem}
 @media (max-width:520px){.lang button{padding:6px 7px;min-width:30px;font-size:.74rem}}
 /*AIVN-FIX-320*/@media (max-width:380px){header .wrap{padding-left:14px;padding-right:14px}.nav{gap:6px}.nav-cta{gap:6px}.logo{flex-shrink:0;gap:6px;font-size:1.08rem}.logo small{padding:1px 6px}.lang button{padding:6px 5px;min-width:27px}.burger{width:40px;height:40px;flex-shrink:0}.mobile-menu,.mobile-menu.open{padding-left:16px;padding-right:16px}.mobile-menu a{overflow-wrap:anywhere}h1,h2,h3,.lead,.checks li{overflow-wrap:anywhere}}.dev-grid>*,.privacy>*{min-width:0}.credit-sub{display:block;font-size:.85em;opacity:.8;margin-top:2px}.credit-sub:empty{display:none}/*END-FIX-320*//*AIVN-FIX-280*/@media (max-width:300px){header .wrap{padding-left:10px;padding-right:10px}.nav{gap:4px}.nav-cta{gap:4px}.logo{gap:4px;font-size:1rem}.logo small{padding:1px 4px;font-size:.62rem}.lang{padding:1px;gap:1px}.lang button{padding:6px 4px;min-width:24px;font-size:.7rem}.burger{width:36px;height:36px}}/*END-FIX-280*/</style>
 </head>
@@ -666,8 +672,9 @@ console.<span class="f">log</span>(data.choices[<span class="n">0</span>].messag
 
   // mobile menu
   var burger=document.getElementById('burger'),menu=document.getElementById('mobileMenu');
-  burger.addEventListener('click',function(){var o=menu.classList.toggle('open');burger.setAttribute('aria-expanded',o);});
-  menu.querySelectorAll('a').forEach(function(a){a.addEventListener('click',function(){menu.classList.remove('open');burger.setAttribute('aria-expanded',false);});});
+  menu.inert=true;
+  burger.addEventListener('click',function(){var o=menu.classList.toggle('open');burger.setAttribute('aria-expanded',o);menu.inert=!o;});
+  menu.querySelectorAll('a').forEach(function(a){a.addEventListener('click',function(){menu.classList.remove('open');burger.setAttribute('aria-expanded',false);menu.inert=true;});});
 
   // accordion
   document.querySelectorAll('.qa button').forEach(function(btn){
