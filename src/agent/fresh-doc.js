@@ -88,10 +88,19 @@ const NAMED_DOC = /(?:^|[^\p{L}])(?:the\s+open|file|tệp|tập tin|文件|檔�
 function contentBefore(t, index) {
   return /(?:summary\s+of|about|tóm\s*tắt|nội\s*dung|的摘要)\s*$/iu.test(String(t).slice(Math.max(0, index - 40), index));
 }
+// danh từ nội dung đứng giữa động từ và giới từ: “notes on…”, “reply to…”, “ghi chú về…”, “对…的评论”
+const CONTENT_NOUN = /(?:^|[^\p{L}])(?:notes|note|repl(?:y|ies)|responses?|feedback|comments?|reviews?|thoughts|ideas|summar(?:y|ies)|recaps?|answers?|opinions?|ghi\s+chú|phản\s+hồi|nhận\s+xét|tóm\s+tắt)(?![\p{L}])|评论|回复|摘要|意见/iu;
+function contentNounIn(text) { return CONTENT_NOUN.test(String(text || '')); }
+// on/to/for/about/về/cho/对 sau danh từ nội dung không phải đích gõ
+function contentPrepGoverned(t, index) {
+  const pre = String(t).slice(0, index);
+  const pm = /(?:^|[^\p{L}])(?:on|to|for|about|về|cho|对)\s+(?:the\s+)?$/iu.exec(pre);
+  return !!pm && contentNounIn(pre.slice(0, pm.index));
+}
 function docFile(t) {
   const re = new RegExp(NAMED_DOC.source, NAMED_DOC.flags);
   for (const m of String(t || '').matchAll(re)) {
-    if (SAVE_BEFORE.test(String(t).slice(0, m.index)) || contentBefore(t, m.index)) continue;
+    if (SAVE_BEFORE.test(String(t).slice(0, m.index)) || contentBefore(t, m.index) || contentPrepGoverned(t, m.index)) continue;
     return m[1];
   }
   return null;
@@ -179,16 +188,24 @@ function commandPart(q) {
 }
 const URL_RE = /(?:[a-z][a-z\d+.-]*:\/\/|www\.)\S*/giu;
 // cụm đích NGAY sau động từ ghi (không có nội dung xen giữa)
-const TARGET_AFTER = /^\s*(?:(?:tiếp(?!\s+(?:theo|tục))|thêm)\s*)?(?:(?:vào|into|to|in|on)\s+(?:(?:the|my|cái)\s+)?(?:(?:tài liệu|tệp|tập tin|file|thẻ)\s+(?:đang mở|hiện tại|hiện có|có sẵn|sẵn có|cũ|này|đó)|(?:current|existing|already[- ]open|same|this|that)\s+(?:file|document|doc|tab)|cuối|the end of))(?![\p{L}])|^\s*tiếp(?!\s+(?:theo|tục))(?![\p{L}])|^\s*(?:at the end of|vào cuối)(?![\p{L}])/iu;
+const TARGET_AFTER = /^\s*(?:(?:tiếp(?!\s+(?:theo|tục))|thêm)\s*)?(?:(?:vào|into|to|in)\s+(?:(?:the|my|cái)\s+)?(?:(?:tài liệu|tệp|tập tin|file|thẻ)\s+(?:đang mở|hiện tại|hiện có|có sẵn|sẵn có|cũ|này|đó)|(?:current|existing|already[- ]open|same|this|that)\s+(?:file|document|doc|tab)|cuối|the end of))(?![\p{L}])|^\s*tiếp(?!\s+(?:theo|tục))(?![\p{L}])|^\s*(?:at the end of|vào cuối)(?![\p{L}])/iu;
 const TARGET_END = /(?:^|[^\p{L}])(?:vào|into|to)\s+(?:(?:the|my)\s+)?(?:(?:tệp|tập tin|file|文件|檔案)\s+)?((?:[a-z]:)?[^\s]*?[\p{L}\d_\-]+\.(?:txt|md|docx?|rtf|odt|log|csv|ini))[\s.!]*$/iu;
-// đích nói rõ, không phải cụm đứng trong nội dung (“summary of this document”, “tóm tắt tệp hiện có”, “当前文档的摘要”)
-const DEST_PHRASE = /(?:^|[^\p{L}])(?:into|to|in|on|vào|đến|tới)\s+(?:(?:the|my|this|that|cái)\s+){0,2}(?:(?:current|existing|already[- ]open|same|this|that)\s+(?:file|document|doc|tab)|(?:tài liệu|tệp|tập tin|file|thẻ)\s+(?:đang mở|hiện tại|hiện có|có sẵn|sẵn có|cũ|này|đó)|cuối|the end of(?:\s+(?:the|this|my)(?:\s+(?:file|document|doc))?)?)/iu;
+// đích nói rõ: into/in/to/vào/đến/tới — không có “on” trần. “to” sau notes/reply/feedback… là nội dung, không phải đích
+const DEST_PHRASE = /(?:^|[^\p{L}])(?:into|to|in|vào|đến|tới)\s+(?:(?:the|my|this|that|cái)\s+){0,2}(?:(?:current|existing|already[- ]open|same|this|that)\s+(?:file|document|doc|tab)|(?:tài liệu|tệp|tập tin|file|thẻ)\s+(?:đang mở|hiện tại|hiện có|có sẵn|sẵn có|cũ|này|đó)|cuối|the end of(?:\s+(?:the|this|my)(?:\s+(?:file|document|doc))?)?)/iu;
 const DEST_ZH = /(?:在|到)\s*(?:当前|當前|现有|現有|原来的|原來的).{0,8}(?:文档|文件|文檔|标签|標籤|末尾)/u;
 const CONTINUE_CMD = /^\s*(?:(?:please|hãy|xin|请)\s+)?(?:continue\s+(?:typing|writing)|继续(?:输入|写)|繼續(?:輸入|寫))/iu;
 function explicitPhrase(text) {
   const s = String(text || '');
-  const m = new RegExp(DEST_PHRASE.source, DEST_PHRASE.flags).exec(s);
-  if (m && !contentBefore(s, m.index) && !/的摘要/.test(s.slice(m.index, m.index + m[0].length + 8))) return true;
+  const re = new RegExp(DEST_PHRASE.source, DEST_PHRASE.flags.includes('g') ? DEST_PHRASE.flags : DEST_PHRASE.flags + 'g');
+  let m;
+  while ((m = re.exec(s))) {
+    const pm = /(?:into|to|in|vào|đến|tới)/iu.exec(m[0]);
+    const word = pm ? pm[0].toLowerCase() : '';
+    const at = m.index + (pm ? pm.index : 0);
+    if (word === 'to' && contentNounIn(s.slice(0, at))) continue; // “reply to this document” là nội dung
+    if (contentBefore(s, m.index) || /的摘要/.test(s.slice(m.index, m.index + m[0].length + 8))) continue;
+    return true;
+  }
   const z = new RegExp(DEST_ZH.source, DEST_ZH.flags).exec(s);
   if (z && !contentBefore(s, z.index) && !/的摘要/.test(s.slice(z.index, z.index + z[0].length + 8))) return true;
   return false;
@@ -212,8 +229,12 @@ function isNonTyping(t) {
 const typingTask = (t) => writeTask(t) || !isNonTyping(t);
 function fileAtEnd(c, v) {
   const m = TARGET_END.exec(c);
-  if (m && (v ? m.index >= v.end : true) && !/:\/\/|^www\./i.test(m[1]) && !SAVE_BEFORE.test(c.slice(0, m.index)) && !contentBefore(c, m.index)) return m[1].split(/[\\/]/).pop();
-  return null;
+  if (!m || (v && m.index < v.end) || /:\/\/|^www\./i.test(m[1]) || SAVE_BEFORE.test(c.slice(0, m.index)) || contentBefore(c, m.index)) return null;
+  const rel = c.slice(m.index);
+  const pm = /(?:^|[^\p{L}])(vào|into|to)(?![\p{L}])/iu.exec(rel);
+  // “to report.docx” chỉ là đích khi không có danh từ nội dung đứng trước (“reply to report.docx” thì không)
+  if (pm && pm[1].toLowerCase() === 'to' && contentNounIn(c.slice(v ? v.end : 0, m.index + pm.index))) return null;
+  return m[1].split(/[\\/]/).pop();
 }
 // không có động từ đã biết: chỉ tắt khi có đích nói rõ (into/in/to/vào/在/到 + tài liệu, hoặc tên tệp để sameFile kiểm cửa sổ đang mở)
 function explicitDest(text) {
