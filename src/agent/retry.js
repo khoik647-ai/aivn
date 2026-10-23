@@ -97,4 +97,53 @@ function honestStatus({ query = '', tracker = null, steps = [], reason = '', rec
 // B95 (máy thật beta.2.2): câu cuối đổ lỗi cho ứng dụng (“Zalo có thể đang gặp sự cố / giao diện bị lỗi”) trong khi chính các bước của AIVN chưa có tác dụng
 const BLAME_RE = /(?:gặp|bị|có)\s+(?:sự cố|trục trặc|lỗi)|giao diện\s+(?:bị|có|đang)\s+(?:lỗi|vấn đề)|(?:ứng dụng|app|phần mềm)\s+(?:\S+\s+){0,3}(?:không hoạt động|bị treo|đang lỗi)|\b(?:is|may be|might be|seems to be)\s+(?:having (?:issues|problems)|broken|malfunctioning|not working)|\b(?:app|application|interface)\s+(?:error|issue|problem)s?\b|(?:出现|遇到)(?:了)?(?:问题|故障)|界面(?:出错|有问题)/iu;
 function blamesApp(text) { return BLAME_RE.test(String(text || '')); }
-module.exports = { BLAME_RE, blamesApp, PROMISE_RE, promiseEnding, honestStatus, createRetryTracker, outcome, key, alternatives, finalCheck, describe, DONE_RE };
+// B192 (QA beta.3, Notepad): gõ “chưa thấy chữ” 2 lần, bấm menu (bước “ok”) rồi câu cuối hỏi lại → vẫn outcome “done”.
+// Việc chỉ XONG khi thao tác quyết định đã có tác dụng ĐÃ KIỂM trên màn hình (step.check = kiểm tra tự động thấy chưa có tác dụng):
+//   (a) việc cần GÕ chữ vào ứng dụng mà không có bước nào được kiểm là đã có chữ (gõ / dán / ghi tệp rồi mở) → 'typed'
+//   (b) bước màn hình cuối cùng (bỏ qua phím lưu/đóng/Enter) báo lỗi hoặc có dấu hiệu CHẮC CHẮN chưa có tác dụng → 'last'
+// review #68 (15c7090): zh “在…里写” chỉ khi phần 在…里 có tên trình soạn thảo (记事本/Notepad/Word/文档…) — không bắt “在家里写作业”, “在公司里写代码”
+// review #68: chỉ coi là việc GÕ khi động từ ở đầu mệnh đề (mệnh lệnh: “…và gõ”, “then type”) hoặc có tân ngữ/chuỗi trích dẫn đi kèm;
+// không tính “bài viết”, “nhập khẩu”, “what type”, “input settings”, “写字楼”, “输入法”…
+const TYPE_NOT = /bài\s+viết|người\s+viết|nhà\s+văn|nhập\s+(?:khẩu|cảnh|học|viện|ngũ|môn|tâm|vai|gia)|đăng\s+nhập|(?:what|which|this|that|file|data|any|the)\s+type\b|type\s+(?:of|is|was)\b|\binput\s+(?:settings?|methods?|devices?|sources?|languages?|lag)\b|写字楼|输入法|输入设置|描写|写真/giu;
+const TYPE_VI = /(?:^|[,.;:!?\n]\s*|(?:^|[^\p{L}])(?:và|rồi|sau đó|xong|hãy|giúp|cho|để|thì|vào|lên|mình|tôi|em|bạn)\s+)(?:gõ|viết|nhập|điền|soạn)(?![\p{L}])|(?:^|[^\p{L}])(?:gõ|viết|nhập|điền|soạn)(?:\s+(?:vào|lên|thêm|lại|một|1|hai|vài|mấy|các|những))*\s+(?:["“'«]|(?:chữ|câu|dòng|nội dung|văn bản|đoạn|thư|tin|lời|số|tên|địa chỉ|ghi chú|tiêu đề|từ|thơ|bài thơ|bài văn|bài luận|email|e-mail|mail|đoạn văn)(?![\p{L}]))|(?:^|[^\p{L}])(?:notepad|word|wordpad|sổ tay|ghi chú|notes|textedit|gedit|google docs|docs)\s+(?:(?:và|rồi|để|lên|ra|vào)\s+)?(?:gõ|viết|nhập|soạn|điền)(?![\p{L}])/iu;
+const TYPE_EN = /(?:^|[,.;:!?\n]\s*|\b(?:and|then|please|to|also|now)\s+)(?:type|write|enter|input|jot)\b|\b(?:notepad|word|wordpad|textedit|gedit|docs|notes)\s+(?:and\s+|then\s+|to\s+)?(?:type|typing|write|writing)\b|\b(?:type|typing|write|writing|enter|input|jot)\s+(?:(?:in|into|down|out)\s+)?(?:["“']|(?:a|an|the|some|this|my)\s+(?:line|sentence|text|note|message|word|paragraph|letter|list|poem)\b|(?:hello|hi)\b)/iu;
+const TYPE_ZH = /输入|键入|写(?:一|下|上|入|几|段|句|行|个|封|首|篇|点)|填写|写\s*["“'「『]|在[^。，,.!?！？\n]{0,8}?(?:记事本|notepad|word|wps|文档|备忘录|写字板|编辑器|便签|文本框|输入框)[^。，,.!?！？\n]{0,4}?(?:里|中|上)(?:面)?写|(?:记事本|文档|备忘录|写字板|notepad|word)[^。，,.!?！？\n]{0,3}?写/iu;
+function typeTask(q) { const t = String(q || '').replace(TYPE_NOT, ' '); return TYPE_VI.test(t) || TYPE_EN.test(t) || TYPE_ZH.test(t); }
+const TYPE_TASK = { test: typeTask }; // giữ tên cũ (.test) cho chỗ gọi cũ
+const actOf = (x) => String((x && x.args && x.args.action) || '').toLowerCase();
+const chainActs = (x) => [actOf(x), ...((x && x.args && Array.isArray(x.args.then)) ? x.args.then.map(t => String((t && t.action) || '').toLowerCase()) : [])];
+const keysOf = (x) => String((x && x.args && x.args.keys) || '').toLowerCase().replace(/\s+/g, '');
+const PASTE = /^(?:ctrl|cmd|command|meta|control)\+v$/;
+// phím lưu/đóng/xác nhận sau khi gõ: thường gần như không đổi màn hình → không dùng làm “bước cuối” để chấm
+const SAVE_KEYS = /^(?:(?:ctrl|cmd|command|meta|control)\+(?:shift\+)?(?:s|w)|alt\+f4|enter|return|escape|esc|tab)$/;
+// “màn hình không thay đổi rõ ràng” chỉ là đo điểm ảnh (cú bấm làm đổi rất nhỏ cũng ra câu này) → không đủ chắc để đánh hỏng việc
+const WEAK_CHECK = new Set(['màn hình không thay đổi']);
+function effectOf(steps = [], query = '') {
+  const all = (steps || []).filter(Boolean);
+  const acts = all.filter(x => x.name === 'screen_act' && x.status !== 'refused' && !['screen_look', 'look', 'wait', 'ensure_app'].includes(actOf(x)));
+  if (!acts.length) return { ok: true };
+  const okStep = (x) => x.status === 'ok' && !x.check;
+  const typed = acts.filter(x => chainActs(x).includes('type_text'));
+  // re-review #68 (5): dán ctrl+v KHÔNG có kiểm chứng chữ (bước hotkey không đọc lại chữ) → không tính là đã gõ; chỉ tính khi bước có dấu đã thấy chữ
+  const SEEN_TXT = /Đã thấy chữ vừa gõ/;
+  const pasted = acts.some(x => actOf(x) === 'hotkey' && PASTE.test(keysOf(x)) && okStep(x) && ((x.verify && x.verify.typed) || SEEN_TXT.test(String(x.detail || '') + ' ' + String(x.summary || ''))));
+  // re-review #68 (2): ghi tệp rồi MỞ ĐÚNG tệp đó (open_path đường dẫn đã ghi, hoặc open_app có tên tệp làm đối số) mới tính; mở ứng dụng trống thì không
+  const norm = (v) => String(v || '').trim().replace(/^["']|["']$/g, '').replace(/\\/g, '/').toLowerCase();
+  const baseOf = (v) => norm(v).split('/').filter(Boolean).pop() || '';
+  let fileOpened = false;
+  all.forEach((w, i) => {
+    if (fileOpened || w.name !== 'write_file' || w.status !== 'ok') return;
+    const base = baseOf(w.args && w.args.path);
+    if (!base) return;
+    fileOpened = all.slice(i + 1).some(x => x.status === 'ok' && ((x.name === 'open_path' && baseOf(x.args && x.args.path) === base) || (x.name === 'open_app' && norm(x.args && x.args.name).split(/[\s/"']+/).includes(base))));
+  });
+  const typedOk = typed.some(okStep) || pasted || fileOpened || all.some(x => x.draftIn || (x.verify && x.verify.sent));
+  if (typeTask(query) && !typedOk) return { ok: false, why: 'typed', n: typed.length };
+  let k = acts.length - 1;
+  while (k > 0 && actOf(acts[k]) === 'hotkey' && SAVE_KEYS.test(keysOf(acts[k])) && acts[k].status !== 'error' && (!acts[k].check || WEAK_CHECK.has(acts[k].check))) k--; // re-review #68 (1): phím có check CHẮC CHẮN (vd. chưa kiểm chứng gửi) không được bỏ qua
+  const last = acts[k];
+  if (last.status === 'error') return { ok: false, why: 'last', step: last };
+  if (last.status === 'ok' && last.check && !WEAK_CHECK.has(last.check)) return { ok: false, why: 'last', step: last };
+  return { ok: true };
+}
+module.exports = { BLAME_RE, blamesApp, PROMISE_RE, promiseEnding, honestStatus, createRetryTracker, outcome, key, alternatives, finalCheck, describe, DONE_RE, TYPE_TASK, typeTask, effectOf };

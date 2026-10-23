@@ -22,6 +22,8 @@
     "quan sát màn hình nhiều lần liền mà mô hình không làm bước nào": "连续多次查看屏幕，但模型没有执行任何步骤",
     "các bước gõ/bấm của AIVN AGENT chưa có tác dụng — không phải lỗi của ứng dụng": "AIVN AGENT 的输入/点击步骤没有效果——这不是应用的问题",
     "mô hình định làm tiếp nhưng lượt đã kết thúc": "模型打算继续，但这一轮已经结束",
+    "chưa thấy chữ nào được gõ vào ứng dụng trên màn hình": "屏幕上的应用中没有出现任何输入的文字",
+    "bước cuối chưa có tác dụng trên màn hình": "最后一步在屏幕上没有产生效果",
     "\"{0}\" là tệp rỗng.": "“{0}”是空文件。",
     "\"{0}\" quá lớn ({1} MB). Giới hạn là {2} MB mỗi tệp âm thanh/video.": "“{0}”太大（{1} MB）。每个音频/视频文件上限为 {2} MB。",
     "\"{0}\" quá lớn ({1}). Giới hạn là 20 MB mỗi tệp.": "“{0}”太大（{1}）。每个文件上限为 20 MB。",

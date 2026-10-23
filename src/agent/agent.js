@@ -1319,6 +1319,12 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       outcome = 'failed'; deps.log && deps.log('[aivn agent] B111: việc mở cuộc trò chuyện nhưng chưa có bước nào kiểm tiêu đề khớp người nhận → không báo xong');
       if (!/chưa|không|\bnot\b|n't\b|未|没|尚/iu.test(String(text || ''))) text = say(LG, '{0} Mình CHƯA xác nhận được đã mở đúng cuộc trò chuyện “{1}” (tiêu đề khung chat chưa khớp).', String(text || '').trim() + '\n\n', require('./send-verify').recipientOf(query)).replace(/\n\n /, '\n\n').trim();
     }
+    // B192 (QA beta.3: Notepad không có chữ nào mà vẫn “done”): thao tác quyết định chưa có tác dụng đã kiểm trên màn hình → không báo xong, nói trung thực
+    if (outcome === 'done' && compOn && !sentDone && finishReason !== 'abort') { const ef = RT.effectOf(steps, query);
+      if (!ef.ok) { outcome = 'failed'; deps.log && deps.log(`[aivn agent] B192: thao tác quyết định chưa có tác dụng (${ef.why}, ${ef.n || 0} lần gõ) → không báo xong`);
+        // re-review #68 (1): bước gửi cuối “chưa kiểm chứng được là đã gửi” mà câu cuối ĐÃ được thay bằng câu trung thực “CHƯA xác nhận…gửi” (B2) → giữ câu đó, chỉ đổi outcome
+        const sendNoted = ef.why === 'last' && ef.step && ef.step.verify && ef.step.verify.sent === false && /CHƯA xác nhận được|have NOT confirmed|还没有确认/u.test(String(text || ''));
+        if (!sendNoted) text = honestOf(ef.why === 'typed' ? say(LG, 'chưa thấy chữ nào được gõ vào ứng dụng trên màn hình') : say(LG, 'bước cuối chưa có tác dụng trên màn hình')); } }
     try { if (!headless && deps.recipes && names.includes('screen_act')) { if (outcome === 'done' && finishReason !== 'abort' && !timedOut && steps.some(x => x.name === 'screen_act' && x.status === 'ok')) deps.recipes.put(query, steps); else if (recipe && outcome === 'failed') deps.recipes.drop(query); } } catch {}
     return { text: (text || '').trim(), steps, usage, finishReason, urls, memories: sys.memories.map(m => m.text), tools: names, warning, outcome, sources: srcOut.sources || [], grounding: srcOut.grounding || null, replayed: recipe ? recipe.steps.length : 0 };
   }
