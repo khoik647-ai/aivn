@@ -1224,7 +1224,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
           // QA lượt 8 (B66): lỗi ném ra (vd. phím hỏng) cũng tính vào chống lặp — lần 3 cùng cách bị chặn, nhiều lỗi liền → dừng sớm
           if (call.name === 'screen_act') { try { const rr = retry.after(args, out, rctx); if (rr.bad) { out = { ...out, forModel: String(out.forModel || '') + rr.hint }; step.check = rr.bad; } } catch {} }
         }
-        Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok' /* B166: bước có step.check hiện “không có tác dụng” (màu hổ phách), không phải “xong” xanh */, check: step.check || null, summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, draftIn: out.draftIn || undefined, ms: Date.now() - step.startedAt });
+        Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok' /* B166: bước có step.check hiện “không có tác dụng” (màu hổ phách), không phải “xong” xanh */, check: step.check || null, summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, draftIn: out.draftIn || undefined, typedSeen: out.typedSeen || undefined, ms: Date.now() - step.startedAt });
         logTool(step);
         cyc.push(call.name, args, { error: out.error, refused: out.refused, bad: !!step.check, summary: out.summary, verified: !!(out.verify && out.verify.sent), sig: out.sig || (out.raw && out.raw.sig) || null });
         onStep({ ...step });
@@ -1318,6 +1318,16 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
     if (outcome === 'done' && compOn && openChatTask(query) && require('./send-verify').recipientOf(query) && !sentDone && !steps.some(chatVerifiedStep)) {
       outcome = 'failed'; deps.log && deps.log('[aivn agent] B111: việc mở cuộc trò chuyện nhưng chưa có bước nào kiểm tiêu đề khớp người nhận → không báo xong');
       if (!/chưa|không|\bnot\b|n't\b|未|没|尚/iu.test(String(text || ''))) text = say(LG, '{0} Mình CHƯA xác nhận được đã mở đúng cuộc trò chuyện “{1}” (tiêu đề khung chat chưa khớp).', String(text || '').trim() + '\n\n', require('./send-verify').recipientOf(query)).replace(/\n\n /, '\n\n').trim();
+    }
+    // B192 (#59): việc không được 'done' khi một bước gõ đã kiểm mà ảnh/cây giao diện không có chữ. Lần gõ sau của cùng chữ mà thấy chữ thì lần trước chỉ là thử lại.
+    if (outcome === 'done' && compOn) {
+      const tw = require('./typed-seen').taskWritesOk(steps);
+      if (!tw.ok) {
+        outcome = 'failed'; text = scrubToolNames(honestOf(tw.why), names, defOf); warning = null;
+        // SYS_WORDS luôn đổi type_text thành “gõ chữ”. en/zh dùng nhãn đã có (“Gõ chữ”), không thêm khoá dịch mới.
+        if (LG !== 'vi') { const gloss = String(say(LG, 'Gõ chữ') || '').toLowerCase(); if (gloss && gloss !== 'gõ chữ') text = text.replace(/(^|\n)(- )gõ chữ(?= “|:)/g, `$1$2${gloss}`); }
+        deps.log && deps.log('[aivn agent] B192: bước gõ không có chữ trên màn hình → không báo xong');
+      }
     }
     try { if (!headless && deps.recipes && names.includes('screen_act')) { if (outcome === 'done' && finishReason !== 'abort' && !timedOut && steps.some(x => x.name === 'screen_act' && x.status === 'ok')) deps.recipes.put(query, steps); else if (recipe && outcome === 'failed') deps.recipes.drop(query); } } catch {}
     return { text: (text || '').trim(), steps, usage, finishReason, urls, memories: sys.memories.map(m => m.text), tools: names, warning, outcome, sources: srcOut.sources || [], grounding: srcOut.grounding || null, replayed: recipe ? recipe.steps.length : 0 };

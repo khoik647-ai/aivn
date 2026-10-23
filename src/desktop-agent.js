@@ -4,6 +4,7 @@
 // An toàn: lớp phủ báo "AIVN AGENT đang điều khiển" + khung đỏ ở mục tiêu kế tiếp, Esc / Ctrl+Alt+Q để dừng, hỏi trước bước quan trọng, không bao giờ gõ mật khẩu.
 const path = require('path');
 const SV = require('./agent/send-verify');
+const TS = require('./agent/typed-seen'); // B192: chữ vừa gõ phải hiện trên ảnh hoặc cây UIA/AX
 const TB = require('./agent/taskbar');
 // B109 (máy thật beta.2.5): OCR đọc ô tìm kiếm Zalo là “Q Tim kiếm” (mất dấu ở “Tìm”, còn dấu ở “kiếm”) → /tìm|tim kiem/ không khớp → bấm vào đó
 // không tính là vào ô tìm kiếm → cổng B90 chặn gõ tên người nhận. So cả bản không dấu và bỏ nhiễu đầu dòng.
@@ -1098,9 +1099,8 @@ function createDesktopAgent(deps) {
     }
     let o2 = o;
     let searchyDone = false; let draftIn = null;
+    let typedSeen = null; let typeMiss = false; // B192
     if (action === 'type_text') {
-      const typed = U.fold(String(a.text).split('\n')[0]).slice(0, 40);
-      const seen = o.obs.elements.some(e => (e.value && U.fold(e.value).includes(typed)) || (e.name && U.fold(e.name).includes(typed)) || (e.ocr && e.name && U.fuzzyHas(U.fold(e.name), typed.slice(0, 24)))); // B76: OCR đọc sai dấu (“Lich hop nhém”)
       // B94: nội dung tin → phải nằm trong Ô SOẠN TIN; chữ mới xuất hiện ở ô khác (ô tìm kiếm…) = gõ NHẦM ô → báo + xoá
       let landed = null;
       if (bodyTyping && !a.submit) {
@@ -1116,8 +1116,6 @@ function createDesktopAgent(deps) {
         }
       }
       if (bodyTyping && !a.submit) deps.log && deps.log('desk', `B94: kiểm chữ sau khi gõ “${String(a.text).slice(0, 40)}”: ${landed === 'composer' ? 'CÓ trong ô soạn tin' : landed === 'wrong' ? 'vào NHẦM ô' : 'chưa đọc được ô soạn tin'}`);
-      if (!a.submit) checks.push(landed === 'composer' ? 'Đã thấy chữ vừa gõ trong Ô SOẠN TIN.' : landed === 'wrong' ? '' : seen ? 'Đã thấy chữ vừa gõ trên màn hình.' : 'CHƯA thấy chữ vừa gõ trong danh sách phần tử (có thể ô không hiện giá trị) — hãy kiểm tra trước khi làm tiếp.');
-      else checks.push('Đã gõ (dán một lần) rồi bấm Enter.');
       // ô tìm kiếm: chờ kết quả tải, nhìn lại, rồi mới kết luận; gợi ý tìm không dấu / một phần tên
       const el = t && t.el ? t.el : focusedEl;
       const prevTxt = prevAction && Date.now() - (prevAction.doneAt || prevAction.at) < 60000 ? `${prevAction.query || ''} ${prevAction.el ? prevAction.el.name || '' : ''}` : '';
@@ -1125,6 +1123,33 @@ function createDesktopAgent(deps) {
       const stillSearching = s.inSearch && Date.now() - s.inSearch < SEARCH_MS();
       const searchy = (stillSearching || inSearchMode() || /tìm|tim kiem|search|find|kiếm/i.test(`${el ? el.name + ' ' + (el.kind || '') : ''} ${a.element || a.target || ''} ${prevTxt}`) || (prevAction && Date.now() - (prevAction.doneAt || prevAction.at) < 60000 && /^(ctrl|cmd|command|meta)\+(f|k)$/i.test(String(prevAction.keys || '').replace(/\s/g, '')))) && !/\n/.test(String(a.text)) && String(a.text).length <= 80
         && !(bodyTyping && landed !== 'wrong'); // B112: AIVN đã chuyển sang ô soạn tin (B94) → đây là gõ NỘI DUNG tin, không phải tìm kiếm: không kiểm “kết quả tìm kiếm”
+      // B192: chữ vừa gõ phải có trên ảnh (OCR/mắt nhìn) hoặc cây UIA/AX. Ảnh che vì bí mật (s.sensitive, B193) không tính; chữ UIA/AX vẫn tính.
+      const shotBlank = () => !!(s.sensitive && s.sensitive.length);
+      const evOf = (obs, seenText) => TS.collect(obs, { seen: shotBlank() ? '' : (seenText || ''), shotBlanked: shotBlank() });
+      const beforeEv = evOf(before, '');
+      let proof = null;
+      if (landed === 'composer') proof = { ok: true, via: 'uia', part: 'all', why: 'composer' };
+      else if (!a.submit && !searchy && landed !== 'wrong') {
+        proof = await TS.confirmTyped(String(a.text || ''), async (i) => {
+          if (i > 0) {
+            if (ctx.signal && ctx.signal.aborted) return null;
+            await sleep(i === 1 ? 400 : 700);
+            const blank = shotBlank();
+            const last = i >= TS.LOOKS - 1;
+            const wantEyes = last && !blank && (o.poor || (deps.engine.status() && deps.engine.status().vision));
+            o = await observe(ctx, { ocr: 'force', vision: blank || !wantEyes ? 'off' : 'auto', question: wantEyes ? TS.LOOK_Q : '' });
+            o2 = o;
+          }
+          return evOf(o.obs, o.seen);
+        }, { looks: TS.LOOKS, signal: ctx.signal, before: beforeEv });
+        if (!proof.ok) { typeMiss = true; deps.log && deps.log('desk', `B192: chưa thấy chữ vừa gõ sau ${proof.looks || TS.LOOKS} lần nhìn (${proof.why || 'not-seen'})`); }
+      } else if (!a.submit && searchy) {
+        const p = TS.textOnScreen(String(a.text || ''), evOf(o.obs, o.seen), beforeEv);
+        if (p.ok) proof = p;
+      }
+      if (proof) typedSeen = { ok: !!proof.ok, via: proof.via || null, part: proof.part || null, why: proof.why || '' };
+      if (!a.submit) checks.push(landed === 'composer' ? 'Đã thấy chữ vừa gõ trong Ô SOẠN TIN.' : landed === 'wrong' ? '' : (proof && proof.ok) ? 'Đã thấy chữ vừa gõ trên màn hình.' : searchy ? '' : 'CHƯA thấy chữ vừa gõ trong danh sách phần tử (có thể ô không hiện giá trị) — hãy kiểm tra trước khi làm tiếp.');
+      else checks.push('Đã gõ (dán một lần) rồi bấm Enter.');
       if (searchy && String(a.text).trim()) { searchyDone = true;
         const q = String(a.text).split('\n')[0].trim(); const fq = U.fold(q);
         const ask = `Ô tìm kiếm vừa được gõ "${q}". Danh sách kết quả tìm kiếm đang hiện những tên nào (ghi đúng chữ)? Dòng đầu tiên trả lời CÓ nếu có kết quả khớp hoặc gần khớp "${q}", KHÔNG nếu không có, ĐANG TẢI nếu chưa hiện xong.`;
@@ -1244,7 +1269,7 @@ function createDesktopAgent(deps) {
     // B101: việc gửi tin đã GỬI + KIỂM CHỨNG (bong bóng tin + ô soạn trống + đúng người nhận) → báo agent.js kết thúc việc là XONG
     const sentDone = verify && verify.sent && gate.send && bodyTyping ? { msg: String(a.text || '').replace(/\n\s*$/, ''), to: SV.recipientOf(ctx.userQuery) || s.chatOpen || '', auto: !!a.__autoSubmit } : null;
     if (sentDone) { s.draftTyped = null; deps.log && deps.log('desk', `B101: đã gửi “${sentDone.msg.slice(0, 60)}” tới “${sentDone.to}” và KIỂM CHỨNG trên màn hình (thấy tin trong khung chat, ô soạn trống) → việc xong`); }
-    return { ...(sentDone ? { sentDone } : {}), ...(draftIn ? { draftIn } : {}), ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.filter(Boolean).join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
+    return { ...(typeMiss ? { error: 'chưa thấy chữ vừa gõ' } : {}), ...(typedSeen ? { typedSeen } : {}), ...(sentDone ? { sentDone } : {}), ...(draftIn ? { draftIn } : {}), ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.filter(Boolean).join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (typeMiss ? ' · chưa thấy chữ vừa gõ' : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
   }
 
   async function look(a, ctx) {
