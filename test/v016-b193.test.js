@@ -107,7 +107,7 @@ async function qaRun({ title, text, windowInfo, image = fakeImage(), steps = nul
   const LOG = { log: (tag, m) => { const l = `[${tag}] ${m}`; logs.push(l); tapFn && tapFn(l); }, tap: (f) => { tapFn = f; return () => { tapFn = null; }; } };
   const win = { hwnd: 42, pid: 7, proc: 'notepad', title };
   const deps = { version: 't', engine: { status: () => ({ loaded: true, id: 'm', path: '/m.gguf' }) }, listModels: () => [], LOG, capture, image, deadlineGraceMs: 500,
-    ...(windows !== undefined ? { windows: typeof windows === 'function' ? windows : async () => windows } : {}),
+    windows: typeof (windows === undefined ? [] : windows) === 'function' ? windows : async () => (windows === undefined ? [] : windows),
     windowInfo: windowInfo === undefined ? async (w) => (w.hwnd === 42 ? { b: [100, 50, 800, 600], title, proc: 'notepad', text } : null) : windowInfo,
     runAgentTurn: async ({ qa }) => {
       for (const st of steps || [{ id: 1, name: 'ensure_app', out: { window: win, summary: `Notepad: cửa sổ “${title}” đã ở trước`, forModel: text } }, { id: 2, name: 'screenshot', out: { summary: 'đã chụp màn hình' } }]) {

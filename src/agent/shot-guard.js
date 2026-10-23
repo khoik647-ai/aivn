@@ -24,8 +24,10 @@ const SECRET_RE = [
   ['sk', /\bsk-[A-Za-z0-9_-]{16,}/g],
   ['github', /\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}/g],
   ['private-key', /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g],
-  ['jwt', /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g],
-  ['hex', /\b[0-9a-fA-F]{32,}\b/g],
+  // (?<![A-Za-z0-9_-]) thay cho \b: "eyJ-" lặp lại không còn là điểm bắt đầu mới (tránh quay lui bậc hai). Mỗi đoạn có trần.
+  ['jwt', /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,2000}\.[A-Za-z0-9_-]{10,2000}\.[A-Za-z0-9_-]{10,2000}/g],
+  // "commit <sha>" là mã git, không phải khoá. Chuỗi hex trần ≥32 ký tự vẫn tính.
+  ['hex', /(?<!commit )\b[0-9a-fA-F]{32,}\b/g],
   ['base64', /(?<![A-Za-z0-9+/=_-])(?=[A-Za-z0-9+_-]*[0-9])(?=[A-Za-z0-9+_-]*[a-z])(?=[A-Za-z0-9+_-]*[A-Z])[A-Za-z0-9+_-]{40,}={0,2}(?![A-Za-z0-9+/=_-])/g, wordy], // không có '/': đường dẫn tệp không bị tính; tên tệp kiểu chữ-nối-gạch cũng không
 ];
 const TEXT_RE = [
@@ -39,51 +41,121 @@ const reasonList = (xs) => (Array.isArray(xs) ? xs : []).filter(x => typeof x ==
 const hit = (re, s, skip) => { re.lastIndex = 0; let m; while ((m = re.exec(s))) { if (!skip || !skip(m[0])) { re.lastIndex = 0; return true; } if (!m[0]) re.lastIndex++; } re.lastIndex = 0; return false; };
 // cửa sổ thu nhỏ / ẩn không nằm trên ảnh chụp
 const onScreen = (w) => !!w && w.min !== true && w.minimized !== true && w.visible !== false;
-// Mã kích hoạt (license.issueCode): Crockford base32, nhóm 6. OCR hay viết thường, thay gạch bằng cách / en-dash,
-// đọc 0→O, 1→I hoặc L, và ngắt dòng giữa chừng. Khớp cả mã chỉ lộ một phần (≥5 nhóm, hoặc ≥70 ký tự).
-const DASH_RE = /[-\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/;
-function crockChar(ch) {
-  if (!ch) return false;
-  let u = ch.toUpperCase();
-  if (u === 'O') u = '0'; else if (u === 'I' || u === 'L') u = '1';
-  return (u >= '0' && u <= '9') || (u >= 'A' && u <= 'H') || u === 'J' || u === 'K' || u === 'M' || u === 'N' || (u >= 'P' && u <= 'T') || (u >= 'V' && u <= 'Z');
+// Mã kích hoạt (license.issueCode): Crockford base32, nhóm 6. Trước khi khớp: NFKC (chữ/số/gạch toàn chiều rộng),
+// bỏ ký tự định dạng (\p{Cf}, gồm ZWSP/ZWJ) và soft hyphen, chữ Kirin trông giống Latin → Latin, O/0 I/1 L/1.
+// Một dấu câu bất kỳ là dấu phân cách nhóm. Khoảng trắng chỉ nối khi có chữ số (mã thật) hoặc đoạn rất dài —
+// menu tiếng Anh mỗi mục một dòng không bị ghép thành mã. Khớp ≥5 nhóm (5–6) hoặc ≥70 ký tự.
+const CYR_LAT = new Map([[0x0410, 65], [0x0430, 65], [0x0412, 66], [0x0432, 66], [0x0415, 69], [0x0435, 69], [0x041A, 75], [0x043A, 75], [0x041C, 77], [0x043C, 77], [0x041D, 72], [0x043D, 72], [0x0420, 80], [0x0440, 80], [0x0421, 67], [0x0441, 67], [0x0422, 84], [0x0442, 84], [0x0425, 88], [0x0445, 88]]);
+const ASCII_P = new Uint8Array(128);
+for (const c of '!"#%&\'()*,-./:;?@[\\]_{}') ASCII_P[c.charCodeAt(0)] = 1;
+function isFormatCp(cp) {
+  if (cp < 0x7F) return false;
+  if (cp === 0x00AD || cp === 0xFEFF) return true;
+  if (cp >= 0x200B && cp <= 0x200F) return true;
+  if (cp >= 0x202A && cp <= 0x202E) return true;
+  if (cp >= 0x2060 && cp <= 0x2064) return true;
+  if (cp >= 0x2066 && cp <= 0x206F) return true;
+  if ((cp >= 0x00C0 && cp <= 0x024F) || (cp >= 0x1E00 && cp <= 0x1EFF) || (cp >= 0x0400 && cp <= 0x04FF)) return false;
+  return /^\p{Cf}$/u.test(String.fromCodePoint(cp));
 }
-function crockLetter(ch) {
-  if (!crockChar(ch)) return false;
-  let u = ch.toUpperCase();
-  if (u === 'O') u = '0'; else if (u === 'I' || u === 'L') u = '1';
-  return u < '0' || u > '9';
+function isWsCp(cp) {
+  return cp === 9 || cp === 10 || cp === 11 || cp === 12 || cp === 13 || cp === 32 || cp === 0xA0 || cp === 0x1680 || (cp >= 0x2000 && cp <= 0x200A) || cp === 0x2028 || cp === 0x2029 || cp === 0x202F || cp === 0x205F || cp === 0x3000;
+}
+function isPunctCp(cp) {
+  if (cp < 128) return ASCII_P[cp] === 1;
+  if ((cp >= 0x00C0 && cp <= 0x024F) || (cp >= 0x1E00 && cp <= 0x1EFF) || (cp >= 0x0400 && cp <= 0x04FF)) return false;
+  return /^\p{P}$/u.test(String.fromCodePoint(cp));
+}
+function isCrockCp(cp) {
+  return (cp >= 48 && cp <= 57) || (cp >= 65 && cp <= 72) || cp === 74 || cp === 75 || cp === 77 || cp === 78 || (cp >= 80 && cp <= 84) || (cp >= 86 && cp <= 90);
+}
+// một ký tự đã gấp (NFKC / Kirin / hoa / O,I,L) → loại để duyệt
+function classifyCp(cp, depth) {
+  let f = cp;
+  if (f >= 0xFF01 && f <= 0xFF5E) f -= 0xFEE0;
+  const cyr = CYR_LAT.get(f); if (cyr) f = cyr;
+  if (f >= 97 && f <= 122) f -= 32;
+  const oil = f === 79 || f === 73 || f === 76;
+  if (f === 79) f = 48; else if (f === 73 || f === 76) f = 49;
+  if (isCrockCp(f)) {
+    // O/I/L đếm là chữ: từ menu (“Insert”, “Format”) không được coi là có chữ số rồi nối qua xuống dòng.
+    const realDigit = !oil && !cyr && f >= 48 && f <= 57;
+    return { kind: 'crock', digit: realDigit, letter: !realDigit };
+  }
+  if (isWsCp(cp) || isWsCp(f)) return { kind: 'ws' };
+  if (isPunctCp(cp) || isPunctCp(f)) return { kind: 'punct' };
+  if (!depth && cp > 0x7F && !(cp >= 0x0400 && cp <= 0x04FF) && !((cp >= 0x00C0 && cp <= 0x024F) || (cp >= 0x1E00 && cp <= 0x1EFF))) {
+    const n = String.fromCodePoint(cp).normalize('NFKC');
+    if (n !== String.fromCodePoint(cp)) {
+      let all = true, digit = false, letter = false;
+      for (const ch of n) { const c = classifyCp(ch.codePointAt(0), 1); if (c.kind !== 'crock') { all = false; break; } if (c.digit) digit = true; if (c.letter) letter = true; }
+      if (all && n.length) return { kind: 'crock', digit, letter };
+    }
+  }
+  return { kind: 'break' };
 }
 // các đoạn [start, end) trong chuỗi gốc trông như mã kích hoạt (đã gồm dấu phân cách và chỗ ngắt dòng)
 function codeSpans(s) {
-  const spans = []; const n = s.length; let i = 0;
+  if (typeof s !== 'string' || !s) return [];
+  const spans = []; const n = s.length;
+  const unit = (p) => {
+    while (p < n) {
+      const cp = s.codePointAt(p); const w = cp > 0xFFFF ? 2 : 1;
+      if (isFormatCp(cp)) { p += w; continue; }
+      return { p, w, ...classifyCp(cp, 0) };
+    }
+    return null;
+  };
+  let i = 0;
   while (i < n) {
-    if (!crockChar(s[i])) { i++; continue; }
-    const start = i; let chars = 0; let letters = 0; const pieces = []; let cur = 0; let j = i;
-    const endGroup = () => { if (cur) { pieces.push(cur); cur = 0; } };
-    while (j < n && crockChar(s[j])) { if (crockLetter(s[j])) letters++; cur++; chars++; j++; }
-    while (j < n) {
-      let k = j; let dash = false; let newline = false; let space = false;
-      while (k < n) {
-        const ch = s[k];
-        if (DASH_RE.test(ch)) { dash = true; k++; continue; }
-        if (/\s|\u00a0/.test(ch)) { if (ch === '\n' || ch === '\r') newline = true; else space = true; k++; continue; }
+    const u0 = unit(i);
+    if (!u0) break;
+    if (u0.kind !== 'crock') { i = u0.p + u0.w; continue; }
+    const start = u0.p; let chars = 0; let letters = 0; let digits = 0; const pieces = []; let cur = 0;
+    let p = u0.p;
+    while (p < n) {
+      const u = unit(p); if (!u || u.kind !== 'crock') break;
+      cur++; chars++; if (u.letter) letters++; if (u.digit) digits++;
+      p = u.p + u.w;
+    }
+    let end = p;
+    while (p < n) {
+      let q = p; let punct = false; let ws = false; let saw = false;
+      while (q < n) {
+        const u = unit(q); if (!u) break;
+        if (u.kind === 'ws') { ws = true; saw = true; q = u.p + u.w; continue; }
+        if (u.kind === 'punct') { punct = true; saw = true; q = u.p + u.w; continue; }
         break;
       }
-      if (k === j || k >= n || !crockChar(s[k])) break;
-      let t = k; let nextLen = 0;
-      while (t < n && crockChar(s[t])) { nextLen++; t++; }
-      const incomplete = cur > 0 && cur < 5 && nextLen > 0 && nextLen < 5 && cur + nextLen <= 6 && !dash;
-      const bridge = dash || newline || incomplete || (space && cur >= 5 && nextLen >= 5);
+      if (!saw) break;
+      const nxt = unit(q);
+      if (!nxt || nxt.kind !== 'crock') break;
+      let t = nxt.p; let nextLen = 0; let nextDigit = false;
+      while (t < n) {
+        const u = unit(t); if (!u || u.kind !== 'crock') break;
+        nextLen++; if (u.digit) nextDigit = true; t = u.p + u.w;
+      }
+      const incomplete = !punct && cur > 0 && cur < 5 && nextLen > 0 && nextLen < 5 && cur + nextLen <= 6;
+      const digitish = digits > 0 || nextDigit;
+      const codeSoFar = digits > 0 && chars >= 12;
+      // Dấu câu nối nhóm mã. Đoạn ngắn phía trước (“hoạt:”) không được kéo cả mã vào một span rồi làm hỏng luật nhóm.
+      const bridgePunct = punct && (cur >= 5 || nextLen < 5 || codeSoFar);
+      const bridgeWs = ws && nextLen >= 5 && (digitish || cur >= 20 || nextLen >= 20) && (cur >= 5 || codeSoFar);
+      const bridge = bridgePunct || incomplete || bridgeWs;
       if (!bridge) break;
-      if (!incomplete) endGroup();
-      while (j < k) j++;
-      while (j < n && crockChar(s[j])) { if (crockLetter(s[j])) letters++; cur++; chars++; j++; }
+      if (!incomplete) { pieces.push(cur); cur = 0; }
+      p = nxt.p;
+      while (p < n) {
+        const u = unit(p); if (!u || u.kind !== 'crock') break;
+        cur++; chars++; if (u.letter) letters++; if (u.digit) digits++;
+        p = u.p + u.w;
+      }
+      end = p;
     }
-    endGroup();
+    if (cur) pieces.push(cur);
     const grouped = pieces.length >= 5 && pieces.every(g => g >= 5 && g <= 6);
-    if ((chars >= 70 && letters >= 8) || grouped) spans.push([start, j]);
-    i = j > start ? j : start + 1;
+    if ((chars >= 70 && letters >= 8) || grouped) spans.push([start, end]);
+    i = end > start ? end : start + 1;
   }
   return spans;
 }
@@ -104,16 +176,22 @@ function scan({ title = '', proc = '', text = '' } = {}) {
 // Cả màn hình: chữ/tiêu đề cửa sổ đích, chữ OCR của cả ảnh, và NỘI DUNG (không chỉ tiêu đề) của mọi cửa sổ đang hiện.
 // titles chỉ để che log; không đưa vào tệp kết quả.
 function screenSecrets({ title = '', proc = '', text = '', windows = [] } = {}) {
-  const reasons = new Set(scan({ title, proc, text })); const titles = [];
+  const reasons = new Set(scan({ title, proc })); const titles = []; const chunks = []; const unread = [];
+  if (text) chunks.push(String(text));
   for (const w of Array.isArray(windows) ? windows : []) {
     if (!onScreen(w)) continue;
+    if (w.unread) unread.push(w);
+    const wt = String(w.title || ''); const wp = String(w.proc || '');
+    const ownTitle = wt || wp ? scan({ title: wt, proc: wp }) : [];
+    for (const x of ownTitle) reasons.add(x);
     const body = [w.text, w.body, w.ocr].filter(x => typeof x === 'string' && x).join('\n');
-    const r = scan({ title: w.title || '', proc: w.proc || '', text: body });
-    if (!r.length) continue;
-    for (const x of r) reasons.add(x);
-    if (w.title) titles.push(String(w.title));
+    if ((ownTitle.length || (body && scan({ text: body }).length)) && wt) titles.push(wt);
+    if (body) chunks.push(body);
   }
-  return { reasons: [...reasons], titles, failed: false };
+  // Nối chữ mọi cửa sổ: mã bị chia (4 nhóm + 4 nhóm) vẫn thành một chuỗi. Mỗi cửa sổ một mình thì 4 nhóm chưa đủ.
+  const joined = chunks.filter(Boolean).join('\n');
+  if (joined) for (const x of scan({ text: joined })) if (String(x).startsWith('text:')) reasons.add(x);
+  return { reasons: [...reasons], titles, failed: false, unread };
 }
 // Đọc chữ từng cửa sổ đang hiện (UIA). Lỗi hoặc quá hạn của BẤT KỲ cửa sổ nào → ném lỗi (người gọi coi ảnh là không an toàn).
 async function fillWindowText(wins, read, { timeoutMs = 8000 } = {}) {
@@ -128,7 +206,9 @@ async function fillWindowText(wins, read, { timeoutMs = 8000 } = {}) {
     ]);
     if (timer) clearTimeout(timer);
     if (!textR || !textR.ok) throw new Error('window-text');
-    out.push({ ...w, text: textR.v == null ? '' : String(textR.v) });
+    const v = textR.v;
+    if (v && typeof v === 'object' && v.unread) { out.push({ ...w, unread: true }); continue; }
+    out.push({ ...w, text: v == null ? '' : String(v) });
   }
   return out;
 }
@@ -151,7 +231,7 @@ async function reveal({ title = '', proc = '', text = '', windows = null, loadWi
     if (typeof loadText === 'function') wins = await fillWindowText(wins || [], loadText, { timeoutMs });
     return screenSecrets({ title, proc, text, windows: wins || [] });
   } catch {
-    return { reasons: ['text:unreadable'], titles: [], failed: true };
+    return { reasons: ['text:unreadable'], titles: [], failed: true, unread: [] };
   }
 }
 // che chuỗi trông như khoá (giữ phần chữ còn lại để vẫn đọc được bước đã làm gì)
@@ -221,9 +301,9 @@ function electronImage() {
   };
 }
 // chụp một bước: trả { buf | null, scope, rect, redacted, reasons, skipped }
-async function shot({ capture, target = null, reasons = [], image = undefined, maxW = 1920 }) {
+async function shot({ capture, captured = null, target = null, reasons = [], image = undefined, maxW = 1920 } = {}) {
   const I = image === undefined ? electronImage() : image;
-  const c = await capture({ maxW });
+  const c = captured || await capture({ maxW });
   const rect = target && target.b ? rectInShot(target.b, c) : null;
   const meta = { scope: rect ? 'window' : 'screen', rect: rect || null, redacted: false, reasons: [...reasons] };
   if (!I) { // không xử lý ảnh được: ảnh nhạy cảm thì KHÔNG ghi gì; còn lại ghi ảnh toàn màn hình như trước

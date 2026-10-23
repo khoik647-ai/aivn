@@ -15,7 +15,8 @@ const FLAGS = { '--agent-task': 'task', '--qa-ui': 'script', '--profile': 'profi
 const BOOL = new Set(['--qa-input-diag']); // cờ không nhận giá trị
 const LANGS = ['vi', 'en', 'zh'];
 // lệnh nói rõ “chỉ soạn, đừng gửi”: lời từ chối mang lý do đó để AIVN AGENT dừng trước bước gửi (vẫn KHÔNG cho phép)
-const DRAFT_RE = require('./agent/send-verify').DRAFT_ONLY; // một nguồn với desktop-agent (B101)
+const SV = require('./agent/send-verify'); // #91: giữ cả cổng gửi và bộ chụp
+const DRAFT_RE = SV.DRAFT_ONLY; // một nguồn với desktop-agent (B101)
 const SG = require('./agent/shot-guard'); // B193: chụp đúng cửa sổ, che ảnh nhạy cảm, dọn ảnh cũ
 // thẻ xin phép của bước quan trọng — kể cả khi thiếu cờ risk, chữ trên thẻ nói tới các việc này cũng bị từ chối
 const RISK_RE = /(gửi|send|发送|xo[áa]|delete|删除|mua|thanh to[áa]n|purchase|buy|pay|购买|支付|kho[áa] m[áa]y|lock|锁|âm lượng|volume|音量|tắt máy|shutdown|restart|khởi động lại)/iu;
@@ -153,7 +154,7 @@ function statusOf(r, { denied = 0, draft = false, error = null, timedOut = false
 // B193: khung + chữ của cửa sổ đích. Không có bộ đọc / không có hwnd → không phải lỗi.
 // Lỗi hoặc quá 8 giây → ok:false (người gọi KHÔNG được giữ ảnh gốc).
 async function winInfoOf(deps, tgt) {
-  const get = deps.windowInfo !== undefined ? deps.windowInfo : (process.platform === 'win32' ? async (w) => { const r = await require('./agent/uitree').tree({ hwnd: w.hwnd || 0, max: 120 }); const els = r && Array.isArray(r.els) ? r.els : r && r.els ? [r.els] : [];
+  const get = deps.windowInfo !== undefined ? deps.windowInfo : ((process.platform === 'win32' || process.platform === 'darwin') ? async (w) => { const r = await require('./agent/uitree').tree({ hwnd: w.hwnd || 0, app: (w && w.proc) || '', max: 400, vmax: 500000 }); const els = r && Array.isArray(r.els) ? r.els : r && r.els ? [r.els] : [];
     return r && r.win ? { b: r.win.b, title: r.win.title, proc: r.win.proc, text: els.map(e => [e.n, e.v].filter(Boolean).join(' ')).join('\n') } : null; } : null);
   if (!get || !tgt || tgt.hwnd == null) return { ok: true, info: null };
   let timer;
@@ -162,11 +163,11 @@ async function winInfoOf(deps, tgt) {
   if (timer) clearTimeout(timer);
   return got && got.ok ? { ok: true, info: got.v || null } : { ok: false, info: null };
 }
-// B193: mọi cửa sổ đang hiện. Không có bộ liệt kê (Linux/mac, trừ khi deps.windows được truyền) → danh sách rỗng, không phải lỗi.
+// B193: mọi cửa sổ đang hiện (Windows EnumWindows, macOS JXA, Linux xdotool). deps.windows === null → không có bộ liệt kê, danh sách rỗng, không phải lỗi.
 // Lỗi, kết quả không phải mảng, hoặc quá 8 giây → ok:false.
 async function windowsOf(deps) {
-  const get = deps.windows !== undefined ? deps.windows : (process.platform === 'win32' ? () => require('./agent/uitree').windows() : null);
-  if (!get) return { ok: true, windows: [] }; // không có bộ liệt kê (Linux/mac): không phải lỗi
+  const get = deps.windows !== undefined ? deps.windows : () => require('./agent/uitree').windows();
+  if (get == null) return { ok: true, windows: [] };
   if (typeof get !== 'function') return { ok: false, windows: [] };
   let timer;
   const job = Promise.resolve().then(() => get()).then(v => ({ ok: true, v }), () => ({ ok: false }));
@@ -177,13 +178,29 @@ async function windowsOf(deps) {
 // Chữ của từng cửa sổ đang hiện (không chỉ tiêu đề). deps.windowText nếu có; nếu không, Windows đọc cây UIA. Lỗi → ném (fail-closed).
 function windowTextReader(deps) {
   if (deps.windowText !== undefined) return deps.windowText;
-  if (process.platform !== 'win32') return null;
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return null;
   return async (w) => {
-    if (!w || w.hwnd == null) return '';
-    const r = await require('./agent/uitree').tree({ hwnd: w.hwnd, max: 100 });
+    if (!w || w.hwnd == null) return { unread: true };
+    const r = await require('./agent/uitree').tree({ hwnd: w.hwnd, app: w.proc || '', max: 400, vmax: 500000 });
     const els = r && Array.isArray(r.els) ? r.els : [];
     return els.map(e => [e && e.n, e && e.v].filter(Boolean).join(' ')).join('\n');
   };
+}
+// OCR ảnh đã chụp. Không có bộ OCR / lỗi / quá hạn → null (người gọi xoá ảnh). Chuỗi rỗng = đã đọc, không thấy chữ.
+async function ocrCaptured(deps, captured) {
+  const fn = typeof deps.ocr === 'function' ? deps.ocr : (deps.engine && typeof deps.engine.ocrLines === 'function' ? deps.engine.ocrLines : null);
+  if (!fn || !captured || !captured.dataUrl) return null;
+  const b64 = String(captured.dataUrl).split(',')[1] || '';
+  let timer;
+  const job = Promise.resolve().then(() => fn(Buffer.from(b64, 'base64'))).then(v => ({ ok: true, v }), () => ({ ok: false }));
+  const got = await Promise.race([job, new Promise(res => { timer = setTimeout(() => res({ ok: false }), 28000); })]);
+  if (timer) clearTimeout(timer);
+  if (!got || !got.ok) return null;
+  const v = got.v;
+  if (typeof v === 'string') return v;
+  if (v && Array.isArray(v.lines)) return v.lines.map(l => l && l.text).filter(Boolean).join('\n');
+  if (Array.isArray(v)) return v.map(l => (l && l.text) || (typeof l === 'string' ? l : '')).filter(Boolean).join('\n');
+  return '';
 }
 const exitCodeOf = (status) => status === 'done' ? 0 : status === 'asked_user' ? 3 : status === 'cancelled' ? 4 : 2;
 function writeJson(file, obj) { fs.mkdirSync(path.dirname(file), { recursive: true }); const tmp = file + '.tmp-' + process.pid; fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8'); fs.renameSync(tmp, file); }
@@ -229,23 +246,33 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
           if (Array.isArray(s.sensitive) && s.sensitive.length && tgt) tgt.sensitive = [...new Set([...tgt.sensitive, ...s.sensitive])];
           step.summary = SG.redactTitles(step.summary, [...titles]); step.debug = step.debug.map(l => SG.redactTitles(l, [...titles]));
           if (args.shots && deps.capture) { try { const f = path.join(args.shots, `step-${String(n).padStart(2, '0')}-${String(s.name || 'step').replace(/[^\w-]/g, '_')}.jpg`);
-            // B193: chỉ chụp cửa sổ đích (khi biết khung của nó). Lỗi/quá hạn khi liệt kê cửa sổ hoặc đọc chữ → coi là không an toàn (không ghi ảnh gốc).
-            // Nội dung mọi cửa sổ đang hiện (không chỉ tiêu đề) được quét; tệp mã kích hoạt mở bên cạnh vẫn làm ảnh bị che.
+            // B193: chụp TRƯỚC, quét đúng ảnh đó, chỉ ghi tệp khi sạch. Ảnh gốc của bước này không bao giờ được ghi rồi mới xoá.
+            // Lỗi/quá hạn khi liệt kê cửa sổ hoặc đọc chữ → không ghi ảnh gốc. Cửa sổ hiện mà không đọc được chữ → OCR vùng điểm ảnh, không có OCR thì bỏ ảnh.
+            const captured = await deps.capture({ maxW: 1920 });
             const [infoR, winR] = await Promise.all([tgt ? winInfoOf(deps, tgt) : { ok: true, info: null }, windowsOf(deps)]);
             let unsafe = !infoR.ok || !winR.ok; let wins = winR.windows || [];
             const info = infoR.info; if (info && info.title) titles.add(String(info.title));
-            if (!unsafe) { try { const reader = windowTextReader(deps); if (reader) wins = await SG.fillWindowText(wins, reader); } catch { unsafe = true; } }
-            let sec = { reasons: [], titles: [] };
+            if (!unsafe) {
+              const reader = windowTextReader(deps);
+              if (reader) { try { wins = await SG.fillWindowText(wins, reader); } catch { unsafe = true; } }
+              else wins = wins.map(w => (w && SG.onScreen(w) && typeof w.text !== 'string') ? { ...w, unread: true } : w);
+            }
+            let sec = { reasons: [], titles: [], unread: [] };
             if (!unsafe) { try { sec = SG.screenSecrets({ title: info ? info.title : (tgt && tgt.title) || '', proc: info ? info.proc : (tgt && tgt.proc) || '', text: info && info.text ? info.text : '', windows: wins }); } catch { unsafe = true; } }
-            if (unsafe) sec = { reasons: ['text:unreadable'], titles: [] };
+            if (!unsafe && sec.unread && sec.unread.length) {
+              const ocrText = await ocrCaptured(deps, captured);
+              if (ocrText == null) unsafe = true;
+              else { const extra = SG.scan({ text: ocrText }).filter(x => String(x).startsWith('text:')); sec.reasons = [...(sec.reasons || []), ...extra]; }
+            }
             for (const t of sec.titles || []) titles.add(t);
             const reasons = [...new Set([...SG.reasonList(s.sensitive), ...(tgt ? SG.reasonList(tgt.sensitive) : []), ...SG.reasonList(sec.reasons), ...(unsafe ? ['text:unreadable'] : [])])];
             if (tgt && reasons.length) tgt.sensitive = reasons; // còn nhạy cảm cho các bước sau trên cùng cửa sổ
             if (reasons.length) { const gone = SG.forgetShots(res.steps, args.shots); if (gone.removed) deps.LOG && deps.LOG.log('qa', `B193: xoá ${gone.removed} ảnh đã chụp trước đó trong lượt này (màn hình có nội dung nhạy cảm)`); }
             const b = info && Array.isArray(info.b) ? info.b : tgt && Array.isArray(tgt.b) ? tgt.b : null;
-            const g = await SG.shot({ capture: deps.capture, target: b ? { b } : null, reasons, image: deps.image, maxW: 1920 });
+            const g = await SG.shot({ captured, capture: async () => captured, target: b ? { b } : null, reasons, image: deps.image, maxW: 1920 });
             step.shotScope = { scope: g.scope, rect: g.rect, window: !!b }; if (reasons.length) { step.shotRedacted = true; step.shotWarn = reasons; deps.LOG && deps.LOG.log('qa', `B193: bước ${n} — ảnh chụp có thể chứa nội dung nhạy cảm (${reasons.join(', ')}) → ${g.buf ? 'chỉ ghi ảnh đã che' : 'không ghi ảnh'}`); }
-            if (g.buf) { fs.writeFileSync(f, g.buf); step.shot = f; } else { step.shot = null; step.shotError = 'B193: không ghi ảnh (nội dung nhạy cảm, không che được)'; }
+            if (g.buf) { fs.writeFileSync(f, g.buf); step.shot = f; }
+            else { step.shot = null; step.shotError = 'B193: không ghi ảnh (nội dung nhạy cảm, không che được)'; }
           } catch (e) { step.shot = null; step.shotError = SG.redactTitles(String(e.message || e), [...titles]).slice(0, 200); try { SG.forgetShots(res.steps, args.shots); } catch {} } }
           res.steps.push(step);
   }

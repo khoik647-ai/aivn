@@ -213,6 +213,12 @@ function createDesktopAgent(deps) {
     return r;
   }
   async function ocrShot(shot, region) {
+    const OCR_MS = 28000; let timer;
+    const work = ocrShotBody(shot, region);
+    try { return await Promise.race([work, new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('ocr-timeout')), OCR_MS); })]); }
+    finally { if (timer) clearTimeout(timer); }
+  }
+  async function ocrShotBody(shot, region) {
     const img = imgOf(shot); const W = shot.width, H = shot.height; const st0 = { ...ocrStat }; const tO = Date.now();
     const R = region ? { x: Math.max(0, Math.floor(region.x1 * W)), y: Math.max(0, Math.floor(region.y1 * H)), x2: Math.min(W, Math.ceil(region.x2 * W)), y2: Math.min(H, Math.ceil(region.y2 * H)) } : { x: 0, y: 0, x2: W, y2: H };
     const bandH = 160, overlap = 72, scale = (R.x2 - R.x) < 1000 ? 3 : 2; const out = []; // hộp thoại nhỏ (chữ nhỏ): phóng to hơn
@@ -260,21 +266,30 @@ function createDesktopAgent(deps) {
     return (obs.elements || []).find(e => Array.isArray(e.b) && ((e.value && U.fold(e.value).includes(key)) || (e.name && U.fold(e.name).includes(key))) && (!d.box || Math.abs((e.b[1] + e.b[3] / 2) - (d.box[1] + d.box[3] / 2)) <= Math.max(30, d.box[3]))) || null;
   }
   async function readWindowText(w) {
-    if (!w || w.hwnd == null || (process.platform !== 'win32' && process.platform !== 'darwin')) return '';
-    const rawW = await U.tree({ hwnd: w.hwnd, max: 100 });
+    if (!w || w.hwnd == null || (process.platform !== 'win32' && process.platform !== 'darwin')) return { unread: true };
+    const rawW = await U.tree({ hwnd: w.hwnd, app: w.proc || '', max: 400, vmax: 500000 });
     const els = rawW && Array.isArray(rawW.els) ? rawW.els : [];
     return els.map(e => [e && e.n, e && e.v].filter(Boolean).join(' ')).join('\n');
   }
   // B193: screenSecrets trên chữ đã có + chữ UIA của mọi cửa sổ đang hiện. mustOcr: OCR cả ảnh (không chỉ cửa sổ đích) trước khi kết luận.
+  // Cửa sổ hiện nhưng không đọc được chữ (mac không có hwnd, không có bộ đọc) → OCR đúng vùng điểm ảnh; không OCR được thì xoá ảnh.
   // Bộ quét lỗi / quá hạn → failed, người gọi xoá điểm ảnh và không gửi cho mô hình.
   async function sealShot(shot, { title = '', proc = '', text = '', mustOcr = false } = {}) {
-    let imageText = '';
+    let imageText = ''; let ocrDone = false;
     const canOcr = !!(shot && shot.dataUrl && deps.engine && typeof deps.engine.ocrLines === 'function');
     if (mustOcr && canOcr) {
-      try { imageText = (await ocrShot(shot, null)).map(l => l && l.text).filter(Boolean).join('\n'); }
-      catch { return { reasons: ['text:unreadable'], titles: [], failed: true }; }
+      try { imageText = (await ocrShot(shot, null)).map(l => l && l.text).filter(Boolean).join('\n'); ocrDone = true; }
+      catch { return { reasons: ['text:unreadable'], titles: [], failed: true, unread: [] }; }
     }
-    return ShotGuard.reveal({ title, proc, text: String(text || '') + (imageText ? '\n' + imageText : ''), loadWindows: () => U.windows(), loadText: readWindowText });
+    const sec = await ShotGuard.reveal({ title, proc, text: String(text || '') + (imageText ? '\n' + imageText : ''), loadWindows: () => U.windows(), loadText: readWindowText });
+    if (sec.failed || ocrDone || !sec.unread || !sec.unread.length) return sec;
+    const mergeFail = () => ({ reasons: [...new Set([...(sec.reasons || []), 'text:unreadable'])], titles: sec.titles || [], failed: true, unread: sec.unread });
+    if (!canOcr) return mergeFail();
+    try {
+      const more = (await ocrShot(shot, null)).map(l => l && l.text).filter(Boolean).join('\n');
+      const extra = ShotGuard.scan({ text: more }).filter(x => String(x).startsWith('text:'));
+      return { ...sec, reasons: [...new Set([...(sec.reasons || []), ...extra])], failed: false };
+    } catch { return mergeFail(); }
   }
   async function observe(ctx, { query = '', ocr = 'auto', thumb = true, vision = 'auto', question = '' } = {}) {
     const s = await begin(ctx); status('Đang quan sát màn hình…');
@@ -1121,7 +1136,7 @@ function createDesktopAgent(deps) {
       const R = SV.regionsOf(o.obs); const hdr = [o.obs.win ? o.obs.win.title : '', ...(R ? R.header : [])].filter(Boolean);
       const v = SV.verifySend({ msg: 'x', recipient: rcp, regions: { header: R ? R.header : [], messages: ['x'], composer: [] }, winTitle: o.obs.win ? o.obs.win.title : '', aliases: s.aliases });
       const readable = R && R.header.length;
-      deps.log && deps.log('desk', `Kiểm tra mở chat: tiêu đề “${o.obs.win ? o.obs.win.title : ''}”, đầu khung: ${JSON.stringify(R ? R.header : [])}`);
+      deps.log && deps.log('desk', `Kiểm tra mở chat: tiêu đề “${logTitle(o.obs.win ? o.obs.win.title : '')}”, đầu khung: ${JSON.stringify(R ? R.header : [])}`);
       if (SV.chatShown(rcp, o.obs.win ? o.obs.win.title : '', R ? R.header : [], s.aliases)) { s.chatOpen = SV.nameKey(rcp); s.gateBlocks = 0; checks.push(`Đã mở cuộc trò chuyện với “${rcp}” (thấy đúng tên trên màn hình).`); }
       else if (strongOpen && (v.recipientSeen || !readable)) { s.chatOpen = SV.nameKey(rcp); checks.push(v.recipientSeen ? `Đã mở cuộc trò chuyện với “${rcp}” (thấy tên ở tiêu đề).` : `Đã bấm kết quả “${rcp}”; chưa đọc được tiêu đề — kiểm tra lại bằng screen_look nếu cần.`); }
       else if (!readable && !SV.chatShown(rcp, '', hdr, s.aliases)) checks.push(`Đã bấm “${String(clickedName).trim().slice(0, 40)}”; chưa đọc được tiêu đề cuộc trò chuyện — gọi screen_look để xem đã mở đúng “${rcp}” chưa rồi mới gõ tin.`);
