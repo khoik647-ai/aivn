@@ -24,12 +24,12 @@ for (const copy of [false, true]) test(`chuyển mô hình (${copy ? 'khác ổ:
   assert.strictEqual(fs.statSync(path.join(b, 'org', 'm', 'a-q4_k_m.gguf')).size, 3 << 20); assert.ok(fs.existsSync(path.join(b, 'org', 'm', 'b.gguf.part')));
   assert.deepStrictEqual(MD.listFiles(a), []); assert.ok(fs.existsSync(a), 'giữ thư mục gốc cũ'); assert.ok(!fs.existsSync(path.join(a, 'org')), 'dọn thư mục rỗng');
   const last = ps.at(-1); assert.strictEqual(last.done, 3); assert.strictEqual(last.bytesDone, last.bytesTotal); assert.ok(ps.length >= 3);
-  assert.ok(!MD.listFiles(b).some(f => /\.aivn-moving$/.test(f.rel)));
+  assert.ok(!MD.listFiles(b).some(f => /\.aivn-moving/.test(f.rel)));
 });
 test('huỷ giữa chừng khi chép: tệp đang chép dở bị xoá, bản gốc còn nguyên', async () => {
   const d = tmp(); const a = path.join(d, 'a'), b = path.join(d, 'b'); fill(a); const ac = new AbortController();
   await assert.rejects(MD.moveModels(a, b, { copy: true, signal: ac.signal, onProgress: () => ac.abort() }), /huỷ/);
-  assert.strictEqual(MD.listFiles(a).length >= 2, true); assert.ok(!MD.listFiles(b).some(f => /\.aivn-moving$/.test(f.rel)));
+  assert.strictEqual(MD.listFiles(a).length >= 2, true); assert.ok(!MD.listFiles(b).some(f => /\.aivn-moving/.test(f.rel)));
 });
 test('repro treo: chép không bao giờ xong thì lời hứa không kết thúc khi tắt watchdog', async () => {
   const d = tmp(); const a = path.join(d, 'a'), b = path.join(d, 'b'); fill(a); let settled = false;

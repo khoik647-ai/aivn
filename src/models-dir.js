@@ -72,15 +72,23 @@ function writtenMatch(p, meta) {
     return hashFileSync(p) === meta.sha256;
   } catch { return false; }
 }
+// Chỉ dọn tệp tạm ghi trong nhật ký (tên riêng của lần chuyển này). Không đụng .aivn-moving* đã có sẵn.
 function cleanTemps(j) {
-  for (const f of j.rels || []) { try { fs.rmSync(path.join(j.to, f.rel) + '.aivn-moving', { force: true }); } catch {} }
+  for (const rel of (j && j.temps) || []) {
+    if (typeof rel !== 'string' || !rel.includes('.aivn-moving-')) continue;
+    try { fs.rmSync(path.join(j.to, rel), { force: true }); } catch {}
+  }
+}
+function journalTemp(snap, journal, rel) {
+  if (!snap.temps) snap.temps = [];
+  if (!snap.temps.includes(rel)) snap.temps.push(rel);
+  journalWrite(journal, snap);
 }
 // Chỉ xoá / đưa về những tệp trong journal.created, và chỉ khi nội dung vẫn là bản lần chuyển này ghi.
 function rollbackJournal(j) {
   const items = Array.isArray(j.created) ? j.created.slice().reverse() : [];
   for (const m of items) {
     const src = path.join(j.from, m.rel), dst = path.join(j.to, m.rel);
-    try { fs.rmSync(dst + '.aivn-moving', { force: true }); } catch {}
     if (!writtenMatch(dst, m)) continue;
     // Nguồn đã mất (đổi tên, hoặc đã xoá ở pha commit) → đưa bản đích về lại, không xoá.
     if (!fs.existsSync(src)) {
@@ -102,7 +110,6 @@ function recoverMoveLegacy(j, file) {
   }
   for (const f of j.rels) {
     const src = path.join(j.from, f.rel), dst = path.join(j.to, f.rel);
-    try { fs.rmSync(dst + '.aivn-moving', { force: true }); } catch {}
     if (srcOk(f)) { try { fs.rmSync(dst, { force: true }); } catch {} }
     else if (!fs.existsSync(src) && destOk(f)) { try { fs.mkdirSync(path.dirname(src), { recursive: true }); fs.renameSync(dst, src); } catch { try { fs.copyFileSync(dst, src); if (fs.statSync(src).size === f.size) fs.rmSync(dst, { force: true }); } catch {} } }
     else { try { if (fs.existsSync(dst)) fs.rmSync(dst, { force: true }); } catch {} }
@@ -126,20 +133,6 @@ function openExcl(tmp) {
   const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NONBLOCK || 0);
   return fs.promises.open(tmp, flags, 0o644);
 }
-async function isPrefix(src, dst, n) {
-  if (!(n > 0)) return false;
-  const a = await fs.promises.open(src, 'r'); const b = await fs.promises.open(dst, 'r');
-  try {
-    const bs = Buffer.alloc(64 * 1024), bd = Buffer.alloc(64 * 1024); let off = 0;
-    while (off < n) {
-      const c = Math.min(bs.length, n - off);
-      const rs = await a.read(bs, 0, c, off); const rd = await b.read(bd, 0, c, off);
-      if (rs.bytesRead !== c || rd.bytesRead !== c || !bs.subarray(0, c).equals(bd.subarray(0, c))) return false;
-      off += c;
-    }
-    return true;
-  } finally { await a.close(); await b.close(); }
-}
 // link rồi xoá nguồn: rename không bao giờ ghi đè tệp đã có. false = phải chép (khác ổ / không link được).
 async function renameExclusive(src, dst) {
   try { await fs.promises.link(src, dst); }
@@ -151,8 +144,7 @@ async function renameExclusive(src, dst) {
   }
   await fs.promises.unlink(src); return true;
 }
-async function placeNew(tmp, dst, replace) {
-  if (replace) { await fs.promises.rename(tmp, dst); return; }
+async function placeNew(tmp, dst) {
   try { await fs.promises.link(tmp, dst); }
   catch (e) {
     if (e.code === 'EEXIST' || fs.existsSync(dst)) { const err = new Error('Đích đã có tệp cùng tên.'); err.code = 'ECONFLICT'; throw err; }
@@ -160,10 +152,14 @@ async function placeNew(tmp, dst, replace) {
   }
   await fs.promises.unlink(tmp);
 }
-async function copyOne(src, tmp, { signal, onBytes, copyFile, expectHash }) {
-  if (copyFile) { await copyFile(src, tmp, { signal, onBytes }); return hashFile(tmp); }
-  await fs.promises.rm(tmp, { force: true });
+async function copyOne(src, tmp, { signal, onBytes, copyFile, expectHash, onCreated }) {
+  if (copyFile) {
+    const fh0 = await openExcl(tmp); await fh0.close();
+    if (onCreated) onCreated();
+    await copyFile(src, tmp, { signal, onBytes }); return hashFile(tmp);
+  }
   const fh = await openExcl(tmp);
+  if (onCreated) onCreated();
   const hash = crypto.createHash('sha256'); let n = 0;
   const count = new Transform({ transform(chunk, _enc, cb) { hash.update(chunk); n += chunk.length; try { if (onBytes) onBytes(n); } catch {} cb(null, chunk); } });
   await pipeline(fs.createReadStream(src, { highWaterMark: 64 * 1024 }), count, fh.createWriteStream(), { signal });
@@ -197,7 +193,7 @@ function beforeQuitMove({ exit = (c) => process.exit(c || 0), graceMs = 400 } = 
 // chuyển mô hình: onProgress({ done, total, file, bytesDone, bytesTotal }); signal để huỷ.
 // Không ghi đè tệp đã có ở đích. Chỉ xoá nguồn sau khi đích do CHÍNH lần chuyển này ghi ra đã khớp kích thước + sha256.
 async function moveModels(from, to, { onProgress = () => {}, signal = null, statfs, copy = false, stallMs = 60000, journal = null, copyFile = null, afterEach = null, killAt = null } = {}) {
-  const files = listFiles(from).filter(f => !String(f.rel).endsWith('.aivn-moving')).sort((a, b) => a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
+  const files = listFiles(from).filter(f => !String(f.rel).includes('.aivn-moving')).sort((a, b) => a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0);
   const bytesTotal = files.reduce((s, f) => s + f.size, 0);
   const same = !copy && sameDevice(from, to);
   if (!same) checkSpace(to, bytesTotal, statfs);
@@ -239,19 +235,18 @@ async function moveModels(from, to, { onProgress = () => {}, signal = null, stat
       if (!st) continue;
       if (!st.isFile()) { conflicts.push(f.rel); continue; }
       if (st.size === f.size) { const h = await race(hashFile(dst)); if (h === f.sha256) f.identical = true; else conflicts.push(f.rel); }
-      else if (st.size > 0 && st.size < f.size && await race(isPrefix(path.join(from, f.rel), dst, st.size))) f.partial = true;
       else conflicts.push(f.rel);
     }
     if (conflicts.length) { const e = new Error(conflictMessage(conflicts)); e.code = 'ECONFLICT'; e.conflicts = conflicts; throw e; }
     const rels = files.map(f => ({ rel: f.rel, size: f.size, sha256: f.sha256 }));
-    snap = { from: path.resolve(from), to: path.resolve(to), rels, created: [], phase: 'moving' };
+    const moveId = crypto.randomBytes(8).toString('hex');
+    snap = { from: path.resolve(from), to: path.resolve(to), rels, created: [], temps: [], moveId, phase: 'moving' };
     journalWrite(journal, snap);
     moveActive.snap = snap;
     let bytesDone = 0, done = 0; const moved = [], skipped = [];
     for (const f of files) {
       if (stallAc.signal.aborted || (signal && signal.aborted)) throw fail(new Error('aborted'));
       const src = path.join(from, f.rel), dst = path.join(to, f.rel);
-      try { fs.rmSync(dst + '.aivn-moving', { force: true }); } catch {}
       const idx = done + 1;
       if (f.identical) {
         skipped.push(f.rel); bytesDone += f.size; done++; tell({ done, total: files.length, file: f.rel, bytesDone, bytesTotal }, true);
@@ -263,7 +258,7 @@ async function moveModels(from, to, { onProgress = () => {}, signal = null, stat
       fs.mkdirSync(path.dirname(dst), { recursive: true });
       const meta = { rel: f.rel, size: f.size, sha256: f.sha256, kind: 'copy' };
       const mid = kill === 'mid:' + idx || (kill === 'midstream' && idx === 1);
-      if (same && !f.partial && !copyFile && !mid) {
+      if (same && !copyFile && !mid) {
         snap.created.push({ ...meta, kind: 'rename' }); journalWrite(journal, snap);
         const renamed = await race(renameExclusive(src, dst));
         if (renamed) {
@@ -275,25 +270,29 @@ async function moveModels(from, to, { onProgress = () => {}, signal = null, stat
         }
         snap.created.pop(); journalWrite(journal, snap);
       }
-      const tmp = dst + '.aivn-moving';
+      const tmpRel = f.rel + '.aivn-moving-' + moveId;
+      const tmp = path.join(to, tmpRel);
       snap.created.push(meta); journalWrite(journal, snap);
-      try { await fs.promises.rm(tmp, { force: true }); } catch {}
+      let ownedTmp = null;
+      const ownTemp = () => { journalTemp(snap, journal, tmpRel); ownedTmp = tmp; };
       try {
         if (mid && !copyFile) {
           const fh = await openExcl(tmp);
+          ownTemp();
           const n = Math.max(1, Math.floor(f.size / 2)); const buf = Buffer.alloc(n);
           const rs = await fs.promises.open(src, 'r');
           try { await rs.read(buf, 0, n, 0); } finally { await rs.close(); }
           await fh.write(buf); await fh.sync(); await fh.close();
           hit(kill);
         }
-        const sha = await race(copyOne(src, tmp, { signal: stallAc.signal, copyFile, expectHash: f.sha256, onBytes: (n) => tell({ done, total: files.length, file: f.rel, bytesDone: bytesDone + Math.min(n, f.size), bytesTotal }, false) }));
+        const sha = await race(copyOne(src, tmp, { signal: stallAc.signal, copyFile, expectHash: f.sha256, onCreated: ownTemp, onBytes: (n) => tell({ done, total: files.length, file: f.rel, bytesDone: bytesDone + Math.min(n, f.size), bytesTotal }, false) }));
         if (sha !== f.sha256) throw new Error(`Chép “${f.rel}” không khớp nội dung nguồn`);
         const st = await fs.promises.stat(tmp);
         if (st.size !== f.size) throw new Error(`Chép “${f.rel}” không đủ dữ liệu`);
-        await placeNew(tmp, dst, !!f.partial);
+        await placeNew(tmp, dst);
+        ownedTmp = null;
         if (!writtenMatch(dst, meta)) throw new Error(`Đích “${f.rel}” không khớp sau khi đọc lại`);
-      } catch (e) { try { fs.rmSync(tmp, { force: true }); } catch {} throw fail(e); }
+      } catch (e) { if (ownedTmp) { try { fs.rmSync(ownedTmp, { force: true }); } catch {} } throw fail(e); }
       bytesDone += f.size; done++; moved.push(f.rel); tell({ done, total: files.length, file: f.rel, bytesDone, bytesTotal }, true);
       journalWrite(journal, snap); hit('after:' + done);
       if (afterEach) await race(Promise.resolve().then(() => afterEach({ rel: f.rel, index: done })));

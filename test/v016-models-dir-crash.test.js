@@ -63,7 +63,6 @@ function audit(srcBefore, dstBefore, from, to, { allowBoth = new Set(), allowRep
     }
   }
   for (const [rel, hash] of dstBefore) {
-    if (String(rel).endsWith('.aivn-moving')) continue;
     const now = afterD.get(rel);
     if (allowReplaced.has(rel)) {
       const srcHash = srcBefore.get(rel);
@@ -73,7 +72,7 @@ function audit(srcBefore, dstBefore, from, to, { allowBoth = new Set(), allowRep
     if (now !== hash) preLost.push(rel);
   }
   for (const rel of new Set([...afterS.keys(), ...afterD.keys()])) {
-    if (String(rel).endsWith('.aivn-moving') && !srcBefore.has(rel) && !dstBefore.has(rel)) junk.push(rel);
+    if (String(rel).includes('.aivn-moving') && !srcBefore.has(rel) && !dstBefore.has(rel)) junk.push(rel);
   }
   return { lost, both, split, preLost, junk, afterS, afterD };
 }
@@ -238,19 +237,18 @@ if (process.argv.includes('--child')) {
       } finally { rmAll(d); }
     });
 
-    test(`B198 bản dở cùng nội dung được thay bằng tệp đủ (copy=${copy})`, async () => {
+    test(`B198 đích là tiền tố nhỏ hơn của cùng tệp (copy=${copy}): từ chối, không ghi đè`, async () => {
       const { d, from, to, journal } = fresh();
       try {
         const srcBefore = seed(from);
         const full = fs.readFileSync(path.join(from, RELS[0]));
         put(to, RELS[0], full.subarray(0, 500));
         const dstBefore = tree(to);
-        const r = await MD.moveModels(from, to, { copy, journal, stallMs: 0 });
-        assert.strictEqual(r.moved, 5);
-        expectSafe(srcBefore, dstBefore, from, to, { allowReplaced: new Set([RELS[0]]) });
-        assert.strictEqual(tree(to).get(RELS[0]), srcBefore.get(RELS[0]));
-        assert.strictEqual(tree(from).size, 0);
-        assert.ok(![...tree(to).keys()].some((k) => k.endsWith('.aivn-moving')));
+        await assert.rejects(MD.moveModels(from, to, { copy, journal, stallMs: 0 }), (e) => e.code === 'ECONFLICT' && e.conflicts.includes(RELS[0]));
+        expectSafe(srcBefore, dstBefore, from, to, { allowKeep: new Set([RELS[0]]) });
+        assert.strictEqual(tree(from).size, 5, 'mọi tệp còn ở thư mục cũ');
+        assert.strictEqual(tree(to).get(RELS[0]), dstBefore.get(RELS[0]));
+        assert.ok(!fs.existsSync(journal));
       } finally { rmAll(d); }
     });
 
@@ -285,18 +283,24 @@ if (process.argv.includes('--child')) {
       } finally { rmAll(d); }
     });
 
-    test(`B198 tệp tạm .aivn-moving cũ của tệp đang chuyển được dọn (copy=${copy})`, async () => {
+    test(`B198 tệp tạm .aivn-moving cũ được giữ nguyên byte và lần chuyển vẫn xong (copy=${copy})`, async () => {
       const { d, from, to, journal } = fresh();
       try {
         const srcBefore = seed(from);
-        put(to, RELS[0] + '.aivn-moving', Buffer.from('stale-partial'));
+        put(to, RELS[0] + '.aivn-moving', Buffer.alloc(1000, 4));
         put(to, 'keep.gguf.aivn-moving', Buffer.from('leave-unrelated-temp'));
         const dstBefore = tree(to);
-        await MD.moveModels(from, to, { copy, journal, stallMs: 0 });
+        const r = await MD.moveModels(from, to, { copy, journal, stallMs: 0 });
+        assert.strictEqual(r.moved, 5);
         const after = tree(to);
-        assert.ok(!after.has(RELS[0] + '.aivn-moving'), 'dọn tạm của tệp vừa chuyển');
-        assert.strictEqual(after.get('keep.gguf.aivn-moving'), dstBefore.get('keep.gguf.aivn-moving'), 'không xoá tạm không thuộc lần chuyển');
+        assert.strictEqual(after.get(RELS[0] + '.aivn-moving'), dstBefore.get(RELS[0] + '.aivn-moving'));
+        assert.strictEqual(after.get('keep.gguf.aivn-moving'), dstBefore.get('keep.gguf.aivn-moving'));
+        assert.strictEqual(after.get(RELS[0]), srcBefore.get(RELS[0]));
+        assert.strictEqual(tree(from).size, 0);
         expectSafe(srcBefore, dstBefore, from, to);
+        const j = JSON.parse(fs.readFileSync(journal, 'utf8'));
+        assert.ok(Array.isArray(j.temps));
+        assert.ok(!j.temps.some((t) => String(t).endsWith('.aivn-moving') && !String(t).includes('.aivn-moving-')));
       } finally { rmAll(d); }
     });
 
