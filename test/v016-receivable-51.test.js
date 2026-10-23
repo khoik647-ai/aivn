@@ -79,3 +79,28 @@ test('#51 vi/en/zh: dòng “đã trừ giấy báo có khách hàng {0}” có 
   assert.strictEqual(require('../src/i18n/zh.js')[key], '已扣除客户贷项通知单 {0}');
   assert.match(fs.readFileSync(path.join(root, 'src/renderer/biz.js'), 'utf8'), /a\.credit \? `<span class="small muted">đã trừ giấy báo có khách hàng \$\{vnd\(a\.credit\)\}<\/span>`/);
 });
+
+test('#51 KPI quá hạn = agedTotals.overdue = Tổng quan.overdue.sum; báo có quá hạn không kéo KPI xuống âm', async () => {
+  const { biz, cus, cus2 } = await setup();
+  // repro review: báo có 1,1 triệu đã quá hạn + hoá đơn chưa đến hạn. Công thức cũ total − current = −1.100.000; Tổng quan = 0.
+  day = '2026-07-01';
+  const paid = post(biz, cus.id, [line(1000000)]); biz.registerPayment(paid.id, {});
+  const cn = biz.postInvoice(biz.creditNote(paid.id, {}).id);
+  assert.strictEqual(cn.residual, 1100000); assert.strictEqual(cn.due_date, '2026-07-01');
+  day = '2026-10-23';
+  post(biz, cus.id, [line(2000000)], { due_date: '2026-11-20' });
+  let r = biz.invoiceReport({}); let ov = biz.overview();
+  const row = r.aged.find(x => x.partner_id === cus.id);
+  assert.strictEqual(row.older, -1100000, 'báo có vẫn nằm trong bảng tuổi nợ, đúng nhóm theo hạn');
+  assert.strictEqual(row.current, 2200000); assert.strictEqual(row.credit, 1100000);
+  assert.strictEqual(r.agedTotals.total - r.agedTotals.current, -1100000, 'công thức cũ total − current âm');
+  assert.strictEqual(ov.overdue.sum, 0); assert.strictEqual(r.agedTotals.overdue, ov.overdue.sum);
+
+  // thêm một hoá đơn khách thật sự quá hạn: hai số vẫn khớp và chỉ cộng hoá đơn đó
+  const late = post(biz, cus2.id, [line(500000)], { invoice_date: '2026-08-01', due_date: '2026-08-20' });
+  assert.strictEqual(late.residual, 550000); assert.ok(late.overdue);
+  r = biz.invoiceReport({}); ov = biz.overview();
+  assert.strictEqual(r.agedTotals.overdue, 550000); assert.strictEqual(r.agedTotals.overdue, ov.overdue.sum);
+  assert.strictEqual(r.aged.find(x => x.partner_id === cus.id).older, -1100000, 'báo có không bị lấy khỏi bảng tuổi nợ');
+  assert.match(fs.readFileSync(path.join(__dirname, '../src/renderer/biz.js'), 'utf8'), /quá hạn \$\{vnd\(a\.overdue\)\}/);
+});

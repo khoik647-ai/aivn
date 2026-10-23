@@ -37,7 +37,10 @@
   // sau mỗi lần chờ dữ liệu, lượt nào không còn là lượt mới nhất thì bỏ, không đụng B.edit hay #crmBody.
   let renderGen = 0;
   const STALE = Symbol('stale');
-  const live = (gen) => { if (gen !== renderGen || !Object.hasOwn(APPS, crm.tab)) throw STALE; }; // đã chuyển sang thẻ CRM thường (Tổng quan, Liên hệ…) cũng là cũ
+  // Lượt còn hiệu lực khi vẫn là lượt mới nhất VÀ người dùng còn đứng ở thẻ Kinh doanh. Tổng quan (dash) không tăng renderGen,
+  // nên chỉ so số phiên thì lỗi của lượt cũ (chứng từ không tải được) vẫn ghi đè #crmBody.
+  const isLive = (gen) => gen === renderGen && Object.hasOwn(APPS, crm.tab);
+  const live = (gen) => { if (!isLive(gen)) throw STALE; };
   async function render(app) {
     const gen = ++renderGen;
     const el = body(); const q = $('#crmQ').value.trim();
@@ -51,7 +54,7 @@
       else if (app === 'invoices') html += await invoiceList(s, q);
       else html += await reportView(s);
       live(gen); el.innerHTML = html;
-    } catch (e) { if (e !== STALE && gen === renderGen) el.innerHTML = `<div class="empty-state">⚠ ${esc(e.message)}</div>`; }
+    } catch (e) { if (e !== STALE && isLive(gen)) el.innerHTML = `<div class="empty-state">⚠ ${esc(e.message)}</div>`; }
   }
   const empty = (icon, text) => `<div class="empty-state"><div class="big">${icon}</div>${esc(text)}</div>`;
 
@@ -236,7 +239,7 @@
     if (s === 'invoice') {
       const d = await C('invoiceReport', { from: r.from, to: r.to }); const a = d.agedTotals;
       B.lastRows = [['Khách hàng', 'Chưa đến hạn', '1–30 ngày', '31–60 ngày', '61–90 ngày', 'Trên 90 ngày', 'Tổng'], ...d.aged.map(x => [x.partner_name, x.current, x.d30, x.d60, x.d90, x.older, x.total])];
-      return `<div class="biz-filters">${range}</div><div class="kpis"><div class="kpi">Doanh thu đã lập hoá đơn<b>${vnd(d.totals.untaxed)}</b><span class="small muted">gồm thuế ${vnd(d.totals.total)}</span></div><div class="kpi">Đã thu<b>${vnd(d.totals.paid)}</b></div><div class="kpi">Còn phải thu<b>${vnd(a.total)}</b><span class="small muted">quá hạn ${vnd(a.total - a.current)}</span>${a.credit ? `<span class="small muted">đã trừ giấy báo có khách hàng ${vnd(a.credit)}</span>` : ''}</div></div>
+      return `<div class="biz-filters">${range}</div><div class="kpis"><div class="kpi">Doanh thu đã lập hoá đơn<b>${vnd(d.totals.untaxed)}</b><span class="small muted">gồm thuế ${vnd(d.totals.total)}</span></div><div class="kpi">Đã thu<b>${vnd(d.totals.paid)}</b></div><div class="kpi">Còn phải thu<b>${vnd(a.total)}</b><span class="small muted">quá hạn ${vnd(a.overdue)}</span>${a.credit ? `<span class="small muted">đã trừ giấy báo có khách hàng ${vnd(a.credit)}</span>` : ''}</div></div>
         <h3>Theo tháng</h3>${d.byMonth.length ? `<table class="crm-table biz-list"><thead><tr><th>Tháng</th><th class="num">Số chứng từ</th><th class="num">Trước thuế</th><th class="num">Thuế</th><th class="num">Tổng cộng</th></tr></thead><tbody>${d.byMonth.map(x => `<tr><td>${esc(x.key)}</td><td class="num">${x.count}</td><td class="num">${vnd(x.untaxed)}</td><td class="num">${vnd(x.tax)}</td><td class="num">${vnd(x.total)}</td></tr>`).join('')}</tbody></table>` : empty('🧾', 'Chưa có hoá đơn vào sổ trong khoảng này.')}
         <h3>Công nợ phải thu theo tuổi nợ</h3>${d.aged.length ? `<table class="crm-table biz-list"><thead><tr><th>Khách hàng</th><th class="num">Chưa đến hạn</th><th class="num">1–30 ngày</th><th class="num">31–60 ngày</th><th class="num">61–90 ngày</th><th class="num">Trên 90 ngày</th><th class="num">Tổng</th></tr></thead><tbody>${d.aged.map(x => `<tr><td>${esc(x.partner_name)}</td>${['current', 'd30', 'd60', 'd90', 'older', 'total'].map(k => `<td class="num ${k !== 'current' && k !== 'total' && x[k] ? 'neg' : ''}">${x[k] ? vnd(x[k]) : ''}</td>`).join('')}</tr>`).join('')}</tbody><tfoot><tr><td>Tổng</td>${['current', 'd30', 'd60', 'd90', 'older', 'total'].map(k => `<td class="num"><b>${vnd(a[k])}</b></td>`).join('')}</tr></tfoot></table>` : '<p class="muted">Không còn công nợ phải thu. 👍</p>'}`;
     }

@@ -426,8 +426,11 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => ymd(new Date
     const sum = (k) => all.reduce((a, i) => a + sign(i) * i[k], 0);
     // #51: “Đã thu” chỉ cộng tiền thu có NGÀY trong khoảng lọc (trước đây cộng mọi lần thu từ trước tới nay, kể cả hoá đơn đã huỷ); thêm “refunded” (hoàn tiền cho khách)
     const payIn = (kind) => db.all("SELECT p.amount, p.date FROM payments p JOIN invoices i ON i.id = p.invoice_id WHERE i.kind = ? AND i.state = 'posted'", [kind]).filter(p => inRange(p.date || '', from, to)).reduce((a, p) => a + p.amount, 0);
+    const agedTotals = ['current', 'd30', 'd60', 'd90', 'older', 'total', 'credit'].reduce((o, k) => (o[k] = agedRows.reduce((a, r) => a + r[k], 0), o), {});
+    // KPI “quá hạn” chỉ cộng số còn lại của hoá đơn khách đã quá hạn. Giấy báo có vẫn nằm trong bảng tuổi nợ (số âm theo hạn) nhưng không được kéo KPI này xuống âm — cùng số với Tổng quan.
+    agedTotals.overdue = db.all("SELECT * FROM invoices WHERE state = 'posted' AND kind = 'out_invoice'").map(pubInvoice).filter(i => i.overdue).reduce((a, i) => a + i.residual, 0);
     return { byMonth: [...byMonth.values()].sort((a, b) => a.key.localeCompare(b.key)), totals: { untaxed: sum('amount_untaxed'), tax: sum('amount_tax'), total: sum('amount_total'), paid: payIn('out_invoice'), refunded: payIn('out_refund') },
-      aged: agedRows, agedTotals: ['current', 'd30', 'd60', 'd90', 'older', 'total', 'credit'].reduce((o, k) => (o[k] = agedRows.reduce((a, r) => a + r[k], 0), o), {}) };
+      aged: agedRows, agedTotals };
   }
   function stockReport() { const s = listStock({}); return { rows: s.rows, totalValue: s.totalValue, low: s.rows.filter(r => r.below_min), negative: s.rows.filter(r => r.on_hand < -EPS) }; }
   // số liệu nhanh cho Tổng quan
