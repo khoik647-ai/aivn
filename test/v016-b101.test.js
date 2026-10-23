@@ -92,7 +92,7 @@ test('B101: mã nguồn — tự bấm Enter qua bước GỬI, kiểm chữ tr�
   const s = fs.readFileSync(path.join(ROOT, 'src/desktop-agent.js'), 'utf8');
   assert.match(s, /bodyTyping && action === 'type_text' && !a\.submit && s\.chatOpen && !DRAFT_SEND\.test/);
   // tự gửi phải đặt submit TRƯỚC khi xếp loại bước gửi (thẻ xin phép / --approve-send-to vẫn áp dụng)
-  assert.ok(s.indexOf('__autoSubmit: true') < s.indexOf('SG.classify'), 'B101 phải trước SG.classify');
+  assert.ok(s.indexOf('__autoSubmit: true') < s.indexOf('SendGate.classify'), 'B101 phải trước SendGate.classify');
   assert.match(s, /a\.__beforeSubmit = async/); assert.match(s, /B94: kiểm chữ sau khi gõ/);
   assert.match(s, /if \(!a\.__beforeSubmit \|\| await a\.__beforeSubmit\(\)\) \{ await sleep\(150\); n\.keyTap\('enter'\); \}/);
   const ag = fs.readFileSync(path.join(ROOT, 'src/agent/agent.js'), 'utf8'); assert.match(ag, /out\.sentDone && out\.verify && out\.verify\.sent/);

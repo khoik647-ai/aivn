@@ -367,23 +367,37 @@ function negatedBefore(s, index) {
 // Riêng trong nội dung sau dấu hai chấm: lời rút lại (“À thôi, đừng gửi”, “never mind, don't send”, “算了别发”) vẫn cấm.
 const isSpace = (c) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\u00a0' || c === '\u3000';
 const isColon = (c) => c === ':' || c === '\uff1a' || c === '\ufe55' || c === '\ufe13';
-const isAsciiLetter = (c) => { const u = c ? c.charCodeAt(0) : 0; return (u >= 65 && u <= 90) || (u >= 97 && u <= 122); };
-// Chỉ cặp ngoặc ĐÓNG cùng họ mới là lời trích: "" “” '' 「」 『』 «». Ngoặc không đóng không phải ngoặc.
-const QUOTE_OPEN = { '"': '"', '\u201c': '\u201d', "'": "'", '\u300c': '\u300d', '\u300e': '\u300f', '\u00ab': '\u00bb' };
-function intraApos(s, i) { return s[i] === "'" && isAsciiLetter(s[i - 1]) && isAsciiLetter(s[i + 1]); }
+// Bỏ ký tự rộng bằng không trước khi phân loại, kẻo “đừ\u200bng gửi” không còn là “đừng gửi”.
+const ZERO_WIDTH = /[\u200b-\u200d\u2060\ufeff\u00ad]/g;
+function stripZw(s) { return String(s || '').replace(ZERO_WIDTH, ''); }
+const SEND_CAP = 16384;
+// Gấp chữ để so từ cấm không dấu: bỏ dấu, đ→d, thường, ngoặc đơn cong → thẳng. Giữ nguyên ranh giới từ.
+function foldNeg(s) {
+  return stripZw(s).replace(/[\u2018\u2019\u201b]/g, "'").normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
+}
+// Chỉ cặp ngoặc ĐÓNG cùng họ mới là lời trích: "" “” 「」 『』 «». Dấu ' và ’ là dấu lược (’til, don’t), không phải ngoặc.
+// Ngoặc không đóng không phải ngoặc. Quét một lần bằng ngăn xếp, tô vùng bằng mảng hiệu — tuyến tính.
+const QUOTE_OPEN = { '"': '"', '\u201c': '\u201d', '\u300c': '\u300d', '\u300e': '\u300f', '\u00ab': '\u00bb' };
 function quoteSkip(s) {
-  const skip = new Uint8Array(s.length);
+  const n = s.length;
+  const skip = new Uint8Array(n);
+  if (!n) return skip;
+  const diff = new Int32Array(n + 1);
   const stack = [];
-  for (let i = 0; i < s.length; i++) {
+  for (let i = 0; i < n; i++) {
+    const ch = s[i];
     const top = stack.length ? stack[stack.length - 1] : null;
-    if (top && s[i] === top.close && !intraApos(s, i)) {
+    if (top && ch === top.close) {
       stack.pop();
-      for (let k = top.start; k <= i; k++) skip[k] = 1;
+      diff[top.start]++;
+      diff[i + 1]--;
       continue;
     }
-    const close = QUOTE_OPEN[s[i]];
-    if (close && !(s[i] === "'" && isAsciiLetter(s[i - 1]))) stack.push({ close, start: i });
+    const close = QUOTE_OPEN[ch];
+    if (close) stack.push({ close, start: i });
   }
+  let d = 0;
+  for (let i = 0; i < n; i++) { d += diff[i]; if (d > 0) skip[i] = 1; }
   return skip;
 }
 function commandSurface(q, skip) {
@@ -415,7 +429,23 @@ function messageTail(q, skip) {
   }
   return '';
 }
-const BLOCK_SEND = /(?:^|[^\p{L}])(?:tuyệt\s+nhiên|không|chẳng|chưa|đừng|ko|khỏi|cấm|thôi|don['’]t|do\s+not|never|without|refrain|hold\s+off|no\s+need|not|no)(?![\p{L}])|(?:^|[^\p{L}])(?:xem\s+thôi|chỉ\s+xem|chỉ\s+nhìn|just\s+look|only\s+look)(?![\p{L}])|不要|不用|禁止|别|別|勿|不|看看就行|只看/iu;
+// “không cần hỏi lại / no need to ask again / 不用再问” cấm HỎI, không cấm GỬI. Gỡ trước khi soi từ cấm.
+function dropAsk(s) {
+  return String(s || '')
+    .replace(/(?:không|chẳng|chưa|đừng|chớ|ko|khỏi|khoan|cấm)\s+(?:cần\s+|phải\s+)?(?:hỏi(?:\s+lại)?|xác\s*nhận(?:\s+lại)?)/giu, ' ')
+    .replace(/(?:don['’]t|do\s+not)\s+ask(?:\s+again)?/giu, ' ')
+    .replace(/no\s+need\s+to\s+(?:ask|confirm)(?:\s+again)?/giu, ' ')
+    .replace(/不用再问|无需再问|不必再问|不用确认|不必确认|不用再确认|无需确认|别再问|不要再问|不必再确认/gu, ' ');
+}
+function dropAskFold(s) {
+  return String(s || '')
+    .replace(/(?:khong|chang|chua|dung|ko|khoi|khoan|cam)\s+(?:can\s+|phai\s+)?(?:hoi(?:\s+lai)?|xac\s*nhan(?:\s+lai)?)/giu, ' ')
+    .replace(/(?:don't|dont|do\s+not)\s+ask(?:\s+again)?/giu, ' ')
+    .replace(/no\s+need\s+to\s+(?:ask|confirm)(?:\s+again)?/giu, ' ');
+}
+// Từ cấm trên câu lệnh (đã gỡ cụm “hỏi lại”). Bản gấp phủ hết NEG_GOVERN khi không dấu: dung/khong/chua/ko/khoi/khoan/thoi/dont…
+const BLOCK_SEND = /(?:^|[^\p{L}])(?:tuyệt\s+nhiên|không|chẳng|chưa|đừng|chớ|ko|khoan|khỏi|cấm|thôi|don['’]t|dont|do\s+not|never|without|refrain|hold\s+off|no\s+need|not|no)(?![\p{L}])|(?:^|[^\p{L}])(?:xem\s+thôi|chỉ\s+xem|chỉ\s+nhìn|just\s+look|only\s+look)(?![\p{L}])|不要|不用|禁止|先别|先別|别|別|勿|不|看看就行|只看/iu;
+const BLOCK_FOLD = /(?:^|[^\p{L}])(?:tuyet\s+nhien|khong|chang|chua|dung|ko|khoan|khoi|cam|thoi|don't|dont|do\s+not|never|without|refrain|hold\s+off|no\s+need|not|no)(?![\p{L}])|(?:^|[^\p{L}])(?:xem\s+thoi|chi\s+xem|chi\s+nhin|just\s+look|only\s+look)(?![\p{L}])/iu;
 // Lời rút lại trong nội dung tin: từ cấm chi phối đúng động từ gửi, hoặc một mệnh đề huỷ (“never mind”, “算了”, “À thôi,”).
 // “đừng quên họp” / “别忘了开会” / “chỉ xem thôi nhé” không có động từ gửi bị cấm → vẫn là nội dung tin.
 const TAIL_SEND = /(?:^|[^\p{L}])(?:gửi|gui|nhắn|nhan|send(?:ing)?)(?![\p{L}])|发送|发给|发出|發送|發給|发(?!现|展|生|票)|發(?!現|展|生)/giu;
@@ -424,28 +454,35 @@ const CANCEL_CLAUSE = /(?:^|[^\p{L}])never\s+mind(?![\p{L}])|算了|(?:^|[.!?。
 // Mệnh đề CUỐI của nội dung sau dấu hai chấm, nếu chỉ là lời huỷ (“Mà thôi”, “Cancel.”, “khỏi”, “不了”).
 // “ăn thôi”, “xong rồi thôi về”, “không sao đâu”, “不去了” không phải lời huỷ.
 const FINAL_CANCEL = /^(?:(?:mà|à)\s+)?(?:thôi(?:\s+khỏi)?|khỏi|huỷ|hủy|cancel|never\s+mind|forget\s+it)$/iu;
+const FINAL_CANCEL_F = /^(?:(?:ma|a)\s+)?(?:thoi(?:\s+khoi)?|khoi|huy|cancel|never\s+mind|forget\s+it)$/iu;
+const TAIL_GOVERN_F = /(?:(?:^|[^\p{L}])(?:never\s+mind|do\s+not|don't|dont|thoi|dung|khoi|khong|ko|wait|cancel)|算了|取消|不要|别|別)\s*(?:(?:duoc|bam|nhan|an|nut|co|ma|please|just|press|hit|on|the|a|an)\s+){0,3}$/iu;
 function finalClauseCancels(tail) {
   const parts = String(tail || '').split(/[.!?。！？,，;；]+/u);
   let last = '';
   for (const p of parts) { const t = p.trim(); if (t) last = t; }
-  return FINAL_CANCEL.test(last) || /^(?:算了|不了|取消)$/u.test(last);
+  return FINAL_CANCEL.test(last) || /^(?:算了|不了|取消)$/u.test(last) || FINAL_CANCEL_F.test(foldNeg(last));
 }
-function tailRetracts(tail) {
-  if (!tail) return false;
-  if (CANCEL_CLAUSE.test(tail) || finalClauseCancels(tail)) return true;
+function governedRetract(tail, govern) {
   const re = new RegExp(TAIL_SEND.source, 'giu');
   let m;
   while ((m = re.exec(tail))) {
     const at = m.index + (/^[^\p{L}]/u.test(m[0]) ? 1 : 0);
-    if (TAIL_GOVERN.test(tail.slice(Math.max(0, at - 48), at))) return true;
+    if (govern.test(tail.slice(Math.max(0, at - 48), at))) return true;
     if (!m[0]) re.lastIndex++;
   }
   return false;
 }
+function tailRetracts(tail) {
+  if (!tail) return false;
+  if (CANCEL_CLAUSE.test(tail) || finalClauseCancels(tail)) return true;
+  if (governedRetract(tail, TAIL_GOVERN)) return true;
+  return governedRetract(foldNeg(tail), TAIL_GOVERN_F);
+}
 function blocksSend(q) {
-  const s = String(q || '');
+  const s = stripZw(q);
   const skip = quoteSkip(s);
-  return BLOCK_SEND.test(commandSurface(s, skip)) || tailRetracts(messageTail(s, skip));
+  const surface = dropAsk(commandSurface(s, skip));
+  return BLOCK_SEND.test(surface) || BLOCK_FOLD.test(dropAskFold(foldNeg(surface))) || tailRetracts(messageTail(s, skip));
 }
 function keepAside(inner) { return REAL_SEND.test(inner) || KEEP_ASIDE.test(inner); }
 function intentText(q) {
@@ -471,11 +508,11 @@ function scanSend(s, reSrc) {
   }
   return { pos, neg };
 }
-function activeSend(q) { return scanSend(selfReport(intentText(q)), REAL_SEND.source).pos; }
+function activeSend(q) { const s = stripZw(q); return scanSend(selfReport(intentText(s)), REAL_SEND.source).pos; }
 // Động từ gửi thật (không tính “soạn/write/draft”) — QA đòi bằng chứng đã gửi, cổng phím coi là việc nhắn.
-function hasSendVerb(q) { return scanSend(selfReport(intentText(q)), PROOF_SEND.source).pos; }
+function hasSendVerb(q) { const s = stripZw(q); return scanSend(selfReport(intentText(s)), PROOF_SEND.source).pos; }
 function lookOnly(q) {
-  const raw = String(q || '');
+  const raw = stripZw(q);
   const st = scanSend(selfReport(intentText(raw)), REAL_SEND.source);
   if (st.pos) return false; // còn động từ gửi không bị phủ định → không phải câu chỉ nhìn
   // Động từ gửi bị phủ định chỉ thành “chỉ nhìn” khi câu cũng xin nhìn hoặc nêu ô soạn.
@@ -488,15 +525,18 @@ function lookOnly(q) {
 // Chỉ cho gửi khi có động từ gửi không bị phủ định, và phần lệnh không có từ cấm.
 // Nội dung tin sau dấu hai chấm được bỏ qua, trừ lời rút lại việc gửi.
 function allowsSend(q) {
-  if (blocksSend(q) || lookOnly(q)) return false;
-  if (hasSendVerb(q)) return true;
-  if (!msgSend(q)) return false;
-  const proof = scanSend(selfReport(intentText(q)), PROOF_SEND.source);
+  const raw = String(q || '');
+  if (raw.length > SEND_CAP) return false; // câu quá dài: từ chối gửi, không quét ngoặc
+  const s = stripZw(raw);
+  if (blocksSend(s) || lookOnly(s)) return false;
+  if (hasSendVerb(s)) return true;
+  if (!msgSend(s)) return false;
+  const proof = scanSend(selfReport(intentText(s)), PROOF_SEND.source);
   return !(proof.neg && !proof.pos);
 }
 // Việc nhắn/gửi tin thật. MSG_SEND xét trên câu GỐC (như trước B219): gỡ “ô soạn tin” cũng gỡ mất động từ “soạn tin”,
 // cổng Ctrl+Enter hết biết đây là gửi. intentText chỉ dùng trong lookOnly. Câu chỉ nhìn thì không phải lệnh gửi.
-const msgSend = (q) => lookOnly(q) ? false : MSG_SEND.test(selfReport(q));
+const msgSend = (q) => { const s = stripZw(q); return lookOnly(s) ? false : MSG_SEND.test(selfReport(s)); };
 function missingRecipient(query) {
   if (!msgSend(query)) return false;
   const q = selfReport(query); if (CURRENT_CHAT.test(q)) return false;
