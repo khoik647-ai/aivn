@@ -10,7 +10,7 @@ Dùng: python3 tools/site_drift.py --rendered dist/site --live <bản clone nhá
 import argparse, hashlib, json, os, re, shutil, subprocess, sys, tempfile
 ap = argparse.ArgumentParser(); ap.add_argument('--rendered', required=True); ap.add_argument('--live', required=True); a = ap.parse_args()
 HERE = os.path.dirname(os.path.abspath(__file__))
-SKIP = {'.git', '.nojekyll', 'verified.html', 'revoked.json'}  # verified.html do release.sh tạo; revoked.json được trộn (merge-revoked)
+SKIP = {'.git', '.nojekyll', 'verified.html', 'revoked.json', 'revoked-v2.json'}  # v1 đóng băng; v2 được trộn lúc phát hành (không xoá khi SITE_DRIFT_ACK)
 live_idx = os.path.join(a.live, 'index.html'); ren_idx = os.path.join(a.rendered, 'index.html')
 digest = hashlib.sha256(open(live_idx, 'rb').read()).hexdigest()[:12]
 tmp = tempfile.mkdtemp(prefix='aivn-drift-')

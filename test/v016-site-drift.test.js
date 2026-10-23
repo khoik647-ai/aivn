@@ -27,4 +27,9 @@ test('site_drift: dòng/khoá i18n thêm trên gh-pages sau lần triển khai g
   r = run(hot.replace('0.15.3', '0.16.0')); assert.strictEqual(r.status, 0, r.stderr);
   const digest = require('crypto').createHash('sha256').update(fs.readFileSync(path.join(live, 'index.html'))).digest('hex').slice(0, 12);
   assert.strictEqual(run(newer, { SITE_DRIFT_ACK: digest }).status, 0); assert.strictEqual(run(newer, { SITE_DRIFT_ACK: 'sai' }).status, 1);
+  const good = hot.replace('0.15.3', '0.16.0');
+  fs.writeFileSync(path.join(live, 'revoked-v2.json'), '{"payload":"x"}\n');
+  r = run(good); assert.strictEqual(r.status, 0, r.stderr); assert.doesNotMatch(r.stderr + r.stdout, /revoked-v2/);
+  fs.writeFileSync(path.join(live, 'notes-hot.txt'), 'sửa nóng\n');
+  r = run(good); assert.strictEqual(r.status, 1, r.stdout + r.stderr); assert.match(r.stderr, /notes-hot\.txt/); assert.doesNotMatch(r.stderr, /revoked-v2/);
 });

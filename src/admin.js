@@ -1,5 +1,5 @@
 // Trang "Quản trị" của chủ sở hữu: nhập khoá riêng Ed25519 (mã hoá trên máy bằng cụm mật khẩu quản trị),
-// cấp mã kích hoạt theo Mã máy, thu hồi, ký và đăng revoked.json. Khoá riêng KHÔNG bao giờ rời tiến trình chính.
+// cấp mã kích hoạt theo Mã máy, thu hồi, ký và đăng revoked-v2.json. Khoá riêng KHÔNG bao giờ rời tiến trình chính.
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -38,10 +38,14 @@ function createAdmin({ dir, fetchJson, fetchRaw, publicX = L.PUBLIC_KEY_X, log =
     log('[quản trị] đã nhập khoá quản trị (đã mã hoá bằng cụm mật khẩu)');
     return state();
   }
+  function publicXOfPem(pem) { return crypto.createPublicKey(crypto.createPrivateKey(pem)).export({ format: 'jwk' }).x; }
   async function unlock(pass) {
     const st = read(FILE, null); if (!st) throw new Error('Chưa nhập khoá quản trị trên máy này');
     const key = await kdf(pass, Buffer.from(st.salt, 'base64'));
     let pem; try { pem = open_(key, st.sealed); } catch { throw new Error('Cụm mật khẩu quản trị không đúng'); }
+    // admin.json cũ niêm phong bằng khoá đã mất: không mở, không ký mã mới bằng khoá đó.
+    let derived = null; try { derived = publicXOfPem(pem); } catch { /* pem hỏng */ }
+    if (st.publicKey !== publicX || derived !== publicX) throw new Error(L.ADMIN_KEY_MISMATCH);
     let token = null; if (st.token) { try { token = open_(key, st.token); } catch {} }
     session = { key, pem, token, at: now() };
     return state();

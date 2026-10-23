@@ -156,3 +156,112 @@ test('bản mới đăng revoked-v2.json và gộp id từ cả hai URL; v2 lỗ
     delete process.env.AIVN_TEST_PUBKEY; delete process.env.AIVN_FAKE_MACHINE; delete process.env.AIVN_FAKE_NOW;
   }
 });
+
+test('unlock từ chối admin.json niêm bằng khoá không phải khoá chính, nhận đúng khoá chính', async () => {
+  const primary = key(); const other = key(); const pass = 'cum-mat-khau-dai';
+  const offline = { fetchJson: async () => { throw new Error('offline'); }, fetchRaw: async () => { throw new Error('không được gọi'); } };
+  const dir = tmp();
+  const a = createAdmin({ dir, publicX: primary.x, ...offline });
+  await a.importKey(JSON.stringify({ type: 'aivn-admin-key', publicKey: primary.x, privateKey: primary.pem }), pass);
+  a.lock();
+  await assert.rejects(a.unlock('sai-mat-khau'), /không đúng/);
+  assert.strictEqual(a.state().unlocked, false);
+  const opened = await a.unlock(pass);
+  assert.strictEqual(opened.unlocked, true);
+  assert.strictEqual(L.parseCode(a.issue({ name: 'Đúng khoá', machineCode: 'AAAAABBBBB', days: 1 }).code, primary.x).name, 'Đúng khoá');
+
+  const b = createAdmin({ dir, publicX: other.x, ...offline });
+  await assert.rejects(b.unlock(pass), /không khớp với bản AIVN này/);
+  assert.strictEqual(b.state().unlocked, false);
+  assert.throws(() => b.issue({ name: 'X', machineCode: 'AAAAABBBBB' }), /khoá/);
+
+  const dirP = tmp(); const dirO = tmp(); const dirM = tmp();
+  await createAdmin({ dir: dirP, publicX: primary.x, ...offline }).importKey(JSON.stringify({ type: 'aivn-admin-key', publicKey: primary.x, privateKey: primary.pem }), pass);
+  await createAdmin({ dir: dirO, publicX: other.x, ...offline }).importKey(JSON.stringify({ type: 'aivn-admin-key', publicKey: other.x, privateKey: other.pem }), pass);
+  const sealedP = JSON.parse(fs.readFileSync(path.join(dirP, 'admin.json'), 'utf8'));
+  const sealedO = JSON.parse(fs.readFileSync(path.join(dirO, 'admin.json'), 'utf8'));
+  fs.writeFileSync(path.join(dirM, 'admin.json'), JSON.stringify({ ...sealedP, publicKey: primary.x, salt: sealedO.salt, sealed: sealedO.sealed }));
+  const mixed = createAdmin({ dir: dirM, publicX: primary.x, ...offline });
+  await assert.rejects(mixed.unlock(pass), /không khớp với bản AIVN này/);
+  assert.strictEqual(mixed.state().unlocked, false);
+});
+
+const { spawnSync } = require('child_process');
+const { mergeV2, copyV1 } = require('../build/merge-revoked.cjs');
+const root = path.join(__dirname, '..');
+function rawDoc(pem, ids, issuedAt) {
+  return Buffer.from(JSON.stringify(L.signRevoked(pem, ids, issuedAt)) + '\n');
+}
+
+test('merge revoked: v2 giữ bản mới nhất còn chữ ký; bản cũ hoặc sai bị bỏ; v1 không đụng tới', () => {
+  const primary = key(); const legacy = key(); const foreign = key();
+  const trust = [primary.x, legacy.x];
+  const dir = tmp();
+  const older = rawDoc(legacy.pem, ['aaaaaaaaaaaa'], NOW);
+  const newer = rawDoc(primary.pem, ['bbbbbbbbbbbb'], NOW + 864e5);
+  const bad = Buffer.from(newer.toString('utf8').replace(/"sig":"[^"]+"/, '"sig":"' + Buffer.from('x'.repeat(64)).toString('base64') + '"'));
+  const v1 = fs.readFileSync(path.join(root, 'site/revoked.json'));
+  const v1copy = path.join(dir, 'revoked.json');
+  fs.writeFileSync(v1copy, v1);
+
+  const live = path.join(dir, 'live.json'); const local = path.join(dir, 'local.json'); const out = path.join(dir, 'revoked-v2.json');
+  fs.writeFileSync(live, newer); fs.writeFileSync(local, older);
+  assert.strictEqual(mergeV2({ out, paths: [local, live], publicX: trust }), 0);
+  assert.deepStrictEqual(fs.readFileSync(out), newer);
+  assert.deepStrictEqual(fs.readFileSync(v1copy), v1);
+
+  fs.writeFileSync(local, newer); fs.writeFileSync(live, older); fs.rmSync(out);
+  assert.strictEqual(mergeV2({ out, paths: [local, live], publicX: trust }), 0);
+  assert.deepStrictEqual(fs.readFileSync(out), newer);
+
+  const kept = fs.readFileSync(out);
+  fs.writeFileSync(local, older);
+  assert.strictEqual(mergeV2({ out, paths: [local], publicX: trust }), 0);
+  assert.deepStrictEqual(fs.readFileSync(out), kept);
+
+  fs.writeFileSync(local, bad);
+  assert.strictEqual(mergeV2({ out, paths: [local], publicX: trust }), 0);
+  assert.deepStrictEqual(fs.readFileSync(out), kept);
+
+  const onlyBad = path.join(dir, 'only-bad'); fs.mkdirSync(onlyBad);
+  fs.writeFileSync(path.join(dir, 'foreign.json'), rawDoc(foreign.pem, ['cccccccccccc'], NOW + 9 * 864e5));
+  assert.strictEqual(mergeV2({ out: path.join(onlyBad, 'revoked-v2.json'), paths: [path.join(dir, 'foreign.json'), local], publicX: trust }), 0);
+  assert.ok(!fs.existsSync(path.join(onlyBad, 'revoked-v2.json')));
+  assert.deepStrictEqual(fs.readFileSync(v1copy), v1);
+
+  const frozenOut = path.join(dir, 'nested', 'revoked.json');
+  fs.mkdirSync(path.dirname(frozenOut));
+  fs.writeFileSync(frozenOut, v1);
+  assert.strictEqual(mergeV2({ out: frozenOut, paths: [live], publicX: trust }), 1);
+  assert.deepStrictEqual(fs.readFileSync(frozenOut), v1);
+
+  const cliOut = path.join(dir, 'cli-v1.json');
+  const cli = spawnSync(process.execPath, [path.join(root, 'build/merge-revoked.cjs'), v1copy, cliOut], { encoding: 'utf8' });
+  assert.strictEqual(cli.status, 0, cli.stderr);
+  assert.deepStrictEqual(fs.readFileSync(cliOut), v1);
+  assert.deepStrictEqual(fs.readFileSync(v1copy), v1);
+  const signedNew = path.join(dir, 'signed-new.json');
+  fs.writeFileSync(signedNew, rawDoc(primary.pem, [], NOW));
+  const before = fs.readFileSync(signedNew);
+  const rejected = path.join(dir, 'rejected.json');
+  const badCli = spawnSync(process.execPath, [path.join(root, 'build/merge-revoked.cjs'), signedNew, rejected], { encoding: 'utf8' });
+  assert.strictEqual(badCli.status, 1);
+  assert.match(badCli.stderr, /không ký lại|revoked-v2\.json/);
+  assert.deepStrictEqual(fs.readFileSync(signedNew), before);
+  assert.ok(!fs.existsSync(rejected));
+  assert.strictEqual(copyV1(v1copy, path.join(dir, 'copy-v1.json')), 0);
+  assert.deepStrictEqual(fs.readFileSync(path.join(dir, 'copy-v1.json')), v1);
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'site/revoked.json')), v1);
+});
+
+test('release.sh trộn revoked-v2 trước khi đẩy gh-pages và không bảo ký lại revoked.json', () => {
+  const rel = fs.readFileSync(path.join(root, 'release.sh'), 'utf8');
+  const push = rel.indexOf('git push -q -f origin gh-pages');
+  const v1 = rel.indexOf('node build/merge-revoked.cjs site/revoked.json "$SITE/revoked.json"');
+  const v2 = rel.indexOf('node build/merge-revoked.cjs --next --out "$SITE/revoked-v2.json" site/revoked-v2.json');
+  const v2live = rel.indexOf('node build/merge-revoked.cjs --next --no-fetch --out "$SITE/revoked-v2.json"');
+  const drift = rel.indexOf('python3 tools/site_drift.py --rendered "$SITE" --live');
+  assert.ok(v1 > 0 && v2 > v1 && v2live > v2 && drift > v2live && push > drift);
+  assert.doesNotMatch(rel, /admin\.cjs/);
+  assert.match(fs.readFileSync(path.join(root, 'tools/site_drift.py'), 'utf8'), /'revoked-v2\.json'/);
+});
