@@ -167,3 +167,11 @@ test('B192 re-review #68 (1) agent: gõ rồi Enter “CHƯA kiểm chứng đư
   assert.strictEqual(r.outcome, 'failed', r.text);
   assert.match(r.text, /CHƯA xác nhận/); assert.ok(!/thành công/.test(r.text), r.text);
 });
+test('B192 QA #68 v2 (B202/B203): zh “在里面写” chỉ lại trình soạn thảo là việc gõ; “写了/写过/写的” không phải lệnh gõ', () => {
+  for (const q of ['打开记事本，在里面写你好', '打开记事本，然后在上面写明天开会', '打开Word，在里面写一份请假条', '打开 notepad，在它里面写你好', '打开记事本，在里面写"你好"', '在记事本里面写你好', '在记事本里写你好'])
+    assert.ok(RT.typeTask(q), q);
+  for (const q of ['我昨天在文档里写了什么？帮我打开文件夹', '在Word里写的那份报告在哪里？帮我打开下载文件夹', '记事本里写过的东西在哪？', '打开记事本，看看在里面写了什么', '在记事本里写的笔记丢了，帮我打开回收站', '在家里写作业', '我在家里，在里面写作业，帮我放首歌', '打开记事本'])
+    assert.ok(!RT.typeTask(q), q);
+  assert.strictEqual(RT.effectOf([st2('click')], '打开记事本，在里面写你好').why, 'typed');
+  assert.strictEqual(RT.effectOf([st2('click')], '在Word里写的那份报告在哪里？帮我打开下载文件夹').ok, true);
+});
