@@ -47,7 +47,9 @@ test('bản đóng gói bỏ qua biến môi trường kiểm thử', () => {
   delete process.env.AIVN_TEST_PUBKEY; delete process.env.AIVN_FAKE_MACHINE;
 });
 
-test('revoked.json trên trang web có chữ ký hợp lệ với khoá công khai trong app', { skip: process.env.AIVN_OFFLINE && 'offline', timeout: 20000 }, async () => {
+test('revoked.json trên trang web vẫn do khoá cũ ký (bản cũ gia hạn được; bản mới cũng tin)', { skip: process.env.AIVN_OFFLINE && 'offline', timeout: 20000 }, async () => {
   let doc; try { doc = await (await fetch(L.REVOKED_URL + '?t=' + Date.now())).json(); } catch (e) { return; }
-  const j = L.verifyRevoked(doc, L.PUBLIC_KEY_X); assert.ok(Array.isArray(j.revoked));
+  const j = L.verifyRevoked(doc, L.LEGACY_PUBLIC_KEYS[0]); assert.ok(Array.isArray(j.revoked));
+  assert.deepStrictEqual(L.verifyRevoked(doc).revoked, j.revoked);
+  assert.throws(() => L.verifyRevoked(doc, L.PUBLIC_KEY_X)); // khoá mới không được ký đè URL cũ
 });

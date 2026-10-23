@@ -3,6 +3,7 @@ const http = require('http');
 const crypto = require('crypto');
 const { normalizeTools, dropNullOptionals } = require('./schema');
 const { handleMessages, anthropicError } = require('./anthropic-api');
+const { assertInputLengths, MAX_EMBED_BODY } = require('./embed-server');
 
 // tool_choice kiểu OpenAI → 'auto' | 'none' | 'required' | { name }
 function parseToolChoice(tc, tools) {
@@ -45,22 +46,23 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
   // B80: mọi phản hồi lỗi đều vào nhật ký kèm mã (trước đây 404 chỉ thấy “POST /v1/completions”, không thấy mã)
   const err = (res, code, message, type = 'invalid_request_error') => { if (code !== 401) log(`  → ${code} ${String(message).slice(0, 200)}`); return send(res, code, { error: { message, type, code } }); };
 
-  const readBody = (req) => new Promise((resolve, reject) => {
+  const readBody = (req, max = 20e6, tooBigMsg) => new Promise((resolve, reject) => {
     let size = 0; const chunks = []; let settled = false;
     const dump = () => { req.removeAllListeners('data'); req.on('data', () => {}); req.resume(); };
     req.on('data', c => {
       if (settled) return;
       size += c.length;
-      if (size > 20e6) {
+      if (size > max) {
         settled = true;
-        const e = new Error('Body quá lớn'); e.status = 413;
+        const e = new Error(typeof tooBigMsg === 'function' ? tooBigMsg(max) : (tooBigMsg || 'Body quá lớn'));
+        e.status = 413;
         dump(); reject(e);
         return;
       }
       chunks.push(c);
     });
     req.on('end', () => { if (!settled) resolve(Buffer.concat(chunks).toString('utf8')); });
-    req.on('error', (e) => { if (!settled) reject(e); });
+    req.on('error', (e) => { if (!settled) { settled = true; reject(e); } });
   });
   const tooBig = (e) => !!(e && e.status === 413);
   const sseHeaders = (req) => {
@@ -97,9 +99,16 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
 
     if (req.method === 'GET' && (p === '/v1/models' || p === '/models')) {
       const st = engine.status();
-      const data = models().map(m => ({ id: m.id, object: 'model', created: Math.floor(m.mtime / 1000), owned_by: 'aivn', loaded: st.loaded && st.id === m.id, ...(m.vision ? { vision: true } : {}) }));
-      const em = embeddings && embeddings.info();
-      if (em && em.installed) data.push({ id: em.id, object: 'model', created: Math.floor((em.mtime || Date.now()) / 1000), owned_by: 'aivn', type: 'embedding' });
+      let rows = [];
+      if (embeddings && typeof embeddings.list === 'function') { try { rows = embeddings.list() || []; } catch { rows = []; } }
+      const embedIds = new Set(rows.map(em => String(em.id).toLowerCase()));
+      const data = models().filter(m => !embedIds.has(String(m.id).toLowerCase())).map(m => ({ id: m.id, object: 'model', created: Math.floor(m.mtime / 1000), owned_by: 'aivn', loaded: st.loaded && st.id === m.id, ...(m.vision ? { vision: true } : {}) }));
+      if (embeddings && typeof embeddings.list === 'function') {
+        for (const em of rows) data.push({ id: em.id, object: 'model', created: Math.floor((em.mtime || Date.now()) / 1000), owned_by: 'aivn', type: 'embedding' });
+      } else {
+        const em = embeddings && embeddings.info();
+        if (em && em.installed) data.push({ id: em.id, object: 'model', created: Math.floor((em.mtime || Date.now()) / 1000), owned_by: 'aivn', type: 'embedding' });
+      }
       return send(res, 200, { object: 'list', data });
     }
     if (req.method === 'GET' && (p === '' || p === '/' || p === '/health')) return send(res, 200, { status: 'ok', app: 'AIVN', model: engine.status() });
@@ -220,12 +229,14 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
     if (req.method === 'POST' && (p === '/v1/embeddings' || p === '/embeddings')) {
       if (!embeddings) return err(res, 501, 'Máy chủ này không hỗ trợ embeddings');
       let body;
-      try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) { if (tooBig(e)) return err(res, 413, 'Body quá lớn', 'payload_too_large'); return err(res, 400, 'JSON không hợp lệ'); }
+      try { body = JSON.parse(await readBody(req, MAX_EMBED_BODY, (n) => `Nội dung yêu cầu embeddings quá lớn (tối đa ${n} byte).`) || '{}'); }
+      catch (e) { const msg = e && e.message || ''; return err(res, 400, /quá lớn/.test(msg) ? msg : 'JSON không hợp lệ'); }
       let input = body.input;
       if (typeof input === 'string') input = [input];
       if (!Array.isArray(input) || !input.length) return err(res, 400, 'Thiếu trường "input" (chuỗi hoặc mảng chuỗi)');
       if (input.some(x => typeof x !== 'string')) return err(res, 400, 'AIVN chỉ nhận "input" dạng chuỗi (chưa hỗ trợ mảng token)');
       if (input.length > 256) return err(res, 400, 'Tối đa 256 chuỗi mỗi yêu cầu');
+      try { assertInputLengths(input); } catch (e) { return err(res, e.status || 400, e.message); }
       const fmt = body.encoding_format || 'float';
       if (!['float', 'base64'].includes(fmt)) return err(res, 400, '"encoding_format" phải là "float" hoặc "base64"');
       let info;
@@ -240,7 +251,7 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
           data: vecs.map((v, index) => { const f = fit(v); return { object: 'embedding', index, embedding: fmt === 'base64' ? Buffer.from(f.buffer, f.byteOffset, f.byteLength).toString('base64') : Array.from(f) }; }),
           usage: { prompt_tokens: tokens, total_tokens: tokens },
         });
-      } catch (e) { return err(res, 500, e.message, 'server_error'); }
+      } catch (e) { return err(res, e.status || 500, e.message, e.status === 400 ? 'invalid_request_error' : 'server_error'); }
     }
     if (isAnthropic) {
       if (req.method !== 'POST') {
