@@ -1,0 +1,474 @@
+{
+ "source": "Odoo 17.0 @657d92130e501843316542524f074a2f094c27e2 float_round; compute_all 17.0 = _add_tax_details_in_base_line 18.0 (price_include, round_per_line, VND rounding 1.0)",
+ "samples": [
+  {
+   "id": "S11",
+   "doc": "quote",
+   "title": "Báo giá giá bán lẻ đã gồm thuế, đủ bốn mức 0/5/8/10%",
+   "lines": [
+    {
+     "name": "Sách",
+     "qty": 3,
+     "price": 52000,
+     "vat_pct": 0,
+     "discount_pct": 0,
+     "price_include": true
+    },
+    {
+     "name": "Gạo ST25 (kg)",
+     "qty": 25,
+     "price": 34000,
+     "vat_pct": 5,
+     "discount_pct": 0,
+     "price_include": true
+    },
+    {
+     "name": "Phần mềm",
+     "qty": 1,
+     "price": 1990000,
+     "vat_pct": 8,
+     "discount_pct": 0,
+     "price_include": true
+    },
+    {
+     "name": "Ghế xoay",
+     "qty": 2,
+     "price": 1650000,
+     "vat_pct": 10,
+     "discount_pct": 0,
+     "price_include": true
+    }
+   ],
+   "odoo": {
+    "lines": [
+     {
+      "price_subtotal": 156000,
+      "tax": 0,
+      "price_total": 156000
+     },
+     {
+      "price_subtotal": 809524,
+      "tax": 40476,
+      "price_total": 850000
+     },
+     {
+      "price_subtotal": 1842593,
+      "tax": 147407,
+      "price_total": 1990000
+     },
+     {
+      "price_subtotal": 3000000,
+      "tax": 300000,
+      "price_total": 3300000
+     }
+    ],
+    "tax_groups": [
+     {
+      "rate": 0,
+      "base": 156000,
+      "tax": 0
+     },
+     {
+      "rate": 5,
+      "base": 809524,
+      "tax": 40476
+     },
+     {
+      "rate": 8,
+      "base": 1842593,
+      "tax": 147407
+     },
+     {
+      "rate": 10,
+      "base": 3000000,
+      "tax": 300000
+     }
+    ],
+    "amount_untaxed": 5808117,
+    "amount_tax": 487883,
+    "amount_total": 6296000
+   }
+  },
+  {
+   "id": "S12",
+   "doc": "sale_order",
+   "title": "Đơn bán: giá gồm thuế có phần lẻ — tách thuế lệch nếu làm tròn sai chỗ",
+   "lines": [
+    {
+     "name": "Nước suối",
+     "qty": 7,
+     "price": 4999,
+     "vat_pct": 10,
+     "discount_pct": 0,
+     "price_include": true
+    },
+    {
+     "name": "Bánh",
+     "qty": 3,
+     "price": 12345,
+     "vat_pct": 8,
+     "discount_pct": 0,
+     "price_include": true
+    },
+    {
+     "name": "Trà",
+     "qty": 11,
+     "price": 7777,
+     "vat_pct": 5,
+     "discount_pct": 0,
+     "price_include": true
+    },
+    {
+     "name": "Báo",
+     "qty": 1,
+     "price": 9,
+     "vat_pct": 10,
+     "discount_pct": 0,
+     "price_include": true
+    },
+    {
+     "name": "Kẹo",
+     "qty": 1,
+     "price": 1,
+     "vat_pct": 8,
+     "discount_pct": 0,
+     "price_include": true
+    }
+   ],
+   "odoo": {
+    "lines": [
+     {
+      "price_subtotal": 31812,
+      "tax": 3181,
+      "price_total": 34993
+     },
+     {
+      "price_subtotal": 34292,
+      "tax": 2743,
+      "price_total": 37035
+     },
+     {
+      "price_subtotal": 81473,
+      "tax": 4074,
+      "price_total": 85547
+     },
+     {
+      "price_subtotal": 8,
+      "tax": 1,
+      "price_total": 9
+     },
+     {
+      "price_subtotal": 1,
+      "tax": 0,
+      "price_total": 1
+     }
+    ],
+    "tax_groups": [
+     {
+      "rate": 5,
+      "base": 81473,
+      "tax": 4074
+     },
+     {
+      "rate": 8,
+      "base": 34293,
+      "tax": 2743
+     },
+     {
+      "rate": 10,
+      "base": 31820,
+      "tax": 3182
+     }
+    ],
+    "amount_untaxed": 147586,
+    "amount_tax": 9999,
+    "amount_total": 157585
+   }
+  },
+  {
+   "id": "S13",
+   "doc": "invoice",
+   "title": "Hoá đơn: giá gồm thuế + chiết khấu + số lượng lẻ",
+   "lines": [
+    {
+     "name": "Thép (kg)",
+     "qty": 86.1,
+     "price": 18150,
+     "vat_pct": 10,
+     "discount_pct": 3.5,
+     "price_include": true
+    },
+    {
+     "name": "Cáp (m)",
+     "qty": 42.861,
+     "price": 835380,
+     "vat_pct": 8,
+     "discount_pct": 12.85,
+     "price_include": true
+    },
+    {
+     "name": "Hạt điều (kg)",
+     "qty": 0.125,
+     "price": 408450,
+     "vat_pct": 5,
+     "discount_pct": 0,
+     "price_include": true
+    },
+    {
+     "name": "Gói",
+     "qty": 2.375,
+     "price": 1999,
+     "vat_pct": 0,
+     "discount_pct": 12.5,
+     "price_include": true
+    }
+   ],
+   "odoo": {
+    "lines": [
+     {
+      "price_subtotal": 1370927,
+      "tax": 137093,
+      "price_total": 1508020
+     },
+     {
+      "price_subtotal": 28892825,
+      "tax": 2311426,
+      "price_total": 31204251
+     },
+     {
+      "price_subtotal": 48625,
+      "tax": 2431,
+      "price_total": 51056
+     },
+     {
+      "price_subtotal": 4154,
+      "tax": 0,
+      "price_total": 4154
+     }
+    ],
+    "tax_groups": [
+     {
+      "rate": 0,
+      "base": 4154,
+      "tax": 0
+     },
+     {
+      "rate": 5,
+      "base": 48625,
+      "tax": 2431
+     },
+     {
+      "rate": 8,
+      "base": 28892825,
+      "tax": 2311426
+     },
+     {
+      "rate": 10,
+      "base": 1370927,
+      "tax": 137093
+     }
+    ],
+    "amount_untaxed": 30316531,
+    "amount_tax": 2450950,
+    "amount_total": 32767481
+   }
+  },
+  {
+   "id": "S14",
+   "doc": "purchase_order",
+   "title": "Đơn mua: trộn dòng giá gồm thuế và dòng giá chưa thuế cùng mức",
+   "lines": [
+    {
+     "name": "Linh kiện (gồm thuế)",
+     "qty": 100,
+     "price": 92247,
+     "vat_pct": 10,
+     "discount_pct": 66.5,
+     "price_include": true
+    },
+    {
+     "name": "Linh kiện (chưa thuế)",
+     "qty": 100,
+     "price": 83861,
+     "vat_pct": 10,
+     "discount_pct": 66.5,
+     "price_include": false
+    },
+    {
+     "name": "Vỏ hộp",
+     "qty": 485,
+     "price": 248,
+     "vat_pct": 8,
+     "discount_pct": 77,
+     "price_include": true
+    },
+    {
+     "name": "Ốc vít",
+     "qty": 29,
+     "price": 184,
+     "vat_pct": 5,
+     "discount_pct": 0,
+     "price_include": true
+    },
+    {
+     "name": "Ốc vít (chưa thuế)",
+     "qty": 29,
+     "price": 175,
+     "vat_pct": 5,
+     "discount_pct": 0,
+     "price_include": false
+    }
+   ],
+   "odoo": {
+    "lines": [
+     {
+      "price_subtotal": 2809341,
+      "tax": 280934,
+      "price_total": 3090275
+     },
+     {
+      "price_subtotal": 2809344,
+      "tax": 280934,
+      "price_total": 3090278
+     },
+     {
+      "price_subtotal": 25615,
+      "tax": 2049,
+      "price_total": 27664
+     },
+     {
+      "price_subtotal": 5082,
+      "tax": 254,
+      "price_total": 5336
+     },
+     {
+      "price_subtotal": 5075,
+      "tax": 254,
+      "price_total": 5329
+     }
+    ],
+    "tax_groups": [
+     {
+      "rate": 5,
+      "base": 10157,
+      "tax": 508
+     },
+     {
+      "rate": 8,
+      "base": 25615,
+      "tax": 2049
+     },
+     {
+      "rate": 10,
+      "base": 5618685,
+      "tax": 561868
+     }
+    ],
+    "amount_untaxed": 5654457,
+    "amount_tax": 564425,
+    "amount_total": 6218882
+   }
+  },
+  {
+   "id": "S15",
+   "doc": "vendor_bill",
+   "title": "Hoá đơn NCC: số tiền lớn giá gồm thuế, chiết khấu 100% và giá 0",
+   "lines": [
+    {
+     "name": "Máy CNC",
+     "qty": 647,
+     "price": 316250,
+     "vat_pct": 10,
+     "discount_pct": 51.46,
+     "price_include": true
+    },
+    {
+     "name": "Vật tư",
+     "qty": 600,
+     "price": 61695,
+     "vat_pct": 8,
+     "discount_pct": 35.83,
+     "price_include": true
+    },
+    {
+     "name": "Hàng tặng",
+     "qty": 5,
+     "price": 132000,
+     "vat_pct": 10,
+     "discount_pct": 100,
+     "price_include": true
+    },
+    {
+     "name": "Miễn phí",
+     "qty": 2,
+     "price": 0,
+     "vat_pct": 5,
+     "discount_pct": 0,
+     "price_include": true
+    },
+    {
+     "name": "Không chịu thuế",
+     "qty": 3,
+     "price": 99999999,
+     "vat_pct": 0,
+     "discount_pct": 0,
+     "price_include": true
+    }
+   ],
+   "odoo": {
+    "lines": [
+     {
+      "price_subtotal": 90290467,
+      "tax": 9029047,
+      "price_total": 99319514
+     },
+     {
+      "price_subtotal": 21994268,
+      "tax": 1759541,
+      "price_total": 23753809
+     },
+     {
+      "price_subtotal": 0,
+      "tax": 0,
+      "price_total": 0
+     },
+     {
+      "price_subtotal": 0,
+      "tax": 0,
+      "price_total": 0
+     },
+     {
+      "price_subtotal": 299999997,
+      "tax": 0,
+      "price_total": 299999997
+     }
+    ],
+    "tax_groups": [
+     {
+      "rate": 0,
+      "base": 299999997,
+      "tax": 0
+     },
+     {
+      "rate": 5,
+      "base": 0,
+      "tax": 0
+     },
+     {
+      "rate": 8,
+      "base": 21994268,
+      "tax": 1759541
+     },
+     {
+      "rate": 10,
+      "base": 90290467,
+      "tax": 9029047
+     }
+    ],
+    "amount_untaxed": 412284732,
+    "amount_tax": 10788588,
+    "amount_total": 423073320
+   }
+  }
+ ]
+}

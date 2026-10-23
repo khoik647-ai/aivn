@@ -63,12 +63,13 @@ const SCHEMA = [
 ];
 // cột thêm cho bảng cũ (CSDL tạo từ 0.15.x): thêm nếu chưa có, giữ nguyên dữ liệu
 const ADD_COLUMNS = {
-  products: [['type', "TEXT DEFAULT 'product'"], ['cost', 'INTEGER DEFAULT 0'], ['barcode', 'TEXT'], ['min_qty', 'REAL DEFAULT 0'], ['category', 'TEXT'], ['vat_pct', 'REAL DEFAULT 10'], ['max_qty', 'REAL DEFAULT 0']], // max_qty: #42 K2
+  products: [['type', "TEXT DEFAULT 'product'"], ['cost', 'INTEGER DEFAULT 0'], ['barcode', 'TEXT'], ['min_qty', 'REAL DEFAULT 0'], ['category', 'TEXT'], ['vat_pct', 'REAL DEFAULT 10'], ['max_qty', 'REAL DEFAULT 0'], ['price_include', 'INTEGER DEFAULT 0']], // max_qty: #42 K2; price_include: #42 K3 (giá bán đã gồm thuế)
   quotes: [['confirmed_at', 'INTEGER'], ['owner', 'TEXT'], ['payment_days', 'INTEGER DEFAULT 0'], ['commitment_date', 'TEXT'], ['tax_rounding', 'TEXT']],
   // 0.16 (lược đồ 3): thuế GTGT theo từng dòng, Mua hàng (phiếu nhập gắn đơn mua, hoá đơn nhà cung cấp), chiều thanh toán
-  quote_lines: [['vat_pct', 'REAL']],
+  quote_lines: [['vat_pct', 'REAL'], ['price_include', 'INTEGER DEFAULT 0']], // price_include: #42 K3 — đơn giá của dòng đã gồm thuế GTGT
   invoices: [['tax_rounding', 'TEXT'], ['ref', 'TEXT'], ['po_id', 'TEXT']],
-  invoice_lines: [['vat_pct', 'REAL'], ['po_line_id', 'TEXT']],
+  invoice_lines: [['vat_pct', 'REAL'], ['po_line_id', 'TEXT'], ['price_include', 'INTEGER DEFAULT 0']],
+  purchase_lines: [['price_include', 'INTEGER DEFAULT 0']], // #42 K3
   pickings: [['po_id', 'TEXT']],
   // B54/N3: hàng xuất khi tồn âm — phần chưa có giá (vacuum_qty) và số đã định giá lại (reval) khi hàng về (Odoo: stock.valuation.layer remaining_qty < 0)
   moves: [['po_line_id', 'TEXT'], ['vacuum_qty', 'REAL DEFAULT 0'], ['reval', 'INTEGER DEFAULT 0']],

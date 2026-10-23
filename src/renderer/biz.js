@@ -18,8 +18,12 @@
   const parseQty = (v) => NUM.parseQty(v);
   const parseMoney = (v) => { const n = NUM.parseMoney(v); return Number.isFinite(n) ? n : 0; };
   // #41: thành tiền dòng như src/crm/tax.js lineSubtotal — 'line' = Odoo round_per_line (float_round(giá × (1 − CK/100) × SL)); 'global' = công thức cũ
-  const amt = (l, rounding) => { const q = parseQty(l.qty) || 0, p = parseMoney(l.price), d = NUM.parsePct(l.discount_pct) || 0;
+  const gross = (l, rounding) => { const q = parseQty(l.qty) || 0, p = parseMoney(l.price), d = NUM.parsePct(l.discount_pct) || 0;
     return rounding === 'global' ? Math.round(q * p * (1 - d / 100)) : NUM.floatRound((p * (1 - d / 100.0)) * q); };
+  // #42 K3: “Giá đã gồm thuế” — như tax.js inclTax/lineSubtotal (Odoo price_include, round_per_line): thuế = float_round(gộp × 1/(1+mức) × mức), thành tiền = gộp − thuế
+  const inclOf = (l) => { const v = l && l.price_include; return v === true || v === 1 || v === '1' || v === 'true' || v === 'on' ? 1 : 0; };
+  const inclTax = (g, r, rounding) => { if (!r) return 0; const v = g * (1 / (1 + r / 100.0)) * r / 100.0; return rounding === 'global' ? Math.round(v) : NUM.floatRound(v); };
+  const amt = (l, rounding) => { const g = gross(l, rounding); return inclOf(l) ? g - inclTax(g, lineVat(l), rounding) : g; };
   // ô số: hiện theo ngôn ngữ (vi “1.234,5”, en/zh “1,234.5”) và giữ số gốc ở data-num — người dùng không sửa thì gửi đúng số gốc (kể cả 1,125 mơ hồ)
   const nv = (v, max = 3) => typeof v === 'number' && Number.isFinite(v) ? `value="${esc(NUM.fmtInput(v, UIL(), max))}" data-num="${v}"` : `value="${esc(v ?? '')}"`;
   const rv = (x) => (x.dataset.num != null && x.value === x.defaultValue ? Number(x.dataset.num) : x.value);
@@ -37,8 +41,9 @@
   const lineVat = (l) => (l.vat_pct === '' || l.vat_pct == null ? defVat() : Number(l.vat_pct));
   function totalsOf(lines, rounding) {
     const g = new Map(); let un = 0, tx = 0;
-    for (const l of lines) { const a = amt(l, rounding), r = lineVat(l); un += a; const x = g.get(r) || { rate: r, base: 0, tax: 0 }; x.base += a; if (rounding !== 'global') { const t = NUM.floatRound(a * r / 100); x.tax += t; tx += t; } g.set(r, x); }
-    const groups = [...g.values()].sort((a, b) => a.rate - b.rate); if (rounding === 'global') { for (const x of groups) x.tax = Math.round(x.base * x.rate / 100); tx = groups.reduce((a, x) => a + x.tax, 0); }
+    for (const l of lines) { const a = amt(l, rounding), r = lineVat(l), inc = inclOf(l); un += a; const x = g.get(r) || { rate: r, base: 0, tax: 0, ex: 0, inTax: 0 }; x.base += a;
+      if (rounding !== 'global') { const t = inc ? inclTax(gross(l, rounding), r, rounding) : NUM.floatRound(a * r / 100); x.tax += t; tx += t; } else if (inc) x.inTax += inclTax(gross(l, rounding), r, rounding); else x.ex += a; g.set(r, x); }
+    const groups = [...g.values()].sort((a, b) => a.rate - b.rate); if (rounding === 'global') { for (const x of groups) x.tax = Math.round(x.ex * x.rate / 100) + x.inTax; tx = groups.reduce((a, x) => a + x.tax, 0); }
     return { untaxed: un, tax: tx, total: un + tx, groups };
   }
   const roundingOf = (e) => e.tax_rounding || (B.company && B.company.tax_rounding) || 'line';
@@ -46,12 +51,13 @@
     const t = totalsOf(lines, rounding);
     return `<div class="biz-totals"><div><span>Tiền trước thuế</span><b>${vnd(t.untaxed)}</b></div>${t.groups.map(g => `<div><span>Thuế GTGT ${g.rate}% <small class="muted">trên ${vnd(g.base)}</small></span><b>${vnd(g.tax)}</b></div>`).join('')}<div class="grand"><span>Tổng cộng</span><b>${vnd(t.total)}</b></div>${extra}</div>`;
   }
+  const inclSel = (l) => `<select data-lf="price_include" class="biz-incl" aria-label="Đơn giá đã gồm thuế?"><option value="0" ${inclOf(l) ? '' : 'selected'}>Chưa gồm thuế</option><option value="1" ${inclOf(l) ? 'selected' : ''}>Đã gồm thuế</option></select>`;
   const vatSel = (v, attrs, aria = 'Thuế GTGT') => `<select ${attrs} aria-label="${esc(aria)}">${VATS.map(x => `<option value="${x}" ${Number(v) === x ? 'selected' : ''}>${x}%</option>`).join('')}</select>`;
   // bảng dòng dùng chung (báo giá/đơn bán, hoá đơn, đơn mua): sửa trực tiếp khi còn nháp
   function linesTable(lines, editable, { note = () => '', products = B.products, rounding = 'line' } = {}) {
     const head = `<thead><tr><th>Sản phẩm</th><th>Mô tả</th><th class="num">SL</th><th>ĐVT</th><th class="num">Đơn giá</th><th class="num">CK %</th><th class="num">Thuế</th><th class="num">Thành tiền</th><th></th></tr></thead>`;
-    const row = (l, i) => editable ? `<tr data-line="${i}"><td><select data-lf="product_id" aria-label="Sản phẩm">${opt(products.map(p => [p.id, p.name]), l.product_id, '(dòng tự ghi)')}</select></td><td><input data-lf="name" value="${esc(l.name || '')}" aria-label="Mô tả"></td><td class="num"><input data-lf="qty" inputmode="decimal" ${nv(l.qty ?? 1)} class="biz-num" aria-label="Số lượng"></td><td><input data-lf="unit" list="bizUoms" value="${esc(uomL(l.unit || 'cái', l.qty))}" class="biz-unit" aria-label="Đơn vị"></td><td class="num"><input data-lf="price" inputmode="numeric" ${nv(l.price ?? 0, 0)} class="biz-money" aria-label="Đơn giá"></td><td class="num"><input data-lf="discount_pct" inputmode="decimal" ${nv(l.discount_pct || 0)} class="biz-num" aria-label="Chiết khấu %"></td><td class="num">${vatSel(lineVat(l), 'data-lf="vat_pct" class="biz-vat"')}</td><td class="num">${vnd(amt(l, rounding))}</td><td><button type="button" class="btn sm" data-biz-act="delLine" data-i="${i}" aria-label="Xoá dòng">✕</button></td></tr>`
-      : `<tr><td colspan="2">${esc(l.name)}</td><td class="num">${qn(l.qty)}</td><td>${esc(uomL(l.unit || '', l.qty))}</td><td class="num">${vnd(l.price)}</td><td class="num">${l.discount_pct ? qn(l.discount_pct) + '%' : ''}</td><td class="num">${lineVat(l)}%</td><td class="num">${vnd(l.amount ?? amt(l, rounding))}</td><td class="small muted">${note(l)}</td></tr>`;
+    const row = (l, i) => editable ? `<tr data-line="${i}"><td><select data-lf="product_id" aria-label="Sản phẩm">${opt(products.map(p => [p.id, p.name]), l.product_id, '(dòng tự ghi)')}</select></td><td><input data-lf="name" value="${esc(l.name || '')}" aria-label="Mô tả"></td><td class="num"><input data-lf="qty" inputmode="decimal" ${nv(l.qty ?? 1)} class="biz-num" aria-label="Số lượng"></td><td><input data-lf="unit" list="bizUoms" value="${esc(uomL(l.unit || 'cái', l.qty))}" class="biz-unit" aria-label="Đơn vị"></td><td class="num"><input data-lf="price" inputmode="numeric" ${nv(l.price ?? 0, 0)} class="biz-money" aria-label="Đơn giá"></td><td class="num"><input data-lf="discount_pct" inputmode="decimal" ${nv(l.discount_pct || 0)} class="biz-num" aria-label="Chiết khấu %"></td><td class="num">${vatSel(lineVat(l), 'data-lf="vat_pct" class="biz-vat"')}${inclSel(l)}</td><td class="num">${vnd(amt(l, rounding))}</td><td><button type="button" class="btn sm" data-biz-act="delLine" data-i="${i}" aria-label="Xoá dòng">✕</button></td></tr>`
+      : `<tr><td colspan="2">${esc(l.name)}</td><td class="num">${qn(l.qty)}</td><td>${esc(uomL(l.unit || '', l.qty))}</td><td class="num">${vnd(l.price)}</td><td class="num">${l.discount_pct ? qn(l.discount_pct) + '%' : ''}</td><td class="num">${lineVat(l)}%${inclOf(l) ? ` <small class="muted biz-incl">gồm thuế</small>` : ''}</td><td class="num">${vnd(l.amount ?? amt(l, rounding))}</td><td class="small muted">${note(l)}</td></tr>`;
     return `<table class="crm-table biz-lines">${head}<tbody>${lines.map(row).join('') || '<tr><td colspan="9" class="muted">Chưa có dòng nào.</td></tr>'}</tbody></table>${editable ? uomList() : ''}`;
   }
   // PDF thật (Chromium printToPDF ở tiến trình chính) thay cho hộp thoại in của trình duyệt
@@ -152,13 +158,13 @@
     $$('#crmBody [data-f]').forEach(x => { e[x.dataset.f] = x.value; });
     $$('#crmBody tr[data-line]').forEach(tr => { const l = e.lines[Number(tr.dataset.line)]; if (!l) return; tr.querySelectorAll('[data-lf]').forEach(x => { l[x.dataset.lf] = x.dataset.lf === 'unit' ? UOM.canon(x.value) : rv(x); }); });
   }
-  const orderPayload = () => { const e = B.edit; return { id: B.form.id || undefined, contact_id: e.contact_id, date: e.date, valid_until: e.valid_until, payment_days: e.payment_days, commitment_date: e.commitment_date, vat_pct: e.vat_pct, notes: e.notes, lines: e.lines.map(l => ({ product_id: l.product_id || null, name: l.name, unit: l.unit, qty: l.qty, price: parseMoney(l.price), discount_pct: l.discount_pct, vat_pct: lineVat(l) })) }; };
+  const orderPayload = () => { const e = B.edit; return { id: B.form.id || undefined, contact_id: e.contact_id, date: e.date, valid_until: e.valid_until, payment_days: e.payment_days, commitment_date: e.commitment_date, vat_pct: e.vat_pct, notes: e.notes, lines: e.lines.map(l => ({ product_id: l.product_id || null, name: l.name, unit: l.unit, qty: l.qty, price: parseMoney(l.price), discount_pct: l.discount_pct, vat_pct: lineVat(l), price_include: inclOf(l) })) }; };
 
   // ---------- Sản phẩm (hộp thoại) ----------
   async function productDialog(p = {}) {
     if (!B.company) B.company = await C('getCompany');
-    const F = [['name', 'Tên sản phẩm *'], ['type', 'Loại sản phẩm', [['product', 'Hàng lưu kho (theo dõi tồn kho)'], ['consu', 'Hàng tiêu dùng (không theo dõi tồn)'], ['service', 'Dịch vụ']]], ['sku', 'Mã nội bộ'], ['barcode', 'Mã vạch'], ['category', 'Nhóm sản phẩm'], ['unit', 'Đơn vị tính'], ['price', 'Giá bán (₫)'], ['cost', 'Giá vốn (₫)'], ['vat_pct', 'Thuế GTGT', VATS.map(v => [v, v + '%'])], ['min_qty', 'Tồn tối thiểu (cảnh báo khi thấp hơn)'], ['max_qty', 'Tồn tối đa (đặt hàng bổ sung đến mức này)'], ['description', 'Mô tả', 'area']];
-    dialog(p.id ? 'Sửa sản phẩm' : 'Thêm sản phẩm', F, { unit: 'cái', type: 'product', vat_pct: defVat(), ...p }, async (o) => { await C('saveProduct', { ...o, id: p.id || undefined }); toast('Đã lưu ✓'); render('sales'); });
+    const F = [['name', 'Tên sản phẩm *'], ['type', 'Loại sản phẩm', [['product', 'Hàng lưu kho (theo dõi tồn kho)'], ['consu', 'Hàng tiêu dùng (không theo dõi tồn)'], ['service', 'Dịch vụ']]], ['sku', 'Mã nội bộ'], ['barcode', 'Mã vạch'], ['category', 'Nhóm sản phẩm'], ['unit', 'Đơn vị tính'], ['price', 'Giá bán (₫)'], ['cost', 'Giá vốn (₫)'], ['vat_pct', 'Thuế GTGT', VATS.map(v => [v, v + '%'])], ['price_include', 'Giá bán đã gồm thuế', [[0, 'Chưa gồm thuế (cộng thuế khi bán)'], [1, 'Đã gồm thuế (giá khách trả)']]], ['min_qty', 'Tồn tối thiểu (cảnh báo khi thấp hơn)'], ['max_qty', 'Tồn tối đa (đặt hàng bổ sung đến mức này)'], ['description', 'Mô tả', 'area']];
+    dialog(p.id ? 'Sửa sản phẩm' : 'Thêm sản phẩm', F, { unit: 'cái', type: 'product', vat_pct: defVat(), price_include: 0, ...p }, async (o) => { await C('saveProduct', { ...o, id: p.id || undefined }); toast('Đã lưu ✓'); render('sales'); });
     if (p.id) vendorSection(p); // #42 K1: phần “Nhà cung cấp” trên form sản phẩm (Odoo: tab Mua hàng)
   }
   async function vendorSection(p) {
@@ -306,7 +312,7 @@
         ${qrBox}
         <label class="biz-notes">Ghi chú<textarea data-f="notes" rows="2" ${editable ? '' : 'disabled'}>${esc(e.notes || '')}</textarea></label></div>`;
   }
-  const invPayload = () => { const e = B.edit; return { id: B.form.id || undefined, kind: e.kind, partner_id: e.partner_id, invoice_date: e.invoice_date, due_date: e.due_date, ref: e.ref, vat_pct: e.vat_pct, notes: e.notes, lines: e.lines.map(l => ({ product_id: l.product_id || null, so_line_id: l.so_line_id || null, po_line_id: l.po_line_id || null, name: l.name, unit: l.unit, qty: l.qty, price: parseMoney(l.price), discount_pct: l.discount_pct, vat_pct: lineVat(l) })) }; };
+  const invPayload = () => { const e = B.edit; return { id: B.form.id || undefined, kind: e.kind, partner_id: e.partner_id, invoice_date: e.invoice_date, due_date: e.due_date, ref: e.ref, vat_pct: e.vat_pct, notes: e.notes, lines: e.lines.map(l => ({ product_id: l.product_id || null, so_line_id: l.so_line_id || null, po_line_id: l.po_line_id || null, name: l.name, unit: l.unit, qty: l.qty, price: parseMoney(l.price), discount_pct: l.discount_pct, vat_pct: lineVat(l), price_include: inclOf(l) })) }; };
 
   // ---------- Mua hàng (theo Odoo Purchase) ----------
   const PO_STEPS = [['draft', 'Yêu cầu báo giá'], ['sent', 'Đã gửi yêu cầu báo giá'], ['purchase', 'Đơn mua hàng']];
@@ -359,7 +365,7 @@
         <label class="biz-notes">Điều khoản và ghi chú<textarea data-f="notes" rows="2" ${editable ? '' : 'disabled'}>${esc(e.notes || '')}</textarea></label>
       </div>`;
   }
-  const poPayload = () => { const e = B.edit; return { id: B.form.id || undefined, partner_id: e.partner_id, partner_ref: e.partner_ref, date_order: e.date_order, date_planned: e.date_planned, payment_days: e.payment_days, vat_pct: e.vat_pct, notes: e.notes, lines: e.lines.map(l => ({ product_id: l.product_id || null, name: l.name, unit: l.unit, qty: l.qty, price: parseMoney(l.price), discount_pct: l.discount_pct, vat_pct: lineVat(l) })) }; };
+  const poPayload = () => { const e = B.edit; return { id: B.form.id || undefined, partner_id: e.partner_id, partner_ref: e.partner_ref, date_order: e.date_order, date_planned: e.date_planned, payment_days: e.payment_days, vat_pct: e.vat_pct, notes: e.notes, lines: e.lines.map(l => ({ product_id: l.product_id || null, name: l.name, unit: l.unit, qty: l.qty, price: parseMoney(l.price), discount_pct: l.discount_pct, vat_pct: lineVat(l), price_include: inclOf(l) })) }; };
 
   // ---------- Báo cáo ----------
   async function reportView(s) {
@@ -524,12 +530,12 @@
     readForm();
     const buying = B.form.type === 'purchase' || (B.form.type === 'invoice' && String(B.edit.kind || '').startsWith('in_'));
     if (B.form.type === 'vprices') return;
-    if (lf && lf.dataset.lf === 'product_id') { const l = B.edit.lines[Number(lf.closest('tr').dataset.line)]; const p = B.products.find(x => x.id === lf.value); if (p && l) { if (B.form.type === 'receipt') l.unit_cost = p.cost || 0; else { l.name = p.name; l.unit = p.unit; l.price = buying ? (p.cost || 0) : p.price; if (p.vat_pct != null) l.vat_pct = p.vat_pct; if (B.form.type === 'purchase') l._vp = 'new'; } } }
+    if (lf && lf.dataset.lf === 'product_id') { const l = B.edit.lines[Number(lf.closest('tr').dataset.line)]; const p = B.products.find(x => x.id === lf.value); if (p && l) { if (B.form.type === 'receipt') l.unit_cost = p.cost || 0; else { l.name = p.name; l.unit = p.unit; l.price = buying ? (p.cost || 0) : p.price; if (p.vat_pct != null) l.vat_pct = p.vat_pct; l.price_include = buying ? 0 : inclOf(p); if (B.form.type === 'purchase') l._vp = 'new'; } } }
     if (f && f.dataset.f === 'vat_pct') B.edit.lines.forEach(l => { l.vat_pct = Number(f.value); });
     if (f && f.dataset.f === 'date_planned') B.edit._autoPlanned = false;
     const vpIdx = B.form.type !== 'purchase' ? [] : lf && ['product_id', 'qty'].includes(lf.dataset.lf) ? [Number(lf.closest('tr').dataset.line)] : f && ['partner_id', 'date_order'].includes(f.dataset.f) ? B.edit.lines.map((_, i) => i) : [];
     if (vpIdx.length) return refreshVendorPrices(vpIdx).catch(x => toast(x.message, true)).then(() => renderForm());
-    if ((lf && ['product_id', 'qty', 'price', 'discount_pct', 'vat_pct'].includes(lf.dataset.lf)) || (f && f.dataset.f === 'vat_pct')) renderForm();
+    if ((lf && ['product_id', 'qty', 'price', 'discount_pct', 'vat_pct', 'price_include'].includes(lf.dataset.lf)) || (f && f.dataset.f === 'vat_pct')) renderForm();
   });
   el.addEventListener('change', (e) => { const r = e.target.closest('[data-rep]'); if (r && crm.tab === 'reports') { B.rep[r.dataset.rep] = r.value; renderCrm(); } });
 

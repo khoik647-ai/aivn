@@ -123,13 +123,13 @@ function createPurchase({ db, crm, now, today, log = () => {}, h }) {
       const q = Math.max(0, Number.isFinite(qty) ? qty : 0); const seller = pr ? sellerOf(pr.id, o.partner_id, q) : null; if (seller) delays.push(seller.delay || 0);
       return { id: newId('pol'), product_id: pr ? pr.id : null, name: str(l.name || (pr && pr.name), 300), unit: UOM.canon(str(l.unit || (pr && pr.unit), 30)) || 'cái', qty: q,
         price: Math.max(0, TAX.moneyIn(l.price, seller ? seller.price : pr ? pr.cost || 0 : 0)), discount_pct: TAX.pctIn(l.discount_pct),
-        vat_pct: given ? TAX.vatOf(l.vat_pct) : !docVatGiven && pr && pr.vat_pct != null ? TAX.vatOf(pr.vat_pct) : o.vat_pct, pos: i };
+        vat_pct: given ? TAX.vatOf(l.vat_pct) : !docVatGiven && pr && pr.vat_pct != null ? TAX.vatOf(pr.vat_pct) : o.vat_pct, price_include: TAX.inclIn(l.price_include), pos: i }; // #42 K3: mặc định giá mua chưa thuế
     }).filter(l => l.name) : null;
     if (!o.date_planned && delays.length) o.date_planned = addDays(o.date_order, Math.min(...delays)); // như Odoo: ngày đặt + số ngày giao (dòng sớm nhất)
     db.tx(() => {
       if (old) db.run('UPDATE purchase_orders SET partner_id=?, partner_ref=?, date_order=?, date_planned=?, payment_days=?, vat_pct=?, owner=?, notes=?, updated_at=? WHERE id=?', [o.partner_id, o.partner_ref, o.date_order, o.date_planned, o.payment_days, o.vat_pct, o.owner, o.notes, now(), o.id]);
       else { o.id = newId('po'); o.number = nextNumber(); db.run('INSERT INTO purchase_orders(id, number, partner_id, partner_ref, state, date_order, date_planned, payment_days, vat_pct, tax_rounding, owner, notes, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [o.id, o.number, o.partner_id, o.partner_ref, 'draft', o.date_order, o.date_planned, o.payment_days, o.vat_pct, o.tax_rounding, o.owner, o.notes, now(), now()]); }
-      if (lines) { db.run('DELETE FROM purchase_lines WHERE po_id = ?', [o.id]); for (const l of lines) db.run('INSERT INTO purchase_lines(id, po_id, product_id, name, unit, qty, price, discount_pct, vat_pct, pos) VALUES (?,?,?,?,?,?,?,?,?,?)', [l.id, o.id, l.product_id, l.name, l.unit, l.qty, l.price, l.discount_pct, l.vat_pct, l.pos]); }
+      if (lines) { db.run('DELETE FROM purchase_lines WHERE po_id = ?', [o.id]); for (const l of lines) db.run('INSERT INTO purchase_lines(id, po_id, product_id, name, unit, qty, price, discount_pct, vat_pct, price_include, pos) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [l.id, o.id, l.product_id, l.name, l.unit, l.qty, l.price, l.discount_pct, l.vat_pct, l.price_include, l.pos]); }
     });
     const full = getPurchase(o.id);
     if (!old) h.hist(o.partner_id, `Tạo yêu cầu báo giá ${full.number}: ${T.fmtVnd(full.total)}`);
@@ -154,7 +154,9 @@ function createPurchase({ db, crm, now, today, log = () => {}, h }) {
     }
     return out;
   }
-  const keepLine = (l) => ({ product_id: l.product_id, name: l.name, unit: l.unit, qty: l.qty, price: l.price, discount_pct: l.discount_pct, vat_pct: l.vat_pct });
+  // giá vốn nhập kho của một đơn vị: giá sau CK, bỏ thuế nếu giá gồm thuế (#42 K3; Odoo _get_stock_move_price_unit: compute_all(price_unit)['total_excluded'])
+  const unitCostOf = (l) => { const pu = l.price * (1 - (l.discount_pct || 0) / 100); return Math.round(TAX.inclOf(l) ? pu / (1 + (Number(l.vat_pct) || 0) / 100) : pu); };
+  const keepLine = (l) => ({ product_id: l.product_id, name: l.name, unit: l.unit, qty: l.qty, price: l.price, discount_pct: l.discount_pct, vat_pct: l.vat_pct, price_include: TAX.inclOf(l) });
   function runReorder() {
     const items = reorderPlan(); const touched = new Map(); const created = []; const updated = [];
     const save = (poId, edit) => { const po = getPurchase(poId); const lines = po.lines.map(keepLine); edit(lines, po); return savePurchase({ id: poId, lines }); };
@@ -189,7 +191,7 @@ function createPurchase({ db, crm, now, today, log = () => {}, h }) {
     const rcv = lines.filter(l => l.receivable);
     db.tx(() => {
       db.run("UPDATE purchase_orders SET state = 'purchase', confirmed_at = ?, updated_at = ? WHERE id = ?", [now(), now(), id]);
-      if (rcv.length) h.insertPicking({ kind: 'in', partner_id: po.partner_id, po_id: id, origin: po.number, scheduled: isDate(po.date_planned) ? po.date_planned : today(), lines: rcv.map(l => ({ product_id: l.product_id, qty: l.qty, po_line_id: l.id, unit_cost: Math.round(l.price * (1 - (l.discount_pct || 0) / 100)) })) });
+      if (rcv.length) h.insertPicking({ kind: 'in', partner_id: po.partner_id, po_id: id, origin: po.number, scheduled: isDate(po.date_planned) ? po.date_planned : today(), lines: rcv.map(l => ({ product_id: l.product_id, qty: l.qty, po_line_id: l.id, unit_cost: unitCostOf(l) })) });
     });
     h.hist(po.partner_id, `Xác nhận đơn mua hàng ${po.number}`);
     return getPurchase(id);
@@ -199,10 +201,11 @@ function createPurchase({ db, crm, now, today, log = () => {}, h }) {
     const po = need(poId); const out = [];
     for (const l of poLines(poId, po.state)) {
       if (!l.product_id || !(l.qty > EPS) || !(l.price > 0)) continue;
+      const vp = TAX.inclOf(l) ? Math.round(l.price / (1 + (Number(l.vat_pct) || 0) / 100)) : l.price; // #42 K3: bảng giá NCC lưu giá CHƯA thuế
       const mine = db.all('SELECT * FROM vendor_prices WHERE product_id = ? AND partner_id = ?', [l.product_id, po.partner_id]);
       const s = sellerOf(l.product_id, po.partner_id, l.qty);
-      if (!mine.length) out.push({ line_id: l.id, product_id: l.product_id, name: l.name, action: 'add', old_price: null, price: l.price, min_qty: 0, delay: isDate(po.date_planned) ? Math.max(0, Math.min(365, daysBetween(po.date_order || today(), po.date_planned))) : 0 });
-      else if (s && s.price !== l.price) out.push({ line_id: l.id, product_id: l.product_id, name: l.name, action: 'update', vendor_price_id: s.id, old_price: s.price, price: l.price, min_qty: s.min_qty, delay: s.delay });
+      if (!mine.length) out.push({ line_id: l.id, product_id: l.product_id, name: l.name, action: 'add', old_price: null, price: vp, min_qty: 0, delay: isDate(po.date_planned) ? Math.max(0, Math.min(365, daysBetween(po.date_order || today(), po.date_planned))) : 0 });
+      else if (s && s.price !== vp) out.push({ line_id: l.id, product_id: l.product_id, name: l.name, action: 'update', vendor_price_id: s.id, old_price: s.price, price: vp, min_qty: s.min_qty, delay: s.delay });
     }
     return out;
   }
@@ -246,7 +249,7 @@ function createPurchase({ db, crm, now, today, log = () => {}, h }) {
     const id = db.tx(() => {
       const iid = newId('inv');
       db.run('INSERT INTO invoices(id, kind, partner_id, po_id, state, invoice_date, vat_pct, notes, ref, tax_rounding, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', [iid, 'in_invoice', po.partner_id, poId, 'draft', today(), po.vat_pct, '', po.partner_ref || '', TAX.roundingOf(po.tax_rounding), now(), now()]);
-      h.writeLines(iid, todo.map((l, i) => ({ product_id: l.product_id, po_line_id: l.id, name: `${po.number}: ${l.name}`, unit: l.unit, qty: l.qty_to_bill, price: l.price, discount_pct: l.discount_pct, vat_pct: l.vat_pct, pos: i })));
+      h.writeLines(iid, todo.map((l, i) => ({ product_id: l.product_id, po_line_id: l.id, name: `${po.number}: ${l.name}`, unit: l.unit, qty: l.qty_to_bill, price: l.price, discount_pct: l.discount_pct, vat_pct: l.vat_pct, price_include: TAX.inclOf(l), pos: i })));
       h.refreshAmounts(iid); return iid;
     });
     h.hist(po.partner_id, `Tạo hoá đơn nhà cung cấp nháp cho đơn mua ${po.number}`);
