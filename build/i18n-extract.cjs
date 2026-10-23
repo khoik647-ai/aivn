@@ -65,7 +65,7 @@ function extract(files) {
   }
   return [...out].sort();
 }
-const UI_FILES = ['src/renderer/index.html', 'src/renderer/app.js', 'src/renderer/error-view.js', 'src/renderer/biz.js', 'src/renderer/gate.html', 'src/renderer/gate.js', 'src/renderer/overlay.html', 'src/renderer/overlay.js', 'src/renderer/stop.html', 'src/renderer/stop.js'];
+const UI_FILES = ['src/renderer/index.html', 'src/renderer/app.js', 'src/renderer/error-view.js', 'src/renderer/gen-chrome.js', 'src/renderer/biz.js', 'src/renderer/gate.html', 'src/renderer/gate.js', 'src/renderer/overlay.html', 'src/renderer/overlay.js', 'src/renderer/stop.html', 'src/renderer/stop.js'];
 // Tiến trình chính: chỉ chuỗi người dùng thấy trong menu, hộp thoại, khay, thông báo (khoá label/title/buttonLabel/message/detail/name/body/checkboxLabel, buttons: […])
 // và chuỗi bọc trong T('…'). Bỏ phần kiểm thử QA (từ “async function qaBench” trở đi).
 const MAIN_FILES = ['src/main.js'];

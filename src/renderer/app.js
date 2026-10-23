@@ -699,9 +699,7 @@ function convoHit(c, q) {
 }
 function renderConvos() {
   const q = fold(($('#convoQ') && $('#convoQ').value || '').trim());
-  let mine = state.convos.filter(c => convoMode(c) === state.mode);
-  const gen = ChatStream.generatingFor(state.mode, state.generatingConv, state.generatingByMode); // B173/B178: cuộc mới chưa saveConvo vẫn hiện khi đang chạy
-  if (gen && convoMode(gen) === state.mode && !mine.some(c => c.id === gen.id)) mine = [gen, ...mine];
+  let mine = ChatStream.listForMode({ mode: state.mode, convos: state.convos, generating: state.generatingConv, generatingByMode: state.generatingByMode }); // B173/B178: cuộc mới chưa lưu vẫn nằm trong thanh bên
   const rows = mine.map(c => [c, convoHit(c, q)]).filter(([, h]) => h.ok);
   $('#convoList').innerHTML = rows.map(([c, h]) => `<div class="convo ${state.current && c.id === state.current.id ? 'active' : ''}" data-id="${c.id}"><span data-noi18n title="${esc(c.title)}">${esc(c.title)}${h.snip ? `<small class="convo-snip">${esc(h.snip)}</small>` : ''}</span><button class="exp" title="Xuất ra tệp (.md/.txt/.json)" aria-label="Xuất ra tệp" data-testid="convo-export">⤓</button><button class="del" title="Xoá">✕</button></div>`).join('')
     || `<div class="muted" style="padding:8px;font-size:12.5px">${q && mine.length ? `Không có cuộc trò chuyện nào khớp “${esc($('#convoQ').value.trim())}”` : isAgent() ? 'Chưa giao việc nào cho AIVN AGENT' : 'Chưa có cuộc trò chuyện nào'}</div>`;
@@ -716,7 +714,9 @@ $('#convoList').addEventListener('click', async (e) => {
   if (e.target.closest('.exp')) { await exportConvo(row.dataset.id); return; }
   if (e.target.classList.contains('del')) { await A.deleteConvo(row.dataset.id); if (state.current && state.current.id === row.dataset.id) state.current = null; await loadConvos(); renderMessages(); return; }
   const genRow = ChatStream.generatingFor(state.mode, state.generatingConv, state.generatingByMode);
-  state.current = (genRow && genRow.id === row.dataset.id) ? genRow : state.convos.find(c => c.id === row.dataset.id); renderConvos(); renderMessages();
+  state.current = (genRow && genRow.id === row.dataset.id) ? genRow : state.convos.find(c => c.id === row.dataset.id);
+  if (isAgent() && state.current && state.generatingByMode.agent && state.current.id === state.generatingByMode.agent.id) { state.agentExplicitNew = false; state.lastByMode.agent = state.current.id; }
+  renderConvos(); renderMessages();
   if (typeof state.streamFlush === 'function') state.streamFlush();
 });
 $('#messages').addEventListener('click', async (e) => {
@@ -725,8 +725,10 @@ $('#messages').addEventListener('click', async (e) => {
 });
 A.onEngineCrash((e) => toast(e.message, true));
 $('#newChat').addEventListener('click', () => {
-  state.current = null;
   const page = state.mode === 'agent' ? 'agent' : 'chat';
+  state.current = null;
+  // B178: “＋ Việc mới” trong lúc AGENT đang chạy phải thắng. Không chọn lại việc đó giữa lượt hay khi lượt xong.
+  if (page === 'agent' && state.generatingByMode.agent) { state.agentExplicitNew = true; delete state.lastByMode.agent; }
   pending = [];
   drafts.clearFiles(page);
   renderChips();
@@ -944,13 +946,13 @@ window.addEventListener('drop', (e) => e.preventDefault()); // không cho cửa 
 const input = $('#input');
 input.addEventListener('input', () => { resizeInput(); syncChatDraft(); });
 input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#composer').requestSubmit(); } });
-// B176: trang này không giữ mô hình thì vẫn gửi. Trang kia đang giữ thì nói rõ chỗ bấm Dừng, không bảo bấm Dừng trên trang không có nút đó.
-function holdSharedModel(toastHere) {
+// B176: trang này không giữ mô hình thì vẫn gửi. Trang kia đang giữ thì nói rõ chỗ bấm Dừng.
+// Đang đứng trên chính trang bận thì “bấm Dừng ở dưới”, không bảo sang trang mình đang xem.
+function holdSharedModel() {
   const g = composerGate({ mode: state.mode, generating: state.generating, genKind: state.genKind, cloudAgent: !!(state.settings && state.settings.cloudBrain && state.settings.cloudBrain.on) });
   if (g === 'send') return false;
-  if (g === 'wait-agent') toast('AGENT đang chạy — đợi xong hoặc sang AGENT bấm Dừng', true);
-  else if (g === 'wait-chat') toast('Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng', true);
-  else if (toastHere || $('#stopBtn').hidden) toast('Đang trả lời — bấm Dừng trước đã', true);
+  const msg = holdCopy(g, state.mode);
+  if (msg) toast(msg, true);
   return true;
 }
 $('#composer').addEventListener('submit', async (e) => {
@@ -958,7 +960,7 @@ $('#composer').addEventListener('submit', async (e) => {
   let text = input.value.trim(); $('#slashPop').hidden = true;
   // lệnh / chạy ngay cả khi đang tạo câu trả lời (chỉ đổi cài đặt cục bộ), trừ /moi
   if (!isAgent() && text.startsWith('/') && runSlash(text)) return;
-  if (holdSharedModel(false)) return;
+  if (holdSharedModel()) return;
   if (isAgent()) { if (pending.some(a => a.loading)) { toast('Đang đọc tệp, vui lòng đợi một chút…'); return; } if (text || pending.some(a => a.ok)) sendAgent(text); return; }
   if (pending.some(a => a.loading)) { toast('Đang đọc tệp, vui lòng đợi một chút…'); return; }
   const vision = !!state.status.vision;
@@ -1096,7 +1098,7 @@ $('#messages').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-mact]'); if (!b || !state.current) return;
   const conv = state.current; const i = Number(b.closest('.msg').dataset.i); const m = conv.messages[i]; if (!m) return;
   const act = b.dataset.mact;
-  if (act !== 'copy' && holdSharedModel(true)) return;
+  if (act !== 'copy' && holdSharedModel()) return;
   if (act === 'copy') { await A.copyText(m.content); toast('Đã sao chép ✓'); }
   if (act === 'regen') {
     const u = conv.messages[i - 1]; if (!u || u.role !== 'user') return;
@@ -1629,6 +1631,7 @@ async function sendAgent(text) {
   const stick = () => { box.scrollTop = box.scrollHeight; };
   const startEl = msgEl(); if (startEl) startEl.querySelector('.body').classList.add('cursor');
   const reqId = uid(); state.generating = reqId; state.genKind = 'agent'; state.generatingByMode.agent = conv; state.lastByMode.agent = conv.id; state.genPhase = null; genStartedAt = Date.now(); // B178: việc mới chưa lưu vẫn được chọn lại khi quay về AGENT
+  renderConvos(); // việc đang chạy phải có mặt trên thanh bên ngay, không chờ đến lúc bấm Việc mới
   setGenNote('Đang chuẩn bị (công cụ, ghi nhớ)…');
   const paintNote = (el) => { const n = el.querySelector('.err-note'); if (n) n.innerHTML = errNoteHtml(reply); };
   const paintSteps = () => { const el = msgEl(); if (!el) return; const w = el.querySelector('.steps-wrap'); const open = new Set($$('details.step[open], details.step-more[open]', w).map(d => d.dataset.step)); w.innerHTML = stepsHtml(reply, open); paintNote(el); stick(); };
@@ -1674,7 +1677,8 @@ async function sendAgent(text) {
     else setPhase(null);
     state.generatingByMode.agent = null;
     conv.updatedAt = Date.now(); await A.saveConvo(conv); await loadConvos();
-    const picked = ChatStream.selectAfterRun({ visibleMode: state.mode, current: state.current, conv, convos: state.convos }); // B178: lưu xong thì chọn lại việc, không để trang chào trống
+    const picked = ChatStream.selectAfterRun({ visibleMode: state.mode, current: state.current, conv, convos: state.convos, explicitNew: state.agentExplicitNew }); // B178: lưu xong thì chọn lại việc, trừ khi người dùng đã bấm Việc mới
+    state.agentExplicitNew = false;
     if (picked.selected) { state.current = picked.current; state.lastByMode.agent = picked.current.id; }
     renderConvos(); renderMessages();
     if (reply.steps.some(x => x.name === 'save_memory' && x.status === 'ok')) refreshMemCount();
@@ -2688,6 +2692,19 @@ $('#setNav').addEventListener('keydown', (e) => {
 });
 $('#setKeys').addEventListener('click', openKeys);
 // ---------- Thư mục mô hình (beta.3): đổi ổ khi ổ C: sắp đầy — chuyển mô hình có tiến độ, hoặc chỉ trỏ sang thư mục mới ----------
+// B189: thanh chỉ hiện khi lượt chuyển CHƯA xong. Sự kiện tiến độ đến muộn (sau lời invoke hoặc sau finished) không được bật lại — nếu không, hàng “Đang chuyển” kẹt mãi dù tệp đã chuyển xong.
+let mdirJob = null, mdirGen = 0;
+const MDIR_STALL_MSG = 'Chuyển thư mục mô hình bị dừng vì quá lâu không thấy tiến triển. Mô hình vẫn nằm ở thư mục cũ, không mất tệp. Hãy bấm Thử lại.';
+function mdirClearErr() { const e = $('#mdirErr'); if (!e) return; e.hidden = true; const t = $('#mdirErrTxt'); if (t) t.textContent = ''; }
+function mdirShowErr(msg) { $('#mdirProg').hidden = true; const e = $('#mdirErr'); if (!e) return; e.hidden = false; $('#mdirErrTxt').textContent = msg || MDIR_STALL_MSG; }
+function mdirArmStall() {
+  if (!mdirJob || !mdirJob.moving) return; clearTimeout(mdirJob.timer); const gen = mdirJob.gen;
+  mdirJob.timer = setTimeout(() => {
+    if (!mdirJob || mdirJob.gen !== gen || !mdirJob.moving || mdirJob.reported) return;
+    mdirJob.moving = false; mdirJob.reported = true; try { A.modelsDirCancel(); } catch {}
+    mdirShowErr(MDIR_STALL_MSG); toast(MDIR_STALL_MSG, true);
+  }, 90000);
+}
 async function mdirRefresh() {
   const d0 = await A.modelsDirInfo(); if (!d0) return;
   const d = { ...d0, drive: String(d0.drive || '').replace(/:$/, '') }; // B87: “ổ C” / “drive C: …” / “C 盘”, không còn “drive C::”
@@ -2707,16 +2724,40 @@ async function mdirChange() {
     else if (await modalAsk({ icon: '📁', title: 'Chỉ dùng thư mục mới?', message: `Mô hình tải về sau sẽ lưu ở ${r.dir}. Các mô hình đã có vẫn ở ${cur.dir} và vẫn dùng được.`, okLabel: 'Dùng thư mục mới', noLabel: 'Huỷ' })) mode = 'point';
   } else mode = 'point';
   if (!mode) return;
-  if (mode === 'move') { $('#mdirProg').hidden = false; $('#mdirBar').value = 0; $('#mdirProgTxt').textContent = ''; show('settings', { tab: 'general' }); }
-  const x = await A.modelsDirApply({ dir: r.dir, mode });
-  $('#mdirProg').hidden = true;
-  if (!x || !x.ok) toast((x && x.error) || 'Không đổi được thư mục mô hình', true);
-  else toast(mode === 'move' ? `Đã chuyển ${x.moved + (x.skipped || 0)} tệp sang ${r.dir} ✓` : `Đã đổi thư mục mô hình sang ${r.dir} ✓`);
-  await mdirRefresh(); refreshModels();
+  await mdirRun(r.dir, mode);
 }
-A.onModelsDirProgress((p) => { if (!p || p.finished) return; $('#mdirProg').hidden = false; $('#mdirBar').value = p.bytesTotal ? p.bytesDone / p.bytesTotal : p.done / Math.max(1, p.total); const fn = document.createElement('span'); fn.dataset.noi18n = ''; fn.textContent = String(p.file || '').split(/[\\/]/).pop(); $('#mdirProgTxt').replaceChildren(document.createTextNode(`${p.done}/${p.total} tệp · ${fmtBytes(p.bytesDone)} / ${fmtBytes(p.bytesTotal)}`), document.createTextNode(' · '), fn); }); // B87: chỉ tên tệp không dịch
+async function mdirRun(dir, mode) {
+  mdirClearErr();
+  const gen = ++mdirGen; if (mdirJob && mdirJob.timer) clearTimeout(mdirJob.timer);
+  mdirJob = { dir, mode, gen, moving: mode === 'move', reported: false, timer: null };
+  if (mode === 'move') { $('#mdirProg').hidden = false; $('#mdirBar').value = 0; $('#mdirProgTxt').textContent = ''; show('settings', { tab: 'general' }); mdirArmStall(); }
+  let x; try { x = await A.modelsDirApply({ dir, mode }); } catch (e) { x = { ok: false, error: (e && e.message) || '', code: '' }; }
+  if (!mdirJob || mdirJob.gen !== gen) return x;
+  mdirJob.moving = false; clearTimeout(mdirJob.timer); $('#mdirProg').hidden = true; // đồng bộ, trước mọi await — IPC đến sau không kịp bật lại thanh
+  if (mdirJob.reported) { await mdirRefresh(); refreshModels(); return x; }
+  if (!x || !x.ok) {
+    if (x && x.code === 'ABORT') toast('Đã huỷ chuyển mô hình.');
+    else { const msg = (x && x.code === 'ESTALL') ? MDIR_STALL_MSG : ((x && x.error) || 'Không đổi được thư mục mô hình'); mdirJob.reported = true; mdirShowErr(msg); toast(msg, true); }
+    await mdirRefresh(); refreshModels(); return x;
+  }
+  mdirJob = null;
+  toast(mode === 'move' ? `Đã chuyển ${x.moved + (x.skipped || 0)} tệp sang ${dir} ✓` : `Đã đổi thư mục mô hình sang ${dir} ✓`);
+  await mdirRefresh(); refreshModels(); return x;
+}
+A.onModelsDirProgress((p) => {
+  if (!mdirJob || !mdirJob.moving) return; // B189: đã xong / đã lỗi — bỏ sự kiện đến muộn
+  if (!p || p.finished) {
+    const err = p && p.error, code = p && p.code;
+    mdirJob.moving = false; clearTimeout(mdirJob.timer); $('#mdirProg').hidden = true;
+    if (err && code !== 'ABORT' && !mdirJob.reported) { mdirJob.reported = true; const msg = code === 'ESTALL' ? MDIR_STALL_MSG : err; mdirShowErr(msg); toast(msg, true); }
+    return;
+  }
+  mdirArmStall();
+  $('#mdirProg').hidden = false; $('#mdirBar').value = p.bytesTotal ? p.bytesDone / p.bytesTotal : p.done / Math.max(1, p.total); const fn = document.createElement('span'); fn.dataset.noi18n = ''; fn.textContent = String(p.file || '').split(/[\\/]/).pop(); $('#mdirProgTxt').replaceChildren(document.createTextNode(`${p.done}/${p.total} tệp · ${fmtBytes(p.bytesDone)} / ${fmtBytes(p.bytesTotal)}`), document.createTextNode(' · '), fn); // B87: chỉ tên tệp không dịch
+});
 $('#mdirChange').addEventListener('click', mdirChange); $('#modelsDirChange').addEventListener('click', mdirChange);
 $('#mdirCancel').addEventListener('click', () => A.modelsDirCancel());
+$('#mdirRetry').addEventListener('click', () => { if (mdirJob && mdirJob.dir && !mdirJob.moving) mdirRun(mdirJob.dir, mdirJob.mode); });
 $('#mdirReset').addEventListener('click', async () => { const x = await A.modelsDirReset(); if (x && x.ok) toast('Đã về thư mục mô hình mặc định ✓'); await mdirRefresh(); refreshModels(); });
 mdirRefresh();
 // Mức hiển thị: Cơ bản ẩn các phần có lớp .adv-only
