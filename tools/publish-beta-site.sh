@@ -7,8 +7,16 @@
 # “chỉ có cho Windows” + tệp Mac của bản ổn định Latest; không máy nào ngoài Windows được mời tải .exe.
 # Trước khi đặt khối beta: tools/site_fixes.py (sửa chung, dung lượng thật của bản ổn định). Sau: đẩy gh-pages (không ghi đè lịch sử), chờ trang thật hiện khối mới. Nhớ chạy lại tools/site_beta.py trên site/index.html
 # (--i18n-dir site/i18n) rồi commit, để release.sh giữ khối beta khi dựng lại trang. Không đụng khoá admin.
+# INCLUDE_PRERELEASE=true trong site/index.html: nút tự động đã là một nguồn tải (kể cả bản thử nghiệm).
+# Thoát ngay — không clone, không sửa trang, không đẩy gh-pages.
 set -euo pipefail
-OWNER="${1:?OWNER}"; TAG="${2:?TAG hoặc --clear}"; REPO=aivn; HERE="$(cd "$(dirname "$0")" && pwd)"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+SITE_HTML="${SITE_HTML:-$HERE/../site/index.html}"
+if [[ -f "$SITE_HTML" ]] && grep -qE 'var INCLUDE_PRERELEASE=true;' "$SITE_HTML"; then
+  echo "BỎ QUA publish-beta: ${SITE_HTML} có INCLUDE_PRERELEASE=true. Nút tải tự động là nguồn tải duy nhất (kể cả bản thử nghiệm). Không chèn link beta, không sửa trang, không đẩy gh-pages."
+  exit 0
+fi
+OWNER="${1:?OWNER}"; TAG="${2:?TAG hoặc --clear}"; REPO=aivn
 SITE_URL="https://$OWNER.github.io/$REPO/"
 W=$(mktemp -d /tmp/beta-site-XXXX); trap 'rm -rf "$W"' EXIT
 git clone -q --branch gh-pages --single-branch "https://github.com/$OWNER/$REPO.git" "$W/ghp"

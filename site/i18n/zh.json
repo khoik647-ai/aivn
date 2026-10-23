@@ -187,7 +187,8 @@
   "dl.17": "链接已复制",
   "dl.18": "不确定你的 Mac 用哪种芯片？点按左上角的苹果菜单 →“关于本机”：显示“芯片 Apple M…”即为 Apple 芯片，显示“处理器 Intel”即为 Intel。",
   "dl.19": "首次在 Mac 上打开 AIVN？查看方法",
-  "dl.20": "<summary>🔒 在 Mac 上首次打开 AIVN（此应用未经 Apple 公证）</summary><ol><li>打开下载的 .zip 文件（Safari 通常会自动解压），然后把 <b>AIVN</b> 拖到“<b>应用程序</b>”文件夹。</li><li>打开 AIVN。如果 macOS 提示无法验证 AIVN，请点按“<b>完成</b>”（不要点“移到废纸篓”）。</li><li>打开“<b>系统设置 › 隐私与安全性</b>”，向下滚动到“<b>安全性</b>”，点按关于 AIVN 的提示旁边的“<b>仍要打开</b>”，输入 Mac 登录密码，然后再次点按“<b>仍要打开</b>”。</li><li>在 macOS 13 和 14 上也可以更快：在“应用程序”中按住 Control 键点按（或右键点按）AIVN，选择“<b>打开</b>”，再点按“<b>打开</b>”。从 macOS 15 起此方法已失效，请使用第 3 步。</li></ol><span class=\"dl-gk-note\">只需操作一次。如果 macOS 提示“AIVN 已损坏”，请打开“终端”，运行 <code>xattr -dr com.apple.quarantine /Applications/AIVN.app</code>，然后重新打开 AIVN。</span>"
+  "dl.20": "<summary>🔒 在 Mac 上首次打开 AIVN（此应用未经 Apple 公证）</summary><ol><li>打开下载的 .zip 文件（Safari 通常会自动解压），然后把 <b>AIVN</b> 拖到“<b>应用程序</b>”文件夹。</li><li>打开 AIVN。如果 macOS 提示无法验证 AIVN，请点按“<b>完成</b>”（不要点“移到废纸篓”）。</li><li>打开“<b>系统设置 › 隐私与安全性</b>”，向下滚动到“<b>安全性</b>”，点按关于 AIVN 的提示旁边的“<b>仍要打开</b>”，输入 Mac 登录密码，然后再次点按“<b>仍要打开</b>”。</li><li>在 macOS 13 和 14 上也可以更快：在“应用程序”中按住 Control 键点按（或右键点按）AIVN，选择“<b>打开</b>”，再点按“<b>打开</b>”。从 macOS 15 起此方法已失效，请使用第 3 步。</li></ol><span class=\"dl-gk-note\">只需操作一次。如果 macOS 提示“AIVN 已损坏”，请打开“终端”，运行 <code>xattr -dr com.apple.quarantine /Applications/AIVN.app</code>，然后重新打开 AIVN。</span>",
+  "dl.21": "下载稳定版 AIVN"
  },
  "attr": {
   "@aria-label.1": "AIVN 首页",

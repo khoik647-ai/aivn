@@ -3,6 +3,7 @@
 // bỏ bản nháp, nhãn Beta cho prerelease, lùi về bản cũ hơn khi thiếu tệp cho máy này, và giữ link tĩnh khi API lỗi/bị giới hạn.
 // Dữ liệu: test/fixtures/site-releases-api.json = API thật ngày 23/10/2026 (lấy khi đã đăng nhập nên có cả bản nháp).
 const test = require('node:test'); const assert = require('node:assert'); const fs = require('fs'); const path = require('path'); const vm = require('vm');
+const { spawnSync, execFileSync } = require('child_process'); const os = require('os');
 const root = path.join(__dirname, '..');
 const html = fs.readFileSync(path.join(root, 'site/index.html'), 'utf8');
 const API = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/site-releases-api.json'), 'utf8'));
@@ -77,7 +78,7 @@ test('nhãn Beta cho prerelease: có chữ “Beta” ở cả vi/en/zh, chỉ h
   for (const t of [vi, D.en['dl.5'], D.zh['dl.5']]) assert.match(t, /Beta/);
   assert.match(html, /\.dl-beta\{display:none;/); assert.match(html, /\.dl\[data-pre="1"\] \.dl-beta\{display:inline-block\}/);
   assert.match(html, /row\.setAttribute\('data-pre',rel&&rel\.prerelease\?'1':'0'\)/);
-  const keys = Object.keys(D.en); assert.deepStrictEqual(keys.slice(keys.indexOf('dl.2'), keys.indexOf('dl.2') + 19), Array.from({ length: 19 }, (_, i) => 'dl.' + (i + 2)), 'khoá mới thêm ở cuối, theo thứ tự');
+  const keys = Object.keys(D.en); assert.deepStrictEqual(keys.slice(keys.indexOf('dl.2'), keys.indexOf('dl.2') + 20), Array.from({ length: 20 }, (_, i) => 'dl.' + (i + 2)), 'khoá mới thêm ở cuối, theo thứ tự');
 });
 
 test('dự phòng: API lỗi / bị giới hạn (403) / hết giờ / trả rác → trạng thái fail, giữ link tĩnh trong trang, có link tới trang releases', async () => {
@@ -133,4 +134,107 @@ test('Linux / máy tính không rõ hệ điều hành: nút chính không bao g
   // hàng nút cuối trang: Linux là chữ “sắp ra mắt”, không phải link chết
   assert.match(html, /<span aria-disabled="true" class="btn dl-btn soon" data-i18n="cta\.5"[^>]*data-os="linux"/);
   assert.ok(!/<a[^>]*data-os="linux"[^>]*>/.test(html) && !/<a[^>]*href="#"[^>]*data-os="linux"/.test(html), 'còn link Linux href="#"');
+});
+
+function spec(sel) {
+  let a = 0, b = 0, c = 0, i = 0;
+  while (i < sel.length) {
+    if (sel[i] === '#') { a++; i++; while (/[\w-]/.test(sel[i] || '')) i++; }
+    else if (sel[i] === '.') { b++; i++; while (/[\w-]/.test(sel[i] || '')) i++; }
+    else if (sel[i] === '[') { b++; i = sel.indexOf(']', i) + 1; }
+    else if (sel[i] === ':' && sel[i + 1] !== ':') { b++; i++; while (/[\w()-]/.test(sel[i] || '')) i++; }
+    else if (/[a-z*]/i.test(sel[i])) { c++; i++; while (/[\w-]/.test(sel[i] || '')) i++; }
+    else i++;
+  }
+  return [a, b, c];
+}
+const cmpSpec = (x, y) => x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+
+test('Gatekeeper: .dl-other a không được hiện .dl-gklink trên Windows/Linux; Mac vẫn thắng', () => {
+  assert.match(html, /\.dl-other a\.dl-gklink\{display:none\}/);
+  assert.match(html, /\.dl\[data-os=mac\] \.dl-gklink\{display:inline-flex\}/);
+  assert.ok(html.indexOf('.dl-other a.dl-gklink{display:none}') < html.indexOf('.dl[data-os=mac] .dl-gklink{display:inline-flex}'));
+  const broad = spec('.dl-other a'), hide = spec('.dl-other a.dl-gklink'), mac = spec('.dl[data-os=mac] .dl-gklink');
+  assert.ok(cmpSpec(hide, broad) > 0, `ẩn ${hide} phải hơn ${broad}`);
+  assert.ok(cmpSpec(mac, hide) > 0, `Mac ${mac} phải hơn ${hide} để vẫn hiện`);
+  assert.match(html, /<p class="dl-other"><a class="dl-gklink" href="#mo-tren-mac">/);
+  assert.ok(!/DLX\.newest\(\)/.test(html), 'dòng phiên bản không lấy newest() khi p null');
+});
+
+test('không có tệp cho máy này: không lấy phiên bản từ newest(); nút, href và dòng phụ cùng một bản', async () => {
+  const strip = (list) => list.map((r) => ({ ...r, assets: [] }));
+  const L = lib(true); await L.resolve(ok(strip(API)));
+  assert.strictEqual(L.newest().tag_name, 'v0.16.0-beta.3', 'newest() vẫn là beta — không được đưa lên dòng phụ');
+  assert.strictEqual(L.target('windows'), null);
+  for (const href of ['AIVN-Setup.exe', 'https://github.com/khoik647-ai/aivn/releases/latest/download/AIVN-Setup.exe']) {
+    const v = L.viewFor('windows', null, href);
+    assert.strictEqual(v.state, 'ok'); assert.strictEqual(v.fallback, true); assert.strictEqual(v.asset, null);
+    assert.strictEqual(v.rel.tag_name, 'v0.15.3'); assert.strictEqual(v.rel.prerelease, false);
+  }
+  const mac = L.viewFor('mac', 'x64', 'AIVN-mac-x64.zip');
+  assert.strictEqual(mac.rel.tag_name, 'v0.15.3'); assert.strictEqual(mac.fallback, true);
+  const named = L.viewFor('windows', null, 'https://github.com/khoik647-ai/aivn/releases/download/v0.15.2/AIVN-Setup-0.15.2.exe');
+  assert.strictEqual(named.rel.tag_name, 'v0.15.2'); assert.strictEqual(named.rel.prerelease, false);
+  const betas = API.filter((r) => r.prerelease && !r.draft).map((r) => ({ ...r, assets: [] }));
+  const B = lib(true); await B.resolve(ok(betas));
+  assert.strictEqual(B.newest().tag_name, 'v0.16.0-beta.3');
+  const fail = B.viewFor('windows', null, 'AIVN-Setup.exe');
+  assert.strictEqual(fail.state, 'fail'); assert.strictEqual(fail.rel, null); assert.strictEqual(fail.fallback, true);
+  const evil = L.viewFor('windows', null, 'https://evil.example/AIVN-Setup.exe');
+  assert.strictEqual(evil.state, 'fail'); assert.strictEqual(evil.rel, null);
+  const lin = L.viewFor('linux', null, null);
+  assert.strictEqual(lin.state, 'ok'); assert.strictEqual(lin.rel, null, 'Linux không hiện newest()');
+  const has = lib(true); await has.resolve(ok(API));
+  const okWin = has.viewFor('windows', null, 'AIVN-Setup.exe');
+  assert.strictEqual(okWin.fallback, false); assert.strictEqual(okWin.rel.tag_name, 'v0.16.0-beta.3');
+  assert.match(okWin.asset.name, /AIVN-Setup-0\.16\.0-beta\.3\.exe/);
+  const vi = html.match(/data-i18n="dl\.21">([^<]*)</)[1];
+  assert.strictEqual(vi, 'Tải AIVN bản ổn định'); assert.ok(!/\blink\b/i.test(vi), 'tiếng Việt không dùng chữ link');
+  assert.strictEqual(D.en['dl.21'], 'Download the stable AIVN'); assert.strictEqual(D.zh['dl.21'], '下载稳定版 AIVN');
+  assert.match(html, /\.dl\[data-fb="1"\] \.dl-l-latest\{display:none\}\.dl\[data-fb="1"\] \.dl-l-stable\{display:inline\}/);
+  assert.match(html, /DLX\.viewFor\(mobile\?null:os,macArch,staticHref\)/);
+});
+
+test('INCLUDE_PRERELEASE=true: publish-beta không sửa trang và không thêm link tải thứ hai', () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'nobin-'));
+  for (const cmd of ['git', 'gh', 'curl']) {
+    fs.writeFileSync(path.join(bin, cmd), '#!/bin/sh\necho "' + cmd + ' bị gọi — publish-beta không được đụng mạng" >&2\nexit 99\n');
+    fs.chmodSync(path.join(bin, cmd), 0o755);
+  }
+  const before = fs.readFileSync(path.join(root, 'site/index.html'));
+  const r = spawnSync('bash', [path.join(root, 'tools/publish-beta-site.sh'), 'khoik647-ai', 'v0.16.0-beta.99'], {
+    encoding: 'utf8', cwd: root, timeout: 8000,
+    env: { ...process.env, PATH: `${bin}:/usr/bin:/bin`, GIT_TERMINAL_PROMPT: '0' },
+  });
+  assert.strictEqual(r.status, 0, (r.stdout || '') + (r.stderr || ''));
+  assert.match(r.stdout, /BỎ QUA publish-beta:/); assert.match(r.stdout, /INCLUDE_PRERELEASE=true/);
+  assert.match(r.stdout, /không đẩy gh-pages/);
+  assert.ok(!/git bị gọi|gh bị gọi|curl bị gọi/.test(r.stderr || ''), r.stderr);
+  assert.deepStrictEqual(fs.readFileSync(path.join(root, 'site/index.html')), before);
+  const rel = fs.readFileSync(path.join(root, 'release.sh'), 'utf8');
+  const iFlag = rel.indexOf("grep -qE 'var INCLUDE_PRERELEASE=true;'");
+  const iCall = rel.indexOf('tools/publish-beta-site.sh "$OWNER" "$TAG"');
+  assert.ok(iFlag > 0 && iCall > iFlag, 'release.sh phải xét cờ trước khi gọi publish-beta');
+  // Luồng phát hành: release.sh chỉ đổi href tĩnh; publish-beta không chèn link beta.N.
+  const base = 'https://github.com/khoik647-ai/aivn/releases/latest/download';
+  const page = before.toString()
+    .replaceAll('href="AIVN-Setup.exe"', `href="${base}/AIVN-Setup.exe"`)
+    .replaceAll('href="AIVN-mac-arm64.zip"', `href="${base}/AIVN-mac-arm64.zip"`)
+    .replaceAll('href="AIVN-mac-x64.zip"', `href="${base}/AIVN-mac-x64.zip"`);
+  assert.ok(!/AIVN-BETA|beta-link|data-beta-version|tai-beta|id="tai-beta"/.test(page));
+  const exe = [...page.matchAll(/href="([^"]*AIVN-Setup[^"]*\.exe)"/g)].map((m) => m[1]);
+  assert.ok(exe.length >= 1); assert.ok(exe.every((h) => h === `${base}/AIVN-Setup.exe`), exe.join('\n'));
+  assert.ok(!exe.some((h) => /-beta/.test(h)), 'không chèn link beta.N');
+  const block = page.match(/id="tai-ve"[\s\S]*?<!--\/AIVN-DL-LATEST-->/)[0];
+  const shownOnWindows = [...block.matchAll(/<a\b([^>]*)>/g)].map((m) => m[1]).filter((a) => /AIVN-Setup[^"]*\.exe"/.test(a) && !/\bo-win\b/.test(a));
+  assert.strictEqual(shownOnWindows.length, 1, 'trên Windows chỉ nút chính trong khối tải trỏ tới bộ cài (bản khác bị ẩn)');
+  assert.match(page, /\.dl\[data-t=win\] \.o-win\{display:none\}|\.dl\[data-t=win\] \.o-win,/);
+  // site_beta.py vẫn chèn link Windows thứ hai nếu bị gọi — luồng publish không gọi nó khi cờ bật.
+  const inj = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'beta-inj-')), 'index.html');
+  fs.writeFileSync(inj, page);
+  execFileSync('python3', [path.join(root, 'tools/site_beta.py'), '--html', inj, '--version', '0.16.0-beta.9', '--url', 'https://github.com/khoik647-ai/aivn/releases/download/v0.16.0-beta.9/AIVN-Setup-0.16.0-beta.9.exe', '--sha256', 'ab'.repeat(32), '--size', '1000']);
+  const injected = [...fs.readFileSync(inj, 'utf8').matchAll(/href="([^"]*AIVN-Setup[^"]*\.exe)"/g)].map((m) => m[1]);
+  assert.ok(injected.some((h) => h.includes('AIVN-Setup-0.16.0-beta.9.exe')));
+  assert.ok(injected.filter((h) => h.endsWith('/AIVN-Setup.exe')).length === exe.length);
+  assert.ok(injected.length > exe.length, 'khối beta thêm link tải — publish-beta khi cờ bật không được làm vậy');
 });
