@@ -276,36 +276,27 @@ function createDesktopAgent(deps) {
   function windowsPrior() {
     return ShotGuard.readWindows({ loadWindows: () => U.windows(), loadText: readWindowText });
   }
-  // B193: screenSecrets trên HỢP chữ đọc trước và sau ảnh. Hai lần khác nhau → OCR ảnh hoặc xoá điểm ảnh, không giữ ảnh gốc chưa quét.
-  // mustOcr: OCR cả ảnh (không chỉ cửa sổ đích) trước khi kết luận. Cửa sổ không đọc được chữ → OCR; không OCR được thì xoá ảnh.
-  // Bộ quét lỗi / quá hạn → failed, người gọi xoá điểm ảnh và không gửi cho mô hình.
+  // B193: OCR mọi ảnh đã chụp. Chữ UIA chỉ được cộng vào chữ OCR. UIA không thay OCR và không kết luận ảnh an toàn.
+  // OCR lỗi, rỗng, hoặc quá hạn → failed. Hai lần đọc cửa sổ lệch nhau → vẫn che, kể cả khi OCR không thấy mã.
   async function sealShot(shot, { title = '', proc = '', text = '', mustOcr = false, prior = null } = {}) {
-    let imageText = ''; let ocrDone = false;
+    let imageText = '';
     const canOcr = !!(shot && shot.dataUrl && deps.engine && typeof deps.engine.ocrLines === 'function');
-    if (mustOcr && canOcr) {
+    const fail = (extra = []) => ({ reasons: [...new Set([...extra, 'text:unreadable'])], titles: [], failed: true, unread: [] });
+    if (canOcr) {
       try { imageText = (await ocrShot(shot, null)).map(l => l && l.text).filter(Boolean).join('\n'); }
-      catch { return { reasons: ['text:unreadable'], titles: [], failed: true, unread: [] }; }
-      if (!String(imageText).trim()) return { reasons: ['text:unreadable'], titles: [], failed: true, unread: [] };
-      ocrDone = true;
-    }
+      catch { return fail(); }
+      if (!String(imageText).trim()) return fail();
+    } else if (mustOcr) return fail();
     const after = await ShotGuard.readWindows({ loadWindows: () => U.windows(), loadText: readWindowText });
     const snapFail = !after.ok || (prior && prior.ok === false);
     const torn = !snapFail && !!prior && (prior.torn || ShotGuard.snapshotsDiffer(prior, after));
-    if (snapFail) return { reasons: ['text:unreadable'], titles: [], failed: true, unread: [] };
+    if (snapFail) return fail();
     const wins = [...((prior && prior.wins) || []), ...after.wins];
-    const sec = ShotGuard.screenSecrets({ title, proc, text: String(text || '') + (imageText ? '\n' + imageText : ''), windows: wins });
-    // Tranh chấp (cửa sổ hoặc chữ đổi giữa hai lần đọc) → luôn che, kể cả khi OCR không thấy mã.
+    const sec = ShotGuard.screenSecrets({ title, proc, text: [text, imageText].filter(Boolean).join('\n'), windows: wins });
     if (torn) return { reasons: [...new Set([...(sec.reasons || []), 'text:unreadable'])], titles: sec.titles || [], failed: true, unread: sec.unread || [] };
-    if (sec.failed || ocrDone || !sec.unread || !sec.unread.length) return sec;
-    const mergeFail = () => ({ reasons: [...new Set([...(sec.reasons || []), 'text:unreadable'])], titles: sec.titles || [], failed: true, unread: sec.unread });
-    if (sec.reasons && sec.reasons.length) return sec;
-    if (!canOcr) return mergeFail();
-    try {
-      const more = (await ocrShot(shot, null)).map(l => l && l.text).filter(Boolean).join('\n');
-      if (!String(more).trim()) return mergeFail();
-      const extra = ShotGuard.scan({ text: more }).filter(x => String(x).startsWith('text:'));
-      return { ...sec, reasons: [...new Set([...(sec.reasons || []), ...extra])], failed: false };
-    } catch { return mergeFail(); }
+    if (sec.failed) return sec;
+    if (!canOcr && wins.some(w => ShotGuard.onScreen(w))) return { reasons: [...new Set([...(sec.reasons || []), 'text:unreadable'])], titles: sec.titles || [], failed: true, unread: sec.unread || [] };
+    return sec;
   }
   async function observe(ctx, { query = '', ocr = 'auto', thumb = true, vision = 'auto', question = '' } = {}) {
     const s = await begin(ctx); status('Đang quan sát màn hình…');

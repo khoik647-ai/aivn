@@ -264,8 +264,8 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
           if (Array.isArray(s.sensitive) && s.sensitive.length && tgt) tgt.sensitive = [...new Set([...tgt.sensitive, ...s.sensitive])];
           step.summary = SG.redactTitles(step.summary, [...titles]); step.debug = step.debug.map(l => SG.redactTitles(l, [...titles]));
           if (args.shots && deps.capture) { try { const f = path.join(args.shots, `step-${String(n).padStart(2, '0')}-${String(s.name || 'step').replace(/[^\w-]/g, '_')}.jpg`);
-            // B193: đọc cửa sổ TRƯỚC và SAU đúng ảnh đã chụp, quét HỢP của hai lần. Hai lần khác nhau (cửa sổ đóng / chữ đổi) → không tin UIA: OCR ảnh hoặc ghi ảnh trắng, không bao giờ ghi ảnh gốc chưa quét.
-            // Lần đọc trước lỗi thì không đọc lần sau (một lần chờ 8 giây, không phải hai). Cửa sổ hiện mà không đọc được chữ → OCR; không có OCR thì bỏ ảnh gốc.
+            // B193: đọc cửa sổ TRƯỚC và SAU đúng ảnh đã chụp, quét HỢP của hai lần. Hai lần khác nhau (cửa sổ đóng / chữ đổi) → che, không giữ ảnh gốc.
+            // Lần đọc trước lỗi thì không đọc lần sau (một lần chờ 8 giây, không phải hai). Mọi cửa sổ đang hiện đều OCR: chữ UIA chỉ được cộng thêm, không thay OCR. OCR lỗi, rỗng, hoặc quá hạn → che.
             const before = await snapState(deps, tgt);
             const captured = await deps.capture({ maxW: 1920 });
             const after = before.ok ? await snapState(deps, tgt) : { ok: false, info: null, wins: [] };
@@ -279,10 +279,10 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
             let sec = { reasons: [], titles: [], unread: [] };
             const join = (...xs) => xs.filter(x => typeof x === 'string' && x).join('\n');
             try { sec = SG.screenSecrets({ title: join(bi.title, ai.title) || (tgt && tgt.title) || '', proc: join(bi.proc, ai.proc) || (tgt && tgt.proc) || '', text: join(bi.text, ai.text), windows: wins }); } catch { unsafe = true; }
-            if (!unsafe && sec.unread && sec.unread.length && !(sec.reasons && sec.reasons.length)) {
+            if (wins.some(w => w && SG.onScreen(w))) {
               const ocrText = await ocrCaptured(deps, captured);
               if (ocrText == null || !String(ocrText).trim()) unsafe = true;
-              else { const extra = SG.scan({ text: ocrText }).filter(x => String(x).startsWith('text:')); sec.reasons = [...(sec.reasons || []), ...extra]; }
+              else { const extra = SG.scan({ text: [ocrText, join(bi.text, ai.text), ...wins.map(w => (w && (w.text || w.body || w.ocr)) || '')].join('\n') }).filter(x => String(x).startsWith('text:')); sec.reasons = [...(sec.reasons || []), ...extra]; }
             }
             for (const t of sec.titles || []) titles.add(t);
             const reasons = [...new Set([...SG.reasonList(s.sensitive), ...(tgt ? SG.reasonList(tgt.sensitive) : []), ...SG.reasonList(sec.reasons), ...(unsafe ? ['text:unreadable'] : [])])];

@@ -216,8 +216,8 @@ async function fillWindowText(wins, read, { timeoutMs = 8000 } = {}) {
   }
   return out;
 }
-// Chỉ Edit/Document/ComboBox có giá trị khác rỗng mới là đã đọc được thân cửa sổ.
-// Text, TabItem, nút, mục menu và khung không tính. List/Hyperlink vẫn được tin (lỗ hổng đã biết).
+// Chữ UIA đưa vào lần quét: Edit/Document/ComboBox có giá trị khác rỗng, hoặc tên List/Hyperlink.
+// Text, TabItem, nút, mục menu và khung không tính. Người gọi vẫn OCR ảnh — chữ UIA không thay OCR.
 const VALUE_ROLE = /^(edit|document|combobox|axtextfield|axtextarea|axcombobox|axsearchfield)$/i;
 const TRUSTED_NAME_ROLE = /^(listitem|hyperlink|axlink|axrow)$/i;
 function roleOf(e) { return String((e && (e.r || e.role)) || ''); }
@@ -225,7 +225,7 @@ function nameOf(e) { return String((e && (e.n != null ? e.n : e.name)) || '').tr
 function valueOf(e) { if (!e || typeof e !== 'object') return undefined; if (e.v !== undefined) return e.v; if (e.value !== undefined) return e.value; return undefined; }
 function isPassword(e) { return !!(e && (e.p === true || e.password === true || /secure/i.test(roleOf(e)))); }
 function valueText(e) { const v = valueOf(e); return v != null && String(v).trim() ? String(v).trim() : ''; }
-// Có Edit/Document/ComboBox mang chữ, hoặc List/Hyperlink (lỗ hổng đã biết).
+// Có Edit/Document/ComboBox mang chữ, hoặc tên List/Hyperlink. Cả hai đều chỉ là chữ UIA, không bỏ OCR.
 function uiaHasContent(els) {
   if (!Array.isArray(els) || !els.length) return false;
   for (const e of els) {
