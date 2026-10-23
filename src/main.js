@@ -890,7 +890,7 @@ async function runAgentTurn({ reqId, convoId, messages, headless = false, signal
   const tb = tokenBatcher(reqId);
   try { return await agent.run({ messages, convoId, signal, headless, qa: !!qa, attachments: files, confirm: qa ? qa.confirm : (...a) => { tb.flush(); return askConfirm(...a); }, confirmScreen: qa ? qa.confirmScreen : (...a) => { tb.flush(); return askScreen(...a); }, approve: qa ? qa.approve : (card) => { tb.flush(); return askApproval(card); }, // QA runner: thẻ xin phép luôn bị TỪ CHỐI tự động (qa-runner.js)
     onToken: (t) => reqId && tb.push(t),
-    onStep: (st) => { tb.flush(); if (qa && qa.onStep) qa.onStep(st); reqId && send('agent:step', { reqId, step: slimStep(st) }); },
+    onStep: (st) => { tb.flush(); const p = qa && qa.onStep ? qa.onStep(st) : undefined; reqId && send('agent:step', { reqId, step: slimStep(st) }); return p; },
     onStatus: (st) => { tb.flush(); reqId && send('agent:status', { reqId, ...st }); } }); }
   finally {
     tb.flush();

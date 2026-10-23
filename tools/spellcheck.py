@@ -23,7 +23,7 @@ def collect():
             d = json.load(open(p, encoding='utf-8'))
             for v in list(d.get('text', {}).values()) + list(d.get('attr', {}).values()) + list(d.get('meta', {}).values()):
                 en['site/i18n/en.json'].add(strip_tags(str(v)))
-    files = ['src/renderer/index.html', 'src/renderer/app.js', 'src/renderer/error-view.js', 'src/main.js', 'src/preload.js', 'src/desktop-agent.js', 'src/agent/agent.js', 'src/recommend.js', 'src/catalog.js', 'src/catalog-claims.js', 'src/updater.js']
+    files = ['src/renderer/index.html', 'src/renderer/app.js', 'src/renderer/error-view.js', 'src/main.js', 'src/preload.js', 'src/desktop-agent.js', 'src/agent/agent.js', 'src/agent/shot-guard.js', 'src/qa-runner.js', 'src/recommend.js', 'src/catalog.js', 'src/catalog-claims.js', 'src/updater.js']
     for f in files:
         p = os.path.join(ROOT, f)
         if not os.path.exists(p): continue
