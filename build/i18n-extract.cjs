@@ -68,7 +68,7 @@ function extract(files) {
 const UI_FILES = ['src/renderer/index.html', 'src/renderer/app.js', 'src/renderer/error-view.js', 'src/renderer/gen-chrome.js', 'src/renderer/biz.js', 'src/renderer/gate.html', 'src/renderer/gate.js', 'src/renderer/overlay.html', 'src/renderer/overlay.js', 'src/renderer/stop.html', 'src/renderer/stop.js'];
 // Tiến trình chính: chỉ chuỗi người dùng thấy trong menu, hộp thoại, khay, thông báo (khoá label/title/buttonLabel/message/detail/name/body/checkboxLabel, buttons: […])
 // và chuỗi bọc trong T('…'). Bỏ phần kiểm thử QA (từ “async function qaBench” trở đi).
-const MAIN_FILES = ['src/main.js'];
+const MAIN_FILES = ['src/main.js', 'src/biz-pdf.js'];
 function extractMain(files = MAIN_FILES) {
   const out = new Set();
   for (const f of files) {
@@ -86,7 +86,7 @@ function extractMain(files = MAIN_FILES) {
   return [...out].sort();
 }
 // mô-đun dữ liệu mà giao diện hiển thị nguyên văn (danh mục mô hình, cấu hình mẫu, mức máy, giấy phép, mức vừa máy, hỗ trợ công cụ…)
-const DATA_FILES = ['src/catalog.js', 'src/runtimes.js', 'src/catalog-claims.js', 'src/presets.js', 'src/perf.js', 'src/license.js', 'src/fit.js', 'src/toolsupport.js', 'src/agent-eligibility.js', 'src/recommend.js', 'src/agent-bench.js', 'src/hf.js', 'src/applock.js', 'src/updater.js', 'src/gate.js', 'src/media.js', 'src/crm/crm.js', 'src/crm/biz.js', 'src/models-dir.js', 'src/load-notice.js', 'src/downloader.js'];
+const DATA_FILES = ['src/catalog.js', 'src/runtimes.js', 'src/catalog-claims.js', 'src/presets.js', 'src/perf.js', 'src/license.js', 'src/fit.js', 'src/toolsupport.js', 'src/agent-eligibility.js', 'src/recommend.js', 'src/agent-bench.js', 'src/hf.js', 'src/applock.js', 'src/updater.js', 'src/gate.js', 'src/media.js', 'src/crm/crm.js', 'src/crm/biz.js', 'src/models-dir.js', 'src/load-notice.js', 'src/downloader.js', 'src/crm/purchase.js', 'src/crm/company.js', 'src/crm/tax.js', 'src/crm/print.js'];
 // 0.16 (QA lượt 5, B33): chữ động của AIVN AGENT mà người dùng THẤY (nhãn công cụ, tóm tắt bước, cảnh báo, thẻ duyệt, câu trả lời do mã tạo) —
 // không lấy forModel (lời dành cho mô hình). Khoá: label/summary/warning/title/desc/okLabel/noLabel/short/message/check/why/text và hằng *_WARN / *_NOTE.
 // B182: và mẫu câu trong say(lang, '…{0}…') (src/agent/say.js — dịch theo ngôn ngữ trả lời trước khi chèn phần thay đổi).

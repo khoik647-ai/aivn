@@ -42,7 +42,7 @@
     <!-- KINH DOANH → KHÁCH HÀNG -->
     <section class="view" id="view-crm" data-testid="view-crm">
       <div class="crm-head"><h2>💼 <span>Kinh doanh</span></h2>
-        <nav class="crm-tabs" role="tablist" aria-label="Kinh doanh"><button data-crm="dash" class="on" role="tab" data-testid="biz-tab-dash">Tổng quan</button><button data-crm="contacts" role="tab" data-testid="biz-tab-contacts">Liên hệ</button><button data-crm="leads" role="tab" data-testid="biz-tab-leads">CRM</button><button data-crm="acts" role="tab" data-testid="biz-tab-acts">Việc cần làm</button><button data-crm="sales" role="tab" data-testid="biz-tab-sales">Bán hàng</button><button data-crm="stock" role="tab" data-testid="biz-tab-stock">Kho</button><button data-crm="invoices" role="tab" data-testid="biz-tab-invoices">Hoá đơn</button><button data-crm="reports" role="tab" data-testid="biz-tab-reports">Báo cáo</button></nav>
+        <nav class="crm-tabs" role="tablist" aria-label="Kinh doanh"><button data-crm="dash" class="on" role="tab" data-testid="biz-tab-dash">Tổng quan</button><button data-crm="contacts" role="tab" data-testid="biz-tab-contacts">Liên hệ</button><button data-crm="leads" role="tab" data-testid="biz-tab-leads">CRM</button><button data-crm="acts" role="tab" data-testid="biz-tab-acts">Việc cần làm</button><button data-crm="sales" role="tab" data-testid="biz-tab-sales">Bán hàng</button><button data-crm="purchase" role="tab" data-testid="biz-tab-purchase">Mua hàng</button><button data-crm="stock" role="tab" data-testid="biz-tab-stock">Kho</button><button data-crm="invoices" role="tab" data-testid="biz-tab-invoices">Hoá đơn</button><button data-crm="reports" role="tab" data-testid="biz-tab-reports">Báo cáo</button></nav>
         <div class="crm-actions"><input type="search" id="crmQ" placeholder="Tìm tên, số chứng từ, số điện thoại, email…" aria-label="Tìm trong Kinh doanh" data-testid="crm-q"><button class="btn sm primary" id="crmAdd" data-testid="crm-add">＋ Thêm</button><button class="btn sm" id="crmImport" title="Nhập từ CSV/Excel" data-testid="crm-import">⬆ Nhập</button><button class="btn sm" id="crmExport" title="Xuất CSV (mở được bằng Excel)" data-testid="crm-export">⬇ Xuất</button></div>
       </div>
       <div class="crm-body" id="crmBody" data-testid="crm-body"></div>
@@ -356,6 +356,7 @@
           <button type="button" role="tab" data-stab="runtime" data-testid="settings-tab-runtime">Runtime (CUDA/Vulkan)</button>
           <button type="button" role="tab" data-stab="perf" data-testid="settings-tab-perf">Hiệu năng</button>
           <button type="button" role="tab" data-stab="docs" data-testid="settings-tab-docs">Tìm trong tài liệu</button>
+          <button type="button" role="tab" data-stab="company" data-crm-nav data-testid="settings-tab-company">Công ty</button>
           <button type="button" role="tab" data-stab="security" data-testid="settings-tab-security">Bảo mật &amp; Quản trị</button>
           <button type="button" role="tab" data-stab="logs" data-testid="settings-tab-logs">Nhật ký &amp; chẩn đoán</button>
           <button type="button" role="tab" data-stab="about" data-testid="settings-tab-about">Cập nhật &amp; giới thiệu</button>
@@ -371,6 +372,7 @@
             <div class="set-row" id="mdirRow" data-testid="mdir-row"><div><b>Thư mục mô hình</b><small id="mdirInfo" data-testid="mdir-info"></small><small id="mdirWarn" class="warn" hidden data-testid="mdir-warn"></small></div><div class="row"><button type="button" class="btn sm" id="mdirChange" data-testid="mdir-change">📂 Đổi thư mục…</button><button type="button" class="btn sm" id="mdirReset" hidden data-testid="mdir-reset">Về mặc định</button></div></div>
             <div class="set-row" id="mdirProg" hidden data-testid="mdir-prog"><div><b>Đang chuyển mô hình…</b><small id="mdirProgTxt" data-testid="mdir-prog-txt"></small><progress id="mdirBar" max="1" value="0" data-testid="mdir-bar"></progress></div><button type="button" class="btn sm" id="mdirCancel" data-testid="mdir-cancel">Huỷ</button></div>
           </section>
+          <section class="set-pane" data-spane="company" role="tabpanel" data-testid="settings-pane-company"><h3 class="pane-title">Công ty</h3><div id="bizCompany"></div></section>
           <section class="set-pane" data-spane="hardware" role="tabpanel" data-testid="settings-pane-hardware"><h3 class="pane-title">Phần cứng &amp; bộ máy</h3>
             <div class="set-card">
           <div class="hw-info small" id="hwInfo" data-testid="hw-info">Đang đọc phần cứng…</div>
@@ -532,6 +534,8 @@
 <script src="../i18n/en.js"></script>
 <script src="../i18n/zh.js"></script>
 <script src="i18n-dom.js"></script>
+<script src="../crm/num.js"></script>
+<script src="../crm/uom.js"></script>
 <script src="chat-stream.js"></script>
 <script src="error-view.js"></script>
 <script src="drafts.js"></script>

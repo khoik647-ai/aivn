@@ -814,8 +814,25 @@ select option.opt-no{color:#8a8a8a}
 .biz-grid input:disabled, .biz-grid select:disabled, .biz-notes textarea:disabled { border-color: transparent; padding-left: 0; opacity: 1; color: var(--text); }
 .biz-ro div { color: var(--text); font-size: 13.5px; padding-top: 4px; }
 .biz-lines input { width: 100%; box-sizing: border-box; } .biz-lines select { max-width: 220px; }
-.biz-lines .biz-num { width: 76px; text-align: right; } .biz-lines .biz-money { width: 120px; text-align: right; } .biz-lines .biz-unit { width: 64px; }
+.biz-lines .biz-num { width: 76px; text-align: right; } .biz-lines .biz-money { width: 120px; text-align: right; } .biz-lines .biz-unit { width: 88px; }
 .biz-totals { margin: 12px 0 12px auto; width: min(440px, 100%); }
+/* 0.16 Kinh doanh P0/P1: thuế theo dòng, VietQR, Cài đặt › Công ty */
+.biz-lines .biz-vat { width: 64px; }
+.biz-totals small { font-weight: normal; }
+.biz-qr { display: flex; gap: 14px; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 10px 0; width: fit-content; max-width: 100%; background: var(--surface); }
+.biz-qr svg { width: 132px; height: 132px; flex: none; background: #fff; border-radius: 4px; }
+.biz-qr > div { display: grid; gap: 3px; }
+.biz-co { display: grid; grid-template-columns: 200px 1fr; gap: 18px; align-items: start; }
+.biz-co-logo { display: grid; gap: 8px; }
+.biz-logo-box { width: 200px; height: 100px; border: 1px dashed var(--line2); border-radius: 8px; display: grid; place-items: center; background: #fff; overflow: hidden; }
+.biz-logo-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.biz-co-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 14px; }
+.biz-co-f { display: grid; gap: 4px; font-size: 13px; }
+.biz-co-f.wide { grid-column: 1 / -1; }
+.biz-co-f input, .biz-co-f select, .biz-co-f textarea { width: 100%; }
+#bizCompany h4 { margin: 18px 0 8px; }
+@media (max-width: 760px) { .biz-co { grid-template-columns: 1fr; } }
+
 .biz-totals b { white-space: nowrap; }
 .biz-totals > div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
 .biz-totals .grand { border-top: 1px solid var(--line2); margin-top: 4px; padding-top: 6px; font-size: 15px; }
@@ -827,7 +844,7 @@ select option.opt-no{color:#8a8a8a}
 .biz-filters .chip { border: 1px solid var(--line); background: var(--panel, transparent); color: inherit; border-radius: 999px; padding: 4px 10px; cursor: pointer; font: inherit; font-size: 12.5px; }
 .biz-filters .chip.on { background: var(--accent-soft2); border-color: var(--accent); color: var(--accent-ink); }
 .biz-barcol { width: 28%; } .biz-hbar { display: block; height: 10px; border-radius: 5px; background: var(--accent); opacity: .75; min-width: 2px; }
-.biz-dash { margin-bottom: 14px; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); } .biz-kpi { text-align: left; background: var(--card); color: inherit; font: inherit; cursor: pointer; }
+.biz-dash { margin-bottom: 14px; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); } .biz-dash .kpi b { font-size: 19px; white-space: nowrap; } .biz-kpi { text-align: left; background: var(--card); color: inherit; font: inherit; cursor: pointer; }
 .biz-kpi:hover { border-color: var(--accent); }
 
 /* ===== B46 (beta.2): bố cục co giãn khi cửa sổ hẹp (chia đôi màn hình ~1024 px, 800, 640) — kiểu LM Studio =====

@@ -132,7 +132,7 @@ test('Báo cáo: doanh số theo tháng / khách hàng / sản phẩm, tồn kho
   db.run("UPDATE quotes SET status = 'accepted'"); db.flushSync(); db.close();
   const db2 = await openDb(file); assert.strictEqual(db2.get('SELECT status FROM quotes LIMIT 1').status, 'sale');
   assert.ok(db2.get("SELECT type FROM products WHERE name = 'Bàn làm việc'").type === 'product');
-  assert.strictEqual(db2.get("SELECT value FROM meta WHERE key = 'schema'").value, '2');
+  assert.strictEqual(db2.get("SELECT value FROM meta WHERE key = 'schema'").value, '3');
   db2.close();
 });
 
@@ -141,9 +141,9 @@ const { spawnSync } = require('child_process');
 const ROOT = path.join(__dirname, '..');
 const hasX = spawnSync('which', ['xvfb-run']).status === 0 && fs.existsSync(path.join(ROOT, 'node_modules/.bin/electron'));
 // Tên sản phẩm/khách/đơn vị là dữ liệu người dùng nhập — không dịch.
-const USER_DATA = new Set(['Bàn làm việc gỗ sồi', 'Ghế xoay lưới', 'Lắp đặt tại nhà', 'Nội thất', 'Công ty TNHH Sen Vàng', 'lần', 'cái']);
-const userData = (s) => USER_DATA.has(s) || /^\d+ (cái|lần)$/.test(s);
-for (const lang of ['vi', 'en']) {
+const USER_DATA = new Set(['Bàn làm việc gỗ sồi', 'Ghế xoay lưới', 'Lắp đặt tại nhà', 'Nội thất', 'Công ty TNHH Sen Vàng']); // đơn vị tính (cái, lần) nay dịch: Units/件, Times/次
+const userData = (s) => USER_DATA.has(s);
+for (const lang of ['vi', 'en', 'zh']) {
   test(`Kinh doanh — giao diện thật (${lang}): nhập kho → báo giá → xác nhận → giao một phần (phiếu chờ) → hoá đơn → thu một phần → báo cáo`, { skip: !hasX && 'cần xvfb-run + electron' }, () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-qabiz-')); const ud = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-qabiz-ud-'));
     const env = Object.assign({}, process.env, { AIVN_USER_DATA: ud, AIVN_SKIP_ACTIVATION: '1', AIVN_QA_BIZ: dir, AIVN_QA_BIZ_LANG: lang });
@@ -157,8 +157,9 @@ for (const lang of ['vi', 'en']) {
     }
     assert.strictEqual(d.backorder, 'WH/OUT/00002');
     assert.strictEqual(d.db.receivable, 3800000); assert.strictEqual(d.db.salesMonth, 8000000); assert.strictEqual(d.db.deliveriesReady, 1);
-    if (lang === 'vi') { assert.strictEqual(d.invoice.ribbon, 'THANH TOÁN MỘT PHẦN'); assert.strictEqual(d.order.total, '8.800.000 đ'); }
-    else { assert.strictEqual(d.invoice.ribbon, 'PARTIALLY PAID'); assert.strictEqual(d.order.total, '8,800,000 VND'); assert.match(d.steps['10-don-xac-nhan'].toasts.join(' '), /Order BG-\d{4}-\d{4} confirmed · delivery created/); }
+    if (lang === 'vi') { assert.strictEqual(d.invoice.ribbon, 'THANH TOÁN MỘT PHẦN'); assert.strictEqual(d.order.total, '8.800.000 ₫'); }
+    else if (lang === 'en') { assert.strictEqual(d.invoice.ribbon, 'PARTIALLY PAID'); assert.strictEqual(d.order.total, '8,800,000 ₫'); assert.match(d.steps['10-don-xac-nhan'].toasts.join(' '), /Order BG-\d{4}-\d{4} confirmed · delivery created/); }
+    else assert.strictEqual(d.order.total, '8,800,000 ₫');
   });
 }
 

@@ -1786,7 +1786,7 @@ if (A.onNotice) A.onNotice((n) => toast((n.kind === 'warn' ? '⚠ ' : '') + n.te
 const CRM_ON = true;
 $$('[data-crm-nav]').forEach(el => { el.hidden = !CRM_ON; });
 const crm = { tab: 'dash', contacts: [] };
-const vnd = (n) => `${(Number(n) || 0).toLocaleString(LOC())} đ`;
+const vnd = (n) => `${(Math.round(Number(n) || 0)).toLocaleString(LOC())} ₫`;
 async function C(fn, ...a) { const r = await A.crm(fn, ...a); if (!r.ok) throw new Error(r.error); return r.data; }
 async function renderCrm() {
   $$('.crm-tabs button').forEach(b => { b.classList.toggle('on', b.dataset.crm === crm.tab); b.setAttribute('aria-selected', String(b.dataset.crm === crm.tab)); });

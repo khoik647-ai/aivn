@@ -1315,6 +1315,7 @@ function registerIpc() {
       const rows = c.exportContacts(); const S = require('./crm/sheet'); fs.writeFileSync(r.filePath, S.toCsv(Array.isArray(rows) ? rows : rows.rows)); return { ok: true, file: r.filePath }; } catch (e) { return { ok: false, error: e.message }; }
   });
   // 0.16 Báo cáo Kinh doanh: lưu bảng đang xem ra CSV (Excel mở được, UTF-8 có BOM)
+  require('./biz-pdf').registerBizPdf({ ipcMain, BrowserWindow, dialog, shell, getWin: () => win, getCrm, T, uiLang, log: (m) => LOG.log('crm', m) }); // 0.16 PDF chứng từ
   ipcMain.handle('crm:saveCsv', async (_e, { name, rows } = {}) => {
     try { if (!Array.isArray(rows) || !rows.length || rows.length > 100000) return { ok: false, error: 'Không có dữ liệu để xuất.' };
       const r = await dialog.showSaveDialog(win, { buttonLabel: 'Lưu', title: 'Xuất báo cáo', defaultPath: String(name || 'bao-cao').replace(/[\\/:*?"<>|]+/g, '-').slice(0, 80) + '.csv', filters: [{ name: 'CSV', extensions: ['csv'] }] }); if (r.canceled || !r.filePath) return { ok: false, canceled: true };
@@ -3433,6 +3434,7 @@ else {
     if (process.env.AIVN_QAPAR && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaPar().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QA_MEDIA && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaMedia().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QA_BIZ && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaBiz().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
+    if (process.env.AIVN_QA_PURCHASE && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => require('./qa-purchase').qaPurchase({ win, app, VI: String(I18N_CORE.VI) }).catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QAUI && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaUI().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QACU && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaCU().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
     if (process.env.AIVN_QA_B21 && !app.isPackaged) win.webContents.once('did-finish-load', () => setTimeout(() => qaB21().catch(e => { console.error('QA lỗi', e); app.exit(2); }), 2500));
