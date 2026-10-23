@@ -88,19 +88,16 @@ const NAMED_DOC = /(?:^|[^\p{L}])(?:the\s+open|file|tệp|tập tin|文件|檔�
 function contentBefore(t, index) {
   return /(?:summary\s+of|about|tóm\s*tắt|nội\s*dung|的摘要)\s*$/iu.test(String(t).slice(Math.max(0, index - 40), index));
 }
-// danh từ nội dung đứng giữa động từ và giới từ: “notes on…”, “reply to…”, “ghi chú về…”, “对…的评论”
-const CONTENT_NOUN = /(?:^|[^\p{L}])(?:notes|note|repl(?:y|ies)|responses?|feedback|comments?|reviews?|thoughts|ideas|summar(?:y|ies)|recaps?|answers?|opinions?|ghi\s+chú|phản\s+hồi|nhận\s+xét|tóm\s+tắt)(?![\p{L}])|评论|回复|摘要|意见/iu;
-function contentNounIn(text) { return CONTENT_NOUN.test(String(text || '')); }
-// on/to/for/about/về/cho/对 sau danh từ nội dung không phải đích gõ
-function contentPrepGoverned(t, index) {
-  const pre = String(t).slice(0, index);
-  const pm = /(?:^|[^\p{L}])(?:on|to|for|about|về|cho|对)\s+(?:the\s+)?$/iu.exec(pre);
-  return !!pm && contentNounIn(pre.slice(0, pm.index));
+// to/on/gửi/cho/给 đứng ngay trước cụm = người nhận / chủ đề, không phải chỗ gõ (trừ động từ chèn)
+function recipientGoverned(text, index) {
+  const pre = String(text).slice(Math.max(0, index - 24), index);
+  return /(?:^|[^\p{L}])(?:to|on|gửi|cho)\s*$|(?:给|給)\s*$/iu.test(pre);
 }
-function docFile(t) {
+function docFile(t, allowTo = true) {
   const re = new RegExp(NAMED_DOC.source, NAMED_DOC.flags);
   for (const m of String(t || '').matchAll(re)) {
-    if (SAVE_BEFORE.test(String(t).slice(0, m.index)) || contentBefore(t, m.index) || contentPrepGoverned(t, m.index)) continue;
+    if (SAVE_BEFORE.test(String(t).slice(0, m.index)) || contentBefore(t, m.index)) continue;
+    if (!allowTo && recipientGoverned(t, m.index)) continue;
     return m[1];
   }
   return null;
@@ -121,7 +118,7 @@ const ADD = /(?:^|[^\p{L}])(?:thêm|chèn|add|insert|note\s+down|write\s+down|pu
 const ADD_ASCII = /(?:^|[,;]\s*|[^\p{L}](?:va|roi|hay|sau do|xong|de|giup)\s+)(?:them|chen|go|viet|ghi)\s+(?!to\b|on\b|out\b)\S/iu;
 // review #64 r9: draft/compose/append/chép/记录… cũng là động từ ghi (jot, soạn, note down đã nằm ở TYPE/ADD).
 // Động từ vẫn chưa biết thì KHÔNG quét cả câu — “this document” / “report.docx” trong nội dung không tắt bảo vệ.
-const MORE = /(?:^|[^\p{L}])(?:draft|compose|append|chép(?:\s+lại)?)(?![\p{L}])|记录|起草|附加/iu;
+const MORE = /(?:^|[^\p{L}])(?:draft|compose|append|chép(?:\s+lại)?)(?![\p{L}])|记录|起草|附加|加到/iu;
 const WRITE_SRC = [TYPE, TYPE_ASCII, ADD, ADD_ASCII, MORE];
 const writeTask = (t) => WRITE_SRC.some(re => re.test(t));
 // vị trí đầu tiên một động từ ghi xuất hiện → { at, end } | null
@@ -190,25 +187,44 @@ const URL_RE = /(?:[a-z][a-z\d+.-]*:\/\/|www\.)\S*/giu;
 // cụm đích NGAY sau động từ ghi (không có nội dung xen giữa)
 const TARGET_AFTER = /^\s*(?:(?:tiếp(?!\s+(?:theo|tục))|thêm)\s*)?(?:(?:vào|into|to|in)\s+(?:(?:the|my|cái)\s+)?(?:(?:tài liệu|tệp|tập tin|file|thẻ)\s+(?:đang mở|hiện tại|hiện có|có sẵn|sẵn có|cũ|này|đó)|(?:current|existing|already[- ]open|same|this|that)\s+(?:file|document|doc|tab)|cuối|the end of))(?![\p{L}])|^\s*tiếp(?!\s+(?:theo|tục))(?![\p{L}])|^\s*(?:at the end of|vào cuối)(?![\p{L}])/iu;
 const TARGET_END = /(?:^|[^\p{L}])(?:vào|into|to)\s+(?:(?:the|my)\s+)?(?:(?:tệp|tập tin|file|文件|檔案)\s+)?((?:[a-z]:)?[^\s]*?[\p{L}\d_\-]+\.(?:txt|md|docx?|rtf|odt|log|csv|ini))[\s.!]*$/iu;
-// đích nói rõ: into/in/to/vào/đến/tới — không có “on” trần. “to” sau notes/reply/feedback… là nội dung, không phải đích
-const DEST_PHRASE = /(?:^|[^\p{L}])(?:into|to|in|vào|đến|tới)\s+(?:(?:the|my|this|that|cái)\s+){0,2}(?:(?:current|existing|already[- ]open|same|this|that)\s+(?:file|document|doc|tab)|(?:tài liệu|tệp|tập tin|file|thẻ)\s+(?:đang mở|hiện tại|hiện có|có sẵn|sẵn có|cũ|này|đó)|cuối|the end of(?:\s+(?:the|this|my)(?:\s+(?:file|document|doc))?)?)/iu;
+// into/in/vào là đích với mọi động từ ghi. to chỉ là đích với động từ CHÈN (append/add/insert/paste/thêm/chèn/dán/添加/加到). on/gửi/cho/给 không bao giờ là đích.
+const DEST_PHRASE = /(?:^|[^\p{L}])(?:into|to|in|vào)\s+(?:(?:the|my|this|that|cái)\s+){0,2}(?:(?:current|existing|already[- ]open|same|this|that)\s+(?:file|document|doc|tab)|(?:tài liệu|tệp|tập tin|file|thẻ)\s+(?:đang mở|hiện tại|hiện có|có sẵn|sẵn có|cũ|này|đó)|cuối|the end of(?:\s+(?:the|this|my)(?:\s+(?:file|document|doc))?)?)/iu;
 const DEST_ZH = /(?:在|到)\s*(?:当前|當前|现有|現有|原来的|原來的).{0,8}(?:文档|文件|文檔|标签|標籤|末尾)/u;
 const CONTINUE_CMD = /^\s*(?:(?:please|hãy|xin|请)\s+)?(?:continue\s+(?:typing|writing)|继续(?:输入|写)|繼續(?:輸入|寫))/iu;
-function explicitPhrase(text) {
+// to chỉ là đích với động từ CHÈN. write/draft/compose/soạn/viết/写 và mọi động từ khác: to/on/gửi/cho/给 là người nhận hoặc chủ đề.
+const INSERT_VERB = /^(?:append|add|insert|paste|thêm|chèn|dán|添加|插入|加到|贴上|粘贴|貼上)$/iu;
+function verbWord(c, v) { return c.slice(v.at, v.end).replace(/^[^\p{L}]+/u, '').trim(); }
+const isInsertion = (w) => INSERT_VERB.test(w);
+function explicitPhrase(text, allowTo) {
   const s = String(text || '');
   const re = new RegExp(DEST_PHRASE.source, DEST_PHRASE.flags.includes('g') ? DEST_PHRASE.flags : DEST_PHRASE.flags + 'g');
   let m;
   while ((m = re.exec(s))) {
-    const pm = /(?:into|to|in|vào|đến|tới)/iu.exec(m[0]);
+    const pm = /(?:into|to|in|vào)/iu.exec(m[0]);
     const word = pm ? pm[0].toLowerCase() : '';
-    const at = m.index + (pm ? pm.index : 0);
-    if (word === 'to' && contentNounIn(s.slice(0, at))) continue; // “reply to this document” là nội dung
+    if (word === 'to' && !allowTo) continue;
     if (contentBefore(s, m.index) || /的摘要/.test(s.slice(m.index, m.index + m[0].length + 8))) continue;
     return true;
   }
   const z = new RegExp(DEST_ZH.source, DEST_ZH.flags).exec(s);
   if (z && !contentBefore(s, z.index) && !/的摘要/.test(s.slice(z.index, z.index + z[0].length + 8))) return true;
   return false;
+}
+function realExistingIn(head) {
+  const re = new RegExp(EXISTING.source, EXISTING.flags.includes('g') ? EXISTING.flags : EXISTING.flags + 'g');
+  let m;
+  while ((m = re.exec(head))) if (!recipientGoverned(head, m.index)) return true;
+  return false;
+}
+function realFileIn(head) {
+  if (OPEN_FILE.test(head)) return true;
+  for (const m of head.matchAll(new RegExp(FILE_RE.source, FILE_RE.flags))) {
+    if (!SAVE_BEFORE.test(head.slice(0, m.index)) && !recipientGoverned(head, m.index)) return true;
+  }
+  for (const m of head.matchAll(new RegExp(CODE_FILE_RE.source, CODE_FILE_RE.flags))) {
+    if (CODE_BEFORE.test(head.slice(0, m.index)) && !SAVE_BEFORE.test(head.slice(0, m.index)) && !recipientGoverned(head, m.index)) return true;
+  }
+  return !!docFile(head, false);
 }
 // chỉ MỞ ứng dụng / đăng nhập / hỏi “type of” / bấm một phím — không phải việc gõ chữ
 function isOpenOnly(t) {
@@ -227,35 +243,33 @@ function isNonTyping(t) {
 }
 // việc gõ: động từ đã biết, HOẶC bất kỳ động từ nào khác (append, draft, chép, 记录…) — mặc định là việc gõ, không cần nằm trong danh sách
 const typingTask = (t) => writeTask(t) || !isNonTyping(t);
-function fileAtEnd(c, v) {
+function fileAtEnd(c, v, allowTo) {
   const m = TARGET_END.exec(c);
   if (!m || (v && m.index < v.end) || /:\/\/|^www\./i.test(m[1]) || SAVE_BEFORE.test(c.slice(0, m.index)) || contentBefore(c, m.index)) return null;
-  const rel = c.slice(m.index);
-  const pm = /(?:^|[^\p{L}])(vào|into|to)(?![\p{L}])/iu.exec(rel);
-  // “to report.docx” chỉ là đích khi không có danh từ nội dung đứng trước (“reply to report.docx” thì không)
-  if (pm && pm[1].toLowerCase() === 'to' && contentNounIn(c.slice(v ? v.end : 0, m.index + pm.index))) return null;
+  const pm = /(?:^|[^\p{L}])(vào|into|to)(?![\p{L}])/iu.exec(c.slice(m.index));
+  if (pm && pm[1].toLowerCase() === 'to' && !allowTo) return null;
   return m[1].split(/[\\/]/).pop();
 }
-// không có động từ đã biết: chỉ tắt khi có đích nói rõ (into/in/to/vào/在/到 + tài liệu, hoặc tên tệp để sameFile kiểm cửa sổ đang mở)
-function explicitDest(text) {
-  const s = String(text || '');
-  const f = fileAtEnd(s, null); if (f) return { fresh: false, file: f };
-  if (explicitPhrase(s)) return { fresh: false, file: null };
-  return null;
+function targetAfterCounts(tail, allowTo) {
+  if (!TARGET_AFTER.test(tail)) return false;
+  if (!allowTo && /^\s*(?:(?:tiếp(?!\s+(?:theo|tục))|thêm)\s*)?to(?![\p{L}])/iu.test(tail)) return false;
+  return true;
 }
-// câu lệnh (đã cắt nội dung, đã bỏ phủ định) có NÊU RÕ tệp/tài liệu có sẵn không
+// câu lệnh (đã cắt nội dung, đã bỏ phủ định) có NÊU RÕ chỗ gõ không. Không nhận ra → bảo vệ bật.
 function existingTarget(c) {
   const ON = { fresh: true, file: null }; if (!c || negated(c)) return ON;
   const bare = c.replace(URL_RE, ' '); const v = firstVerb(bare);
-  if (v) {
-    const head = bare.slice(0, v.end); const tail = c.slice(v.end);
-    if (EXISTING.test(head) || namesExistingFile(head)) return { fresh: false, file: null };
-    const nd = docFile(tail); if (nd) return { fresh: false, file: nd };
-    if (TARGET_AFTER.test(tail)) return { fresh: false, file: null };
-    const f = fileAtEnd(c, v); if (f) return { fresh: false, file: f };
-    return explicitDest(tail) || ON;
-  }
-  return explicitDest(bare) || (CONTINUE_CMD.test(bare) ? { fresh: false, file: null } : ON);
+  if (!v) return CONTINUE_CMD.test(bare) ? { fresh: false, file: null } : ON;
+  const word = verbWord(bare, v); const allowTo = isInsertion(word);
+  const head = bare.slice(0, v.end); const tail = c.slice(v.end);
+  // to/on/gửi/cho/给 + tài liệu là người nhận hoặc chủ đề — không tắt bảo vệ. “mở tệp…”, “tài liệu đang mở”, “在当前文档中” vẫn tắt.
+  if (realExistingIn(head) || realFileIn(head)) return { fresh: false, file: null };
+  const nd = docFile(tail, allowTo); if (nd) return { fresh: false, file: nd };
+  if (targetAfterCounts(tail, allowTo)) return { fresh: false, file: null };
+  const f = fileAtEnd(c, v, allowTo); if (f) return { fresh: false, file: f };
+  if (/^加到$/u.test(word) && (EXISTING.test(tail) || explicitPhrase('到' + tail, true))) return { fresh: false, file: null };
+  if (explicitPhrase(tail, allowTo)) return { fresh: false, file: null };
+  return ON;
 }
 // → { fresh: có bật bảo vệ, file: tên tệp nêu ở “gõ X vào <tệp>” (ngoại lệ 2) hoặc null }
 // Bảo vệ BẬT mặc định cho mọi việc gõ. Chỉ TẮT khi phần LỆNH (sau khi cắt nội dung, không tính câu phủ định) nêu rõ tệp/tài liệu có sẵn.
