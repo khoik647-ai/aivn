@@ -45,6 +45,15 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
   const cors = () => (getOpts().cors ? { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key, anthropic-version', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' } : {});
   // B80: mọi phản hồi lỗi đều vào nhật ký kèm mã (trước đây 404 chỉ thấy “POST /v1/completions”, không thấy mã)
   const err = (res, code, message, type = 'invalid_request_error') => { if (code !== 401) log(`  → ${code} ${String(message).slice(0, 200)}`); return send(res, code, { error: { message, type, code } }); };
+  // Sau ensureModel giao diện có thể đã đổi mô hình. Không trả lời bằng mô hình khác, cũng không 500.
+  const switched = (requested) => {
+    if (!requested) return null;
+    const st = engine.status() || {};
+    const req = String(requested).toLowerCase().replace(/\.gguf$/, '');
+    if (st.loaded && (st.id === req || String(st.id).includes(req))) return null;
+    const have = st.loaded && st.id ? st.id : 'chưa có mô hình';
+    return `Mô hình đã đổi trong lúc nạp (${have}). Yêu cầu này không trả lời bằng mô hình khác. Hãy gửi lại.`;
+  };
 
   const readBody = (req, max = 20e6, tooBigMsg) => new Promise((resolve, reject) => {
     let size = 0; const chunks = []; let settled = false;
@@ -118,6 +127,7 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
       try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) { if (tooBig(e)) return err(res, 413, 'Body quá lớn', 'payload_too_large'); return err(res, 400, 'JSON không hợp lệ'); }
       if (!Array.isArray(body.messages) || !body.messages.length) return err(res, 400, 'Thiếu trường "messages"');
       try { await ensureModel(body.model); } catch (e) { return err(res, 400, e.message, 'model_not_found'); }
+      const gone = switched(body.model); if (gone) return err(res, 409, gone, 'model_changed');
 
       const st = engine.status();
       const id = 'chatcmpl-' + crypto.randomBytes(12).toString('hex');
@@ -193,6 +203,7 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
       if (prompts.length > 16) return err(res, 400, 'Tối đa 16 prompt mỗi yêu cầu');
       if (body.stream && prompts.length > 1) return err(res, 400, '"stream" chỉ dùng với một prompt');
       try { await ensureModel(body.model); } catch (e) { return err(res, 400, e.message, 'model_not_found'); }
+      const gone = switched(body.model); if (gone) return err(res, 409, gone, 'model_changed');
       const st = engine.status();
       const id = 'cmpl-' + crypto.randomBytes(12).toString('hex');
       const created = Math.floor(Date.now() / 1000);

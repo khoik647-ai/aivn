@@ -619,24 +619,55 @@ function noteUiPick(id) {
 }
 // UI và API cùng xin một mô hình thì dùng chung một lời hứa đang nạp. Lần nạp thứ hai
 // (engine.loadModel) gỡ mô hình ngay khi bắt đầu, nên yêu cầu API thấy "chưa nạp" dù lần đầu đã xong.
-const loadInflight = new Map();
+// Mỗi lần nạp có số thứ tự. Chỉ gom nếu từ lúc lần đó bắt đầu chưa có lần nạp mô hình KHÁC
+// (chọn B, rồi C, rồi B: lần B sau phải nạp lại để lựa chọn cuối thắng).
+let loadTicket = 0;
+const loadStarts = []; // { id, ticket }, cũ trước
+const loadInflight = new Map(); // id -> { p, ticket, ui }
+function noteLoadStart(id) {
+  const ticket = ++loadTicket;
+  loadStarts.push({ id: String(id), ticket });
+  let min = ticket;
+  for (const e of loadInflight.values()) if (e.ticket < min) min = e.ticket;
+  while (loadStarts.length && loadStarts[0].ticket < min) loadStarts.shift();
+  return ticket;
+}
+function otherStartedSince(id, ticket) {
+  const key = String(id);
+  for (let i = loadStarts.length - 1; i >= 0; i--) {
+    const s = loadStarts[i];
+    if (s.ticket <= ticket) break;
+    if (s.id !== key) return true;
+  }
+  return false;
+}
 function loadIsPlain(opts) {
+  // Hộp nạp (Ctrl+L) có load/force/ctx: không gom, vì lựa chọn ngữ cảnh và GPU khác lần nạp thường.
   return !opts.force && opts.ctx == null && opts.load == null && !opts.reason && opts.minCtx == null;
 }
 function shareLoad(id, opts = {}) {
   const key = String(id);
-  if (!loadIsPlain(opts)) return loadById(id, opts);
+  if (!loadIsPlain(opts)) { noteLoadStart(key); return loadById(id, opts); }
   const hit = loadInflight.get(key);
-  if (hit) {
-    return hit.then((st) => {
+  if (hit && !otherStartedSince(key, hit.ticket)) {
+    return hit.p.then((st) => {
       if (!opts.api) { settings.data.lastModel = id; settings.save(); }
       return st;
     });
   }
+  const ticket = noteLoadStart(key);
+  const entry = { ticket, ui: !opts.api, p: null };
   const p = Promise.resolve().then(() => loadById(id, opts));
-  loadInflight.set(key, p);
-  p.finally(() => { if (loadInflight.get(key) === p) loadInflight.delete(key); }).catch(() => {});
+  entry.p = p;
+  loadInflight.set(key, entry);
+  p.finally(() => { if (loadInflight.get(key) === entry) loadInflight.delete(key); }).catch(() => {});
   return p;
+}
+function loadClaim(m, pickSeq, st, joiningUi) {
+  const pickedDuring = uiPick.seq !== pickSeq;
+  // API gom vào lần nạp do giao diện bắt đầu (kể cả lúc chưa kịp báo engine.loading): mô hình là của người dùng.
+  const uiOwns = !!joiningUi || (uiPick.id === m.id && (pickedDuring || !!st.loading));
+  return { pickedDuring, uiOwns };
 }
 async function ensureModel(requested, { api = false, signal = null } = {}) {
   const stopped = () => !!(signal && signal.aborted);
@@ -649,17 +680,24 @@ async function ensureModel(requested, { api = false, signal = null } = {}) {
     if (m) {
       if (stopped()) return;
       // loadById không huỷ được. Ghi nhận lần nạp do API bắt đầu và số người đang giữ, rồi xét gỡ SAU khi nạp xong.
-      const triggered = !st.loading;
       const pickSeq = uiPick.seq;
       const prev = st.loaded && st.id && st.id !== m.id ? { id: st.id } : null;
-      // Giao diện đang nạp mô hình khác: chờ xong, không chen. Client ngắt trong lúc chờ thì không nạp đè.
-      if (api && st.loading && uiPick.id && uiPick.id !== m.id) {
-        while (engine.status().loading) {
+      const hit = loadInflight.get(String(m.id));
+      const joiningUi = !!(api && hit && hit.ui && !otherStartedSince(String(m.id), hit.ticket));
+      // Giao diện đang nạp mô hình khác, kể cả giai đoạn trước khi engine báo loading: chờ xong, không chen.
+      // Client ngắt trong lúc chờ thì không nạp đè.
+      if (api && !joiningUi && uiPick.id && uiPick.id !== m.id) {
+        const uiKey = String(uiPick.id);
+        const uiHit = loadInflight.get(uiKey);
+        if (st.loading || (uiHit && uiHit.ui)) {
+          while (engine.status().loading || (loadInflight.get(uiKey) && loadInflight.get(uiKey).ui)) {
+            if (stopped()) return;
+            await new Promise((r) => setTimeout(r, 20));
+          }
           if (stopped()) return;
-          await new Promise((r) => setTimeout(r, 20));
         }
-        if (stopped()) return;
       }
+      const triggered = joiningUi ? false : !st.loading;
       if (api) jitGuard.enter(m.id, { triggered });
       try {
         if (!api) await shareLoad(m.id, {});
@@ -667,8 +705,7 @@ async function ensureModel(requested, { api = false, signal = null } = {}) {
         if (stopped()) {
           if (api) {
             await Promise.resolve(); // models:load kịp tăng uiPick nếu người dùng vừa chọn
-            const pickedDuring = uiPick.seq !== pickSeq;
-            const uiOwns = uiPick.id === m.id && (pickedDuring || !!st.loading);
+            const { pickedDuring, uiOwns } = loadClaim(m, pickSeq, st, joiningUi);
             jitGuard.noteAbort(m.id);
             const gate = jitGuard.state(m.id);
             const drop = jitGuard.shouldUnload(m.id, {
@@ -697,8 +734,7 @@ async function ensureModel(requested, { api = false, signal = null } = {}) {
       } finally { if (api) jitGuard.leave(m.id, { aborted: stopped() }); }
       if (api) {
         await Promise.resolve(); // models:load kịp tăng uiPick nếu người dùng vừa chọn
-        const pickedDuring = uiPick.seq !== pickSeq;
-        const uiOwns = uiPick.id === m.id && (pickedDuring || !!st.loading);
+        const { pickedDuring, uiOwns } = loadClaim(m, pickSeq, st, joiningUi);
         const after = engine.status();
         if (!pickedDuring && !uiOwns && after.loaded && String(after.id) === String(m.id)) {
           apiJit = { id: m.id, at: Date.now() };

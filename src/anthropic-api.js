@@ -268,6 +268,13 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
   }
   if (ac.signal.aborted || clientGone(req, res)) return;
   const st = engine.status ? engine.status() : {};
+  if (translated.model) {
+    const reqId = String(translated.model).toLowerCase().replace(/\.gguf$/, '');
+    if (!(st && st.loaded && (st.id === reqId || String(st.id).includes(reqId)))) {
+      const have = st && st.loaded && st.id ? st.id : 'chưa có mô hình';
+      return fail(409, 'invalid_request_error', `Mô hình đã đổi trong lúc nạp (${have}). Yêu cầu này không trả lời bằng mô hình khác. Hãy gửi lại.`);
+    }
+  }
   const id = 'msg_' + crypto.randomBytes(12).toString('hex');
   const model = translated.model || (st && st.id) || '';
   const inputTokens = countInput(engine, translated.messages);
