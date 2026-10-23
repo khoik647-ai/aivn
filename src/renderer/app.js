@@ -2739,6 +2739,19 @@ $('#setNav').addEventListener('keydown', (e) => {
 });
 $('#setKeys').addEventListener('click', openKeys);
 // ---------- Thư mục mô hình (beta.3): đổi ổ khi ổ C: sắp đầy — chuyển mô hình có tiến độ, hoặc chỉ trỏ sang thư mục mới ----------
+// B189: thanh chỉ hiện khi lượt chuyển CHƯA xong. Sự kiện tiến độ đến muộn (sau lời invoke hoặc sau finished) không được bật lại — nếu không, hàng “Đang chuyển” kẹt mãi dù tệp đã chuyển xong.
+let mdirJob = null, mdirGen = 0;
+const MDIR_STALL_MSG = 'Chuyển thư mục mô hình bị dừng vì quá lâu không thấy tiến triển. Mô hình vẫn nằm ở thư mục cũ, không mất tệp. Hãy bấm Thử lại.';
+function mdirClearErr() { const e = $('#mdirErr'); if (!e) return; e.hidden = true; const t = $('#mdirErrTxt'); if (t) t.textContent = ''; }
+function mdirShowErr(msg) { $('#mdirProg').hidden = true; const e = $('#mdirErr'); if (!e) return; e.hidden = false; $('#mdirErrTxt').textContent = msg || MDIR_STALL_MSG; }
+function mdirArmStall() {
+  if (!mdirJob || !mdirJob.moving) return; clearTimeout(mdirJob.timer); const gen = mdirJob.gen;
+  mdirJob.timer = setTimeout(() => {
+    if (!mdirJob || mdirJob.gen !== gen || !mdirJob.moving || mdirJob.reported) return;
+    mdirJob.moving = false; mdirJob.reported = true; try { A.modelsDirCancel(); } catch {}
+    mdirShowErr(MDIR_STALL_MSG); toast(MDIR_STALL_MSG, true);
+  }, 90000);
+}
 async function mdirRefresh() {
   const d0 = await A.modelsDirInfo(); if (!d0) return;
   const d = { ...d0, drive: String(d0.drive || '').replace(/:$/, '') }; // B87: “ổ C” / “drive C: …” / “C 盘”, không còn “drive C::”
@@ -2758,16 +2771,40 @@ async function mdirChange() {
     else if (await modalAsk({ icon: '📁', title: 'Chỉ dùng thư mục mới?', message: `Mô hình tải về sau sẽ lưu ở ${r.dir}. Các mô hình đã có vẫn ở ${cur.dir} và vẫn dùng được.`, okLabel: 'Dùng thư mục mới', noLabel: 'Huỷ' })) mode = 'point';
   } else mode = 'point';
   if (!mode) return;
-  if (mode === 'move') { $('#mdirProg').hidden = false; $('#mdirBar').value = 0; $('#mdirProgTxt').textContent = ''; show('settings', { tab: 'general' }); }
-  const x = await A.modelsDirApply({ dir: r.dir, mode });
-  $('#mdirProg').hidden = true;
-  if (!x || !x.ok) toast((x && x.error) || 'Không đổi được thư mục mô hình', true);
-  else toast(mode === 'move' ? `Đã chuyển ${x.moved + (x.skipped || 0)} tệp sang ${r.dir} ✓` : `Đã đổi thư mục mô hình sang ${r.dir} ✓`);
-  await mdirRefresh(); refreshModels();
+  await mdirRun(r.dir, mode);
 }
-A.onModelsDirProgress((p) => { if (!p || p.finished) return; $('#mdirProg').hidden = false; $('#mdirBar').value = p.bytesTotal ? p.bytesDone / p.bytesTotal : p.done / Math.max(1, p.total); const fn = document.createElement('span'); fn.dataset.noi18n = ''; fn.textContent = String(p.file || '').split(/[\\/]/).pop(); $('#mdirProgTxt').replaceChildren(document.createTextNode(`${p.done}/${p.total} tệp · ${fmtBytes(p.bytesDone)} / ${fmtBytes(p.bytesTotal)}`), document.createTextNode(' · '), fn); }); // B87: chỉ tên tệp không dịch
+async function mdirRun(dir, mode) {
+  mdirClearErr();
+  const gen = ++mdirGen; if (mdirJob && mdirJob.timer) clearTimeout(mdirJob.timer);
+  mdirJob = { dir, mode, gen, moving: mode === 'move', reported: false, timer: null };
+  if (mode === 'move') { $('#mdirProg').hidden = false; $('#mdirBar').value = 0; $('#mdirProgTxt').textContent = ''; show('settings', { tab: 'general' }); mdirArmStall(); }
+  let x; try { x = await A.modelsDirApply({ dir, mode }); } catch (e) { x = { ok: false, error: (e && e.message) || '', code: '' }; }
+  if (!mdirJob || mdirJob.gen !== gen) return x;
+  mdirJob.moving = false; clearTimeout(mdirJob.timer); $('#mdirProg').hidden = true; // đồng bộ, trước mọi await — IPC đến sau không kịp bật lại thanh
+  if (mdirJob.reported) { await mdirRefresh(); refreshModels(); return x; }
+  if (!x || !x.ok) {
+    if (x && x.code === 'ABORT') toast('Đã huỷ chuyển mô hình.');
+    else { const msg = (x && x.code === 'ESTALL') ? MDIR_STALL_MSG : ((x && x.error) || 'Không đổi được thư mục mô hình'); mdirJob.reported = true; mdirShowErr(msg); toast(msg, true); }
+    await mdirRefresh(); refreshModels(); return x;
+  }
+  mdirJob = null;
+  toast(mode === 'move' ? `Đã chuyển ${x.moved + (x.skipped || 0)} tệp sang ${dir} ✓` : `Đã đổi thư mục mô hình sang ${dir} ✓`);
+  await mdirRefresh(); refreshModels(); return x;
+}
+A.onModelsDirProgress((p) => {
+  if (!mdirJob || !mdirJob.moving) return; // B189: đã xong / đã lỗi — bỏ sự kiện đến muộn
+  if (!p || p.finished) {
+    const err = p && p.error, code = p && p.code;
+    mdirJob.moving = false; clearTimeout(mdirJob.timer); $('#mdirProg').hidden = true;
+    if (err && code !== 'ABORT' && !mdirJob.reported) { mdirJob.reported = true; const msg = code === 'ESTALL' ? MDIR_STALL_MSG : err; mdirShowErr(msg); toast(msg, true); }
+    return;
+  }
+  mdirArmStall();
+  $('#mdirProg').hidden = false; $('#mdirBar').value = p.bytesTotal ? p.bytesDone / p.bytesTotal : p.done / Math.max(1, p.total); const fn = document.createElement('span'); fn.dataset.noi18n = ''; fn.textContent = String(p.file || '').split(/[\\/]/).pop(); $('#mdirProgTxt').replaceChildren(document.createTextNode(`${p.done}/${p.total} tệp · ${fmtBytes(p.bytesDone)} / ${fmtBytes(p.bytesTotal)}`), document.createTextNode(' · '), fn); // B87: chỉ tên tệp không dịch
+});
 $('#mdirChange').addEventListener('click', mdirChange); $('#modelsDirChange').addEventListener('click', mdirChange);
 $('#mdirCancel').addEventListener('click', () => A.modelsDirCancel());
+$('#mdirRetry').addEventListener('click', () => { if (mdirJob && mdirJob.dir && !mdirJob.moving) mdirRun(mdirJob.dir, mdirJob.mode); });
 $('#mdirReset').addEventListener('click', async () => { const x = await A.modelsDirReset(); if (x && x.ok) toast('Đã về thư mục mô hình mặc định ✓'); await mdirRefresh(); refreshModels(); });
 mdirRefresh();
 // Mức hiển thị: Cơ bản ẩn các phần có lớp .adv-only
