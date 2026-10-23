@@ -467,8 +467,9 @@ test('embeddings trong lúc nạp mô hình không khởi động -ngl 8 và kh�
 test('mỗi lần khởi động máy nhúng đo lại VRAM trống; probe lỗi thì -ngl 0', async () => {
   let free = 11 * GB;
   let mode = 'ok';
+  let releaseHang = () => {};
   const probe = () => {
-    if (mode === 'hang') return new Promise(() => {});
+    if (mode === 'hang') return new Promise((resolve) => { releaseHang = resolve; });
     if (mode === 'fail') return Promise.reject(new Error('no-gpu'));
     return { gpu: 'vulkan', vram: { total: 12 * GB, free, integratedOnly: false } };
   };
@@ -482,6 +483,7 @@ test('mỗi lần khởi động máy nhúng đo lại VRAM trống; probe lỗi
   mode = 'hang';
   const t0 = Date.now();
   assert.equal(await embedGpuChoice({ probe, chatLoaded: false, timeoutMs: 200 }), 0);
+  releaseHang();
   assert.ok(Date.now() - t0 < 1500, 'probe treo phải hết hạn nhanh');
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b10-vram-'));
@@ -504,9 +506,10 @@ test('mỗi lần khởi động máy nhúng đo lại VRAM trống; probe lỗi
     mode = 'hang';
     const t1 = Date.now();
     await srv.open(model);
+    releaseHang();
     assert.ok(Date.now() - t1 < 2000);
     assert.equal(srv.stats().lastArgs[srv.stats().lastArgs.indexOf('-ngl') + 1], '0');
-  } finally { await srv.stop(); }
+  } finally { releaseHang(); await srv.stop(); }
 });
 
 test('inspectFile là LRU lớn, khoá theo đường dẫn, mtime và kích thước', () => {

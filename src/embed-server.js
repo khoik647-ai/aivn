@@ -164,14 +164,16 @@ function gpuLayersFor({ vramTotal = 0, vramFree = null, chatLoaded = false, inte
 function embedGpuChoice({ probe, chatLoaded = false, timeoutMs = GPU_PROBE_MS } = {}) {
   const ms = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : GPU_PROBE_MS;
   let timer = null;
-  const timeout = new Promise((_, reject) => {
+  let finishTimeout = () => {};
+  const timeout = new Promise((resolve, reject) => {
+    finishTimeout = resolve;
     timer = setTimeout(() => reject(new Error('gpu-probe-timeout')), ms);
-    if (timer && typeof timer.unref === 'function') timer.unref();
   });
   const work = Promise.resolve().then(() => (typeof probe === 'function' ? probe() : probe));
   work.catch(() => {});
+  const done = () => { clearTimeout(timer); finishTimeout(); };
   return Promise.race([work, timeout]).then((h) => {
-    clearTimeout(timer);
+    done();
     const v = h && h.vram;
     const loaded = typeof chatLoaded === 'function' ? !!chatLoaded() : !!chatLoaded;
     const metal = !!(h && h.gpu === 'metal' && v && v.total > 0);
@@ -182,7 +184,7 @@ function embedGpuChoice({ probe, chatLoaded = false, timeoutMs = GPU_PROBE_MS } 
       chatLoaded: loaded,
       integratedOnly: !!(v && v.integratedOnly),
     });
-  }, () => { clearTimeout(timer); return 0; });
+  }, () => { done(); return 0; });
 }
 
 function vectorsFrom(body, n) {
