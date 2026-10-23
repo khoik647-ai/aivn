@@ -2731,6 +2731,7 @@
     "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "Chat is running — wait until it finishes, or switch to Chat and click Stop",
     "AGENT đang chạy — bấm Dừng ở dưới": "AGENT is running — click Stop below",
     "Trò chuyện đang chạy — bấm Dừng ở dưới": "Chat is running — click Stop below",
+    "Việc đang chạy ở danh sách bên trái — mở việc đó rồi bấm Dừng": "The running task is in the list on the left — open it, then click Stop",
     "Không chuyển xong thư mục mô hình": "Could not finish moving the models folder",
     "Thử lại": "Try again",
     "Chuyển thư mục mô hình bị dừng vì quá lâu không thấy tiến triển. Mô hình vẫn nằm ở thư mục cũ, không mất tệp. Hãy bấm Thử lại.": "The model move stopped because it made no progress for too long. The models are still in the old folder and no file was lost. Click Try again.",

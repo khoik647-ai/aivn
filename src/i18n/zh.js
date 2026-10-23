@@ -2731,6 +2731,7 @@
     "Trò chuyện đang chạy — đợi xong hoặc sang Trò chuyện bấm Dừng": "对话正在运行 — 请等它结束，或切到对话点击停止",
     "AGENT đang chạy — bấm Dừng ở dưới": "AGENT 正在运行 — 请点击下方的停止",
     "Trò chuyện đang chạy — bấm Dừng ở dưới": "对话正在运行 — 请点击下方的停止",
+    "Việc đang chạy ở danh sách bên trái — mở việc đó rồi bấm Dừng": "正在运行的任务在左侧列表 — 请打开它，然后点击停止",
     "Không chuyển xong thư mục mô hình": "未能完成移动模型文件夹",
     "Thử lại": "重试",
     "Chuyển thư mục mô hình bị dừng vì quá lâu không thấy tiến triển. Mô hình vẫn nằm ở thư mục cũ, không mất tệp. Hãy bấm Thử lại.": "移动模型文件夹已停止，因为太久没有进展。模型仍在原文件夹中，没有丢失文件。请点击重试。",
