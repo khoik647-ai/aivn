@@ -166,6 +166,7 @@ sed -e "s#href=\"AIVN-Setup.exe\"#href=\"$BASE_URL/AIVN-Setup.exe\"#g" \
     -e "s#href=\"AIVN-mac-x64.zip\"#href=\"$BASE_URL/AIVN-mac-x64.zip\"#g" \
     site/index.html > "$SITE/index.html"
 for f in preview-desktop.png preview-mobile.png favicon.svg favicon.ico apple-touch-icon.png; do [[ -f "site/$f" ]] && cp "site/$f" "$SITE/"; done
+if [[ -d site/img ]]; then mkdir -p "$SITE/img"; cp -a site/img/. "$SITE/img/"; fi
 # dung lượng tải thật của bản phát hành này (QA B10), MB thập phân, làm tròn
 mb() { node -e 'const s=require("fs").statSync(process.argv[1]).size;process.stdout.write(String(Math.round(s/1e6)))' "$1"; }
 MB_WIN="$(mb "$OUT/AIVN-Setup.exe")"; MB_ARM="$(mb "$OUT/AIVN-mac-arm64.zip")"; MB_X64="$(mb "$OUT/AIVN-mac-x64.zip")"
