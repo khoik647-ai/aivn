@@ -15,8 +15,8 @@ const FLAGS = { '--agent-task': 'task', '--qa-ui': 'script', '--profile': 'profi
 const BOOL = new Set(['--qa-input-diag']); // cờ không nhận giá trị
 const LANGS = ['vi', 'en', 'zh'];
 // lệnh nói rõ “chỉ soạn, đừng gửi”: lời từ chối mang lý do đó để AIVN AGENT dừng trước bước gửi (vẫn KHÔNG cho phép)
+const DRAFT_RE = require('./agent/send-verify').DRAFT_ONLY; // một nguồn với desktop-agent (B101)
 const SV = require('./agent/send-verify');
-const DRAFT_RE = SV.DRAFT_ONLY; // một nguồn với desktop-agent (B101)
 // thẻ xin phép của bước quan trọng — kể cả khi thiếu cờ risk, chữ trên thẻ nói tới các việc này cũng bị từ chối
 const RISK_RE = /(gửi|send|发送|xo[áa]|delete|删除|mua|thanh to[áa]n|purchase|buy|pay|购买|支付|kho[áa] m[áa]y|lock|锁|âm lượng|volume|音量|tắt máy|shutdown|restart|khởi động lại)/iu;
 
