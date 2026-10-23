@@ -282,6 +282,8 @@ footer li a{display:inline-flex;align-items:center;min-height:32px}
 @media (max-width:900px) and (min-width:761px){.nav ul a{padding:0 2px}}
 @media (max-width:300px){.lang button[data-lang]{font-size:.74rem}}
 /* M9: the closed phone menu is out of the Tab order and hidden from screen readers (JS also sets menu.inert) */
+/* gradient text: background-clip:text only paints the inline content box, so stacked VI diacritics and descenders were cut off; vertical padding on the inline box widens the painted area without changing line height */
+.grad-text{padding:.12em 0 .14em;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 /* app mock step rows: show the whole step text (wraps) instead of an ellipsis that clipped VI/EN text */
 .steps-mock .st em{white-space:normal;overflow:visible;text-overflow:clip;min-width:0;overflow-wrap:anywhere;line-height:1.4}
 @media (max-width:760px){.mobile-menu:not(.open){visibility:hidden;transition:max-height .35s ease,padding .35s ease,visibility 0s .35s}.mobile-menu.open{visibility:visible}}
