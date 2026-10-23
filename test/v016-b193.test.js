@@ -102,12 +102,13 @@ test('prune: chỉ xoá step-*.jpg cũ/vượt dung lượng trong đúng thư m
 });
 
 // chạy QA thật (runAgentTurn giả): Notepad đang mở tệp mã kích hoạt GIẢ
-async function qaRun({ title, text, windowInfo, image = fakeImage(), steps = null, windows = undefined }) {
+async function qaRun({ title, text, windowInfo, image = fakeImage(), steps = null, windows = undefined, ocr = undefined }) {
   const d = tmp(); const shots = path.join(d, 'shots'); const logs = []; let tapFn = null;
   const LOG = { log: (tag, m) => { const l = `[${tag}] ${m}`; logs.push(l); tapFn && tapFn(l); }, tap: (f) => { tapFn = f; return () => { tapFn = null; }; } };
   const win = { hwnd: 42, pid: 7, proc: 'notepad', title };
   const deps = { version: 't', engine: { status: () => ({ loaded: true, id: 'm', path: '/m.gguf' }) }, listModels: () => [], LOG, capture, image, deadlineGraceMs: 500,
     windows: typeof (windows === undefined ? [] : windows) === 'function' ? windows : async () => (windows === undefined ? [] : windows),
+    ...(ocr !== undefined ? { ocr } : {}),
     windowInfo: windowInfo === undefined ? async (w) => (w.hwnd === 42 ? { b: [100, 50, 800, 600], title, proc: 'notepad', text } : null) : windowInfo,
     runAgentTurn: async ({ qa }) => {
       for (const st of steps || [{ id: 1, name: 'ensure_app', out: { window: win, summary: `Notepad: cửa sổ “${title}” đã ở trước`, forModel: text } }, { id: 2, name: 'screenshot', out: { summary: 'đã chụp màn hình' } }]) {
@@ -165,16 +166,18 @@ test('QA: tệp mã kích hoạt đang mở ở cửa sổ khác → ảnh bư�
   assert.ok(!json.includes('license.json') && !json.includes('ORIGINAL'));
 });
 test('QA: ảnh đã ghi trong lượt này bị xoá khi sau đó mới thấy tệp mã kích hoạt', async () => {
-  // Mỗi bước đọc cửa sổ hai lần (trước và sau khi chụp): hai lần đầu sạch thì bước 1 mới ghi ảnh gốc.
+  // Mỗi bước đọc cửa sổ hai lần (trước và sau khi chụp). Bước 1 không có cửa sổ đang hiện;
+  // OCR sạch thì ảnh gốc mới được ghi, rồi bước 2 thấy mã và xoá ảnh đó.
   let n = 0; const windows = async () => (++n <= 2 ? [] : [{ title: FAKE_TITLE, proc: 'notepad' }]);
-  const { res, files, json } = await qaRun({ title: 'Calculator', text: '12 + 30 = 42', windows, steps: [{ id: 1, name: 'screenshot', out: { summary: 'đã chụp màn hình' } }, { id: 2, name: 'screenshot', out: { summary: 'đã chụp màn hình' } }] });
+  const { res, files, json } = await qaRun({ title: 'Calculator', text: '12 + 30 = 42', windows, ocr: async () => '12 + 30 = 42', steps: [{ id: 1, name: 'screenshot', out: { summary: 'đã chụp màn hình' } }, { id: 2, name: 'screenshot', out: { summary: 'đã chụp màn hình' } }] });
   assert.strictEqual(res.steps[0].shot, null); assert.ok(res.steps[0].shotPurged);
   assert.ok(res.steps[1].shotRedacted);
   for (const f of files) assert.ok(!fs.readFileSync(f, 'latin1').includes('ORIGINAL'), f);
   assert.ok(!json.includes(FAKE_TITLE) && !json.includes(FAKE_CODE) && !json.includes('ORIGINAL'));
 });
 test('QA: tệp mã kích hoạt đang thu nhỏ (không nằm trên màn hình) → ảnh cửa sổ thường vẫn giữ', async () => {
-  const { res, files } = await qaRun({ title: 'Calculator', text: '12 + 30 = 42', windows: [{ title: FAKE_TITLE, proc: 'notepad', min: true }] });
+  // Không còn cửa sổ đang hiện vẫn phải OCR. Ảnh chỉ được giữ khi OCR trả chữ sạch.
+  const { res, files } = await qaRun({ title: 'Calculator', text: '12 + 30 = 42', windows: [{ title: FAKE_TITLE, proc: 'notepad', min: true }], ocr: async () => '12 + 30 = 42' });
   assert.ok(res.steps.every(s => !s.shotRedacted && s.shotScope.scope === 'window'));
   assert.match(fs.readFileSync(files[0], 'latin1'), /^JPGCROP100,50,800,600:/);
 });
@@ -202,10 +205,12 @@ test('desktop-agent: quét và xoá điểm ảnh trước khi gửi cho mắt n
   assert.ok(!/const SG = require\('\.\/agent\/send-gate'\)/.test(src), 'SG của send-gate không được che ShotGuard');
 });
 test('QA: cửa sổ thường → chỉ chụp khung cửa sổ đích (ghi rõ phạm vi), bước không có đích → cả màn hình như trước', async () => {
-  const { res, files } = await qaRun({ title: 'Calculator', text: '12 + 30 = 42' });
+  // Danh sách cửa sổ rỗng vẫn OCR. Giữ ảnh cắt chỉ khi OCR trả chữ sạch.
+  const ocr = async () => '12 + 30 = 42';
+  const { res, files } = await qaRun({ title: 'Calculator', text: '12 + 30 = 42', ocr });
   assert.strictEqual(files.length, 2); assert.ok(res.steps.every(s => !s.shotRedacted && s.shotScope.scope === 'window'));
   assert.deepStrictEqual(res.steps[0].shotScope.rect, { x: 100, y: 50, width: 800, height: 600 }); assert.match(fs.readFileSync(files[0], 'latin1'), /^JPGCROP100,50,800,600:/);
-  const n = await qaRun({ title: 'x', text: '', steps: [{ id: 1, name: 'web_search', out: { summary: 'tìm xong' } }] });
+  const n = await qaRun({ title: 'x', text: '', ocr, steps: [{ id: 1, name: 'web_search', out: { summary: 'tìm xong' } }] });
   assert.strictEqual(n.res.steps[0].shotScope.scope, 'screen'); assert.strictEqual(n.res.steps[0].shotScope.window, false);
   assert.ok(fs.readFileSync(n.files[0], 'latin1').startsWith('JPG' + MARK));
 });

@@ -103,8 +103,8 @@ test('TOCTOU ngược (nội dung): chữ đổi giữa chụp và đọc UIA �
 // ---------- 3. purge ----------
 test('purge: 3 ảnh sạch rồi bước 4 bẩn → xoá hết 3 ảnh gốc, step.shot null, không còn tệp tạm', async () => {
   let k = 0;
-  // Mỗi bước đọc cửa sổ hai lần (trước và sau khi chụp): 3 bước sạch = 6 lần đọc, từ lần 7 thấy mã.
-  const deps = baseDeps({ windows: async () => (++k >= 7 ? [{ hwnd: 1, title: 'x', text: CODE }] : []), runAgentTurn: steps2(['a', 'b', 'c', 'd']) });
+  // Mỗi bước đọc cửa sổ hai lần. Ba bước đầu không có cửa sổ: OCR sạch thì ảnh gốc được ghi, bước 4 thấy mã và xoá chúng.
+  const deps = baseDeps({ windows: async () => (++k >= 7 ? [{ hwnd: 1, title: 'x', text: CODE }] : []), ocr: async () => 'sach', runAgentTurn: steps2(['a', 'b', 'c', 'd']) });
   const r = await runQA(deps);
   assert.deepStrictEqual(r.raw, []); assert.deepStrictEqual(r.tmp, []);
   for (const s of r.res.steps.slice(0, 3)) assert.strictEqual(s.shot, null);
