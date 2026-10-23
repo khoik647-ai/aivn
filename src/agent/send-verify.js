@@ -328,12 +328,43 @@ const selfReport = (q) => {
   r = r.replace(SELF_ANY, (m, off, all) => VIA_APP.test(all.slice(off + m.length)) ? m : ' ');
   return r;
 };
-// việc nhắn/gửi tin thật (đã bỏ phần “báo cho mình…” = trả lời trong AIVN)
-const msgSend = (q) => MSG_SEND.test(selfReport(q));
+// B219: “ô soạn tin / the message box / 消息输入框” là TÊN của ô trên màn hình, không phải lệnh soạn hay gửi.
+// Đoạn trong ngoặc đơn là chú thích (ví dụ chữ mẫu, “chỉ nhìn”, “đừng gửi”) — không phải văn bản cần gõ —
+// trừ khi chính ngoặc là lệnh gửi hoặc nêu người nhận (“gửi tin…”, “cho An”, “to An”, “给安”).
+// Tiếng Việt/Anh cần ranh giới từ (“message” trong “message box”, không phải “send a message”).
+// Tiếng Trung viết liền: “看看消息输入框里” — “输入框/消息框” là tên ô, không có khoảng trắng hai bên.
+const COMPOSE_BOX = /(?:^|[^\p{L}\p{N}])(?:(?:ô|khung|hộp|vùng|chỗ)\s+soạn\s+tin(?:\s+nhắn)?|(?:the\s+|a\s+|this\s+)?(?:message|compose|composer|text|input|chat)\s+(?:box|field|area))(?![\p{L}\p{N}])|(?:消息|信息|短信|讯息|訊息)?输入框|消息框|信息框|撰写框/iu;
+const PAREN_ASIDE = /[(（][^()（）]{0,240}[)）]/u;
+const KEEP_ASIDE = /(?:^|[^\p{L}])(?:cho|tới|đến|với|to|for|给)\s+\p{L}/iu;
+// Động từ GỬI thật. “trả lời / báo / reply / 回复” không nằm ở đây: đó có thể là “trả lời người dùng”.
+const REAL_SEND = /(?:^|[^\p{L}])(?:nhắn(?:\s+tin)?|gửi\s+(?:tin(?:\s+nhắn)?|lời nhắn|email|e-mail|mail|thư)|soạn\s+(?:tin(?:\s+nhắn)?|email|mail|thư))(?![\p{L}])|(?:^|[^\p{L}])(?:send|write|draft)\s+(?:a\s+|an\s+)?(?:message|text|email|e-mail|mail|dm)\b|^\s*(?:please\s+)?(?:text|message|dm|email)\b|发(?:一[条條]|个|個)?\s*(?:消息|信息|短信|讯息|訊息|微信|邮件|郵件|私信)|傳(?:訊息|消息)|私信/iu;
+const LOOK_ASK = /(?:^|[^\p{L}])(?:nhìn|ngó|xem|đọc|quan sát|kiểm tra|cho\s+(?:mình|tôi|em|tớ)\s+biết|chỉ\s+(?:nhìn|xem|đọc)|look(?:\s+at)?|see\s+if|read|check|what(?:'s| is)|is\s+(?:the|it|there)|tell\s+me|just\s+look|only\s+look)(?![\p{L}])|(?:có|còn)\s+(?:chữ|gì|nội dung)|trống\s+không|\bempty\b|看看|看一下|看一看|瞧一下|读一下|讀一下|告诉我|告訴我|有没有|有沒有|是不是|什么|什麼|只看|只读|只讀|检查|檢查/iu;
+function intentText(q) {
+  let s = String(q || '');
+  s = s.replace(new RegExp(PAREN_ASIDE.source, 'gu'), (m) => {
+    const inner = m.slice(1, -1);
+    if (REAL_SEND.test(inner) || KEEP_ASIDE.test(inner)) return ' ' + inner + ' ';
+    return ' ';
+  });
+  return s.replace(new RegExp(COMPOSE_BOX.source, 'giu'), ' ');
+}
+function lookOnly(q) {
+  const raw = String(q || '');
+  if (!COMPOSE_BOX.test(raw)) return false;
+  if (REAL_SEND.test(selfReport(intentText(raw)))) return false;
+  return LOOK_ASK.test(raw) || /[?？]/.test(raw);
+}
+// việc nhắn/gửi tin thật (đã bỏ phần “báo cho mình…” = trả lời trong AIVN, và câu chỉ nhìn ô soạn)
+const msgSend = (q) => lookOnly(q) ? false : MSG_SEND.test(selfReport(intentText(q)));
 function missingRecipient(query) {
-  const q = selfReport(query); if (!MSG_SEND.test(q)) return false;
-  if (CURRENT_CHAT.test(q)) return false;
+  if (!msgSend(query)) return false;
+  const q = selfReport(query); if (CURRENT_CHAT.test(q)) return false;
   return !recipientOf(q);
+}
+// câu chỉ nhìn: chữ nằm mỗi trong ngoặc đơn không phải nội dung tin cần gõ
+function sourceQuery(query) {
+  const q = String(query || '');
+  return lookOnly(q) ? q.replace(new RegExp(PAREN_ASIDE.source, 'gu'), ' ') : q;
 }
 const ASKED_WHO = /^(?:⚠\s*)?(?:Gửi cho ai\?|Who should I send it to\?|发给谁？)/u;
 // câu trả lời cho “Gửi cho ai?”: “đúng/yes/对/cuộc trò chuyện đang mở” = chat đang mở; còn lại là tên người nhận
@@ -389,6 +420,12 @@ function cleanHeader(lines = []) {
 const exactName = (names, x) => { const kx = nameKey(x); return !!kx && names.some(n => nameKey(n) === kx); };
 function chatGate({ query, text, searchField = false, submit = false, proc = '', title = '', state = {}, header = [], ocrHeader = null, seenHeader = null, composer = [] }) {
   if (!isChatContext(query, proc, title)) return null;
+  // B219: câu chỉ nhìn ô soạn — không hỏi “Gửi cho ai?”, không biến chú thích trong ngoặc thành tin cần gửi
+  if (lookOnly(query)) {
+    if (searchField) return null;
+    if (submit || /\n\s*$/.test(String(text || ''))) return 'KHÔNG gửi: câu này chỉ yêu cầu nhìn màn hình và trả lời, không soạn và không gửi.';
+    return null;
+  }
   if (CURRENT_CHAT.test(String(query || ''))) {
     if (searchField) return null;
     const cur = state.currentChat || currentChatName(title, ocrHeader || header, seenHeader);
@@ -509,9 +546,9 @@ function nameLikeText(text, recipient) {
 // Nội dung một bước GỬI (hoặc chữ gõ vào ô soạn tin) phải lấy từ YÊU CẦU của người dùng: trong ngoặc kép, hoặc nêu rõ (“nhắn Lan là mai 8h họp”).
 // Đo: các từ NỘI DUNG của chữ (bỏ lời chào/đại từ/từ đệm) phải có trong câu lệnh (không dấu) — ít nhất 1 từ và ≥ 70%.
 const FILLER = new Set(['chao', 'ban', 'nhe', 'nha', 'nhe', 'a', 'oi', 'hi', 'hello', 'hey', 'minh', 'toi', 'em', 'anh', 'chi', 'to', 'cau', 'nhá', 'ha', 'the', 'and', 'i', 'you', 'ok', 'okay', 'thanks', 'cam', 'on', 'vang', 'da', 'u', 'uh', 'nhi', 'nhe', '你好', '您好']);
-function quotedIn(query) { const out = []; const re = /["“«]([^"”»]{1,400})["”»]/gu; let m; while ((m = re.exec(String(query || '')))) out.push(m[1]); return out; }
+function quotedIn(query) { const out = []; const re = /["“«]([^"”»]{1,400})["”»]/gu; let m; while ((m = re.exec(sourceQuery(query)))) out.push(m[1]); return out; }
 function textFromRequest(query, text) {
-  const q = String(query || ''); const tx = String(text || '').replace(/\n\s*$/, '').trim(); if (!tx) return false;
+  const q = sourceQuery(query); const tx = String(text || '').replace(/\n\s*$/, '').trim(); if (!tx) return false;
   const norm = (x) => fold(x).replace(/[^\p{L}\p{N} ]/gu, ' ').replace(/\s+/g, ' ').trim();
   const nt = norm(tx), nq = norm(q); if (!nt) return false;
   if (quotedIn(q).some(z => norm(z) === nt) || (` ${nq} `).includes(` ${nt} `)) return true;
@@ -546,4 +583,4 @@ function placeholderLike(name) {
   const t = String(name || '').replace(/^(?:[^\p{L}\p{N}]+|[QqO]\s+)+/u, '').trim();
   return /^(?:tìm|search|find|nhập|enter|type|搜索|查找)/iu.test(t) || /^(?:tim kiem|nhap)\b/.test(fold(t));
 }
-module.exports = { headerLike, textFromRequest, quotedIn, selfReport, msgSend, placeholderLike, DRAFT_ONLY, cleanHeader, cleanHeaderLine, searchClose, searchRowText, fileAt, searchLeftover, isComposerEl, findComposer, nameLikeText, isFileTarget, wantsFiles, FILE_NAME, composerTarget, COMPOSER_TO, namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };
+module.exports = { headerLike, textFromRequest, quotedIn, selfReport, msgSend, lookOnly, intentText, placeholderLike, DRAFT_ONLY, cleanHeader, cleanHeaderLine, searchClose, searchRowText, fileAt, searchLeftover, isComposerEl, findComposer, nameLikeText, isFileTarget, wantsFiles, FILE_NAME, composerTarget, COMPOSER_TO, namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };

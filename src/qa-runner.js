@@ -15,7 +15,8 @@ const FLAGS = { '--agent-task': 'task', '--qa-ui': 'script', '--profile': 'profi
 const BOOL = new Set(['--qa-input-diag']); // cờ không nhận giá trị
 const LANGS = ['vi', 'en', 'zh'];
 // lệnh nói rõ “chỉ soạn, đừng gửi”: lời từ chối mang lý do đó để AIVN AGENT dừng trước bước gửi (vẫn KHÔNG cho phép)
-const DRAFT_RE = require('./agent/send-verify').DRAFT_ONLY; // một nguồn với desktop-agent (B101)
+const SV = require('./agent/send-verify');
+const DRAFT_RE = SV.DRAFT_ONLY; // một nguồn với desktop-agent (B101)
 // thẻ xin phép của bước quan trọng — kể cả khi thiếu cờ risk, chữ trên thẻ nói tới các việc này cũng bị từ chối
 const RISK_RE = /(gửi|send|发送|xo[áa]|delete|删除|mua|thanh to[áa]n|purchase|buy|pay|购买|支付|kho[áa] m[áa]y|lock|锁|âm lượng|volume|音量|tắt máy|shutdown|restart|khởi động lại)/iu;
 
@@ -144,8 +145,11 @@ function statusOf(r, { denied = 0, draft = false, error = null, timedOut = false
   const failText = draft ? String(r.text || '').replace(DRAFT_OK_RE, ' ') : String(r.text || '');
   if (FAIL_CLAIM.test(failText)) return { status: 'failed', reason: 'câu trả lời cuối nói chưa làm được: ' + String(r.text || '').slice(0, 240) };
   if (draft && (r.steps || []).some(x => x && x.verify && x.verify.sent)) return { status: 'failed', reason: 'việc chỉ soạn nhưng tin đã bị GỬI' };
-  if (draft && SEND_TASK.test(String(task || '')) && !(r.steps || []).some(x => x && x.draftIn)) return { status: 'failed', reason: 'việc chỉ soạn nhưng không có bước nào kiểm thấy chữ trong ô soạn tin' };
-  const sendTask = !draft && SEND_TASK.test(String(task || '')) && !/(?:âm lượng|volume|音量)/iu.test(String(task || ''));
+  // B219: câu chỉ NHÌN ô soạn (“ô soạn tin”, “message box”, “消息输入框”, kể cả chú thích trong ngoặc) không phải việc gửi/soạn.
+  // Chấm theo câu trả lời. Việc gửi thật vẫn đòi bước đã kiểm chứng gửi; tên ô và chữ mẫu trong ngoặc không bị coi là nội dung cần gõ.
+  const taskS = String(task || ''); const look = SV.lookOnly(taskS); const probe = SV.intentText(taskS);
+  if (!look && draft && SEND_TASK.test(probe) && !(r.steps || []).some(x => x && x.draftIn)) return { status: 'failed', reason: 'việc chỉ soạn nhưng không có bước nào kiểm thấy chữ trong ô soạn tin' };
+  const sendTask = !look && !draft && (SV.msgSend(taskS) || SEND_TASK.test(probe)) && !/(?:âm lượng|volume|音量)/iu.test(taskS);
   if (sendTask && !(r.steps || []).some(x => x && x.verify && x.verify.sent)) return { status: 'failed', reason: 'việc gửi tin nhưng không có bước nào kiểm chứng được là ĐÃ GỬI đúng người' };
   return { status: 'done' };
 }
