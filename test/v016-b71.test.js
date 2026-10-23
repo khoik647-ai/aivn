@@ -10,14 +10,14 @@ test('B71: thông báo nạp nói đúng trạng thái CUỐI (GPU một phần 
   const m = fs.readFileSync(path.join(__dirname, '../src/main.js'), 'utf8'); assert.match(m, /st\.notice = require\('\.\/load-notice'\)\.loadNotice\(st\)/);
   assert.match(m, /final: \{ mode: st\.mode, ctx: st\.contextSize, gpuLayers: st\.gpuLayers, totalLayers: st\.totalLayers \}/);
 });
-test('B71/B216: gpt-oss-20b MXFP4 trên RTX 4070 SUPER 12 GB là “Chạy mượt” (8k trọn VRAM, 16k sát giới hạn) — nhãn “Chạy chậm” cũ sai so với llama.cpp 25/25 lớp', () => {
+test('B71/B216: gpt-oss-20b MXFP4 trên RTX 4070 SUPER 12 GB không ghi “Nằm trọn trong VRAM” khi gpuFit chỉ offload 21/25 (8K) và 20/25 (16K)', () => {
   const c = require('../src/catalog').find ? require('../src/catalog').find(x => x.id === 'gpt-oss-20b-mxfp4') : null;
   const cat = c || [].concat(...Object.values(require('../src/catalog'))).find(x => x && x.id === 'gpt-oss-20b-mxfp4');
   const hw = { gpu: 'cuda', ram: 32604 * 1048576, vram: { total: 12213 * 1048576, free: 11437 * 1048576 }, devices: ['NVIDIA GeForce RTX 4070 SUPER'] };
   const a = F.machineFit(F.metaOf({ catalog: cat }), hw, { ctx: 8192 });
   const b = F.machineFit(F.metaOf({ catalog: cat }), hw, { ctx: 16384 });
-  assert.strictEqual(a.label, 'Chạy mượt'); assert.strictEqual(a.tight, false);
-  assert.strictEqual(b.label, 'Chạy mượt'); assert.strictEqual(b.tight, true);
+  assert.strictEqual(a.label, 'Chạy chậm'); assert.match(a.hint, /Khoảng 84 % mô hình nằm trên GPU/); assert.strictEqual(a.tight, false);
+  assert.strictEqual(b.label, 'Chạy chậm'); assert.match(b.hint, /Khoảng 80 % mô hình nằm trên GPU/); assert.strictEqual(b.tight, false);
   assert.ok(b.need <= 12 * 1024 ** 3, b.need);
 });
 test('B71: gpt-oss dùng mẫu Harmony của node-llama-cpp; phần suy luận (analysis) tách khỏi câu trả lời (final)', () => {

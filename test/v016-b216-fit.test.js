@@ -25,11 +25,14 @@ test('câu tái hiện #81: gpt-oss-20b MXFP4, không metadata, RTX 4070 SUPER',
   const m = { size: 12109566624, params: '20B (MoE)' };
   const a = F.machineFit(m, card, { ctx: 8192 });
   const b = F.machineFit(m, card, { ctx: 16384 });
-  assert.strictEqual(a.label, 'Chạy mượt', a.hint);
+  // Ước tính bộ nhớ vẫn khớp lần nạp 25/25, nhưng loader (gpuFit) chỉ để 21/25 và 20/25 lớp trên GPU.
+  assert.strictEqual(a.label, 'Chạy chậm', a.hint);
+  assert.match(a.hint, /Khoảng 84 % mô hình nằm trên GPU/);
   assert.strictEqual(a.tight, false);
-  assert.strictEqual(b.label, 'Chạy mượt', b.hint);
-  assert.strictEqual(b.tight, true);
-  assert.match(b.hint, /sát giới hạn/);
+  assert.strictEqual(b.label, 'Chạy chậm', b.hint);
+  assert.match(b.hint, /Khoảng 80 % mô hình nằm trên GPU/);
+  assert.strictEqual(b.tight, false);
+  assert.ok(!/Nằm trọn trong VRAM/.test(a.hint + b.hint));
   assert.ok(b.need <= 12 * GiB, (b.need / GiB).toFixed(2));
   // 11458 MiB đo được = model 10949 + KV 402 + compute 107. Cho phép lệch 80 MiB.
   assert.ok(Math.abs(b.need - 11458 * MiB) < 80 * MiB, (b.need / MiB).toFixed(1));
@@ -41,9 +44,9 @@ test('metadata GGUF (24 lớp, 8 đầu KV, độ dài 64) vẫn tính cửa s�
   const m = { size: 12109566624, params: '20B (MoE)', layers: 24, heads: 64, kvHeads: 8, keyLength: 64, valueLength: 64 };
   const full = F.machineFit(m, card, { ctx: 16384, swaFull: true });
   const swa = F.machineFit(m, card, { ctx: 16384 });
-  assert.strictEqual(swa.label, 'Chạy mượt');
-  assert.strictEqual(full.label, 'Chạy chậm', 'SWA tắt thì KV gấp đôi và tràn');
   assert.ok(swa.parts.kv < full.parts.kv * 0.6);
+  assert.strictEqual(full.label, 'Chạy chậm', 'SWA tắt thì KV gấp đôi và tràn');
+  assert.ok(!/Nằm trọn trong VRAM/.test(swa.hint), swa.hint);
   assert.strictEqual(F.kvPerToken(m), 24 * 8 * (64 + 64) * 2);
 });
 
@@ -56,12 +59,12 @@ test('danh mục gpt-oss và 30B-A3B: KV theo kiến trúc, không theo bảng �
 
 // profile, model, ctx, group, tight (null = không xét)
 const ROWS = [
-  ['4070S 12GB', card, { size: oss.size, params: oss.params, id: oss.id, arch: oss.arch }, 4096, 'smooth', false],
-  ['4070S 12GB', card, { size: oss.size, params: oss.params, id: oss.id, arch: oss.arch }, 8192, 'smooth', false],
-  ['4070S 12GB', card, { size: oss.size, params: oss.params, id: oss.id, arch: oss.arch }, 16384, 'smooth', true],
+  ['4070S 12GB', card, { size: oss.size, params: oss.params, id: oss.id, arch: oss.arch }, 4096, 'slow', false],
+  ['4070S 12GB', card, { size: oss.size, params: oss.params, id: oss.id, arch: oss.arch }, 8192, 'slow', false],
+  ['4070S 12GB', card, { size: oss.size, params: oss.params, id: oss.id, arch: oss.arch }, 16384, 'slow', false],
   ['4070S 12GB', card, { size: oss.size, params: oss.params, id: oss.id, arch: oss.arch }, 32768, 'slow', false],
   ['4070S 12GB', card, { size: q14.size, params: q14.params, id: q14.id, arch: q14.arch }, 8192, 'smooth', false],
-  ['4070S 12GB', card, { size: q14.size, params: q14.params, id: q14.id, arch: q14.arch }, 16384, 'smooth', false],
+  ['4070S 12GB', card, { size: q14.size, params: q14.params, id: q14.id, arch: q14.arch }, 16384, 'slow', false],
   ['4070S 12GB', card, { size: q30.size, params: q30.params, id: q30.id, arch: q30.arch }, 8192, 'slow', false],
   ['4070S 12GB', card, { size: q30.size, params: q30.params, id: q30.id, arch: q30.arch }, 16384, 'slow', false],
   ['4070S 12GB', card, { id: 'qwen3-14b', params: '14B', arch: 'qwen3', quant: 'Q8_0', size: 15.2e9 }, 8192, 'slow', false],
@@ -78,7 +81,7 @@ const ROWS = [
   ['laptop 4GB', laptop, { id: 'qwen3-8b', params: '8B', arch: 'qwen3', size: 4.68 * GiB }, 8192, 'slow', false],
   ['laptop 4GB', laptop, { id: 'qwen3-vl-4b', params: '4B', arch: 'qwen3vl', size: 2.33 * GiB, mmprojSize: 0.42 * GiB }, 16384, 'slow', false],
   ['Mac 8GB', mac(8), { size: oss.size, params: oss.params, id: oss.id }, 8192, 'no', false],
-  ['Mac 16GB', mac(16), { size: oss.size, params: oss.params, id: oss.id }, 8192, 'smooth', true],
+  ['Mac 16GB', mac(16), { size: oss.size, params: oss.params, id: oss.id }, 8192, 'slow', false],
   ['Mac 32GB', mac(32), { size: oss.size, params: oss.params, id: oss.id }, 8192, 'smooth', false],
   ['Mac 16GB', mac(16), { id: 'qwen3-4b', params: '4B', arch: 'qwen3', size: 2.5 * GiB }, 8192, 'smooth', false],
   ['Mac 8GB', mac(8), { id: 'qwen3-14b', params: '14B', arch: 'qwen3', size: q14.size }, 8192, 'no', false],
@@ -96,11 +99,13 @@ test('bảng máy × mô hình × ngữ cảnh', () => {
   }
 });
 
-test('14B đặc không lạc quan hơn số đo: ctx 16384 ước ≥ 10,2 GiB và vẫn vừa 12 GB', () => {
+test('14B đặc không lạc quan hơn số đo: ctx 16384 ước ≥ 10,2 GiB và vẫn ≤ 12 GB', () => {
   const r = F.machineFit(F.metaOf({ catalog: q14 }), card, { ctx: 16384 });
-  assert.strictEqual(r.group, 'smooth');
   assert.ok(r.need >= 10.2 * GiB, (r.need / GiB).toFixed(2));
   assert.ok(r.need <= 12 * GiB, (r.need / GiB).toFixed(2));
+  // logits (ubatch × vocab × 4) đẩy nhu cầu quá phần VRAM chừa sẵn → không còn “nằm trọn”
+  assert.notStrictEqual(r.group, 'smooth');
+  assert.ok(!/Nằm trọn trong VRAM/.test(r.hint), r.hint);
 });
 
 test('lượng tử quyết định vừa máy: cùng kiến trúc, Q4 vừa 12 GB, Q8 không', () => {
