@@ -1,4 +1,4 @@
-"""Kiểm bố cục trang web AIVN (B143–B150, B162, B174) ở 280/320/375/1280 px × vi/en/zh bằng Playwright + Chrome. Thoát 1 nếu có lỗi.
+"""Kiểm bố cục trang web AIVN (B143–B150, B162, B174, B185) ở 280/320/375/1280 px và dải 768–900 px × vi/en/zh bằng Playwright + Chrome. Thoát 1 nếu có lỗi.
 B174: máy Mac (Safari Apple Silicon và Intel — Safari không cho biết chip; Chrome trên Mac Apple Silicon), iPhone, Android, Linux, Windows:
 khối beta và link đầu trang KHÔNG mời tải .exe trên máy không phải Windows; Mac thấy tệp Mac đúng chip (hoặc được chọn khi không biết chip)
 — tệp Mac của bản beta nếu release có, nếu không thì dòng “chỉ có cho Windows” + tệp Mac của bản ổn định — kèm cách mở lần đầu (Gatekeeper).
@@ -25,6 +25,8 @@ CONF = [('fold-280', dict(viewport={'width': 280, 'height': 653}, user_agent=AND
         ('iphoneSE-320', dict(viewport={'width': 320, 'height': 568}, user_agent=IPH, is_mobile=True, has_touch=True, device_scale_factor=2), nav('iPhone', 5), 'ios'),
         ('iphone-375', dict(viewport={'width': 375, 'height': 667}, user_agent=IPH, is_mobile=True, has_touch=True, device_scale_factor=2), nav('iPhone', 5), 'ios'),
         ('android-320', dict(viewport={'width': 320, 'height': 640}, user_agent=AND, is_mobile=True, has_touch=True), nav('Linux armv8l', 5), 'android'),
+        ('ipad-810', dict(viewport={'width': 810, 'height': 1080}, user_agent='Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1', is_mobile=True, has_touch=True, device_scale_factor=2), nav('iPad', 5), 'ios'),  # B186
+        ('ipados-mac-820', dict(viewport={'width': 820, 'height': 1180}, user_agent=SAF, is_mobile=True, has_touch=True, device_scale_factor=2), nav('MacIntel', 5), 'ios'),  # B186: iPadOS báo Macintosh + cảm ứng
         ('mac-safari-arm64-1280', dict(viewport=D1280, user_agent=SAF), nav('MacIntel'), 'mac'),        # B174: Mac M… dùng Safari (không biết chip)
         ('mac-safari-intel-1280', dict(viewport=D1280, user_agent=SAF), nav('MacIntel'), 'mac'),        # B174: Mac Intel dùng Safari
         ('mac-chrome-arm64-1280', dict(viewport=D1280, user_agent=MCH), nav('MacIntel', 0, ('macOS', 'arm')), 'mac-arm64'),
@@ -46,12 +48,21 @@ JS = r'''() => {
   gk:vis(gk), gkSummaryH:vis(gk)?Math.round(gk.querySelector('summary').getBoundingClientRect().height):null,
   mnoteShown:vis(n), nwLines:nw, heroText:hero?hero.innerText.trim():null, heroH:hero&&vis(hero)?Math.round(hero.getBoundingClientRect().height):null,
   beta:box.innerText, detected:[...document.querySelectorAll('.dl-btn.detected')].map(b=>b.dataset.os),
+  stableWin:[...document.querySelectorAll('.dl-row .dl-btn[data-os=windows]')].filter(vis).map(a=>a.getAttribute('href')),
+  stableMac:[...document.querySelectorAll('.dl-row>.mac-wrap')].filter(vis).length,
+  stableZip:[...document.querySelectorAll('.dl-row .mac-menu a[download]')].filter(vis).map(a=>a.getAttribute('href')),
+  dlNotes:[...document.querySelectorAll('.dl-mnote')].filter(vis).map(e=>e.innerText.trim()),
+  outsideOverflow:[...document.querySelectorAll('body *')].some(e=>!e.closest('header')&&e.getBoundingClientRect().width&&e.getBoundingClientRect().right>cw+0.5&&getComputedStyle(e).position!=='fixed'&&getComputedStyle(e).display!=='none'),
   creditCount:(foot.match(/NGUYỄN NGỌC KHÔI SINH VIÊN VLU/g)||[]).length, footPhone:(foot.match(/(Điện thoại|Phone|电话)[:：]?\s*[^\n]*/)||[''])[0],
   footer2:(document.querySelector('[data-i18n="footer.2"]')||{}).innerText, footSub:((document.querySelector('[data-i18n="footer.sub"]')||{}).innerText||'').trim(), titles:[...document.querySelectorAll('[data-i18n-title]')].map(e=>e.title).filter(t=>/MB/.test(t)),
   sizes:[...document.querySelectorAll('.mac-menu a small')].map(e=>e.textContent)};
 }'''
 ONLYWIN = {'vi': 'Bản thử nghiệm hiện chỉ có cho Windows', 'en': 'available for Windows only', 'zh-CN': '仅提供 Windows'}
 res = []
+bad_band = []
+band_log = []
+BAND = list(range(768, 901, 2))  # B185: 768, 780, 800, 810, 820, 834, 850, 880, 900 và mọi bước 2 px
+CTA = {'vi': 'Tải miễn phí', 'en': 'Download free', 'zh': '免费下载'}
 with sync_playwright() as p:
     b = p.chromium.launch(channel='chrome')
     for name, kw, init, kind in CONF:
@@ -73,11 +84,46 @@ with sync_playwright() as p:
                 gs.scroll_into_view_if_needed(); gs.click(); pg.wait_for_timeout(300)
                 r['gkSteps'] = pg.evaluate('()=>[...document.querySelectorAll(".beta-dl .beta-gk li")].filter(e=>e.getClientRects().length).length')
             if kind in ('ios', 'android'):
-                pg.click('#burger'); pg.wait_for_timeout(500); r['menuOpen'] = pg.evaluate('()=>({sw:document.documentElement.scrollWidth,mw:Math.round(document.querySelector("#mobileMenu").scrollWidth),cw:document.documentElement.clientWidth})'); pg.click('#burger'); pg.wait_for_timeout(400)
-                r['overflowAfter'] = pg.evaluate('()=>document.documentElement.scrollWidth>document.documentElement.clientWidth')
+                if kw['viewport']['width'] <= 760:  # trên iPad nút menu đang ẩn (chỉ hiện ≤ 760 px)
+                    pg.click('#burger'); pg.wait_for_timeout(500); r['menuOpen'] = pg.evaluate('()=>({sw:document.documentElement.scrollWidth,mw:Math.round(document.querySelector("#mobileMenu").scrollWidth),cw:document.documentElement.clientWidth})'); pg.click('#burger'); pg.wait_for_timeout(400)
+                    r['overflowAfter'] = pg.evaluate('()=>document.documentElement.scrollWidth>document.documentElement.clientWidth')
+                note = pg.locator('.dl-mnote').first
+                if note.count(): note.click()
             r['afterUrl'] = pg.url; r['requests'] = list(reqs)
             if SHOTS: pg.locator('.beta-dl').scroll_into_view_if_needed(); pg.screenshot(path=f'{SHOTS}/{name}-{lang}.png')
             res.append(r); c.close()
+    # B185 (#45): 768–900 px, bước 2 px, vi/en/zh. Nút tải ở đầu trang không đẩy trang cuộn ngang và vẫn bấm tới #tai-ve.
+    band_js = r'''() => {
+      const d=document.documentElement, cw=d.clientWidth;
+      const a=document.querySelector('header .nav-cta a.btn');
+      const rc=a.getBoundingClientRect(), cs=getComputedStyle(a);
+      const vis=!!(rc.width && cs.display!=='none' && cs.visibility!=='hidden');
+      const hit=vis?document.elementFromPoint(Math.min(cw-2, rc.left+rc.width/2), rc.top+rc.height/2):null;
+      return {sw:d.scrollWidth, cw, vis, left:rc.left, right:rc.right, h:rc.height, text:(a.innerText||'').replace(/\s+/g,' ').trim(),
+        hit:!!(hit && (hit===a || a.contains(hit)))};
+    }'''
+    bc = b.new_context(viewport={'width': 900, 'height': 1000}, user_agent=LNX)
+    bc.add_init_script(nav('Linux x86_64'))
+    bp = bc.new_page()
+    for lang in ('vi', 'en', 'zh'):
+        bp.goto(URL + ('&' if '?' in URL else '?') + 'lang=' + lang, wait_until='load')
+        bp.evaluate('() => document.fonts.ready')
+        bp.evaluate("() => { document.documentElement.style.scrollBehavior = 'auto'; }")
+        for w in BAND:
+            bp.set_viewport_size({'width': w, 'height': 1000})
+            br = bp.evaluate(band_js)
+            k = f'band-{w} {lang}'
+            if br['sw'] > br['cw'] or br['right'] > br['cw'] + 0.5 or br['left'] < -0.5:
+                bad_band.append(f'{k}: tràn ngang {br["sw"]}>{br["cw"]} nút {br["left"]:.0f}..{br["right"]:.0f}')
+            if (not br['vis']) or br['text'] != CTA[lang] or (not br['hit']) or not (32 <= br['h'] <= 48):
+                bad_band.append(f'{k}: nút tải đầu trang không bấm được {br["text"]!r} vis={br["vis"]} hit={br["hit"]} h={br["h"]:.0f}')
+        bp.set_viewport_size({'width': 820, 'height': 1000})
+        bp.locator('header .nav-cta a.btn').click()
+        bp.wait_for_timeout(300)
+        if not bp.evaluate('()=>{const e=document.getElementById("tai-ve"); if(!e) return false; const b=e.getBoundingClientRect(); return b.top<innerHeight && b.bottom>0}'):
+            bad_band.append(f'band-820 {lang}: bấm nút đầu trang không tới #tai-ve')
+        band_log.append(f'band {lang} 768..900 bước 2: {len(BAND)} bề rộng, nút “{CTA[lang]}” trong khung')
+    bc.close()
     b.close()
 json.dump(res, open(OUT, 'w'), ensure_ascii=False, indent=1)
 for r in res:
@@ -88,7 +134,8 @@ LABEL = {'vi': 'Điện thoại', 'en': 'Phone', 'zh-CN': '电话'}
 bad = []
 for r in res:
     k = f"{r['conf']} {r['lang']}"; kind = r['kind']; mac_beta = r['betaMac']
-    if r['overflow']: bad.append(f'{k}: tràn ngang {r["sw"]}>{r["cw"]}')
+    # B185 (#45) là nút “Download free” ở đầu trang khi rộng ~820 px. Không sửa #45; chỉ tính tràn nếu phần còn lại của trang (không phải đầu trang) lòi ra.
+    if r['overflow'] and not (r['cw'] > 760 and not r['outsideOverflow']): bad.append(f'{k}: tràn ngang {r["sw"]}>{r["cw"]}')
     if r.get('menuOpen') and r['menuOpen']['sw'] > r['menuOpen']['cw']: bad.append(f'{k}: mở menu bị tràn')
     if r['linkH'] is not None and r['linkH'] < 44: bad.append(f'{k}: link beta cao {r["linkH"]} px < 44')
     if any(n != 1 for n in r['nwLines']): bad.append(f'{k}: “SHA-256”/số phiên bản bị ngắt dòng')
@@ -98,6 +145,8 @@ for r in res:
     if not r['footPhone'].startswith(LABEL.get(r['lang'], '?')): bad.append(f'{k}: nhãn điện thoại “{r["footPhone"]}”')
     if (r['lang'] != 'vi') != bool(r['footSub']): bad.append(f'{k}: phụ đề ghi công “{r["footSub"]}” (en/zh phải có, vi để trống)')
     if r['requests']: bad.append(f'{k}: mở trang/bấm link đầu trang/hướng dẫn mà trình duyệt tải tệp {r["requests"]}')
+    if kind in ('win', 'mac', 'mac-arm64', 'linux'):
+        if r['dlNotes'] or not r['stableWin'] or r['stableMac'] != 2: bad.append(f'{k}: máy tính đổi hàng nút bản ổn định notes={r["dlNotes"]!r} win={r["stableWin"]} mac={r["stableMac"]}')
     if kind == 'win':
         if r['mnoteShown'] or r['mobileCls']: bad.append(f'{k}: máy tính mà hiện dòng điện thoại')
         if not r['exeVisible']: bad.append(f'{k}: Windows không thấy link tải .exe của bản beta')
@@ -109,6 +158,10 @@ for r in res:
             if not (r['mobileCls'] and r['mnoteShown']): bad.append(f'{k}: điện thoại không hiện dòng “mở trên máy tính”')
             if r['detected']: bad.append(f'{k}: điện thoại bị nhận là {r["detected"]}')
             if r.get('overflowAfter'): bad.append(f'{k}: tràn ngang sau khi mở menu')
+            # B186: bản ổn định không còn là đích bấm chính (exe/zip), có dòng 📱 như khối beta
+            if r['stableWin'] or r['stableMac'] or r['stableZip']: bad.append(f'{k}: điện thoại vẫn hiện nút tải bản ổn định {r["stableWin"]} mac={r["stableMac"]} zip={r["stableZip"]}')
+            want = {'vi': '📱 Hãy mở trang này trên máy tính để tải.', 'en': '📱 Open this page on a computer to download it.', 'zh-CN': '📱 请在电脑上打开本页下载。'}[r['lang']]
+            if r['dlNotes'] != [want, want]: bad.append(f'{k}: dòng nhắc bản ổn định {r["dlNotes"]!r}')
         if kind in ('mac', 'mac-arm64'):  # B183: iPhone/iPad không hiện tệp Mac (cùng cách android — chỉ dòng 📱)
             arch = [m.split(' ')[0] for m in r['macLinks']]; want = ['arm64'] if kind == 'mac-arm64' else ['arm64', 'x64']
             if arch != want: bad.append(f'{k}: tệp Mac hiện {arch}, cần {want}')
@@ -125,5 +178,7 @@ for r in res:
             if r['macLinks']: bad.append(f'{k}: {kind} mà hiện tệp Mac')
         if kind == 'linux' and not r['lnote']: bad.append(f'{k}: Linux không hiện dòng “chỉ có cho Windows …”')
         if not (kind.startswith('mac') and mac_beta) and 'Windows' not in (r['heroText'] or ''): bad.append(f'{k}: link đầu trang chưa nói bản beta chỉ có cho Windows: {r["heroText"]}')
-print('\n'.join(bad) if bad else f'KIỂM BỐ CỤC OK: {len(res)} cấu hình')
+bad.extend(bad_band)
+for line in band_log: print(line)
+print('\n'.join(bad) if bad else f'KIỂM BỐ CỤC OK: {len(res)} cấu hình; dải 768–900 px × vi/en/zh ({len(BAND)} bề rộng) không tràn')
 sys.exit(1 if bad else 0)

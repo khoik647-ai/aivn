@@ -156,6 +156,8 @@
   "cta.3": "<b>Intel</b><small>Macs with an Intel processor · ~__MB_X64__ MB</small>",
   "cta.4": "Not sure? Click the Apple logo in the top-left corner → About This Mac. If it says “Chip Apple M…”, you have Apple Silicon.",
   "cta.5": "<span class=\"os-main\">Linux · Coming soon</span>",
+  "cta.6": "📱 Open this page on a computer to download it.",
+  "dl.1": "📱 Open this page on a computer to download it.",
   "footer.1": "An app that helps everyone in Vietnam use AI privately, for free, and without depending on the Internet.",
   "footer.2": "Developed by <b style=\"color:var(--accent)\">NGUYỄN NGỌC KHÔI SINH VIÊN VLU</b>",
   "footer.3": "Product",
