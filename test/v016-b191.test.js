@@ -36,12 +36,12 @@ function fakeNotepad({ tabs, active = 0, ctrlN = 'tab', valueReadable = true, ta
     if (st.dialog) return { win: win(), elements: [], dialog: st.dialog };
     const els = [{ role: 'Document', kind: 'edit', name: 'Text editor', editable: true, value: valueReadable ? t.text : null, b: NOTEPAD_BOX },
       { role: 'Edit', kind: 'edit', name: 'Find', editable: true, value: '', b: [700, 10, 200, 24] }];
-    if (tabItems) st.tabs.forEach(x => els.push({ role: 'TabItem', kind: 'tab', name: (x.dirty ? '*' : '') + x.name, b: [10, 40, 120, 30] }));
+    if (tabItems) st.tabs.forEach((x, i) => els.push({ role: 'TabItem', kind: 'tab', name: (x.dirty ? '*' : '') + x.name, b: [10 + 130 * i, 40, 120, 30], ...(tabItems === 'nosel' ? {} : { selected: i === st.active }) }));
     if (!valueReadable && t.text) els.push({ ocr: true, name: t.text.split('\n')[0], b: [10, 90, 300, 20] });
     return { win: win(), elements: els, dialog: null };
   };
   const hotkey = async (k) => { st.keys.push(k);
-    if (k === 'cmd+n') { if (ctrlN === 'tab') { st.tabs.push({ name: 'Untitled', text: '' }); st.active = st.tabs.length - 1; } else if (ctrlN === 'dialog') st.dialog = 'Notepad'; }
+    if (k === 'cmd+n') { if (ctrlN === 'tab' || ctrlN === 'bg') { st.tabs.push({ name: 'Untitled', text: '' }); if (ctrlN === 'tab') st.active = st.tabs.length - 1; } else if (ctrlN === 'dialog') st.dialog = 'Notepad'; }
     if (k === 'escape') st.dialog = null; };
   const type = (s) => { st.typed.push([st.tabs[st.active].name, s]); st.tabs[st.active].text += s; st.tabs[st.active].dirty = true; };
   return { st, d: { look, hotkey, sleep: async () => {}, log: () => {} }, type };
@@ -73,7 +73,10 @@ const P = (tabs, title = 'Untitled - Notepad', hwnd = '7') => ({ hwnd, title, ta
 test('B191 review (a): newDocEvidence — chỉ nhận thêm đúng một thẻ Untitled mới (giữ thứ tự thẻ cũ) hoặc cửa sổ mới', () => {
   const E = FD.newDocEvidence;
   assert.strictEqual(E(P(['secret.txt']), P(['secret.txt', 'Untitled'])), true, 'thêm thẻ Untitled');
-  assert.strictEqual(E(P(['Untitled', 'notes.txt']), P(['Untitled', 'notes.txt', 'Untitled'])), true, 'thêm thẻ Untitled thứ hai (trùng tên thẻ cũ vẫn là thẻ MỚI theo số lượng)');
+  // QA #64 v3 (INFO): thẻ “Untitled” cũ sạch + thẻ “Untitled” mới — tiêu đề không chỉ ra thẻ nào đang chọn → chỉ nhận khi biết thẻ đang chọn (UIA) là thẻ mới
+  assert.strictEqual(E(P(['Untitled', 'notes.txt']), P(['Untitled', 'notes.txt', 'Untitled'])), false, 'thêm thẻ Untitled thứ hai, không biết thẻ đang chọn → không chắc');
+  assert.strictEqual(E(P(['Untitled', 'notes.txt']), { ...P(['Untitled', 'notes.txt', 'Untitled']), sel: 2 }), true, 'thêm thẻ Untitled thứ hai, đang chọn thẻ mới');
+  assert.strictEqual(E(P(['Untitled', 'notes.txt']), { ...P(['Untitled', 'notes.txt', 'Untitled']), sel: 0 }), false, 'đang chọn thẻ Untitled CŨ');
   assert.strictEqual(E(P(['a.txt', 'b.txt']), P(['a.txt', 'Untitled', 'b.txt'])), true, 'thẻ mới chèn giữa, thẻ cũ giữ thứ tự');
   assert.strictEqual(E(P([], 'x - Notepad', '7'), P([], 'Untitled - Notepad', '8')), true, 'cửa sổ mới (hwnd đều có giá trị, khác nhau)');
   assert.strictEqual(E(P(['a.txt'], 'a.txt - Notepad', '7'), P(['Untitled'], 'Untitled - Notepad', '8')), true, 'cửa sổ mới chỉ một thẻ Untitled');
@@ -125,7 +128,8 @@ test('B191 review (3): sameDoc — chuyển sang thẻ khác / thẻ “Untitled
   assert.deepStrictEqual(FD.sameDoc(rec, await N.d.look({})), { ok: true }, 'sau khi AIVN gõ: dấu * là của AIVN, vẫn đúng tài liệu');
   N.st.active = 0; // chuyển về thẻ “*Untitled” cũ của người dùng — cùng hwnd, cùng danh sách thẻ
   assert.strictEqual(FD.sameDoc({ ...rec, typed: false }, await N.d.look({})).ok, false, 'chưa gõ: thẻ đã sửa không phải tài liệu mới');
-  assert.deepStrictEqual(FD.sameDoc({ ...rec, texts: ['dòng 1'] }, await N.d.look({})), { ok: false, why: 'content' }, 'đã gõ: nội dung thẻ không chứa chữ AIVN đã gõ → thẻ khác');
+  assert.deepStrictEqual(FD.sameDoc({ ...rec, texts: ['dòng 1'] }, await N.d.look({})), { ok: false, why: 'focus' }, 'đã gõ: thẻ đang chọn (UIA) không phải thẻ mới → thẻ khác');
+  assert.deepStrictEqual(FD.sameDoc({ ...rec, print: { ...rec.print, newIdx: null }, texts: ['dòng 1'] }, await N.d.look({})), { ok: false, why: 'content' }, 'không biết vị trí thẻ mới: nội dung thẻ không chứa chữ AIVN đã gõ → thẻ khác');
   N.st.active = 2; assert.deepStrictEqual(FD.sameDoc({ ...rec, texts: ['dòng 1'] }, await N.d.look({})), { ok: true });
   N.st.tabs.push({ name: 'Untitled', text: '' }); N.st.active = 3; // người dùng mở thêm thẻ → danh sách thẻ đổi → không chắc → không gõ
   assert.deepStrictEqual(FD.sameDoc(rec, await N.d.look({})), { ok: false, why: 'tabs' });
@@ -183,13 +187,12 @@ test('B191: desktop-agent nối tài liệu mới vào ensure_app và chặn typ
   const ens = src.slice(src.indexOf('async function ensureApp(a, ctx)'), src.indexOf('async function ensureApp(a, ctx)') + 6000);
   assert.match(ens, /if \(freshDocWanted\(ctx, w\)\) \{\s*fd = await freshDoc\(ctx\);\s*if \(!fd\.ok && !fd\.skip\) return \{ error: FRESH_DOC_MSG, code: 'fresh-doc', stop: true/);
   const inner = src.slice(src.indexOf('async function actInner(a, ctx)'));
-  const gate = inner.indexOf("if (action === 'type_text' && freshDocWanted(ctx, s.obs && s.obs.win))");
+  const gate = inner.indexOf("if ((action === 'type_text' || destructiveKey) && freshDocWanted(ctx, s.obs && s.obs.win))");
   assert.ok(gate > 0 && gate < inner.indexOf('let needPoint ='), 'cổng B191 phải chạy trước khi chọn chỗ gõ');
-  assert.match(inner.slice(gate, gate + 2500), /return \{ refused: true, stop: true, error: FRESH_DOC_MSG/);
-  assert.match(inner.slice(gate, gate + 2500), /!FD\.untitled\(W2\.title\)/);
-  // (3) Notepad Win11 chung hwnd cho mọi thẻ: nhìn lại màn hình và kiểm danh tính tài liệu (thẻ + trống) trước MỖI lần gõ
-  assert.match(inner.slice(gate, gate + 2500), /await observe\(ctx, \{ thumb: false \}\)[^\n]*const g = FD\.sameDoc\(fd, s\.obs\);\s*if \(!g\.ok \|\|/);
-  assert.match(inner.slice(gate, gate + 3000), /if \(s\.freshDoc\) \{ s\.freshDoc\.typed = true; \(s\.freshDoc\.texts = s\.freshDoc\.texts \|\| \[\]\)\.push\(String\(a\.text \|\| ''\)\); \}/);
+  assert.match(inner.slice(gate, gate + 3500), /return \{ refused: true, stop: true, error: FRESH_DOC_MSG/);
+  // (3) Notepad Win11 chung hwnd cho mọi thẻ: nhìn lại màn hình và kiểm danh tính tài liệu (cửa sổ + tên + thẻ + thẻ đang chọn + trống) trước MỖI lần gõ — tên chưa đặt nằm trong sameDoc (P64-4)
+  assert.match(inner.slice(gate, gate + 3500), /const g = !seen \? \{ ok: false, why: 'observe' \} : !W2 \? \{ ok: false, why: 'no-window' \} : FD\.sameDoc\(fd, s\.obs\);\s*if \(!g\.ok\)/);
+  assert.match(inner.slice(gate, gate + 3500), /if \(action === 'type_text' && s\.freshDoc\) \{ s\.freshDoc\.typed = true; \(s\.freshDoc\.texts = s\.freshDoc\.texts \|\| \[\]\)\.push\(String\(a\.text \|\| ''\)\); \}/);
   assert.match(src, /s\.freshDoc = \{ hwnd: [^\n]*print: r\.print \|\| FD\.docPrint\(s\.obs\), typed: false/);
   assert.match(src, /hotkey: async \(keys\) => \{ const h = await act\(\{ action: 'hotkey', keys \}, ctx\)/);
 });
@@ -226,3 +229,113 @@ test('B191: chuỗi người dùng thấy có bản en/zh', () => {
   for (const k of keys) { assert.ok(flat.includes(JSON.stringify(k).slice(1, -1)), 'strings-agent.json thiếu ' + k);
     for (const [n, d] of [['en', en], ['zh', zh]]) assert.ok(typeof d[k] === 'string' && d[k] && !VI.test(d[k]), `${n} thiếu ${k}`); }
 });
+
+// ================= QA PR #64 v3 (REPORT.md): P64-2, 3a, 3b, 4, 5, 7, 8, 9 =================
+// màn hình giả dựng tay: Notepad Win11 (một hwnd cho mọi thẻ); sel = thẻ đang chọn theo UIA (undefined = UIA không cho biết)
+function npObs(tabs, active, { sel = true, value = null, title } = {}) {
+  const t = tabs[active];
+  const els = [{ role: 'Document', kind: 'edit', name: 'Text editor', editable: true, value, b: NOTEPAD_BOX }];
+  tabs.forEach((x, i) => els.push({ role: 'TabItem', kind: 'tab', name: (x.dirty ? '*' : '') + x.name, b: [10 + 130 * i, 40, 120, 30], ...(sel ? { selected: i === active } : {}) }));
+  return { win: { title: title || `${t.dirty ? '*' : ''}${t.name} - Notepad`, proc: 'Notepad.exe', pid: 42, hwnd: 7 }, elements: els, dialog: null };
+}
+
+test('QA #64 v3 P64-2: nhận việc gõ trong trình soạn thảo cả khi không có “mở”, có chữ “hiện tại/current/cũ/end of/node.js/enter/paste/dán”, không dấu, chữ phồn thể', () => {
+  for (const q of ['viết vào Notepad dòng xin chào', 'type hello in Notepad', '在记事本里输入你好', 'mở Notepad và gõ ngày giờ hiện tại', 'open Notepad and type the current date',
+    'mở Notepad và gõ lời chúc cho bạn cũ', 'open Notepad and write an end of day summary', 'mở Notepad và viết hướng dẫn cài node.js', 'open Notepad and enter the text hello',
+    'open Notepad and paste this: hello', 'mở Notepad và dán đoạn này: xin chào', 'mo notepad va go xin chao', '打開記事本並輸入一行字', 'gõ "xin chào"', 'type hello world'])
+    assert.strictEqual(FD.freshDocTask(q), true, q);
+  // vẫn KHÔNG nhận khi người dùng nói rõ tài liệu/tệp có sẵn hoặc không có việc gõ
+  for (const q of ['mở Notepad', 'mở Word và đăng nhập', 'gõ vào tài liệu đang mở', 'gõ tiếp vào tài liệu hiện tại', 'type into the current document', 'append a line to the existing file',
+    'continue typing in Notepad', '在当前文档末尾输入一行', '在現有文件末尾輸入一行', 'mở ghichu.txt và gõ abc', '在D:\\AIVN-QA\\pr64\\named.txt里输入X', 'open D:\\src\\app.js and type a comment',
+    'what type of file is this', 'press enter', 'mo ghichu.txt va go abc']) assert.strictEqual(FD.freshDocTask(q), false, q);
+});
+
+test('QA #64 v3 P64-3a: chưa gõ, không đọc được nội dung, thẻ đang chọn đã đổi sang thẻ “Untitled” CŨ → không gõ (focus / unsure)', () => {
+  const tabs = [{ name: 'Untitled', text: SECRET }, { name: 'Untitled', text: '' }];
+  const rec = { hwnd: '7', title: 'Untitled - Notepad', print: { ...FD.docPrint(npObs(tabs, 1)), newIdx: 1 }, typed: false };
+  assert.strictEqual(rec.print.sel, 1);
+  assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 1)), { ok: true }, 'đúng thẻ mới (UIA chọn thẻ 1)');
+  assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 0)), { ok: false, why: 'focus' }, 'UIA: đang chọn thẻ cũ');
+  assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 0, { sel: false })), { ok: false, why: 'unsure' }, 'UIA không cho biết thẻ đang chọn + không đọc được nội dung → không chắc → không gõ');
+  assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 0, { sel: false, value: '' })), { ok: true }, 'đọc được: trống thật thì gõ được');
+});
+
+test('QA #64 v3 P64-3b: đã gõ, không đọc được nội dung, thẻ đang chọn không chứng minh được → không gõ tiếp', () => {
+  const tabs = [{ name: 'Untitled', text: SECRET }, { name: 'Untitled', text: 'dòng 1', dirty: true }];
+  const rec = { hwnd: '7', title: 'Untitled - Notepad', print: { hwnd: '7', title: 'Untitled - Notepad', tabs: ['Untitled', 'Untitled'], newIdx: 1 }, typed: true, texts: ['dòng 1'] };
+  assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 1)), { ok: true }, 'UIA chọn đúng thẻ mới');
+  assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 0)), { ok: false, why: 'focus' });
+  assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 0, { sel: false })), { ok: false, why: 'unsure' }, 'trước đây: unread → OK (sai)');
+  assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 1, { sel: false })), { ok: false, why: 'unsure' }, 'cả khi đúng thẻ nhưng không chứng minh được → dừng (fail closed)');
+  assert.deepStrictEqual(FD.sameDoc(rec, npObs(tabs, 1, { sel: false, value: 'dòng 1' })), { ok: true }, 'đọc được nội dung chứa chữ AIVN đã gõ');
+  // Word: mỗi tài liệu một cửa sổ → cùng hwnd là bằng chứng đủ
+  const wobs = (title, hwnd) => ({ win: { title, proc: 'WINWORD.EXE', pid: 9, hwnd }, elements: [{ role: 'Document', kind: 'edit', name: 'Page 1', editable: true, value: null, b: NOTEPAD_BOX }], dialog: null });
+  const wrec = { hwnd: '30', title: 'Document1 - Word', print: { ...FD.docPrint(wobs('Document1 - Word', 30)), newIdx: null }, typed: true, texts: ['x'] };
+  assert.deepStrictEqual(FD.sameDoc(wrec, wobs('Document1 - Word', 30)), { ok: true });
+  assert.deepStrictEqual(FD.sameDoc(wrec, wobs('Document2 - Word', 31)), { ok: false, why: 'window' });
+});
+
+test('QA #64 v3 P64-4: VS Code đổi tên tài liệu chưa lưu theo dòng đầu AIVN đã gõ → vẫn là tài liệu của AIVN; tên tệp thật → dừng', () => {
+  const vs = (title, tab, value) => ({ win: { title, proc: 'Code.exe', pid: 5, hwnd: 50 }, elements: [{ role: 'Edit', kind: 'edit', name: 'editor', editable: true, value, b: NOTEPAD_BOX }, { role: 'TabItem', kind: 'tab', name: tab, b: [0, 30, 100, 20], selected: true }], dialog: null });
+  const rec = { hwnd: '50', title: 'Untitled-1 - Visual Studio Code', print: { ...FD.docPrint(vs('Untitled-1 - Visual Studio Code', 'Untitled-1', '')), newIdx: 0 }, typed: true, texts: ['xin chào\n'] };
+  const now = vs('● xin chào - Visual Studio Code', 'xin chào', 'xin chào\n');
+  assert.strictEqual(FD.ownTitle(rec, now.win), true);
+  assert.deepStrictEqual(FD.sameDoc(rec, now), { ok: true }, 'trước đây: “named” → từ chối nhầm');
+  assert.deepStrictEqual(FD.sameDoc({ ...rec, typed: false }, now), { ok: false, why: 'named' }, 'chưa gõ thì không có tên “của AIVN”');
+  assert.deepStrictEqual(FD.sameDoc(rec, vs('notes.md - Visual Studio Code', 'notes.md', 'xin chào\n')), { ok: false, why: 'named' }, 'tệp có tên khác dòng đã gõ');
+  assert.strictEqual(FD.ownTitle(rec, { title: 'xin chào - Notepad', proc: 'Notepad.exe' }), false, 'chỉ VS Code tự đặt tên theo dòng đầu');
+  assert.strictEqual(FD.untitled('xin chào - Visual Studio Code'), false, 'tên không tự coi là chưa đặt — chỉ khớp theo chữ AIVN đã gõ');
+});
+
+test('QA #64 v3 P64-5: Word “Document - Word” (không số) có thể là tệp Document.docx → không coi là chưa đặt tên', () => {
+  for (const t of ['Document - Word', 'Tài liệu - Word', '文档 - Word', 'Document.docx - Word', 'Document - Notepad']) assert.strictEqual(FD.untitled(t), false, t);
+  assert.strictEqual(FD.untitled('Document - WordPad'), true, 'WordPad hiện cả đuôi tệp: “Document” là tài liệu mới');
+  for (const t of ['Document1 - Word', 'Document 3 - Word', 'Tài liệu1 - Word', '文档1 - Word']) assert.strictEqual(FD.untitled(t), true, t);
+});
+
+test('QA #64 v3 P64-9: tiêu đề còn dấu sửa (*Untitled / ● Untitled) không bao giờ là tài liệu mới trống — cả khi có thêm thẻ', async () => {
+  const E = FD.newDocEvidence;
+  assert.strictEqual(E(P(['notes.txt']), P(['notes.txt', 'Untitled'], '*Untitled - Notepad')), false);
+  assert.strictEqual(E(P(['notes.txt']), { ...P(['notes.txt', 'Untitled'], '● Untitled-1 - Visual Studio Code'), sel: 1 }), false);
+  assert.strictEqual(E(P(['notes.txt']), P(['notes.txt', 'Untitled'])), true, 'đối chứng: tiêu đề sạch, một thẻ mới đúng tên');
+  // Ctrl+N mở thẻ mới ở NỀN, đang chọn vẫn là thẻ “*Untitled” cũ của người dùng → DỪNG, không gõ
+  const N = fakeNotepad({ tabs: [{ name: 'Untitled', text: SECRET, dirty: true }], ctrlN: 'bg', valueReadable: false, tabItems: true });
+  const r = await FD.ensureFresh(N.d); assert.strictEqual(r.ok, false, JSON.stringify(r)); assert.strictEqual(N.st.tabs.length, 2); assert.strictEqual(N.st.active, 0);
+});
+
+test('QA #64 v3 P64-7: cổng trước khi gõ KHÔNG nuốt lỗi nhìn lại màn hình và không kiểm trên lần nhìn cũ', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/desktop-agent.js'), 'utf8');
+  const inner = src.slice(src.indexOf('async function actInner(a, ctx)'));
+  const gate = inner.slice(inner.indexOf("if ((action === 'type_text' || destructiveKey) && freshDocWanted("), inner.indexOf('let needPoint ='));
+  assert.ok(!/observe\(ctx, \{[^}]*\}\)\.catch\(\(\) => \{\}\)/.test(gate), 'không có observe(...).catch(() => {})');
+  assert.match(gate, /let seen = true; try \{ await observe\(ctx, \{ thumb: false, ocr: 'force' \}\); \} catch \(e\) \{ seen = false;/);
+  assert.match(gate, /!seen \? \{ ok: false, why: 'observe' \} : !W2 \? \{ ok: false, why: 'no-window' \}/);
+});
+
+test('QA #64 v3 P64-8 (+residual): chặn ở cổng trước khi gõ / bấm phím xoá = DỪNG thật (stop: true) với câu đã dịch', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/desktop-agent.js'), 'utf8');
+  const inner = src.slice(src.indexOf('async function actInner(a, ctx)'));
+  const gate = inner.slice(inner.indexOf("if ((action === 'type_text' || destructiveKey) && freshDocWanted("), inner.indexOf('let needPoint ='));
+  assert.match(src, /const FRESH_GATE_MSG = 'không phải tài liệu mới AIVN đã mở — không gõ';/);
+  const refusals = gate.match(/return \{ refused: true[^\n]*/g) || []; assert.ok(refusals.length >= 3, refusals.length);
+  for (const x of refusals) assert.match(x, /^return \{ refused: true, stop: true, error: FRESH_(?:GATE|DOC)_MSG,/, x);
+  const re = new Function('return ' + src.match(/const FRESH_DESTRUCTIVE = (\/[^\n]+\/);/)[1])();
+  for (const k of ['ctrl+a', 'cmd+a', 'ctrl+x', 'delete', 'backspace', 'ctrl+backspace', 'cmd+z']) assert.ok(re.test(k), k);
+  for (const k of ['cmd+n', 'escape', 'ctrl+s', 'enter', 'alt+tab']) assert.ok(!re.test(k), k);
+});
+const GATE = 'không phải tài liệu mới AIVN đã mở — không gõ';
+for (const lang of ['vi', 'en', 'zh']) {
+  test(`QA #64 v3 P64-8 [${lang}]: screen_act bị cổng chặn (refused + stop) → dừng, kết quả thất bại, câu cuối theo ngôn ngữ`, async () => {
+    const AG = require('../src/agent/agent'); const CT = require('../src/agent/computer-tools'); const { createMemoryStore } = require('../src/agent/memory');
+    const r0 = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b191-')); const exec = []; let model = 0;
+    const engine = { status: () => ({ loaded: true, vision: true, contextSize: 8192 }), chatStep: async () => { model++; return model === 1 ? { text: '', toolCalls: [{ id: 'c1', name: 'screen_act', arguments: { action: 'type_text', text: 'hello' } }], finishReason: 'tool_calls', usage: {} } : { text: 'Đã gõ xong.', toolCalls: [], finishReason: 'stop', usage: {} }; } };
+    const names = ['screen_look', 'screen_act']; const defs = Object.fromEntries(names.map(n => [n, CT.DEFS[n]]));
+    const computer = { names: () => names, defs, has: (n) => n in defs, CompError: CT.CompError, exec: async (n, a) => { exec.push([n, a]); if (n === 'screen_act') return { refused: true, stop: true, error: GATE, forModel: 'KHÔNG gõ', summary: GATE }; return { forModel: 'ok', summary: 'ok' }; } };
+    const agent = AG.createAgent({ engine, computer, gateOk: () => true, getSettings: () => ({ agentFolders: [], agentMemory: false, agentComputer: true, agentScreen: true, uiLang: lang }), memory: createMemoryStore(path.join(r0, 'm.json')), scheduler: {}, trash: async () => {}, extractFile: async () => ({}), embedForMemory: async () => ({}), log: () => {} });
+    const r = await agent.run({ messages: [{ role: 'user', content: lang === 'zh' ? '在记事本里输入 hello' : lang === 'en' ? 'type hello in Notepad' : 'gõ hello vào Notepad' }], confirm: async () => true });
+    assert.strictEqual(exec.filter(x => x[0] === 'screen_act').length, 1, 'không thử gõ lại'); assert.strictEqual(model, 1, 'mô hình không chạy tiếp sau khi bị chặn');
+    assert.strictEqual(r.outcome, 'failed');
+    if (lang === 'vi') assert.match(r.text, /không phải tài liệu mới AIVN đã mở — không gõ/);
+    else { assert.ok(!VI.test(r.text), r.text); assert.match(r.text, lang === 'en' ? /not the new document AIVN opened — nothing typed/ : /不是 AIVN 打开的新文档 — 未输入任何内容/); }
+  });
+}
