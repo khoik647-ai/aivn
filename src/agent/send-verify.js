@@ -333,12 +333,16 @@ const selfReport = (q) => {
 // trừ khi chính ngoặc là lệnh gửi hoặc nêu người nhận (“gửi tin…”, “cho An”, “to An”, “给安”).
 // Tiếng Việt/Anh cần ranh giới từ (“message” trong “message box”, không phải “send a message”).
 // Tiếng Trung viết liền: “看看消息输入框里” — “输入框/消息框” là tên ô, không có khoảng trắng hai bên.
-const COMPOSE_BOX = /(?:^|[^\p{L}\p{N}])(?:(?:ô|khung|hộp|vùng|chỗ)\s+soạn\s+tin(?:\s+nhắn)?|(?:the\s+|a\s+|this\s+)?(?:message|compose|composer|text|input|chat)\s+(?:box|field|area))(?![\p{L}\p{N}])|(?:消息|信息|短信|讯息|訊息)?输入框|消息框|信息框|撰写框/iu;
+const COMPOSE_BOX = /(?:^|[^\p{L}\p{N}])(?:(?:ô|khung|hộp|vùng|chỗ)\s+(?:soạn\s+tin(?:\s+nhắn)?|nhập\s+tin(?:\s+nhắn)?)|khung\s+chat|khung\s+soạn\s+thảo|(?:the\s+|a\s+|this\s+)?(?:message|compose|composer|text|input|chat)\s+(?:box|field|area)|(?:the\s+|a\s+|this\s+)?(?:chat|message|text)\s+input|(?:the\s+|a\s+)?textbox)(?![\p{L}\p{N}])|(?:消息|信息|短信|讯息|訊息|聊天)?输入框|消息框|信息框|撰写框/iu;
 const PAREN_ASIDE = /[(（][^()（）]{0,240}[)）]/u;
 const KEEP_ASIDE = /(?:^|[^\p{L}])(?:cho|tới|đến|với|to|for|给)\s+\p{L}/iu;
-// Động từ GỬI thật. “trả lời / báo / reply / 回复” không nằm ở đây: đó có thể là “trả lời người dùng”.
-const REAL_SEND = /(?:^|[^\p{L}])(?:nhắn(?:\s+tin)?|gửi\s+(?:tin(?:\s+nhắn)?|lời nhắn|email|e-mail|mail|thư)|soạn\s+(?:tin(?:\s+nhắn)?|email|mail|thư))(?![\p{L}])|(?:^|[^\p{L}])(?:send|write|draft)\s+(?:a\s+|an\s+)?(?:message|text|email|e-mail|mail|dm)\b|^\s*(?:please\s+)?(?:text|message|dm|email)\b|发(?:一[条條]|个|個)?\s*(?:消息|信息|短信|讯息|訊息|微信|邮件|郵件|私信)|傳(?:訊息|消息)|私信/iu;
-const LOOK_ASK = /(?:^|[^\p{L}])(?:nhìn|ngó|xem|đọc|quan sát|kiểm tra|cho\s+(?:mình|tôi|em|tớ)\s+biết|chỉ\s+(?:nhìn|xem|đọc)|look(?:\s+at)?|see\s+if|read|check|what(?:'s| is)|is\s+(?:the|it|there)|tell\s+me|just\s+look|only\s+look)(?![\p{L}])|(?:có|còn)\s+(?:chữ|gì|nội dung)|trống\s+không|\bempty\b|看看|看一下|看一看|瞧一下|读一下|讀一下|告诉我|告訴我|有没有|有沒有|是不是|什么|什麼|只看|只读|只讀|检查|檢查/iu;
+// Động từ GỬI thật, xét SAU khi đã bỏ tên ô. “trả lời giúp / báo cho mình / reply ok” không nằm ở đây: đó có thể là trả lời người dùng.
+// “gửi đi/nó/cho”, “bấm/nhấn gửi”, “send it/this/that”, “hit/press send”, “发送/发给” vẫn là gửi dù tên ô đã bị gỡ.
+const REAL_SEND = /(?:^|[^\p{L}])(?:nhắn(?:\s+tin)?|gửi\s+(?:tin(?:\s+nhắn)?|lời nhắn|email|e-mail|mail|thư|đi|nó|này|cho)|soạn\s+(?:tin(?:\s+nhắn)?|email|mail|thư)|(?:bấm|nhấn|ấn)\s+(?:gửi|enter)|trả lời\s+(?:tin(?:\s+nhắn)?|email|mail|thư))(?![\p{L}])|(?:^|[^\p{L}])(?:send|write|draft)\s+(?:a\s+|an\s+)?(?:message|text|email|e-mail|mail|dm)\b|(?:^|[^\p{L}])send\s+(?:it|this|that)\b|(?:^|[^\p{L}])(?:hit|press)\s+(?:send|enter)\b|(?:^|[^\p{L}])send(?![\p{L}])|^\s*(?:please\s+)?(?:text|message|dm|email)\b|(?:^|[^\p{L}])(?:reply|respond)\s+to\b|发(?:一[条條]|个|個)?\s*(?:消息|信息|短信|讯息|訊息|微信|邮件|郵件|私信)|发送|发给|發送|發給|傳(?:訊息|消息)|私信/iu;
+const LOOK_ASK = /(?:^|[^\p{L}])(?:nhìn|ngó|xem|đọc|quan sát|kiểm tra|cho\s+(?:mình|tôi|em|tớ)\s+biết|chỉ\s+(?:nhìn|xem|đọc)|look(?:\s+at)?|see\s+if|read|check|what(?:'s|\s+is|\s+does)?|is\s+(?:the|it|there)|tell\s+me|just\s+look|only\s+look)(?![\p{L}])|(?:^|[^\p{L}])is\s+["“']|(?:có|còn)\s+(?:chữ|gì|nội dung)|trống\s+không|\bempty\b|看看|看一下|看一看|瞧一下|读一下|讀一下|告诉我|告訴我|有没有|有沒有|是不是|什么|什麼|只看|只读|只讀|检查|檢查/iu;
+// “đừng gửi / don't send / 不要发” phủ định đúng động từ đứng ngay sau — không biến câu nhìn thành lệnh gửi, cũng không xoá một lệnh gửi khác trong cùng câu.
+const SEND_NEG = /(?:đừng|chớ|không(?:\s+được)?|ko|don't|dont|do\s+not|never|不要|别|別|勿)\s*$/iu;
+function negatedBefore(s, index) { return SEND_NEG.test(String(s || '').slice(Math.max(0, index - 16), index)); }
 function intentText(q) {
   let s = String(q || '');
   s = s.replace(new RegExp(PAREN_ASIDE.source, 'gu'), (m) => {
@@ -348,14 +352,30 @@ function intentText(q) {
   });
   return s.replace(new RegExp(COMPOSE_BOX.source, 'giu'), ' ');
 }
+// Có động từ gửi còn lại sau khi bỏ tên ô và chú thích. “tin nhắn” (danh từ) không tính. Động từ bị phủ định ngay trước cũng không tính.
+function activeSend(q) {
+  const s = selfReport(intentText(q));
+  const re = new RegExp(REAL_SEND.source, 'giu');
+  let m;
+  while ((m = re.exec(s))) {
+    // Mẫu có ranh giới từ đứng TRƯỚC động từ (“ nhắn”), nên “tin ” nằm ngay trước chữ, không phải trước chỗ khớp.
+    const at = m.index + (/^[^\p{L}]/u.test(m[0]) ? 1 : 0);
+    const noun = /(?:^|[^\p{L}])tin\s+$/iu.test(s.slice(Math.max(0, at - 8), at));
+    if (!noun && !negatedBefore(s, at)) return true;
+    if (!m[0]) re.lastIndex++;
+  }
+  return false;
+}
 function lookOnly(q) {
   const raw = String(q || '');
   if (!COMPOSE_BOX.test(raw)) return false;
-  if (REAL_SEND.test(selfReport(intentText(raw)))) return false;
-  return LOOK_ASK.test(raw) || /[?？]/.test(raw);
+  if (!LOOK_ASK.test(raw)) return false; // dấu ? một mình không đủ (“…send it to An?” vẫn là gửi)
+  if (activeSend(raw)) return false; // còn động từ gửi → không phải câu chỉ nhìn
+  return true;
 }
-// việc nhắn/gửi tin thật (đã bỏ phần “báo cho mình…” = trả lời trong AIVN, và câu chỉ nhìn ô soạn)
-const msgSend = (q) => lookOnly(q) ? false : MSG_SEND.test(selfReport(intentText(q)));
+// Việc nhắn/gửi tin thật. MSG_SEND xét trên câu GỐC (như trước B219): gỡ “ô soạn tin” cũng gỡ mất động từ “soạn tin”,
+// cổng Ctrl+Enter hết biết đây là gửi. intentText chỉ dùng trong lookOnly. Câu chỉ nhìn thì không phải lệnh gửi.
+const msgSend = (q) => lookOnly(q) ? false : MSG_SEND.test(selfReport(q));
 function missingRecipient(query) {
   if (!msgSend(query)) return false;
   const q = selfReport(query); if (CURRENT_CHAT.test(q)) return false;
@@ -420,11 +440,11 @@ function cleanHeader(lines = []) {
 const exactName = (names, x) => { const kx = nameKey(x); return !!kx && names.some(n => nameKey(n) === kx); };
 function chatGate({ query, text, searchField = false, submit = false, proc = '', title = '', state = {}, header = [], ocrHeader = null, seenHeader = null, composer = [] }) {
   if (!isChatContext(query, proc, title)) return null;
-  // B219: câu chỉ nhìn ô soạn — không hỏi “Gửi cho ai?”, không biến chú thích trong ngoặc thành tin cần gửi
+  // B219: câu chỉ nhìn ô soạn — không hỏi “Gửi cho ai?”. Mọi lần gõ vào ô chưa xác nhận là ô tìm kiếm đều bị chặn
+  // (kể cả chữ nằm trong ngoặc kép của câu hỏi, ví dụ Is "hi" in the message box?): gõ rồi Enter sẽ lọt cổng B108.
   if (lookOnly(query)) {
     if (searchField) return null;
-    if (submit || /\n\s*$/.test(String(text || ''))) return 'KHÔNG gửi: câu này chỉ yêu cầu nhìn màn hình và trả lời, không soạn và không gửi.';
-    return null;
+    return 'KHÔNG gõ và KHÔNG gửi: câu này chỉ yêu cầu nhìn màn hình và trả lời, không soạn và không gửi.';
   }
   if (CURRENT_CHAT.test(String(query || ''))) {
     if (searchField) return null;

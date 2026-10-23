@@ -35,7 +35,8 @@ test('B219: câu chỉ nhìn ô soạn không phải gửi, không hỏi ngườ
 test('B219: cổng chat không hỏi “Gửi cho ai?” khi câu chỉ yêu cầu nhìn', () => {
   const q = LOOKS[0][1];
   const st = {};
-  assert.strictEqual(SV.chatGate({ query: q, text: 'ô soạn trống', proc: 'Zalo', title: 'Zalo', state: st, header: ['Lan'] }), null);
+  const typed = SV.chatGate({ query: q, text: 'ô soạn trống', proc: 'Zalo', title: 'Zalo', state: st, header: ['Lan'] });
+  assert.match(typed, /KHÔNG gõ/);
   assert.strictEqual(st.askWho, undefined);
   const search = {};
   assert.strictEqual(SV.chatGate({ query: q, text: 'Lan', searchField: true, proc: 'Zalo', title: 'Zalo', state: search, header: [] }), null);
