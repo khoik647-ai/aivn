@@ -136,19 +136,25 @@ const CUT = /[\r\n]|[:：﹕∶꞉˸︓](?![\\/]|\d)|["“”„«»‹「『‘
 const linesOf = (q) => String(q || '').replace(/(\d)[:：﹕∶](?=\d)/gu, '$1\u2009').split(/\r\n|[\r\n\u2028\u2029]/);
 const OPEN_START = /^\s*(?:(?:please|hãy|xin)\s+)?(?:mở|open|edit|sửa|打开|打開)(?![\p{L}])/iu;
 function splitClauses(line) {
-  const re = /[.!?…](?=\s)|[,，;；](?=\s)|[。！？…]|[，；]/gu;
+  // r13: mệnh đề phủ định kết thúc ở ，。;； và ở 然后 / 再 (然后再 là MỘT chỗ ngắt). 然后/再 là ngắt mềm như dấu phẩy.
+  const re = /[.!?…](?=\s)|[,，;；](?=\s)|[。！？…]|[，；]|然后再|然後再|然后|然後|再/gu;
   const parts = []; let start = 0; let m;
-  while ((m = re.exec(line))) { parts.push({ text: line.slice(start, m.index), sep: /[,，;；]/.test(m[0]) ? 'comma' : 'stop' }); start = m.index + m[0].length; }
+  while ((m = re.exec(line))) { parts.push({ text: line.slice(start, m.index), sep: /[,，;；]|然后|然後|再/u.test(m[0]) ? 'comma' : 'stop' }); start = m.index + m[0].length; }
   parts.push({ text: line.slice(start), sep: null });
   return parts;
 }
-// phủ định đứng đầu mệnh đề (“Don't type…”, “Đừng gõ…”, “Không được viết…”, “不要输入…”) — không bao giờ là lệnh tắt bảo vệ
-const NEGATED = /^\s*(?:(?:please|hãy|xin|请)\s+)?(?:don't|do\s+not|never|đừng|chớ|không\s+được|không|别|別|不要|勿|不准)(?![\p{L}])/iu;
+// phủ định đứng đầu mệnh đề (“Don't type…”, “Đừng gõ…”, “Không được viết…”, “不要输入…”) — không bao giờ là lệnh tắt bảo vệ.
+// r13: 不要/别/勿/不准/不用/不能/禁止 vẫn là phủ định khi ký tự ngay sau là chữ Hán (“不要在…”). Anh/Việt giữ ranh giới chữ cái.
+const ZH_NEG = /不准|不用|不能|不要|禁止|别|別|勿/u;
+const NEGATED = /^\s*(?:(?:please|hãy|xin|请)\s+)?(?:(?:don't|do\s+not|never|đừng|chớ|không\s+được|không)(?![\p{L}])|不准|不用|不能|不要|禁止|别|別|勿)/iu;
 const negated = (s) => NEGATED.test(String(s || ''));
-// “do not / đừng / 不要” đứng ngay trước động từ ghi — kể cả khi không đứng đầu câu (“Open Notepad and do not type into notes.txt”)
+// “do not / đừng” đứng ngay trước động từ ghi (“Open Notepad and do not type…”).
+// Tiếng Trung: dấu phủ định ở bất kỳ đâu trước động từ, kể cả khi cách động từ bởi “在 notes.txt 里”.
 function verbNegatedAt(text, v) {
-  const pre = String(text).slice(Math.max(0, v.at - 40), v.at);
-  return /(?:^|[^\p{L}])(?:don't|do\s+not|never|đừng|chớ|không(?:\s+được)?|别|別|不要|勿|不准)\s*$/iu.test(pre);
+  const pre = String(text).slice(0, v.at);
+  const tail = pre.slice(-40);
+  if (/(?:^|[^\p{L}])(?:don't|do\s+not|never|đừng|chớ|không(?:\s+được)?)\s*$/iu.test(tail)) return true;
+  return ZH_NEG.test(pre);
 }
 function clauseNegated(text) {
   if (negated(text)) return true;
@@ -271,6 +277,8 @@ function pinnedDestFile(text) {
   const s = String(text || ''); let found = null;
   const consider = (name, index) => {
     if (!name || SAVE_BEFORE.test(s.slice(0, index)) || contentBefore(s, index) || recipientGoverned(s, index)) return;
+    // tên tệp nằm trong mệnh đề phủ định (不要在 notes.txt 里…) không được ghim
+    if (ZH_NEG.test(s.slice(0, index))) return;
     const pre = s.slice(Math.max(0, index - 40), index);
     if (!DEST_FILE_PREP.test(pre)) return;
     if (/(?:^|[^\p{L}])(?:mở|open|打开|打開|edit|sửa)\s+$/iu.test(pre)) return;
@@ -283,7 +291,7 @@ function pinnedDestFile(text) {
 // câu lệnh (đã cắt nội dung, đã bỏ phủ định) có NÊU RÕ chỗ gõ không. Không nhận ra, hoặc đích bị phủ định → bảo vệ bật.
 // Tắt chỉ khi đích rõ. Tên tệp thì phải ghim (file), để thẻ đang mở khác tệp đó không bị gõ.
 function existingTarget(c) {
-  const ON = { fresh: true, file: null }; if (!c || negated(c)) return ON;
+  const ON = { fresh: true, file: null }; if (!c || clauseNegated(c)) return ON;
   const bare = c.replace(URL_RE, ' '); const v = firstVerb(bare);
   if (!v) return CONTINUE_CMD.test(bare) ? { fresh: false, file: null } : ON;
   if (verbNegatedAt(bare, v)) return ON;
