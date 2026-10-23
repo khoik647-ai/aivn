@@ -48,18 +48,20 @@ async function visionFreeBytes() {
   if (visionVramCache && now - visionVramCache.at < (visionVramCache.ok ? 8000 : 1500)) return visionVramCache.free;
   let free = null;
   let ok = false;
+  let timer = null;
   try {
     const VS = require('./vision-server');
     const exe = VS.findServer();
     if (exe) {
       const d = await Promise.race([
         VS.listDevices(exe, { timeoutMs: 1200, fresh: true }),
-        new Promise((resolve) => setTimeout(() => resolve(null), 1200)),
+        new Promise((resolve) => { timer = setTimeout(() => resolve(null), 1200); }),
       ]);
       const gpus = d && Array.isArray(d.all) ? d.all.filter((x) => x.freeMiB != null && !/^cpu/i.test(x.id)) : [];
       if (gpus.length) { free = Math.min(...gpus.map((g) => g.freeMiB)) * 1024 * 1024; ok = true; }
     }
   } catch { free = null; ok = false; }
+  finally { if (timer) clearTimeout(timer); }
   visionVramCache = { at: now, free, ok };
   return free;
 }

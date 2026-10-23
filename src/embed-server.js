@@ -124,8 +124,12 @@ function definitelyEmbedding(info) {
   if (info.pooling && !arch) return true;
   return false;
 }
+// Tên tệp khớp EMBED_RE (Qwen3-Embedding, EmbeddingGemma, bge, nomic…) hoặc siêu dữ liệu chắc là mô hình nhúng.
 function isEmbedGguf(full) {
-  try { return definitelyEmbedding(inspectFile(full)); } catch { return false; }
+  try {
+    if (EMBED_RE.test(path.basename(String(full || '')))) return true;
+    return definitelyEmbedding(inspectFile(full));
+  } catch { return false; }
 }
 
 // Id mô hình nhúng không được nằm trong danh sách trò chuyện (kể cả khi tên tệp không khớp EMBED_RE).

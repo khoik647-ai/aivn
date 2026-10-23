@@ -323,7 +323,7 @@ const SPLIT_RE = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i;
 // Mô hình nhúng (dùng cho tìm kiếm tài liệu), không phải mô hình trò chuyện
 const NAMES = require('./model-names'); // mục 5: tên tệp chung (q4_k_m.gguf) → id/khớp danh mục kèm tên repo
 function modelIdFromFile(f) { return NAMES.idFor(f, SPLIT_RE); }
-// Chỉ ẩn khỏi danh sách trò chuyện khi chắc là mô hình nhúng. Tên tệp chứa "embed" không đủ.
+// Ẩn khỏi danh sách trò chuyện khi tên tệp khớp EMBED_RE hoặc siêu dữ liệu chắc là mô hình nhúng.
 function isEmbedGguf(full) {
   try { return require('./embed-server').isEmbedGguf(full); } catch { return false; }
 }

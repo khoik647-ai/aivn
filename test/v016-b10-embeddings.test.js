@@ -688,6 +688,8 @@ test('llama-server nhìn ảnh đang chạy thì embeddings lấy -ngl 4, không
   const hw = eng.slice(eng.indexOf('async function hardwareInfo'), eng.indexOf('async function modelGeometry'));
   assert.match(hw, /visionOn/);
   assert.match(hw, /freeForEmbed/);
+  const vf = eng.slice(eng.indexOf('async function visionFreeBytes'), eng.indexOf('async function hardwareInfo'));
+  assert.match(vf, /clearTimeout\(timer\)/);
 });
 
 test('nạp mô hình treo không giữ máy nhúng quá hạn', async () => {
@@ -723,11 +725,65 @@ test('isEmbedGguf không giấu mô hình trò chuyện', () => {
   writeModels(dir);
   assert.equal(isEmbedGguf(path.join(dir, 'qwen-q4.gguf')), false);
   assert.equal(isEmbedGguf(path.join(dir, 'bge-m3-q8_0.gguf')), true);
+  const pooled = path.join(dir, 'qwen2-chat-q4.gguf');
+  fs.writeFileSync(pooled, gguf([kvStr('general.architecture', 'qwen2'), kvU32('qwen2.pooling_type', 1), kvU32('qwen2.block_count', 4)]));
+  assert.equal(inspectFile(pooled).pooling, 'mean');
+  assert.equal(definitelyEmbedding(inspectFile(pooled)), false);
+  assert.equal(isEmbedGguf(pooled), false, 'kiến trúc trò chuyện có pooling nhưng tên không khớp EMBED_RE vẫn ở danh sách trò chuyện');
   const named = path.join(dir, 'my-embed-chat-q4.gguf');
   fs.writeFileSync(named, gguf([kvStr('general.architecture', 'qwen2'), kvU32('qwen2.block_count', 4)]));
   assert.equal(inspectFile(named).arch, 'qwen2');
-  assert.equal(isEmbedGguf(named), false);
+  assert.equal(definitelyEmbedding(inspectFile(named)), false);
+  assert.equal(isEmbedGguf(named), true, 'tên tệp khớp EMBED_RE thì không vào danh sách trò chuyện');
   assert.equal(isEmbedGguf(path.join(dir, 'khong-co.gguf')), false);
+});
+
+test('Qwen3-Embedding và EmbeddingGemma không nằm trong danh sách mô hình trò chuyện', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b10-name-embed-'));
+  const chatName = 'Qwen3-0.6B-Q4_K_M.gguf';
+  const qwenEmb = 'Qwen3-Embedding-0.6B-Q8_0.gguf';
+  const gemmaEmb = 'EmbeddingGemma-300M-Q8_0.gguf';
+  fs.writeFileSync(path.join(dir, chatName), gguf([
+    kvStr('general.architecture', 'qwen3'), kvU32('qwen3.block_count', 28), kvU32('qwen3.context_length', 32768),
+  ]));
+  // qwen3 + pooling: kiến trúc cũng là mô hình trò chuyện, definitelyEmbedding từ chối. Chỉ EMBED_RE giấu được.
+  fs.writeFileSync(path.join(dir, qwenEmb), gguf([
+    kvStr('general.architecture', 'qwen3'), kvU32('qwen3.pooling_type', 3), kvU32('qwen3.embedding_length', 1024), kvU32('qwen3.context_length', 32768),
+  ]));
+  fs.writeFileSync(path.join(dir, gemmaEmb), gguf([
+    kvStr('general.architecture', 'gemma-embedding'), kvU32('gemma-embedding.embedding_length', 768), kvU32('gemma-embedding.context_length', 2048),
+  ]));
+  assert.equal(definitelyEmbedding(inspectFile(path.join(dir, qwenEmb))), false);
+  assert.equal(definitelyEmbedding(inspectFile(path.join(dir, gemmaEmb))), false);
+  assert.equal(isEmbedGguf(path.join(dir, qwenEmb)), true);
+  assert.equal(isEmbedGguf(path.join(dir, gemmaEmb)), true);
+  assert.equal(isEmbedGguf(path.join(dir, chatName)), false);
+  const chatList = fs.readdirSync(dir).filter((name) => /\.gguf$/i.test(name) && !/mmproj/i.test(name) && !isEmbedGguf(path.join(dir, name)));
+  assert.deepStrictEqual(chatList, [chatName]);
+  const embed = listEmbeddingModels([dir]);
+  assert.deepStrictEqual(embed.map((m) => m.id).sort(), ['embeddinggemma-300m-q8_0', 'qwen3-embedding-0.6b-q8_0']);
+  const api = serverOf({
+    list: () => embed,
+    ensure: async () => ({ id: 'bge-m3-q8_0' }),
+    embed: async () => [new Float32Array(8)],
+    count: async () => 1,
+  }, {
+    chat: [
+      { id: 'qwen3-0.6b-q4_k_m', mtime: Date.now() },
+      { id: 'qwen3-embedding-0.6b-q8_0', mtime: Date.now() },
+      { id: 'embeddinggemma-300m-q8_0', mtime: Date.now() },
+    ],
+  });
+  const port = await listen(api);
+  try {
+    const models = await (await fetch(`http://127.0.0.1:${port}/v1/models`)).json();
+    for (const id of ['qwen3-embedding-0.6b-q8_0', 'embeddinggemma-300m-q8_0']) {
+      const rows = models.data.filter((m) => m.id === id);
+      assert.equal(rows.length, 1, id);
+      assert.equal(rows[0].type, 'embedding');
+    }
+    assert.ok(models.data.some((m) => m.id === 'qwen3-0.6b-q4_k_m' && m.type == null));
+  } finally { await api.stop(); }
 });
 
 test('cắt theo cụm chữ: emoji ZWJ và dấu kết hợp không bị tách', () => {
