@@ -18,11 +18,11 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<'
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 let toastTimer;
 const toastStack = (() => { const d = document.createElement('div'); d.className = 'toast-stack'; d.setAttribute('role', 'status'); d.setAttribute('aria-live', 'polite'); document.body.appendChild(d); return d; })();
-function toast(msg, err = false, { sticky = false } = {}) {
+function toast(msg, err = false, { sticky = false, id = '' } = {}) {
   msg = String(msg ?? ''); if (!msg) return;
   // trùng nội dung: làm mới thay vì chồng thêm
   for (const el of toastStack.children) if (el.dataset.msg === msg) { el.remove(); }
-  const el = document.createElement('div'); el.className = 'toast-item' + (err ? ' err' : ''); el.dataset.msg = msg; el.dataset.route = String(err ? '' : 'nav');
+  const el = document.createElement('div'); el.className = 'toast-item' + (err ? ' err' : ''); el.dataset.msg = msg; el.dataset.route = String(err ? '' : 'nav'); if (id) el.dataset.noticeId = id;
   el.innerHTML = `<span class="tx"></span><button type="button" aria-label="Đóng thông báo" title="Đóng">×</button>`; el.querySelector('.tx').textContent = msg;
   const close = () => { clearTimeout(el._t); el.remove(); };
   el.querySelector('button').addEventListener('click', close);
@@ -1780,7 +1780,16 @@ $('#agentWait').addEventListener('click', () => show('agent'));
 A.onAgentApprove((c) => { apQueue.push(c); apShow(); });
 A.onAgentApproveCancel(({ id }) => { if (apOpen && apOpen.id === id) { apOpen = null; $('#approveCard').hidden = true; apShow(); } const i = apQueue.findIndex(x => x.id === id); if (i >= 0) apQueue.splice(i, 1); paintAgentWait(); });
 
-if (A.onNotice) A.onNotice((n) => toast((n.kind === 'warn' ? '⚠ ' : '') + n.text, n.kind === 'warn'));
+if (A.onNotice) A.onNotice((n) => {
+  if (n && n.clear) {
+    const id = n.id || '';
+    for (const el of [...toastStack.children]) if (!id || el.dataset.noticeId === id) el.remove();
+    const errEl = $('#mdirErr');
+    if (errEl && (errEl.dataset.code === 'EDEST' || errEl.dataset.code === 'EMODEL' || errEl.dataset.code === 'EJOURNAL')) mdirClearErr();
+    return;
+  }
+  toast((n.kind === 'warn' ? '⚠ ' : '') + n.text, n.kind === 'warn', { id: (n && n.id) || '' });
+});
 
 // --- Kinh doanh (CRM + Bán hàng, Kho, Hoá đơn, Báo cáo ở biz.js) --- 0.16.0: bộ Kinh doanh hoàn chỉnh, hiện cho mọi người
 const CRM_ON = true;
@@ -2410,7 +2419,7 @@ function paintAdmin(a) {
       <div class="row"><button class="btn primary" type="submit">Tạo mã</button><button class="btn" type="button" id="admMine">Dùng Mã máy của máy này</button></div>
       <div id="admOut" hidden></div></form>
     <div class="sec-form"><h4>Đăng danh sách thu hồi</h4>
-      <p class="small muted">Thu hồi một mã sẽ ký lại <code>revoked.json</code>. ${a.hasToken ? 'Đã có token GitHub: AIVN tự đăng lên trang web.' : 'Chưa có token GitHub: AIVN sẽ lưu tệp revoked.json để bạn tự tải lên nhánh gh-pages.'} Máy đã bị thu hồi sẽ bị khoá ở lần kiểm tra tiếp theo (tối đa 4 giờ khi có mạng).</p>
+      <p class="small muted">Thu hồi một mã sẽ ký lại <code>revoked-v2.json</code>. ${a.hasToken ? 'Đã có token GitHub: AIVN tự đăng lên trang web.' : 'Chưa có token GitHub: AIVN sẽ lưu tệp revoked-v2.json để bạn tự tải lên nhánh gh-pages.'} Máy đã bị thu hồi sẽ bị khoá ở lần kiểm tra tiếp theo (tối đa 4 giờ khi có mạng).</p>
       <input type="password" id="admToken" placeholder="${a.hasToken ? 'Đã lưu token (nhập để thay, để trống + Lưu để xoá)' : 'Token GitHub (fine-grained, quyền Contents: Read and write cho ' + esc(a.repo) + ')'}" autocomplete="off">
       <div class="row"><button class="btn sm" id="admSaveToken">Lưu token</button><button class="btn sm" id="admPublish">Ký và đăng lại</button><button class="btn sm" id="admLock">Khoá trang Quản trị</button></div></div></div>
     <h4>Mã đã cấp từ máy này (${a.codes.length})</h4>
@@ -2429,7 +2438,7 @@ $('[data-spane="security"]').addEventListener('click', async (e) => {
     if (t.id === 'admLock') paintAdmin(await A.adminLock());
     if (t.id === 'admMine') $('#admMc').value = $('#secMachine').textContent;
     if (t.id === 'admSaveToken') { paintAdmin(await A.adminSetToken($('#admToken').value)); toast('Đã lưu ✓'); }
-    if (t.id === 'admPublish') { const r = await A.adminPublish(); toast(r.published ? 'Đã đăng revoked.json ✓ (trang web cập nhật sau 1–2 phút)' : r.savedTo ? 'Đã lưu ' + r.savedTo : 'Chưa đăng'); }
+    if (t.id === 'admPublish') { const r = await A.adminPublish(); toast(r.published ? 'Đã đăng revoked-v2.json ✓ (trang web cập nhật sau 1–2 phút)' : r.savedTo ? 'Đã lưu ' + r.savedTo : 'Chưa đăng'); }
     if (t.dataset.copycode) { await A.copyText(t.dataset.copycode); toast('Đã chép mã kích hoạt ✓'); }
     if (t.dataset.revoke) await doRevoke(t.dataset.revoke, t.dataset.name);
   } catch (err) { toast(cleanErr(err.message), true); }
@@ -2437,7 +2446,7 @@ $('[data-spane="security"]').addEventListener('click', async (e) => {
 async function doRevoke(id, name) {
   if (!(await modalAsk({ icon: '⛔', title: 'Thu hồi mã kích hoạt?', message: `Thu hồi mã ${id}${name ? ' của ' + name : ''}. Máy đó sẽ không mở được AIVN sau lần kiểm tra tiếp theo. Không hoàn tác được (muốn cho dùng lại thì cấp mã mới).`, okLabel: 'Thu hồi', noLabel: 'Huỷ' }))) return;
   const r = await A.adminRevoke(id);
-  toast(r.published ? 'Đã thu hồi và đăng revoked.json ✓' : r.savedTo ? 'Đã thu hồi, lưu revoked.json tại ' + r.savedTo + '. Hãy tải lên gh-pages.' : 'Đã thu hồi trên máy này nhưng CHƯA đăng.', !r.published && !r.savedTo);
+  toast(r.published ? 'Đã thu hồi và đăng revoked-v2.json ✓' : r.savedTo ? 'Đã thu hồi, lưu revoked-v2.json tại ' + r.savedTo + '. Hãy tải lên gh-pages.' : 'Đã thu hồi trên máy này nhưng CHƯA đăng.', !r.published && !r.savedTo);
   paintAdmin(r.state);
 }
 $('[data-spane="security"]').addEventListener('submit', async (e) => {
@@ -2695,8 +2704,8 @@ $('#setKeys').addEventListener('click', openKeys);
 // B189: thanh chỉ hiện khi lượt chuyển CHƯA xong. Sự kiện tiến độ đến muộn (sau lời invoke hoặc sau finished) không được bật lại — nếu không, hàng “Đang chuyển” kẹt mãi dù tệp đã chuyển xong.
 let mdirJob = null, mdirGen = 0;
 const MDIR_STALL_MSG = 'Chuyển thư mục mô hình bị dừng vì quá lâu không thấy tiến triển. Mô hình vẫn nằm ở thư mục cũ, không mất tệp. Hãy bấm Thử lại.';
-function mdirClearErr() { const e = $('#mdirErr'); if (!e) return; e.hidden = true; const t = $('#mdirErrTxt'); if (t) t.textContent = ''; }
-function mdirShowErr(msg) { $('#mdirProg').hidden = true; const e = $('#mdirErr'); if (!e) return; e.hidden = false; $('#mdirErrTxt').textContent = msg || MDIR_STALL_MSG; }
+function mdirClearErr() { const e = $('#mdirErr'); if (!e) return; e.hidden = true; delete e.dataset.code; const t = $('#mdirErrTxt'); if (t) t.textContent = ''; }
+function mdirShowErr(msg, code) { $('#mdirProg').hidden = true; const e = $('#mdirErr'); if (!e) return; e.hidden = false; if (code) e.dataset.code = code; else delete e.dataset.code; $('#mdirErrTxt').textContent = msg || MDIR_STALL_MSG; }
 function mdirArmStall() {
   if (!mdirJob || !mdirJob.moving) return; clearTimeout(mdirJob.timer); const gen = mdirJob.gen;
   mdirJob.timer = setTimeout(() => {
@@ -2737,7 +2746,7 @@ async function mdirRun(dir, mode) {
   if (mdirJob.reported) { await mdirRefresh(); refreshModels(); return x; }
   if (!x || !x.ok) {
     if (x && x.code === 'ABORT') toast('Đã huỷ chuyển mô hình.');
-    else { const msg = (x && x.code === 'ESTALL') ? MDIR_STALL_MSG : ((x && x.error) || 'Không đổi được thư mục mô hình'); mdirJob.reported = true; mdirShowErr(msg); toast(msg, true); }
+    else { const msg = (x && x.code === 'ESTALL') ? MDIR_STALL_MSG : ((x && x.error) || 'Không đổi được thư mục mô hình'); mdirJob.reported = true; mdirShowErr(msg, x && x.code); toast(msg, true); }
     await mdirRefresh(); refreshModels(); return x;
   }
   mdirJob = null;
@@ -2749,7 +2758,7 @@ A.onModelsDirProgress((p) => {
   if (!p || p.finished) {
     const err = p && p.error, code = p && p.code;
     mdirJob.moving = false; clearTimeout(mdirJob.timer); $('#mdirProg').hidden = true;
-    if (err && code !== 'ABORT' && !mdirJob.reported) { mdirJob.reported = true; const msg = code === 'ESTALL' ? MDIR_STALL_MSG : err; mdirShowErr(msg); toast(msg, true); }
+    if (err && code !== 'ABORT' && !mdirJob.reported) { mdirJob.reported = true; const msg = code === 'ESTALL' ? MDIR_STALL_MSG : err; mdirShowErr(msg, code); toast(msg, true); }
     return;
   }
   mdirArmStall();

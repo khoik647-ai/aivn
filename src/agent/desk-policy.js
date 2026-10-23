@@ -10,6 +10,8 @@ function riskOf(action, { el, query, text, keys, lastAction } = {}) {
   if (action === 'hotkey') {
     const k = String(keys || '').toLowerCase().replace(/\s+/g, '');
     if (/(^|\+)(enter|return)$/.test(k) && lastAction && lastAction.action === 'type_text') return 'bấm Enter ngay sau khi gõ chữ có thể GỬI tin nhắn hoặc NỘP biểu mẫu';
+    // B219: sau screen_look, Enter / Ctrl+Enter / Alt+S vẫn có thể gửi bản nháp đang nằm sẵn trong ô (chưa gõ ở lượt này)
+    if (lastAction && lastAction.action === 'screen_look' && (/^(?:(?:control|ctrl|cmd|command|meta)\+(?:enter|return)|alt\+s)$/.test(k) || /(^|\+)(enter|return)$/.test(k))) return 'phím Enter, Ctrl+Enter hoặc Alt+S sau khi nhìn màn hình có thể GỬI bản nháp đang có sẵn';
     if (/(^|\+)(delete|del)$/.test(k) || /shift\+(delete|del)/.test(k)) return 'phím Delete có thể xoá dữ liệu';
   }
   if (action === 'type_text' && /\n/.test(String(text || ''))) return 'chữ có xuống dòng (Enter) có thể gửi tin nhắn';
