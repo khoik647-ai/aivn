@@ -110,8 +110,11 @@ test('một đường tải duy nhất: không còn khối beta riêng; nút đ�
   assert.ok(!/data-dl-direct|function directUrl/.test(html), 'nút đầu trang vẫn tải thẳng tệp');
   assert.strictEqual((html.match(/maxTouchPoints/g) || []).length, 1, 'chỉ một bộ nhận diện máy');
   assert.ok(html.includes('NGUYỄN NGỌC KHÔI SINH VIÊN VLU'));
-  const gk = html.match(/<details class="dl-gk" data-i18n="dl\.20">([\s\S]*?)<\/details>/)[1];
-  assert.strictEqual((gk.match(/<li>/g) || []).length, 4); assert.match(gk, /Vẫn mở/); assert.match(D.en['dl.20'], /Open Anyway/);
+  const gk = html.match(/<details class="dl-gk[^"]*" open data-i18n="dl\.20">([\s\S]*?)<\/details>/)[1];
+  assert.strictEqual((gk.match(/<li>/g) || []).length, 3, 'phần ghi chú dưới hai thẻ chỉ giữ việc thẻ chưa nói');
+  assert.match(gk, /Ứng dụng/); assert.match(gk, /<b>Xong<\/b>/); assert.match(gk, /xattr -dr com\.apple\.quarantine/);
+  assert.ok(!/Vẫn mở/.test(gk), 'bước Vẫn mở đã nằm trên thẻ, không lặp trong danh sách');
+  assert.match(html, /data-i18n="gk\.9">Vẫn mở/); assert.match(D.en['dl.20'], /<b>Done<\/b>/); assert.match(D.en['gk.9'], /Open Anyway/);
 });
 
 test('Linux / máy tính không rõ hệ điều hành: nút chính không bao giờ là .exe mà trỏ trang Releases, có ghi chú “chưa có bản Linux”, giữ link nhỏ Windows/Mac, không còn link Linux chết href="#"', async () => {

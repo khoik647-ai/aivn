@@ -121,9 +121,11 @@ JS = r'''() => {
   beta:vis(row.querySelector('.dl-beta')), failLink:[...row.querySelectorAll('.dl-s-fail a')].filter(vis).map(a=>a.getAttribute('href')),
   intelq:vis(row.querySelector('.o-intelq')), lnx:vis(row.querySelector('.dl-lnx')), hint:vis(row.querySelector('.dl-hint')), gkLink:vis(row.querySelector('.dl-gklink')),
   other:[...row.querySelectorAll('.dl-other a')].filter(vis).map(a=>a.dataset.k+' '+a.getAttribute('href')),
+  otherLine:vis(document.getElementById('tai-ve-khac')),
+  srcOther:[...document.querySelectorAll('#tai-ve-khac a[data-k]')].map(a=>a.dataset.k+' '+a.getAttribute('href')),
   shareVis:vis(share), shareH:vis(share)?H(share):null, mobnote:vis(row.querySelector('.dl-mobnote')),
   ctrls, binVis, ctaHrefs:[...document.querySelectorAll('.cta .dl-row a[href]')].map(a=>a.getAttribute('href')),
-  gk:!!gk, gkSteps:gk?gk.querySelectorAll('li').length:0, gkText:gk?gk.textContent:'', gkSummaryH:gk&&vis(gk.querySelector('summary'))?H(gk.querySelector('summary')):null,
+  gk:!!gk, gkSteps:gk?gk.querySelectorAll('li').length:0, gkText:gk?gk.textContent:'', secText:(document.getElementById('mo-tren-mac')||{}).textContent||'', gkSummaryH:gk&&vis(gk.querySelector('summary'))?H(gk.querySelector('summary')):null,
   hdrHref:hdr?hdr.getAttribute('href'):null, raw:/__MB_|__SHA|__VER/.test(document.body.innerText)||[...document.querySelectorAll('[title]')].some(e=>/__MB_/.test(e.title)),
   stableWin:[...document.querySelectorAll('.dl-row .dl-btn[data-os=windows]')].filter(vis).map(a=>a.getAttribute('href')),
   stableMac:[...document.querySelectorAll('.cta .dl-btn[data-os=mac]')].filter(vis).length,
@@ -133,6 +135,7 @@ JS = r'''() => {
   osPicks:[...document.querySelectorAll('a.os-pick')].map(a=>{const k=a.getAttribute('data-k');const src=document.querySelector('#tai-ve .dl-other a[data-k="'+k+'"]');return {k:k,href:a.getAttribute('href'),resolved:a.getAttribute('data-resolved')||'',src:src?src.getAttribute('href'):'',vis:vis(a)};}),
   gkShown:vis(document.getElementById('mo-tren-mac')), gkGuide:vis(document.getElementById('gk-guide')),
   linuxSoon:[...document.querySelectorAll('.os-row [data-os=linux], .cta [data-os=linux]')].filter(vis).length,
+  linuxSoonStyle:[...document.querySelectorAll('.os-row [data-os=linux].soon, .cta [data-os=linux].soon')].map(el=>{const s=getComputedStyle(el);return {op:s.opacity,cur:s.cursor,dis:el.getAttribute('aria-disabled')};}),
   creditCount:(foot.match(/NGUYỄN NGỌC KHÔI SINH VIÊN VLU/g)||[]).length, footPhone:(foot.match(/(Điện thoại|Phone|电话)[:：]?\s*[^\n]*/)||[''])[0],
   footSub:((document.querySelector('[data-i18n="footer.sub"]')||{}).innerText||'').trim(),
   heroText:(()=>{const a=document.querySelector('.beta-hero a');return a?a.innerText:'';})()};
@@ -444,7 +447,11 @@ for r in res:
     if r['hdrHref'] != '#tai-ve' or r.get('hdrScroll') is False: bad.append(f'{k}: nút đầu trang phải là neo #tai-ve ({r["hdrHref"]}, cuộn={r.get("hdrScroll")})')
     small = [c for c in r['ctrls'] if c['h'] < 24]
     if small: bad.append(f'{k}: nút/link trong khối tải thấp hơn 24 px: {small}')
-    if not r['gk'] or r['gkSteps'] != 4 or not re.search(r'Vẫn mở|Open Anyway|仍要打开', r['gkText']): bad.append(f'{k}: thiếu hướng dẫn mở lần đầu trên Mac (Gatekeeper, 4 bước): {r["gk"]} {r["gkSteps"]}')
+    if r.get('otherLine'): bad.append(f'{k}: dòng “Các bản khác” vẫn hiện dưới nút chính')
+    soon = r.get('linuxSoonStyle') or []
+    if len(soon) != 2 or any(s.get('op') != '0.55' or s.get('cur') != 'not-allowed' or s.get('dis') != 'true' for s in soon):
+        bad.append(f'{k}: nút Linux “sắp ra mắt” (hero và CTA) phải opacity 0.55, cursor not-allowed, aria-disabled: {soon}')
+    if not r['gk'] or r['gkSteps'] != 3 or not re.search(r'Vẫn mở|Open Anyway|仍要打开', r.get('secText') or '') or not re.search(r'xattr', r['gkText'] or ''): bad.append(f'{k}: thiếu hướng dẫn mở lần đầu trên Mac (hai thẻ + ghi chú, không lặp bước): {r["gk"]} {r["gkSteps"]}')
     if r['state'] != ('fail' if fail else 'ok'): bad.append(f'{k}: trạng thái {r["state"]}, cần {"fail" if fail else "ok"}')
     bad.extend(pill_problem(k, r))
     if bool(r.get('badgePre')) != bool(r['beta']): bad.append(f'{k}: nhãn Beta trên huy hiệu ({r.get("badgePre")}) khác nút ({r["beta"]})')
@@ -472,21 +479,20 @@ for r in res:
             if fail:
                 if not re.search(STATIC['x64'], r['mainHref']): bad.append(f'{k}: API lỗi mà nút chính không giữ link tĩnh AIVN-mac-x64.zip: {r["mainHref"]}')
             elif not r['mainHref'].endswith('/v0.16.0-beta.3/AIVN-0.16.0-beta.3-x64-mac.zip') or not r['beta']: bad.append(f'{k}: Mac Intel: nút chính {r["mainHref"]} beta={r["beta"]}')
-            if r['intelq']: bad.append(f'{k}: Mac Intel đã biết chip mà vẫn hỏi “Mac dùng chip Intel?”')
-            if not fail and not any(o.startswith('arm64 ') and o.endswith('/v0.16.0-beta.3/AIVN-0.16.0-beta.3-arm64-mac.zip') for o in r['other']): bad.append(f'{k}: Mac Intel: thiếu link Apple Silicon {r["other"]}')
+            if not fail and not any(o.startswith('arm64 ') and o.endswith('/v0.16.0-beta.3/AIVN-0.16.0-beta.3-arm64-mac.zip') for o in r['srcOther']): bad.append(f'{k}: Mac Intel: thiếu nguồn Apple Silicon trong #tai-ve {r["srcOther"]}')
         else:
             if fail:
                 if not re.search(STATIC['mac'], r['mainHref']): bad.append(f'{k}: API lỗi mà nút chính không giữ link tĩnh AIVN-mac-arm64.zip: {r["mainHref"]}')
             elif not r['mainHref'].endswith('/v0.16.0-beta.3/' + WANT['arm64']) or not r['beta']: bad.append(f'{k}: Mac: nút chính {r["mainHref"]} beta={r["beta"]} (không biết chip → Apple Silicon)')
-            if (kind == 'mac') != r['intelq']: bad.append(f'{k}: link “Mac dùng chip Intel?” {"thiếu" if kind == "mac" else "thừa"}')
-            if not fail and not any(o.startswith('x64 ') and o.endswith('/v0.16.0-beta.3/AIVN-0.16.0-beta.3-x64-mac.zip') for o in r['other']): bad.append(f'{k}: Mac: thiếu link bản Intel đúng release {r["other"]}')
-        if not r['gkLink'] or r.get('gkOpen') != 4 or (r.get('gkSummaryH') or 0) < 44: bad.append(f'{k}: Mac: hướng dẫn Gatekeeper không mở được từ khối tải: {r["gkLink"]} {r.get("gkOpen")} {r.get("gkSummaryH")}')
+            if not fail and not any(o.startswith('x64 ') and o.endswith('/v0.16.0-beta.3/AIVN-0.16.0-beta.3-x64-mac.zip') for o in r['srcOther']): bad.append(f'{k}: Mac: thiếu nguồn bản Intel trong #tai-ve {r["srcOther"]}')
+        if r['intelq']: bad.append(f'{k}: link “Mac dùng chip Intel?” vẫn hiện (hàng nút đã có cả hai chip)')
+        if not r['gkLink'] or r.get('gkOpen') != 3 or (r.get('gkSummaryH') or 0) < 44: bad.append(f'{k}: Mac: hướng dẫn Gatekeeper không mở được từ khối tải: {r["gkLink"]} {r.get("gkOpen")} {r.get("gkSummaryH")}')
     elif kind == 'linux':
         if re.search(r'\.(exe|zip)$', r['mainHref']): bad.append(f'{k}: {kind} vẫn được mời tải .exe: {r["mainHref"]}')  # B174
         # M2/QA2: Linux không bao giờ được mời tải .exe; nút chính → trang Releases, có ghi chú “chưa có bản Linux”, vẫn giữ link nhỏ Windows/Mac
         if r['mainHref'] != 'https://github.com/khoik647-ai/aivn/releases' or not r['lnx']: bad.append(f'{k}: Linux: nút chính phải trỏ trang Releases và hiện ghi chú chưa có bản Linux: {r["mainHref"]} lnx={r["lnx"]}')
         if not re.search(r'Xem các bản AIVN trên GitHub|See AIVN releases on GitHub|在 GitHub 查看 AIVN 各版本', r['mainText']): bad.append(f'{k}: Linux: nhãn nút chính “{r["mainText"]}”')
-        if sorted(o.split(' ')[0] for o in r['other']) != ['arm64', 'win', 'x64']: bad.append(f'{k}: Linux: thiếu link nhỏ Windows/Mac {r["other"]}')
+        if sorted({o.split(' ')[0] for o in r.get('srcOther') or []}) != ['arm64', 'win', 'x64']: bad.append(f'{k}: Linux: thiếu nguồn Windows/Mac trong #tai-ve {r.get("srcOther")}')
         if r['gkLink'] or r['intelq']: bad.append(f'{k}: Linux mà hiện phần Mac')
 bad.extend(bad_band)
 bad.extend(bad_narrow)
