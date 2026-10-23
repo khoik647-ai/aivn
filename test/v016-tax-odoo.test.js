@@ -155,8 +155,15 @@ test(`Dữ liệu cũ (${LEGACY_TAG}, một mức thuế): mở bằng bản m�
   const pick = (r) => ({ rows: r.rows.map(x => [x.key, x.orders, x.qty, x.untaxed, x.total]), totals: r.totals });
   ['month', 'customer', 'product'].forEach((g, i) => assert.deepStrictEqual(pick(biz2.salesReport({ groupBy: g })), pick(rep0.sales[i]), 'báo cáo bán hàng theo ' + g));
   const ir = biz2.invoiceReport({});
-  assert.deepStrictEqual(ir.totals, rep0.inv.totals, 'phân tích hoá đơn'); assert.deepStrictEqual(ir.byMonth, rep0.inv.byMonth);
-  assert.deepStrictEqual(ir.agedTotals, rep0.inv.agedTotals, 'công nợ phải thu theo tuổi nợ'); assert.deepStrictEqual(ir.aged.map(a => ({ ...a })), rep0.inv.aged.map(a => ({ ...a })));
+  // #51: báo cáo mới thêm “Đã hoàn tiền” (refunded) và trừ giấy báo có khách hàng chưa đối trừ vào phải thu (như Odoo) —
+  // mẫu i=4 (hoá đơn đã thu 1.000 rồi báo có toàn bộ) còn nợ lại khách 1.000; mọi số khác giữ nguyên như bản cũ
+  const cn = db2.all("SELECT amount_total - amount_paid AS r FROM invoices WHERE kind = 'out_refund' AND state = 'posted'").reduce((a, x) => a + Math.max(0, x.r), 0);
+  assert.strictEqual(cn, 1000, 'báo có của mẫu i=4 còn 1.000 phải hoàn cho khách');
+  assert.deepStrictEqual(ir.totals, { ...rep0.inv.totals, refunded: 0 }, 'phân tích hoá đơn'); assert.deepStrictEqual(ir.byMonth, rep0.inv.byMonth);
+  const AB = ['current', 'd30', 'd60', 'd90', 'older']; const at = ir.agedTotals; const ot = rep0.inv.agedTotals;
+  assert.strictEqual(at.credit, cn); assert.strictEqual(at.total, ot.total - cn, 'công nợ phải thu theo tuổi nợ = cũ − báo có chưa đối trừ');
+  assert.strictEqual(AB.filter(k => at[k] !== ot[k]).length, 1, 'chỉ một nhóm tuổi nợ đổi'); assert.strictEqual(AB.reduce((s, k) => s + ot[k] - at[k], 0), cn);
+  assert.deepStrictEqual(ir.aged.map(a => [a.partner_id, a.total + a.credit]), rep0.inv.aged.map(a => [a.partner_id, a.total]), 'từng khách: cũ = mới + báo có');
   db2.close();
   // chứng từ mới tạo trên dữ liệu đã nâng cấp: theo dòng (Odoo)
   const db3 = await openDb(file); const crm3 = createCrm({ db: db3 }); const biz3 = createBiz({ db: db3, crm: crm3, today: () => DAY });
