@@ -14,7 +14,7 @@ const NOTE = {
 test('B186: CSS hàng nút ổn định bám lớp is-mobile sẵn có', () => {
   assert.match(html, /html\.is-mobile \.dl-mnote\{display:block\}/);
   assert.match(html, /html\.is-mobile \.dl-row>\.dl-btn,html\.is-mobile \.dl-row>\.mac-wrap\{display:none\}/);
-  assert.strictEqual((html.match(/maxTouchPoints/g) || []).length, 2, 'thêm một bộ nhận hệ điều hành nữa');
+  assert.strictEqual((html.match(/maxTouchPoints/g) || []).length, 1, 'thêm một bộ nhận hệ điều hành nữa (khối beta riêng đã gỡ: chỉ còn một bộ nhận)');
   const D = JSON.parse(html.split('/*I18N*/')[1].split('/*END*/')[0]);
   assert.strictEqual(D.en['dl.1'], NOTE.en); assert.strictEqual(D.en['cta.6'], NOTE.en);
   assert.strictEqual(D.zh['dl.1'], NOTE.zh); assert.strictEqual(D.zh['cta.6'], NOTE.zh);
@@ -52,27 +52,29 @@ test('B186: Playwright iPhone 13, iPad, iPadOS, Pixel, máy Windows và Mac', { 
       for (const lang of ['vi', 'en', 'zh']) {
         await page.goto(base + '?lang=' + lang, { waitUntil: 'load' });
         const cls = await page.evaluate(() => document.documentElement.className);
+        const dlos = await page.getAttribute('#tai-ve', 'data-os'); // khối “Tải AIVN bản mới nhất” dùng chung bộ nhận diện máy
         const notes = page.locator('.dl-mnote');
         assert.strictEqual(await notes.count(), 2, name);
-        const wins = page.locator('.dl-row .dl-btn[data-os=windows]');
+        const wins = page.locator('.dl-row .dl-btn[data-os=windows]'); // đầu trang chỉ còn một nút tải: hàng nút theo hệ điều hành chỉ còn ở cuối trang
         const macs = page.locator('.dl-row > .mac-wrap');
         if (kind === 'win' || kind === 'mac') {
-          assert.match(cls, kind === 'win' ? /beta-os-win/ : /beta-os-mac/, name + ' ' + cls);
+          assert.strictEqual(dlos, kind, name + ' ' + cls);
           assert.ok(!cls.includes('is-mobile'), name + ' ' + cls);
-          for (let i = 0; i < 2; i++) {
-            assert.strictEqual(await notes.nth(i).isVisible(), false, name + ' ' + lang);
-            assert.strictEqual(await wins.nth(i).isVisible(), true, name);
-            assert.strictEqual(await macs.nth(i).isVisible(), true, name);
-          }
+          for (let i = 0; i < 2; i++) assert.strictEqual(await notes.nth(i).isVisible(), false, name + ' ' + lang);
+          assert.strictEqual(await wins.count(), 1, name); assert.strictEqual(await macs.count(), 1, name);
+          assert.strictEqual(await wins.nth(0).isVisible(), true, name);
+          assert.strictEqual(await macs.nth(0).isVisible(), true, name);
         } else {
           assert.match(cls, /is-mobile/, name + ' ' + cls);
-          assert.match(cls, kind === 'ios' ? /beta-os-ios/ : /beta-os-android/, name + ' ' + cls);
+          assert.strictEqual(dlos, 'mobile', name + ' ' + cls);
+          assert.strictEqual(await page.locator('#tai-ve a.dl-main').isVisible(), false, name + ': điện thoại thấy nút tải tệp');
+          assert.strictEqual(await page.locator('#tai-ve .dl-share').isVisible(), true, name + ': thiếu nút gửi link về máy tính');
           for (let i = 0; i < 2; i++) {
             assert.strictEqual(await notes.nth(i).isVisible(), true, name + ' ' + lang);
             assert.strictEqual(await notes.nth(i).innerText(), NOTE[lang], name + ' ' + lang);
-            assert.strictEqual(await wins.nth(i).isVisible(), false, name);
-            assert.strictEqual(await macs.nth(i).isVisible(), false, name);
           }
+          assert.strictEqual(await wins.nth(0).isVisible(), false, name);
+          assert.strictEqual(await macs.nth(0).isVisible(), false, name);
           const tapped = await page.evaluate(() => {
             const el = document.querySelector('.dl-mnote'); const r = el.getBoundingClientRect();
             const hit = document.elementFromPoint(r.left + 8, r.top + Math.min(8, r.height / 2));
@@ -85,12 +87,12 @@ test('B186: Playwright iPhone 13, iPad, iPadOS, Pixel, máy Windows và Mac', { 
       }
       if (kind === 'mac') {
         await page.goto(base + '?lang=en', { waitUntil: 'load' });
-        await page.locator('#tai-ve .mac-toggle').click();
-        const zips = page.locator('#tai-ve .mac-menu a[download]');
+        await page.locator('.cta .mac-toggle').click();
+        const zips = page.locator('.cta .mac-menu a[download]');
         assert.strictEqual(await zips.count(), 2, name);
         for (let i = 0; i < 2; i++) {
           assert.strictEqual(await zips.nth(i).isVisible(), true, name);
-          assert.match(await zips.nth(i).getAttribute('href'), /AIVN-mac-(arm64|x64)\.zip$/, name);
+          assert.match(await zips.nth(i).getAttribute('href'), /\/AIVN-(mac-(arm64|x64)|[0-9][^/]*-(arm64|x64)-mac)\.zip$/, name);
         }
       }
       await context.close();
