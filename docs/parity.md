@@ -58,7 +58,7 @@ Phần mô tả bố cục là quan sát cấu trúc giao diện công khai, kh�
 | Danh sách mô hình đang nạp với định danh API. **Nhật ký máy chủ trực tiếp** (mức chi tiết, xoá, tìm). Ví dụ curl/Python/JS theo endpoint. | Ví dụ tĩnh. | **Nhật ký trực tiếp** (yêu cầu/đáp, thời gian, token, lỗi) có lọc và tìm. Ví dụ cụ thể curl / Python (openai) / JS điền sẵn tên mô hình đang nạp, kèm nút "Chạy thử" gửi một yêu cầu thật và hiện kết quả. |
 
 **0.16 đã làm:** CORS (mặc định **tắt**, trước đây luôn `*`), phục vụ mạng LAN (hộp xác nhận, hiện địa chỉ IP, **bắt buộc khoá API**), khoá API (`Authorization: Bearer` hoặc `x-api-key`, so sánh thời gian hằng, tạo/hiện & sao chép/xoá; không xoá được khi LAN đang mở; không trả về giao diện qua cài đặt), TTL tự gỡ (5/15/60/240 phút, chỉ gỡ mô hình do API tự nạp, không gỡ khi đang trả lời), danh sách mô hình đang nạp có nút gỡ, ví dụ curl tự thêm dòng khoá. Mô hình của tôi: bảng sắp xếp/lọc (tên, lượng tử, dung lượng, độ vừa máy, tốc độ đo thật, lần dùng cuối). Khám phá: ★ Khuyên dùng = bản lượng tử chất lượng cao nhất (≥ Q4) còn nằm trọn VRAM; máy chỉ có CPU giữ Q4_K_M.
-Còn thiếu: nhật ký mức chi tiết/tìm, số yêu cầu song song, ví dụ Python/JS.
+Còn thiếu: nhật ký mức chi tiết/tìm, số yêu cầu song song, ví dụ Python/JS. Tên mô hình dạng đường dẫn (`C:\models\foo.gguf`, `/models/foo.gguf`) không khớp tệp trên đĩa; nếu đã nạp một mô hình thì yêu cầu dùng mô hình đó và trả 200.
 
 ## 5. Hiệu năng & cảm giác mượt
 

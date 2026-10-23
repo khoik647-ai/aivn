@@ -674,9 +674,12 @@ async function ensureModel(requested, { api = false, signal = null } = {}) {
   if (stopped()) return;
   const st = engine.status();
   if (requested) {
-    const { resolveModel } = require('./model-ref');
-    if (st.loaded && resolveModel([{ id: st.id }], requested)) return;
+    const { resolveModel, sameModel } = require('./model-ref');
+    // Khớp danh sách trên đĩa trước. Id đang nạp dài hơn (…-abliterated) cũng là tiền tố của id đúng
+    // trên đĩa; trả sớm ở bước đó thì chat và messages 409 mãi, không bao giờ nạp đúng mô hình.
     const m = resolveModel(listModels(), requested);
+    if (st.loaded && m && sameModel(st.id, m.id)) return;
+    if (!m && st.loaded && resolveModel([{ id: st.id }], requested)) return;
     if (m) {
       if (stopped()) return;
       // loadById không huỷ được. Ghi nhận lần nạp do API bắt đầu và số người đang giữ, rồi xét gỡ SAU khi nạp xong.

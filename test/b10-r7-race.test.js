@@ -16,11 +16,16 @@ test('R2 API A aborts while waiting on UI B: returns promptly, no A load', async
   console.log('R2', r, W.ev.join('|'));
   assert.notStrictEqual(r, 'HANG'); assert.ok(!W.ev.includes('load-start a')); assert.strictEqual(W.loaded, 'b');
 });
-test('R3 A loaded, UI picks B, API asks A in pre-phase: does it wait? (info)', async () => {
+test('R3 A loaded, UI picks B, API asks A in pre-phase: returns at once on A, UI B still finishes', async () => {
   const W = world(); await W.ui('a'); const ac = new AbortController();
   const ui = W.ui('b'); await sleep(5); let t0 = Date.now();
   const r = await W.api('a', ac); const dt = Date.now() - t0; const loadedAtReturn = W.loaded; await ui;
   console.log('R3', r, 'returned after', dt, 'ms, loaded at return', loadedAtReturn, 'final', W.loaded);
+  assert.strictEqual(r, 'ok');
+  assert.ok(dt < 150, 'already-loaded A must not wait out the UI load, took ' + dt + 'ms');
+  assert.strictEqual(loadedAtReturn, 'a');
+  assert.strictEqual(W.loaded, 'b');
+  assert.deepStrictEqual(W.opts.map((o) => o.id), ['a', 'b']);
 });
 test('R4 UI B,C,B,C,B fast + API B joins: final B, single inflight cleanup, not JIT', async () => {
   const W = world(); const ac = new AbortController(); const ps = [];

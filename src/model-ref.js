@@ -1,6 +1,7 @@
 'use strict';
 // Khớp tên mô hình do client gửi. Không dùng includes(): "3b" không được trúng "qwen2.5-3b-…".
-// Thứ tự: đúng id, đúng tên tệp bỏ .gguf, rồi tiền tố duy nhất cắt ở dấu - _ hoặc .
+// Thứ tự: đúng id, đúng một tên tệp bỏ .gguf, rồi tiền tố duy nhất cắt ở dấu - _ hoặc .
+// Hai tệp cùng tên gốc, hoặc hai id cùng một tiền tố: không khớp.
 
 function normId(id) {
   return String(id || '').toLowerCase().replace(/\.gguf$/i, '');
@@ -24,8 +25,9 @@ function resolveModel(list, requested) {
   const rows = list.filter(Boolean);
   const exact = rows.find((m) => normId(m.id) === req);
   if (exact) return exact;
-  const base = rows.find((m) => basenameOf(m) === req && normId(m.id) !== req);
-  if (base) return base;
+  const bases = rows.filter((m) => basenameOf(m) === req && normId(m.id) !== req);
+  if (bases.length > 1) return null;
+  if (bases.length === 1) return bases[0];
   const prefixed = rows.filter((m) => isPrefix(normId(m.id), req));
   if (prefixed.length === 1) return prefixed[0];
   return null;
