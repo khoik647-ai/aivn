@@ -250,7 +250,10 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
   const headers = cors();
   const fail = (status, type, message) => { if (status !== 401) log(`  → ${status} ${String(message).slice(0, 200)}`); return anthropicError(res, status, type, message, headers); };
   let body;
-  try { body = JSON.parse(await readBody(req) || '{}'); } catch { return fail(400, 'invalid_request_error', 'JSON không hợp lệ'); }
+  try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) {
+    if (e && e.status === 413) return fail(413, 'invalid_request_error', 'Body quá lớn');
+    return fail(400, 'invalid_request_error', 'JSON không hợp lệ');
+  }
   let translated;
   try { translated = translateRequest(body); } catch (e) { return fail(e.status || 400, e.type || 'invalid_request_error', e.message); }
   const ac = new AbortController();
@@ -272,6 +275,7 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
   if (!translated.stream) {
     try {
       const r = await runEngine(engine, translated, ac.signal);
+      if (ac.signal.aborted || clientGone(req, res)) { log('client disconnected'); return; }
       const cut = cutStop(r.text || '', translated.stops);
       const toolCalls = cut.stopSequence ? [] : (r.toolCalls || []);
       const stopReason = stopReasonOf(r.finishReason, cut.stopSequence, toolCalls);
@@ -281,13 +285,15 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
       res.end(JSON.stringify(msg));
     } catch (e) {
-      if (ac.signal.aborted) return;
+      if (ac.signal.aborted || clientGone(req, res)) { log('client disconnected'); return; }
       return fail(500, 'api_error', e.message);
     }
     return;
   }
 
-  res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', ...headers });
+  const streamHeaders = { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', ...headers };
+  if (!req.httpVersion || req.httpVersion !== '1.0') streamHeaders.Connection = 'keep-alive';
+  res.writeHead(200, streamHeaders);
   sse(res, 'message_start', { type: 'message_start', message: { id, type: 'message', role: 'assistant', content: [], model, stop_reason: null, stop_sequence: null, usage: withCache({ input_tokens: inputTokens, output_tokens: 0 }) } });
   let acc = ''; let emitted = 0; let stopSequence = null; let textOpen = false; let pinged = false; let fromTokens = false;
   const openText = () => {
@@ -317,6 +323,7 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
   try {
     r = await runEngine(engine, translated, ac.signal, (t) => { if (stopSequence) return; fromTokens = true; consume(t); });
   } catch (e) {
+    if (ac.signal.aborted && !stopSequence) { log('client disconnected'); try { if (!res.writableEnded) res.end(); } catch {} return; }
     if (!(ac.signal.aborted && stopSequence)) {
       if (!ac.signal.aborted && !res.writableEnded) sse(res, 'error', { type: 'error', error: { type: 'api_error', message: e.message } });
       try { if (!res.writableEnded) res.end(); } catch {}
@@ -325,6 +332,7 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
     r = { text: acc, toolCalls: [], finishReason: 'abort' };
   }
   try {
+    if ((ac.signal.aborted && !stopSequence) || clientGone(req, res)) { log('client disconnected'); try { if (!res.writableEnded) res.end(); } catch {} return; }
     if (!fromTokens && r && r.text) consume(r.text);
     if (!stopSequence && acc.length > emitted) emitDelta(acc.slice(emitted));
     const finalCut = stopSequence ? { text: acc, stopSequence } : cutStop((fromTokens ? acc : (r.text || acc)), translated.stops);

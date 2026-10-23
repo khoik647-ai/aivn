@@ -75,7 +75,7 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
       const reqId = 'g' + (++seq);
       if (onToken) tokenCbs.set(reqId, onToken);
       const onAbort = () => { try { child && child.send({ type: 'abort', reqId }); } catch {} };
-      signal?.addEventListener('abort', onAbort);
+      if (signal?.aborted) onAbort(); else signal?.addEventListener('abort', onAbort);
       try { return await call('generate', messages, opts, reqId); }
       finally { tokenCbs.delete(reqId); signal?.removeEventListener('abort', onAbort); }
     },

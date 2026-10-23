@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const http = require('http');
+const net = require('net');
 const path = require('path');
 const { createApiServer } = require('../src/server');
 const { createJitGuard } = require('../src/jit-load');
@@ -99,6 +100,7 @@ test('POST /v1/messages stream: đúng thứ tự sự kiện Anthropic', async 
     const r = await post(url, { model: 'aivn-local', max_tokens: 16, stream: true, messages: [{ role: 'user', content: 'Xin chào' }] });
     assert.strictEqual(r.status, 200);
     assert.match(r.headers.get('content-type'), /text\/event-stream/);
+    assert.strictEqual(r.headers.get('connection'), 'keep-alive');
     const ev = parseSse(await r.text());
     const names = ev.map((e) => e.event);
     const deltas = ev.filter((e) => e.event === 'content_block_delta');
@@ -168,8 +170,41 @@ test('khoá API: 401 dạng Anthropic; Bearer hoặc x-api-key thì 200', async 
   }, { apiKey: 'test-key' });
 });
 
+test('body lớn hơn 20MB trả 413, không phải 400', async () => {
+  await withServer(async ({ port }) => {
+    const status = await new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/v1/messages', headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' } }, (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode));
+      });
+      req.on('error', reject);
+      req.end(Buffer.alloc(20e6 + 1, 0x61));
+    });
+    assert.strictEqual(status, 413);
+  });
+});
+
+test('HTTP/1.0 stream không gắn Connection: keep-alive', async () => {
+  await withServer(async ({ port }) => {
+    const raw = await new Promise((resolve, reject) => {
+      const body = JSON.stringify({ model: 'm1', max_tokens: 8, stream: true, messages: [{ role: 'user', content: 'x' }] });
+      const s = net.connect(port, '127.0.0.1', () => {
+        s.write(`POST /v1/messages HTTP/1.0\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+      });
+      const chunks = [];
+      const t = setTimeout(() => { s.destroy(); resolve(Buffer.concat(chunks).toString('utf8')); }, 2000);
+      s.on('data', (d) => chunks.push(d));
+      s.on('end', () => { clearTimeout(t); resolve(Buffer.concat(chunks).toString('utf8')); });
+      s.on('error', (e) => { clearTimeout(t); reject(e); });
+    });
+    assert.match(raw, /^HTTP\/1\.[01] 200/);
+    assert.match(raw, /text\/event-stream/);
+    assert.doesNotMatch(raw, /keep-alive/i);
+  });
+});
+
 test('ngắt kết nối thì huỷ lượt sinh', async () => {
-  await withServer(async ({ port, disconnect }) => {
+  await withServer(async ({ port, disconnect, logs }) => {
     await new Promise((resolve, reject) => {
       const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/v1/messages', headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' } }, (res) => {
         res.on('data', () => req.destroy());
@@ -183,6 +218,9 @@ test('ngắt kết nối thì huỷ lượt sinh', async () => {
     });
     for (let i = 0; i < 30 && disconnect() == null; i++) await new Promise((r) => setTimeout(r, 20));
     assert.strictEqual(disconnect(), true);
+    for (let i = 0; i < 30 && !logs.some((l) => l.includes('client disconnected')); i++) await new Promise((r) => setTimeout(r, 20));
+    assert.ok(logs.some((l) => l.includes('client disconnected')));
+    assert.ok(!logs.some((l) => /200 message/.test(l) && /end_turn/.test(l)));
   }, { engineExtra: { hold: true } });
 });
 
@@ -398,6 +436,7 @@ test('ngắt khi giao diện đã chọn hoặc còn yêu cầu khác thì giữ
   assert.strictEqual(joined.shouldUnload('m1', { triggered: true, uiSelected: false, busy: true, status: loaded('m1') }), false);
   assert.strictEqual(joined.shouldUnload('m1', { triggered: true, uiSelected: false, busy: false, status: { loaded: true, loading: true, id: 'm1' } }), false);
   assert.strictEqual(joined.shouldUnload('m1', { triggered: true, uiSelected: false, busy: false, status: loaded('m-khac') }), false);
+  assert.strictEqual(joined.shouldUnload('m1', { triggered: true, uiSelected: false, busy: false, status: loaded('m1-extra') }), false);
 });
 
 test('đường không có và mô hình không có trả 404 kiểu Anthropic', async () => {

@@ -462,7 +462,7 @@ function noteLayers(id, st, kvUsed) {
   const u = settings.data.modelUsage || (settings.data.modelUsage = {}); const e = u[id] || (u[id] = { uses: 0 });
   e.layers = { ctx: st.contextSize || null, gpu: st.gpuLayers, total: st.totalLayers, device: st.device || null, kv: kvUsed || (st.loadParams && st.loadParams.kvCache) || null, at: Date.now() }; settings.save();
 }
-async function loadById(id, { force = false, ctx = null, reason = null, minCtx = null, load = null } = {}) {
+async function loadById(id, { force = false, ctx = null, reason = null, minCtx = null, load = null, api = false } = {}) {
   const m = listModels().find(x => x.id === id);
   if (!m) throw new Error(`Không tìm thấy mô hình "${id}"`);
   const ml = { ...modelLoadFor(id), ...cleanLoad(load) };
@@ -547,7 +547,8 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
     noteLayers(m.id, st, opts.kvCache);
     LOG.log('load', `Đã nạp ${m.file} sau ${Date.now() - tLoad} ms`, { mode: st.mode, ctx: st.contextSize, gpu: st.backend || st.gpu, runtime: st.vision ? (st.runtime || 'bundled') : 'node-llama-cpp', ...(st.vision && st.gpu && st.backend !== st.gpu ? { chatGpu: st.gpu } : {}), gpuLayers: st.gpuLayers, totalLayers: st.totalLayers, toolMode: st.toolMode, fallbackFrom: st.fallbackFrom });
     noteUsage(null, m.id);
-    settings.data.lastModel = m.id; settings.save(); lastUse = Date.now();
+    if (!api) { settings.data.lastModel = m.id; settings.save(); }
+    lastUse = Date.now();
     send('model:status', st);
     return st;
   } catch (e) { send('model:status', engine.status()); throw e; }
@@ -555,6 +556,10 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
 
 const { createJitGuard } = require('./jit-load');
 const jitGuard = createJitGuard();
+// Lần chọn mô hình trên giao diện (IPC models:load). Không dùng lastModel: nạp API không được ghi lastModel,
+// và giá trị cũ (ví dụ A trong khi máy đang nạp B) không được giữ mô hình JIT khi client ngắt.
+let uiPick = { id: null, seq: 0 };
+function noteUiPick(id) { uiPick = { id: id == null ? null : String(id), seq: uiPick.seq + 1 }; }
 async function ensureModel(requested, { api = false, signal = null } = {}) {
   const stopped = () => !!(signal && signal.aborted);
   if (stopped()) return;
@@ -565,25 +570,53 @@ async function ensureModel(requested, { api = false, signal = null } = {}) {
     const m = listModels().find(x => x.id === req) || listModels().find(x => x.id.includes(req));
     if (m) {
       if (stopped()) return;
-      // loadById không huỷ được. Chỉ gỡ khi chính yêu cầu này bắt đầu nạp và không còn ai khác dùng.
+      // loadById không huỷ được. Ghi nhận lần nạp do API bắt đầu và số người đang giữ, rồi xét gỡ SAU khi nạp xong.
       const triggered = !st.loading;
-      const uiSelected = settings.data.lastModel === m.id;
-      if (api) jitGuard.enter(m.id);
+      const pickSeq = uiPick.seq;
+      const prev = st.loaded && st.id && st.id !== m.id ? { id: st.id } : null;
+      // Giao diện đang nạp mô hình khác: chờ xong, không chen. Client ngắt trong lúc chờ thì không nạp đè.
+      if (api && st.loading && uiPick.id && uiPick.id !== m.id) {
+        while (engine.status().loading) {
+          if (stopped()) return;
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        if (stopped()) return;
+      }
+      if (api) jitGuard.enter(m.id, { triggered });
       try {
-        await loadById(m.id);
+        if (!api) await loadById(m.id);
+        else await loadById(m.id, { api: true });
         if (stopped()) {
           if (api) {
-            await Promise.resolve();
-            const drop = jitGuard.shouldUnload(m.id, { triggered, uiSelected, busy: busy > 0 || generations.size > 0, status: engine.status() });
+            await Promise.resolve(); // models:load kịp tăng uiPick nếu người dùng vừa chọn
+            const pickedDuring = uiPick.seq !== pickSeq;
+            const uiOwns = uiPick.id === m.id && (pickedDuring || !!st.loading);
+            jitGuard.noteAbort(m.id);
+            const gate = jitGuard.state(m.id);
+            const drop = jitGuard.shouldUnload(m.id, {
+              triggered: !!(gate && gate.apiStarted),
+              uiSelected: uiOwns,
+              uiActive: pickedDuring && !uiOwns,
+              busy: busy > 0 || generations.size > 0,
+              status: engine.status(),
+              allAborted: !!(gate && gate.apiStarted && !gate.survived && gate.aborted === gate.n),
+            });
             if (drop) {
               try { await engine.unloadModel(); } catch {}
               if (apiJit && apiJit.id === m.id) apiJit = null;
               try { send('model:status', engine.status()); } catch {}
+              if (prev) { try { await loadById(prev.id, { api: true }); } catch {} }
+            } else if (!pickedDuring && !uiOwns) {
+              const after = engine.status();
+              if (after.loaded && String(after.id) === String(m.id)) {
+                apiJit = { id: m.id, at: Date.now() };
+                log(`Nạp theo yêu cầu API (JIT): ${m.id}${settings.data.apiTtlMin > 0 ? ` · tự gỡ sau ${settings.data.apiTtlMin} phút không dùng` : ''}`);
+              }
             }
           }
           return;
         }
-      } finally { if (api) jitGuard.leave(m.id); }
+      } finally { if (api) jitGuard.leave(m.id, { aborted: stopped() }); }
       if (api) { apiJit = { id: m.id, at: Date.now() }; log(`Nạp theo yêu cầu API (JIT): ${m.id}${settings.data.apiTtlMin > 0 ? ` · tự gỡ sau ${settings.data.apiTtlMin} phút không dùng` : ''}`); }
       return;
     }
@@ -1262,7 +1295,7 @@ function registerIpc() {
     const fin = same ? { ...require('./gguf').estimate({ ...g, fileSize: m.size }, { ...o, gpu, vram, server, gpuLayers: real.gpu }), auto: true, measured: true } : est;
     return { ...fin, server: !!server, hw: { gpu: h.gpu || false, vram: vram || null, ram: h.ram || 0, freeRam: h.freeRam || 0, devices: h.devices || [], gpuName: device, unified: h.gpu === 'metal' } }; });
   ipcMain.handle('models:saveLoad', async (_e, id, o) => { settings.data.modelLoad = { ...(settings.data.modelLoad || {}) }; const c = cleanLoad(o); if (o === null || !Object.keys(c).length) delete settings.data.modelLoad[id]; else settings.data.modelLoad[id] = c; settings.save(); return modelLoadFor(id); });
-  ipcMain.handle('models:load', async (_e, id, o = {}) => { try { if (o && o.remember && o.load) { settings.data.modelLoad = { ...(settings.data.modelLoad || {}), [id]: cleanLoad(o.load) }; settings.save(); } return { ok: true, status: await loadById(id, { force: !!(o && o.force), load: o && o.load || null }) }; } catch (e) { return { ok: false, error: e.message, code: e.code || null, modelId: e.modelId || id, catalogId: e.catalogId || null }; } });
+  ipcMain.handle('models:load', async (_e, id, o = {}) => { noteUiPick(id); try { if (o && o.remember && o.load) { settings.data.modelLoad = { ...(settings.data.modelLoad || {}), [id]: cleanLoad(o.load) }; settings.save(); } return { ok: true, status: await loadById(id, { force: !!(o && o.force), load: o && o.load || null }) }; } catch (e) { return { ok: false, error: e.message, code: e.code || null, modelId: e.modelId || id, catalogId: e.catalogId || null }; } });
   ipcMain.handle('models:unload', async () => { await engine.unloadModel(); const st = engine.status(); send('model:status', st); return st; });
   ipcMain.handle('models:delete', async (_e, id) => {
     if (QA_PROFILE) throw new Error('Hồ sơ QA chỉ đọc thư mục mô hình dùng chung: không xoá mô hình.');
