@@ -177,10 +177,17 @@ done
 node -e 'const fs=require("fs"),h=fs.readFileSync(process.argv[1],"utf8"),ids=[...fs.readFileSync("docs/verified.md","utf8").matchAll(/<a id="([\w-]+)"><\/a>/g)].map(m=>m[1]);for(const L of ["en","zh"]){const b=(h.split(`data-lang-block="${L}"`)[1]||"").split("</main>")[0];const miss=ids.filter(i=>!b.includes(`data-aid="${i}"`));if(miss.length){console.error(L+": thiếu mỏ neo "+miss.join(", "));process.exit(1)}}' "$SITE/verified.html" || die "verified.html: bản dịch thiếu mỏ neo kiểm chứng"
 
 [[ -f "$SITE/favicon.svg" ]] || die "thiếu site/favicon.svg (logo)"
-# v1 đóng băng: chép nguyên byte đã ký bằng khoá cũ. Không ký lại, không lấy bản trên mạng đè lên.
-node build/merge-revoked.cjs site/revoked.json "$SITE/revoked.json" || die "site/revoked.json phải còn chữ ký khoá cũ (không ký lại; danh sách mới là revoked-v2.json)"
-# v2: bản cục bộ hoặc bản đang công khai, cái nào mới hơn và còn chữ ký hợp lệ. Không ghi revoked.json.
-node build/merge-revoked.cjs --next --out "$SITE/revoked-v2.json" site/revoked-v2.json || die "không giữ được revoked-v2.json hợp lệ"
+# Một khối riêng (không đụng vòng chép ảnh). v1: nguyên byte, chỉ khi còn chữ ký khoá cũ.
+# v2: bản mới nhất còn chữ ký hợp lệ; không ghi đè bằng bản cũ hơn hoặc sai. $1 = thư mục gh-pages đã clone, hoặc rỗng để lấy bản công khai.
+merge_revoked_into_site() {
+  node build/merge-revoked.cjs site/revoked.json "$SITE/revoked.json" || die "site/revoked.json phải còn chữ ký khoá cũ (không ký lại; danh sách mới là revoked-v2.json)"
+  if [[ -n "${1:-}" ]]; then
+    node build/merge-revoked.cjs --next --no-fetch --out "$SITE/revoked-v2.json" site/revoked-v2.json "$SITE/revoked-v2.json" "$1/revoked-v2.json" || die "không giữ được revoked-v2.json hợp lệ"
+  else
+    node build/merge-revoked.cjs --next --out "$SITE/revoked-v2.json" site/revoked-v2.json || die "không giữ được revoked-v2.json hợp lệ"
+  fi
+}
+merge_revoked_into_site
 touch "$SITE/.nojekyll"
 grep -q "$BASE_URL/AIVN-Setup.exe" "$SITE/index.html" || die "không thay được link tải Windows trong trang web"
 ls -la "$OUT" "$SITE"
@@ -191,8 +198,7 @@ step "Kiểm tra trang dựng từ site/ không làm mất nội dung chỉ có 
 if git ls-remote --exit-code --heads "https://github.com/$OWNER/$REPO.git" gh-pages >/dev/null 2>&1; then
   LIVE="$(mktemp -d)"
   git clone -q --branch gh-pages "https://github.com/$OWNER/$REPO.git" "$LIVE" || die "không clone được gh-pages để kiểm tra"
-  # Bản vừa đăng lên gh-pages (chưa kịp lên github.io) phải đi theo trang mới; không thay bằng bản cũ hơn.
-  node build/merge-revoked.cjs --next --no-fetch --out "$SITE/revoked-v2.json" site/revoked-v2.json "$SITE/revoked-v2.json" "$LIVE/revoked-v2.json" || die "không giữ được revoked-v2.json hợp lệ"
+  merge_revoked_into_site "$LIVE"
   python3 tools/site_drift.py --rendered "$SITE" --live "$LIVE" || { rm -rf "$LIVE"; die "trang thật có nội dung chưa có trong site/ — chép vào site/index.html (site/i18n) trước khi phát hành"; }
   rm -rf "$LIVE"
 else

@@ -257,11 +257,18 @@ test('merge revoked: v2 giữ bản mới nhất còn chữ ký; bản cũ hoặ
 test('release.sh trộn revoked-v2 trước khi đẩy gh-pages và không bảo ký lại revoked.json', () => {
   const rel = fs.readFileSync(path.join(root, 'release.sh'), 'utf8');
   const push = rel.indexOf('git push -q -f origin gh-pages');
+  const fn = rel.indexOf('merge_revoked_into_site() {');
   const v1 = rel.indexOf('node build/merge-revoked.cjs site/revoked.json "$SITE/revoked.json"');
   const v2 = rel.indexOf('node build/merge-revoked.cjs --next --out "$SITE/revoked-v2.json" site/revoked-v2.json');
   const v2live = rel.indexOf('node build/merge-revoked.cjs --next --no-fetch --out "$SITE/revoked-v2.json"');
+  const call = rel.indexOf('\nmerge_revoked_into_site\n');
+  const clone = rel.indexOf('git clone -q --branch gh-pages');
+  const callLive = rel.indexOf('merge_revoked_into_site "$LIVE"');
   const drift = rel.indexOf('python3 tools/site_drift.py --rendered "$SITE" --live');
-  assert.ok(v1 > 0 && v2 > v1 && v2live > v2 && drift > v2live && push > drift);
+  const endFn = rel.indexOf('\n}\nmerge_revoked_into_site\n');
+  assert.ok(fn > 0 && v1 > fn && v2live > fn && v2 > fn && endFn > v1 && endFn > v2 && endFn > v2live, 'cả hai lệnh trộn nằm trong một hàm');
+  assert.ok(call > endFn && call < clone && clone < callLive && callLive < drift && drift < push);
   assert.doesNotMatch(rel, /admin\.cjs/);
+  assert.match(rel, /for f in preview-desktop\.png preview-mobile\.png favicon\.svg favicon\.ico apple-touch-icon\.png; do \[\[ -f "site\/\$f" \]\] && cp "site\/\$f" "\$SITE\/"; done\n/);
   assert.match(fs.readFileSync(path.join(root, 'tools/site_drift.py'), 'utf8'), /'revoked-v2\.json'/);
 });
