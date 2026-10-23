@@ -45,9 +45,9 @@ test('B219 adv: gửi thật vẫn là gửi trên câu GỐC — Ctrl+Enter b�
     const st = { chatOpen: false, recipient: SV.recipientOf(q), messaging: true, lastTyped: '', targetName: '' };
     assert.strictEqual(SG.classify('hotkey', { keys: 'ctrl+enter' }, st).send, true, q);
   }
-  // người nhận “An” không đọc được ở “Gửi nội dung… cho An” là lỗi recipientOf có sẵn — vẫn phải HỎI, không được gửi im
-  assert.strictEqual(SV.recipientOf('Gửi nội dung trong ô soạn tin cho An'), null);
-  assert.strictEqual(SV.missingRecipient('Gửi nội dung trong ô soạn tin cho An'), true);
+  // “nội dung trong ô soạn tin” là tên ô, không nuốt “cho An”
+  assert.strictEqual(SV.recipientOf('Gửi nội dung trong ô soạn tin cho An'), 'An');
+  assert.strictEqual(SV.missingRecipient('Gửi nội dung trong ô soạn tin cho An'), false);
   for (const q of ['Could you type hi in the message box and send it to An?', 'Look at the message box, then hit send', 'Send what is in the message box to An', 'Press send in the message box', '看看消息输入框，然后发送给An', '在消息输入框输入你好然后发送', 'xem message box rồi send cho An', 'look at the message box and gửi cho An']) {
     assert.strictEqual(SV.lookOnly(q), false, 'không phải câu chỉ nhìn: ' + q);
     assert.strictEqual(qa(q, [{ name: 'screen_look', status: 'ok' }]), 'failed', q);

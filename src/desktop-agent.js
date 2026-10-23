@@ -414,6 +414,16 @@ function createDesktopAgent(deps) {
   async function clearFocused() { try { const n = SC.libnut(); n.keyTap('a', require('./agent/keys').primaryOf(process.platform)); await sleep(120); n.keyTap('delete'); await sleep(150); } catch (e) { deps.log && deps.log('desk', 'Không xoá được chữ trong ô: ' + e.message); } }
   async function performAt(action, x, y, a) {
     // B69: chốt cuối, không dựa vào lời nhắc — thao tác có thể GỬI mà chưa qua chốt gửi trong act() thì không bao giờ được bấm
+    {
+      const SG = require('./agent/send-gate'); const k = SG.normKeys(a && a.keys); const sess = session || {};
+      const nm = `${a && a.__el ? a.__el.name || '' : ''} ${a && a.__q || ''}`;
+      const qLook = a && SV.lookOnly((sess.ctx && sess.ctx.userQuery) || '');
+      const keySend = action === 'hotkey' && (SG.SEND_COMBO.test(k) || /(^|\+)(enter|return|numpad_enter|kp_enter)$/.test(k));
+      const typeSend = action === 'type_text' && a && (a.__submit || a.submit || /\n\s*$/.test(String(a.text || '')));
+      const clickSend = ['click', 'double_click'].includes(action) && SG.SEND_NAME.test(nm);
+      // B219: câu chỉ nhìn — chặn mọi đường gửi, kể cả khi đã được duyệt (Ctrl+Enter/Alt+S/Enter, nút Gửi, gõ rồi Enter; ô có sẵn bản nháp; Outlook/Gmail)
+      if (qLook && (keySend || typeSend || clickSend)) { deps.log && deps.log('desk', `CHẶN (B219): câu chỉ nhìn — không gửi: ${action} ${String((a && (a.keys || a.text)) || nm).slice(0, 60)}`); throw new Error('AIVN chặn: câu chỉ nhìn, không gửi.'); }
+    }
     if (a && !a.__sendOk && !a.__notSend) {
       const SG = require('./agent/send-gate'); const k = SG.normKeys(a.keys); const sess = session || {};
       const nm = `${a.__el ? a.__el.name || '' : ''} ${a.__q || ''}`;
@@ -877,6 +887,19 @@ function createDesktopAgent(deps) {
       a = { ...a, submit: true, __autoSubmit: true };
       deps.log && deps.log('desk', `B101: việc gửi tin, người nhận đã chốt — AIVN tự bấm Enter sau khi gõ và kiểm chữ trong ô soạn (bước GỬI, qua thẻ xin phép)`);
     }
+    // B219: câu chỉ nhìn — từ chối mọi thao tác gửi ở MỌI ngữ cảnh (chat, Outlook, Gmail), không hỏi thẻ xin phép
+    if (ctx && ctx.userQuery && SV.lookOnly(String(ctx.userQuery))) {
+      const SGl = require('./agent/send-gate');
+      const kl = SGl.normKeys(a.keys);
+      const nmL = `${t && t.el ? t.el.name || '' : ''} ${t && t.query ? t.query : ''} ${a.element || ''} ${a.target || ''}`;
+      const keySend = action === 'hotkey' && (SGl.SEND_COMBO.test(kl) || /(^|\+)(enter|return|numpad_enter|kp_enter)$/i.test(kl));
+      const typeSend = action === 'type_text' && !!a.submit;
+      const clickSend = (action === 'click' || action === 'double_click') && SGl.SEND_NAME.test(nmL);
+      if (keySend || typeSend || clickSend) {
+        deps.log && deps.log('desk', `Chặn gửi (B219): câu chỉ nhìn — ${action} ${String(a.keys || a.text || nmL).slice(0, 60)}`);
+        return { refused: true, stop: true, error: 'câu chỉ nhìn', forModel: SV.LOOK_REFUSE, summary: SV.LOOK_REFUSE };
+      }
+    }
     // B24: gõ tên/từ khoá (+ Enter) vào ô tìm kiếm ĐÃ XÁC NHẬN là TÌM, không phải gửi — không coi là bước rủi ro, kể cả chế độ “chỉ soạn, đừng gửi”
     // B69: MỘT chốt quyết định thao tác nào là GỬI (agent/send-gate.js) — gõ + Enter, phím Enter/Ctrl+Enter sau khi gõ, bấm nút Gửi…
     const SG = require('./agent/send-gate');
@@ -885,7 +908,7 @@ function createDesktopAgent(deps) {
       const tName = `${t && t.el ? t.el.name || '' : ''} ${t && t.query ? t.query : String(a.element || a.target || '')}`;
       const W = s.obs && s.obs.win && Array.isArray(s.obs.win.b) && s.obs.win.b[3] > 50 ? s.obs.win.b : null;
       const inComposerRow = !!(t && t.el && Array.isArray(t.el.b) && W && (t.el.b[1] + t.el.b[3] / 2 - W[1]) / W[3] > 0.8);
-      return { chatOpen: !!s.chatOpen, recipient: qG ? SV.recipientOf(qG) : null, messaging: !!(qG && SV.msgSend(qG)), searchTarget: searchConfirmed(t, focusedEl, a), lastTyped: s.lastTyped || '', targetName: tName, inComposerRow };
+      return { chatOpen: !!s.chatOpen, recipient: qG ? SV.recipientOf(qG) : null, messaging: !!(qG && (SV.msgSend(qG) || SV.lookOnly(qG) || SV.hasSendVerb(qG))), searchTarget: searchConfirmed(t, focusedEl, a), lastTyped: s.lastTyped || '', targetName: tName, inComposerRow };
     };
     const gate = SG.classify(action, a, gateState());
     const gateRcp = (ctx && ctx.userQuery ? SV.recipientOf(ctx.userQuery) : null) || s.chatOpen || s.currentChat || '';

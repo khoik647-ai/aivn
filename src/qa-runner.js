@@ -149,8 +149,11 @@ function statusOf(r, { denied = 0, draft = false, error = null, timedOut = false
   // Việc gửi thật xét trên câu gốc (msgSend / SEND_TASK), không gỡ tên ô trước: gỡ “ô soạn tin” làm mất động từ gửi.
   const taskS = String(task || ''); const look = SV.lookOnly(taskS);
   if (look && (r.steps || []).some(x => x && x.verify && x.verify.sent)) return { status: 'failed', reason: 'câu chỉ nhìn nhưng tin đã bị GỬI' };
-  if (!look && draft && SEND_TASK.test(taskS) && !(r.steps || []).some(x => x && x.draftIn)) return { status: 'failed', reason: 'việc chỉ soạn nhưng không có bước nào kiểm thấy chữ trong ô soạn tin' };
-  const sendTask = !look && !draft && (SV.msgSend(taskS) || SEND_TASK.test(taskS)) && !/(?:âm lượng|volume|音量)/iu.test(taskS);
+  // hasSendVerb: “Gửi.” / “gửi luôn” / “gui” / Ctrl+Enter / 发出 / 回车… không nằm trong MSG_SEND hay SEND_TASK nhưng vẫn là lệnh gửi.
+  // Không tính “soạn/write/draft”: “soạn tin cho Lan, chỉ soạn đừng gửi” vẫn xong mà không cần draftIn.
+  const proof = !look && SV.hasSendVerb(taskS);
+  if (!look && draft && !proof && SEND_TASK.test(taskS) && !(r.steps || []).some(x => x && x.draftIn)) return { status: 'failed', reason: 'việc chỉ soạn nhưng không có bước nào kiểm thấy chữ trong ô soạn tin' };
+  const sendTask = !look && (proof || (!draft && (SV.msgSend(taskS) || SEND_TASK.test(taskS)))) && !/(?:âm lượng|volume|音量)/iu.test(taskS);
   if (sendTask && !(r.steps || []).some(x => x && x.verify && x.verify.sent)) return { status: 'failed', reason: 'việc gửi tin nhưng không có bước nào kiểm chứng được là ĐÃ GỬI đúng người' };
   return { status: 'done' };
 }
