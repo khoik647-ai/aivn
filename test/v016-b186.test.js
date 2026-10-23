@@ -13,7 +13,8 @@ const NOTE = {
 
 test('B186: CSS hàng nút ổn định bám lớp is-mobile sẵn có', () => {
   assert.match(html, /html\.is-mobile \.dl-mnote\{display:block\}/);
-  assert.match(html, /html\.is-mobile \.dl-row>\.dl-btn,html\.is-mobile \.dl-row>\.mac-wrap\{display:none\}/);
+  assert.match(html, /html\.is-mobile \.dl-row>\.dl-btn\{display:none\}/);
+  assert.ok(!/mac-wrap|mac-toggle|mac-menu/.test(html), 'không còn menu macOS cũ');
   assert.strictEqual((html.match(/maxTouchPoints/g) || []).length, 1, 'thêm một bộ nhận hệ điều hành nữa (khối beta riêng đã gỡ: chỉ còn một bộ nhận)');
   const D = JSON.parse(html.split('/*I18N*/')[1].split('/*END*/')[0]);
   assert.strictEqual(D.en['dl.1'], NOTE.en); assert.strictEqual(D.en['cta.6'], NOTE.en);

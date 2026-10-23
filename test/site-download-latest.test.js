@@ -281,6 +281,7 @@ exit 0
   assert.ok(!/\.cta \.dl-btn\[data-os="windows"\]/.test(page), 'nút Windows cuối trang không được tự đổi href thành bộ cài');
   assert.ok(!/\.cta \.mac-menu a\[href\]/.test(page), 'menu macOS cuối trang không được tự đổi href thành zip');
   assert.ok(!/\.cta \.mac-wrap \.mac-menu\{position:static/.test(page));
+  assert.ok(!/mac-wrap|mac-toggle|mac-menu/.test(page), 'không còn menu macOS cũ');
   const outside = page.replace(/id="tai-ve"[\s\S]*?<!--\/AIVN-DL-LATEST-->/, '');
   assert.ok(!/href="[^"]*AIVN-Setup[^"]*\.exe"/.test(outside), 'ngoài nút tự động không còn href bộ cài Windows');
   assert.ok(!/href="[^"]*\.zip"/.test(outside), 'ngoài nút tự động không còn href zip');

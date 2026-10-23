@@ -24,14 +24,41 @@ def nav(platform, touch=0, uad=None):
             "Object.defineProperty(Navigator.prototype,'userAgentData',{get:function(){return %s}});") % (json.dumps(platform), touch, u)
 D1280 = {'width': 1280, 'height': 800}
 def exercise_cta(pg):
-    """Mở .mac-toggle nếu còn, bấm mọi nút nhìn thấy trong .cta, rồi trả href .exe/.zip nằm ngoài #tai-ve."""
+    """Mở .mac-toggle nếu còn, bấm mọi nút nhìn thấy trong .cta, rồi bắt đường tải trùng.
+    Cuộn mượt làm el.click chờ quá 3 giây; dispatch_event không chờ trang đứng yên.
+    Một href là đường tải khi nó kết thúc bằng exe/zip/dmg/msi/pkg/AppImage, bắt đầu bằng
+    https://github.com/khoik647-ai/aivn/releases/ , hoặc nằm trên phần tử có thuộc tính download.
+    Lỗi nếu cùng một đường tải xuất hiện hơn một lần, hoặc thuộc tính download nằm ngoài #tai-ve."""
+    pg.evaluate("() => { document.documentElement.style.scrollBehavior = 'auto'; }")
     for sel in ('.mac-toggle', '.cta a', '.cta button:not(.mac-toggle)'):
         loc = pg.locator(sel)
         for i in range(loc.count()):
             el = loc.nth(i)
             if el.is_visible():
-                el.click(timeout=3000, no_wait_after=True)
-    return pg.evaluate(r'''() => [...document.querySelectorAll('a[href]')].filter(a => !a.closest('#tai-ve')).map(a => a.getAttribute('href')).filter(h => /\.(exe|zip)(\?|#|$)/i.test(h || ''))''')
+                el.dispatch_event('click', {'bubbles': True, 'cancelable': True})
+    return pg.evaluate(r'''() => {
+      const ASSET = /\.(exe|zip|dmg|msi|pkg|AppImage)(\?|#|$)/i;
+      const REL = 'https://github.com/khoik647-ai/aivn/releases/';
+      const isDl = h => !!h && (ASSET.test(h) || h.indexOf(REL) === 0);
+      const shown = el => { for (let n = el; n; n = n.parentElement) { const cs = getComputedStyle(n); if (cs.display === 'none' || cs.visibility === 'hidden') return false; } return true; };
+      const groups = {};
+      const outside = [];
+      document.querySelectorAll('a[href]').forEach(a => {
+        const h = a.getAttribute('href') || '';
+        const attr = a.hasAttribute('download');
+        if (!isDl(h) && !attr) return;
+        (groups[h] = groups[h] || []).push(a);
+        if (!a.closest('#tai-ve')) outside.push(h || a.tagName);
+      });
+      const dup = Object.keys(groups).filter(h => {
+        const list = groups[h];
+        const visible = list.filter(shown).length;
+        const outsideN = list.filter(a => !a.closest('#tai-ve')).length;
+        return visible > 1 || outsideN > 1 || (outsideN > 0 && list.length > 1);
+      });
+      const attrOut = [...document.querySelectorAll('[download]')].filter(el => !el.closest('#tai-ve')).map(el => el.getAttribute('href') || el.tagName);
+      return {dup, outside, attr: attrOut};
+    }''')
 # (tên, Playwright context, init script, loại máy)
 CONF = [('fold-280', dict(viewport={'width': 280, 'height': 653}, user_agent=AND, is_mobile=True, has_touch=True, device_scale_factor=2), nav('Linux armv8l', 5), 'android'),  # B162
         ('iphoneSE-320', dict(viewport={'width': 320, 'height': 568}, user_agent=IPH, is_mobile=True, has_touch=True, device_scale_factor=2), nav('iPhone', 5), 'ios'),
@@ -115,7 +142,8 @@ with sync_playwright() as p:
                     r['overflowAfter'] = pg.evaluate('()=>document.documentElement.scrollWidth>document.documentElement.clientWidth')
                 note = pg.locator('.dl-mnote').first
                 if note.count() and note.is_visible(): note.click()
-            r['outsideBin'] = exercise_cta(pg)
+            got = exercise_cta(pg)
+            r['outsideBin'] = got['outside']; r['dupUrls'] = got['dup']; r['outsideAttr'] = got['attr']
             r['afterUrl'] = pg.url; r['requests'] = list(reqs)
             if SHOTS: pg.locator('#tai-ve').scroll_into_view_if_needed(); pg.evaluate('()=>scrollTo(0,0)'); pg.screenshot(path=f'{SHOTS}/{name}-{lang}.png')
             res.append(r); c.close()
@@ -168,6 +196,8 @@ for r in res:
     if r.get('menuOpen') and r['menuOpen']['sw'] > r['menuOpen']['cw']: bad.append(f'{k}: mở menu bị tràn')
     if r.get('overflowAfter'): bad.append(f'{k}: tràn ngang sau khi mở menu')
     if r['single'] != 1 or r['betaBlock']: bad.append(f'{k}: phải có đúng một nút tải chính, không còn khối beta ({r["single"]}, beta={r["betaBlock"]})')
+    if r.get('dupUrls'): bad.append(f'{k}: cùng một đường tải xuất hiện nhiều lần {r["dupUrls"]}')
+    if r.get('outsideAttr'): bad.append(f'{k}: thuộc tính download nằm ngoài #tai-ve {r["outsideAttr"]}')
     if r.get('outsideBin'): bad.append(f'{k}: ngoài #tai-ve còn href tệp {r["outsideBin"]}')
     win_title = {'vi': 'Xem bản tải cho Windows', 'en': 'See the Windows download', 'zh-CN': '查看 Windows 版下载'}.get(r['lang'])
     if win_title and r.get('ctaWinTitle') != win_title: bad.append(f'{k}: gợi ý nút Windows cuối trang “{r.get("ctaWinTitle")}”')
