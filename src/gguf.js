@@ -137,7 +137,11 @@ function contextComputeBuf({ ctx = 8192, batch = 512, layers = ANCHOR_LAYERS } =
 }
 function freeBytes(vram) {
   if (!vram || !(vram.total > 0)) return 0;
-  return Math.max(0, Math.min(vram.free || vram.total, vram.total));
+  // freeKnown: false → chưa đo được VRAM trống, tính theo tổng. free: 0 là trống thật, không phải “không biết”.
+  if (vram.freeKnown === false) return vram.total;
+  const f = Number(vram.free);
+  if (Number.isFinite(f)) return Math.max(0, Math.min(f, vram.total));
+  return vram.total;
 }
 // n = số lớp vừa ngân sách. Trọn lớp khi trọng số + KV + bộ đệm tính toán + mmproj còn dưới VRAM trống trừ lề.
 // confident (bỏ kiểm tra bộ nhớ của thư viện) CHỈ khi byte trọng số lấy từ tensor GGUF, có lề, và không phải GPU tích hợp.

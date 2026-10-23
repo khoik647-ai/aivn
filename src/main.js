@@ -609,11 +609,20 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
           ctxNote = 'Đã nạp ở chế độ an toàn (chỉ CPU, ngữ cảnh ' + safeCtx + ') vì bộ máy AI bị sập khi nạp bình thường. Xem nhật ký để biết chi tiết.';
         } else {
         if (!(e.code === 'LOAD_FAILED' && e.gpu && engine.restart)) throw e;
+        const LF = require('./load-fail');
         engineLog('GPU không nạp được ' + m.file + ', thử lại bằng bộ máy chỉ CPU', e, { path: m.path, size: m.size });
         await engine.restart({ ...engineEnv(), AIVN_GPU: 'off' }, 'GPU không nạp được mô hình, chuyển sang chỉ CPU'); hwCache = null;
-        st = await engine.loadModel(m.id, m.path, opts);
-        st = { ...st, mode: 'cpu-only', fallbackFrom: [...(e.attempts || []).map(a => a.mode + ': ' + a.message), ...(st.fallbackFrom || [])] };
-        settings.data.gpu = false; settings.save(); // lần sau mở AIVN dùng CPU luôn (bật lại trong Cài đặt trò chuyện)
+        const cpuOpts = LF.wantsCpuLadder(e.attempts, { memory: e.memory }) ? opts : { ...opts, singleTry: true };
+        try {
+          st = await engine.loadModel(m.id, m.path, cpuOpts);
+          st = { ...st, mode: 'cpu-only', slow: e.slow || null, fallbackFrom: [...(e.attempts || []).map(a => a.mode + ': ' + a.message), ...(st.fallbackFrom || [])] };
+          // Chỉ ghi gpu=false khi CPU nạp được. Mọi cách đều lỗi thì GPU không phải nguyên nhân — không ghi, và khởi động lại theo cài đặt GPU của người dùng.
+          if (LF.shouldPersistGpuOff({ cpuLoaded: true })) { settings.data.gpu = false; settings.save(); }
+        } catch (e2) {
+          try { await engine.restart(engineEnv(), 'mọi cách nạp đều lỗi, giữ cài đặt GPU'); hwCache = null; } catch {}
+          e2.attempts = [...(e.attempts || []), ...(e2.attempts || [])];
+          throw e2;
+        }
       }
       }
     } catch (e) {
@@ -623,9 +632,8 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       if (e.code === 'VCREDIST') { send('vision:vcredist', { url: VCREDIST_URL }); throw new Error('Chế độ nhìn ảnh cần bộ thư viện Microsoft Visual C++ (bản 2015–2022, x64). Hãy cài từ trang chính thức của Microsoft rồi nạp lại mô hình.'); }
       if (e.code === 'NO_SERVER') throw new Error('Bản AIVN này thiếu thành phần nhìn ảnh (llama-server). Hãy cài lại AIVN.');
       engineLog('Không nạp được mô hình ' + m.file, e, { path: m.path, size: m.size, vision: !!m.mmproj, contextSize: settings.data.contextSize });
-      const n = Array.isArray(e.attempts) ? e.attempts.length : 0;
-      const x = new Error(`Không nạp được ${m.catalog ? m.catalog.name : m.file}${n ? ` (đã thử ${n} cách: GPU, GPU một phần, CPU)` : ''}. Lỗi: ${e.message}. Chi tiết đã ghi vào nhật ký (Mô hình của tôi → Mở thư mục nhật ký).`);
-      x.code = 'LOAD_FAILED'; throw x;
+      const x = new Error(require('./load-fail').failureText(m.catalog ? m.catalog.name : m.file, e.attempts, e.message));
+      x.code = 'LOAD_FAILED'; x.attempts = e.attempts; throw x;
     }
     if (st.fallbackFrom && st.fallbackFrom.length) { engineLog('Nạp ' + m.file + ' bằng chế độ dự phòng: ' + st.mode, null, { attempts: st.fallbackFrom, final: { mode: st.mode, ctx: st.contextSize, gpuLayers: st.gpuLayers, totalLayers: st.totalLayers } }); st.notice = require('./load-notice').loadNotice(st, (s) => T(s), uiLang()); }
     st = { ...st, loadParams: ml }; lastCtx = st.contextSize || lastCtx; engineDied = false;

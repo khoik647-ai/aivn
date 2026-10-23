@@ -29,16 +29,37 @@ async function getLlama() {
 
 // Phần cứng thật: VRAM RIÊNG của GPU rời (node-llama-cpp cộng cả bộ nhớ dùng chung của GPU tích hợp vào "total",
 // ví dụ RTX 3050 Ti 4 GB + Radeon Vega tích hợp → báo 11,8 GB). Có thể giới hạn bằng AIVN_VRAM_LIMIT (byte) để kiểm thử/ghi đè.
+let loggedUnknownFree = false;
 async function vramInfo(l) {
-  if (!l.gpu) return { total: 0, free: 0, shared: 0, mixed: false };
-  let v; try { v = await l.getVramState(); } catch { return { total: 0, free: 0, shared: 0, mixed: false }; }
+  const empty = { total: 0, free: 0, shared: 0, mixed: false, freeKnown: false, freeSource: 'none' };
+  if (!l.gpu) return empty;
+  let v; try { v = await l.getVramState(); } catch { return empty; }
+  const VQ = require('./vram-query');
   const unified = v.unifiedSize || 0;
-  let total, free;
-  if (l.gpu === 'metal' || unified >= v.total) { total = v.total; free = v.free; } // Mac / chỉ có GPU tích hợp: bộ nhớ hợp nhất
-  else { total = v.total - unified; free = Math.max(0, Math.min(total, v.free * (total / v.total))); }
+  const mixed = unified > 0 && unified < v.total;
+  const integratedOnly = l.gpu !== 'metal' && unified >= v.total;
+  let total, reportedFree;
+  if (l.gpu === 'metal' || unified >= v.total) { total = v.total; reportedFree = v.free; } // Mac / chỉ có GPU tích hợp: bộ nhớ hợp nhất
+  else { total = v.total - unified; reportedFree = Math.max(0, Math.min(total, v.free * (total / v.total))); }
   const lim = Number(process.env.AIVN_VRAM_LIMIT || 0);
-  if (lim > 0) { total = Math.min(total, lim); free = Math.min(free, lim); }
-  return { total, free, shared: unified, reportedTotal: v.total, mixed: unified > 0 && unified < v.total, integratedOnly: l.gpu !== 'metal' && unified >= v.total };
+  if (lim > 0) { total = Math.min(total, lim); reportedFree = Math.min(reportedFree, total); }
+  let measured = null;
+  // AIVN_VRAM_LIMIT là số giả lập cho kiểm thử — không hỏi GPU thật. GPU tích hợp / Metal dùng đúng ngân sách của nó.
+  if (!(lim > 0) && l.gpu !== 'metal' && !integratedOnly) {
+    try {
+      const rows = await VQ.queryNvidiaSmi();
+      const row = VQ.pickNvidiaRow(rows, total);
+      if (row) measured = { freeBytes: row.freeBytes };
+    } catch { measured = null; }
+  }
+  const resolved = l.gpu === 'metal'
+    ? { total, free: Math.max(0, Math.min(total, Number(reportedFree) || 0)), freeKnown: Number.isFinite(Number(reportedFree)), freeSource: 'metal' }
+    : VQ.resolveVram({ total, reportedFree, mixed, integratedOnly }, measured);
+  if (!resolved.freeKnown && !loggedUnknownFree) {
+    loggedUnknownFree = true;
+    console.log(VQ.UNKNOWN_FREE_LOG);
+  }
+  return { total: resolved.total, free: resolved.free, shared: unified, reportedTotal: v.total, mixed, integratedOnly, freeKnown: resolved.freeKnown, freeSource: resolved.freeSource };
 }
 let progressCb = null; // 0.16: báo tiến độ nạp mô hình (viên chọn mô hình hiển thị %)
 const setLoadProgress = (cb) => { progressCb = cb; };
@@ -185,6 +206,17 @@ function oomSchedule(plans) {
   return picked;
 }
 
+async function runSpeedProbe() {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 12000);
+  try {
+    const res = await generate([{ role: 'user', content: 'Hi' }], { temperature: 0, maxTokens: 24, signal: ac.signal });
+    const usage = res && res.usage || {};
+    return { tps: usage.tokensPerSecond || 0, tokens: usage.completion_tokens || 0 };
+  } catch { return null; }
+  finally { clearTimeout(timer); }
+}
+
 async function loadModel(id, modelPath, opts = {}) {
   // cùng tệp đã nạp: giữ nguyên, TRỪ khi cần ngữ cảnh lớn hơn ngữ cảnh đang có (0.15.2: tự tăng ngữ cảnh)
   const wantCtx = opts.minContextSize || Math.min(Number(opts.contextSize) || 0, 8192);
@@ -252,17 +284,27 @@ async function loadModel(id, modelPath, opts = {}) {
     const batchCap = Math.max(1, Math.min(Number.isInteger(opts.batchSize) ? opts.batchSize : 512, 2048));
     let weightBytes = 0;
     try { const s = require('./gguf').summarize(modelPath); weightBytes = s.weightBytes || 0; if (s.kvPerToken && !(geo.kvPerToken > 0)) geo.kvPerToken = s.kvPerToken; if (s.layers && !geo.layers) geo.layers = s.layers; } catch {}
-    const plans = oomSchedule(loadPlans({ gpu: l.gpu, vram, fileSize, geo, ctx: ctxMax, userLayers: opts.gpuLayers, kvScale: kvType === 'q8_0' ? 0.55 : 1, kvType, minCtx: opts.minContextSize || 8192, capLayers: opts.capLayers, safe: !!opts.safe, batchSize: batchCap, weightBytes }));
+    let plans = oomSchedule(loadPlans({ gpu: l.gpu, vram, fileSize, geo, ctx: ctxMax, userLayers: opts.gpuLayers, kvScale: kvType === 'q8_0' ? 0.55 : 1, kvType, minCtx: opts.minContextSize || 8192, capLayers: opts.capLayers, safe: !!opts.safe, batchSize: batchCap, weightBytes }));
+    if (opts.singleTry) plans = plans.slice(0, 1);
     const userFlash = explicitFlash(opts.flashAttention, pf.flashAttention);
     // B190: ghim đúng ngữ cảnh của phương án (không để node-llama-cpp tự cắt từ max xuống min). Hết VRAM thì ném lỗi và bước xuống.
     // ignoreMemorySafetyChecks chỉ khi kế hoạch confident (tensor thật + lề + không phải GPU tích hợp).
     const ctxOpts = (plan, kv, fa) => ({ contextSize: plan.ctx, batchSize: Math.max(1, Math.min(batchCap, plan.ctx)), flashAttention: fa, ...(plan.confident ? { ignoreMemorySafetyChecks: true } : {}),
       ...(pf.threads ? { threads: pf.threads } : {}),
       ...(kv ? { experimentalKvCacheKeyType: 'Q8_0', experimentalKvCacheValueType: 'Q8_0' } : {}) });
-    let abandoned = false, oomGpu = null;
+    const LF = require('./load-fail');
+    const GS = require('./gpu-speed');
+    let abandoned = false, oomGpu = null, steppedSlow = null;
+    let devices = [];
+    try { devices = l.getGpuDeviceNames ? await l.getGpuDeviceNames() : []; } catch { devices = []; }
+    const gpuBw = require('./fit').gpuBandwidth({ devices, vram });
     for (const plan of plans) {
+      const gpuPlan = plan.gpuLayers === 'auto' || Number(plan.gpuLayers) > 0;
+      // gpuLayers 0 trong tiến trình GPU không phải bộ máy CPU thật (DLL ggml trùng tên). Tiến trình chính khởi động lại với AIVN_GPU=off.
+      if (l.gpu && !gpuPlan) continue;
       let model = null;
       try {
+        console.log(`[engine] thử nạp ${plan.mode}, ${plan.gpuLayers} lớp GPU, ngữ cảnh ${plan.ctx}`);
         const report = (pct) => { try { progressCb && progressCb({ id, pct, mode: plan.mode, gpuLayers: plan.gpuLayers, ctx: plan.ctx }); } catch {} };
         report(0);
         let lastPct = -1; model = await l.loadModel({ modelPath, gpuLayers: plan.gpuLayers, onLoadProgress: (x) => { const pct = Math.floor(x * 100); if (pct >= lastPct + 2 || pct === 100) { lastPct = pct; report(pct); } }, ...(opts.useMmap === false ? { useMmap: false } : {}), ...(opts.useMlock ? { useMlock: true } : {}) });
@@ -274,23 +316,58 @@ async function loadModel(id, modelPath, opts = {}) {
           catch (e) {
             if (i === tries.length - 1) throw e;
             // q8 cần FA: lỗi tạo ngữ cảnh → thử lại FA tắt và KV f16. Mọi lỗi tạo ngữ cảnh khác cũng được lần thử FA tắt này.
-            attempts.push({ mode: `${plan.mode}${tryOf.kv ? ' KV q8_0' : ''} FA ${tryOf.fa === true ? 'on' : tryOf.fa}`, message: String(e && e.message || e) });
+            attempts.push({ mode: `${plan.mode}${tryOf.kv ? ' KV q8_0' : ''} FA ${tryOf.fa === true ? 'on' : tryOf.fa}`, message: String(e && e.message || e), context: true });
           }
         }
         let tokenPredictor; if (pf.lookup) { try { const { InputLookupTokenPredictor } = await getLib(); tokenPredictor = new InputLookupTokenPredictor(); } catch {} }
-        current = { id, path: modelPath, model, context, tokenPredictor, loadedAt: Date.now(), mode: plan.mode, meta: { name: geo.name, arch: geo.arch, sizeLabel: geo.sizeLabel, toolTemplate: geo.toolTemplate, trainCtx: geo.trainCtx || null }, gpuLayers: model.gpuLayers, totalLayers: geo.layers ? geo.layers + 1 : null, attempts: attempts.map(a => a.mode + ': ' + a.message),
+        const draft = { id, path: modelPath, model, context, tokenPredictor, loadedAt: Date.now(), mode: plan.mode, meta: { name: geo.name, arch: geo.arch, sizeLabel: geo.sizeLabel, toolTemplate: geo.toolTemplate, trainCtx: geo.trainCtx || null }, gpuLayers: model.gpuLayers, totalLayers: geo.layers ? geo.layers + 1 : null, attempts: attempts.map(a => a.mode + ': ' + a.message),
           offload: { gpu: Number.isInteger(plan.gpuLayers) ? plan.gpuLayers : model.gpuLayers, ctx: plan.ctx, requestedCtx: ctxMax, kv: kvUsed ? 'q8_0' : 'f16', oom: abandoned, ...(oomGpu > 0 ? { oomGpu } : {}), confident: !!plan.confident },
           perf: { threads: pf.threads || l.cpuMathCores || null, batchSize: Math.max(1, Math.min(batchCap, plan.ctx)), kv: kvUsed ? 'q8_0' : 'f16', flashAttention: context.flashAttention ?? faUsed, lookup: !!tokenPredictor, profile: pf.effective || null } };
+        if (gpuPlan && !(vram && vram.integratedOnly) && !opts.skipSpeedProbe && process.env.AIVN_SKIP_SPEED_PROBE !== '1') {
+          current = draft;
+          const layersOn = Number.isInteger(plan.gpuLayers) ? plan.gpuLayers : (Number(model.gpuLayers) || 0);
+          const totalL = geo.layers ? geo.layers + 1 : layersOn;
+          const gpuFrac = totalL > 0 ? Math.min(1, layersOn / totalL) : 1;
+          const expected = GS.expectedTps({ bytes: fileSize, gpuFrac, gpuBw });
+          const measured = typeof opts.measureSpeed === 'function' ? await opts.measureSpeed({ plan, fileSize, expected }) : await runSpeedProbe();
+          try { if (current && current.seq && !current.seq.disposed) current.seq.dispose(); } catch {}
+          if (current) current.seq = null;
+          const after = await vramInfo(l).catch(() => null);
+          const decision = GS.shouldStepDown({ tps: measured && measured.tps, expected, tokens: measured && measured.tokens, freeBytes: after && after.freeKnown ? after.free : null });
+          if (decision.step) {
+            const tps = measured && Number(measured.tps) > 0 ? Math.round(measured.tps) : null;
+            const exp = expected > 0 ? Math.round(expected) : null;
+            steppedSlow = { tps, expected: exp, reason: decision.reason };
+            abandoned = true;
+            if (Number.isInteger(plan.gpuLayers) && plan.gpuLayers > 0) oomGpu = oomGpu == null ? plan.gpuLayers : Math.min(oomGpu, plan.gpuLayers);
+            attempts.push({ mode: `${plan.mode} (${plan.gpuLayers} lớp GPU, ngữ cảnh ${plan.ctx})`, message: decision.reason === 'vram' ? 'VRAM trống gần hết sau khi nạp' : `chậm: ${tps == null ? '?' : tps} token/giây`, slow: true });
+            console.log(`[engine] ${plan.mode} quá chậm hoặc hết VRAM trống (${decision.reason}), bước xuống`);
+            current = null;
+            try { await context.dispose(); } catch {}
+            try { await model.dispose(); } catch {}
+            continue;
+          }
+        }
+        if (steppedSlow) {
+          draft.slow = steppedSlow;
+          draft.offload = { ...draft.offload, oom: true, slow: steppedSlow, ...(oomGpu > 0 ? { oomGpu } : {}) };
+        }
+        draft.attempts = attempts.map(a => a.mode + ': ' + a.message);
+        current = draft;
         return;
       } catch (e) {
+        current = null;
         abandoned = true;
         if (Number.isInteger(plan.gpuLayers) && plan.gpuLayers > 0) oomGpu = oomGpu == null ? plan.gpuLayers : Math.min(oomGpu, plan.gpuLayers);
         attempts.push({ mode: `${plan.mode} (${plan.gpuLayers} lớp GPU, ngữ cảnh ${plan.ctx})`, message: String(e && e.message || e), stack: String(e && e.stack || '') });
         try { if (model) await model.dispose(); } catch {}
+        // Hết VRAM thì đi tiếp thang lớp. Lỗi tệp / kiến trúc thì dừng: mỗi lần thử thêm chỉ lặp cùng một lỗi.
+        if (!LF.isMemoryError(e && e.message)) break;
       }
     }
-    const err = new Error(attempts[attempts.length - 1].message);
-    err.code = 'LOAD_FAILED'; err.attempts = attempts; err.gpu = !!l.gpu;
+    const err = new Error(attempts.length ? attempts[attempts.length - 1].message : 'Không đủ VRAM để nạp mô hình trên GPU');
+    err.code = 'LOAD_FAILED'; err.attempts = attempts; err.gpu = !!l.gpu; err.slow = steppedSlow;
+    err.memory = !attempts.length || LF.wantsCpuLadder(attempts);
     throw err;
   })();
   try { await loading; } finally { loading = null; }
@@ -311,7 +388,7 @@ async function unloadModel() {
 function status() {
   // B123: bộ máy THẬT đang chạy mô hình nhìn ảnh (llama-server), không phải GPU của node-llama-cpp
   if (visionOn) { const v = getVision().status(); if (v) return { loaded: true, id: v.id, path: v.path, contextSize: v.contextSize, vision: true, gpu: llama && llama.gpu, backend: serverBackend(v), gpuLayers: v.gpuLayers ?? null, totalLayers: v.totalLayers ?? null, device: v.device || null, toolMode: v.textTools ? 'text' : 'native', runtime: v.runtime || 'bundled', runtimeFallback: v.runtimeFallback || null, meta: v.template ? { toolTemplate: !!v.template.nativeTools } : null }; }
-  return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, meta: current.meta || null, perf: current.perf || null, offload: current.offload || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: !!loading };
+  return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, meta: current.meta || null, perf: current.perf || null, offload: current.offload || null, slow: current.slow || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: !!loading };
 }
 
 // Một chuỗi ngữ cảnh dùng lại giữa các lượt (giữ bộ nhớ đệm KV: lượt sau chỉ tính phần mới của lời nhắc)

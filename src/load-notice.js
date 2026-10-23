@@ -16,6 +16,20 @@ function loadNotice(st = {}, tr, lang) {
   const t = typeof tr === 'function' ? tr : (s) => s;
   const ctx = st.contextSize ? formatCount(st.contextSize, lang) : null; const mode = MODE_VI[st.mode] || st.mode || '';
   const layers = Number.isInteger(st.gpuLayers) && st.totalLayers ? `${st.gpuLayers}/${st.totalLayers} lớp trên GPU` : null;
+  const slow = st.slow || (st.offload && st.offload.slow) || null;
+  const shown = (n) => formatCount(n >= 10 ? Math.round(n) : Math.round(n * 10) / 10, lang);
+  if (slow && slow.tps > 0 && slow.expected > 0) {
+    const tps = shown(slow.tps);
+    const exp = shown(slow.expected);
+    const cpuish = st.mode === 'cpu' || st.mode === 'cpu-only' || !(Number(st.gpuLayers) > 0);
+    if (cpuish && ctx) return t(`GPU chạy quá chậm (${tps} token/giây, mức khoảng ${exp}), AIVN đã chuyển sang ${mode}, ngữ cảnh ${ctx}.`);
+    if (layers && ctx) return t(`GPU chạy quá chậm (${tps} token/giây, mức khoảng ${exp}), AIVN đã giảm xuống ${layers}, ngữ cảnh ${ctx}.`);
+  }
+  if (slow && (slow.reason === 'vram' || !(slow.tps > 0))) {
+    const cpuish = st.mode === 'cpu' || st.mode === 'cpu-only' || !(Number(st.gpuLayers) > 0);
+    if (cpuish && ctx) return t(`VRAM gần hết sau khi nạp, AIVN đã chuyển sang ${mode}, ngữ cảnh ${ctx}.`);
+    if (layers && ctx) return t(`VRAM gần hết sau khi nạp, AIVN đã giảm xuống ${layers}, ngữ cảnh ${ctx}.`);
+  }
   const partial = st.mode === 'gpu-partial' || (st.mode === 'gpu-manual' && st.gpuLayers < st.totalLayers);
   // Chế độ có ngoặc trong tên (“GPU (số lớp tự chọn)”) không được nhét vào mẫu “{0} ({1})” — mẫu đó cắt đôi tên và en/zh giữ tiếng Việt.
   if (partial && layers && ctx && mode.includes('(')) return t(`Đã nạp bằng ${mode}, ${layers}, ngữ cảnh ${ctx}. Mô hình không vừa trọn VRAM nên phần còn lại chạy bằng CPU — chậm hơn nhưng vẫn dùng được.`);

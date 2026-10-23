@@ -40,11 +40,12 @@ test('phi-4 trên 4070S @ 16K không nằm trọn trong VRAM', () => {
   assert.ok(Math.abs(r.parts.kv - 40 * 10 * 128 * 2 * 2 * 16384) < MiB);
 });
 
-test('smollm2 1.7B trên GPU 4 GB @ 16K không Chạy mượt', () => {
+test('smollm2 1.7B: ngữ cảnh gợi ý không vượt 8192 đã huấn luyện, và trên GPU 4 GB thì nằm trọn', () => {
   const r = fitCat('smollm2-1.7b-instruct-q4_k_m', gpu4, 16384);
-  assert.notStrictEqual(r.group, 'smooth', r.hint);
-  assert.ok(!/Nằm trọn trong VRAM/.test(r.hint), r.hint);
-  assert.ok(Math.abs(r.parts.kv - 24 * 32 * 64 * 2 * 2 * 16384) < MiB);
+  assert.strictEqual(r.ctx, 8192);
+  assert.strictEqual(r.group, 'smooth', r.hint);
+  assert.ok(!/Tràn/.test(r.hint), r.hint);
+  assert.ok(Math.abs(r.parts.kv - 24 * 32 * 64 * 2 * 2 * 8192) < MiB);
 });
 
 test('Mac dưới 64 GB lấy 2/3 RAM; từ 64 GB lấy 0.75', () => {
@@ -72,13 +73,19 @@ test('gpt-oss-20b trên 4070S: 8K và 16K theo gpuFit, không ghi nằm trọn V
   const oss = byId('gpt-oss-20b-mxfp4');
   const g = F.resolveGeo(F.metaOf({ catalog: oss }));
   const kv = g.layers * g.kvHeads * (g.keyLen + g.valLen) * 2;
-  for (const [ctx, n, pct] of [[8192, 21, 84], [16384, 20, 80]]) {
+  for (const [ctx, n] of [[8192, 24], [16384, 23]]) {
     const fit = G.gpuFit({ fileSize: oss.size, layers: g.layers, kvPerToken: kv }, { ctx, vram: card.vram });
     assert.strictEqual(fit, n, `gpuFit @ ${ctx}`);
     const r = F.machineFit(F.metaOf({ catalog: oss }), card, { ctx });
-    assert.notStrictEqual(r.group, 'smooth', r.hint);
     assert.ok(!/Nằm trọn trong VRAM/.test(r.hint), r.hint);
-    assert.match(r.hint, new RegExp(`Khoảng ${pct} % mô hình nằm trên GPU`));
+    if (ctx === 8192) {
+      assert.strictEqual(r.group, 'smooth', r.hint);
+      assert.match(r.hint, /Khoảng 96 % mô hình nằm trên GPU/);
+    } else {
+      assert.notStrictEqual(r.group, 'smooth', r.hint);
+      assert.match(r.hint, /Tràn/);
+      assert.ok(!/0,0 GB/.test(r.hint), r.hint);
+    }
   }
 });
 
