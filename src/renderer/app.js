@@ -712,7 +712,14 @@ $('#convoQ').addEventListener('input', () => renderConvos());
 $('#convoList').addEventListener('click', async (e) => {
   const row = e.target.closest('.convo'); if (!row) return;
   if (e.target.closest('.exp')) { await exportConvo(row.dataset.id); return; }
-  if (e.target.classList.contains('del')) { await A.deleteConvo(row.dataset.id); if (state.current && state.current.id === row.dataset.id) state.current = null; await loadConvos(); renderMessages(); return; }
+  if (e.target.classList.contains('del')) {
+    const id = row.dataset.id;
+    await A.deleteConvo(id);
+    const next = chromeAfterDelete({ current: state.current, agentFoot: state.agentFoot, agentFootId: state.agentFootId, deletedId: id }); // B199: việc vừa xoá không giữ thanh bước hay dòng “N bước · … giây”
+    state.current = next.current; state.agentFoot = next.agentFoot; state.agentFootId = next.agentFootId;
+    await loadConvos(); renderMessages(); paintGenChrome();
+    return;
+  }
   const genRow = ChatStream.generatingFor(state.mode, state.generatingConv, state.generatingByMode);
   state.current = (genRow && genRow.id === row.dataset.id) ? genRow : state.convos.find(c => c.id === row.dataset.id);
   if (isAgent() && state.current && state.generatingByMode.agent && state.current.id === state.generatingByMode.agent.id) { state.agentExplicitNew = false; state.lastByMode.agent = state.current.id; }
@@ -1657,7 +1664,7 @@ async function sendAgent(text) {
     if (st.stage === 'act' || st.stage === 'tools') state.genPhase = 'act';
     if (st.stage === 'think') setGenNote(st.round ? `Đang suy nghĩ… (bước ${st.round + 1})` : 'Đang suy nghĩ…');
     else if (st.stage === 'ask' || st.stage === 'act' || st.stage === 'tools') paintGenChrome();
-    if (st.elapsedMs != null && state.mode === 'agent') { const e = $('#genStats'); const sec = Math.round(st.elapsedMs / 1000); if (e && sec >= 5) { let sp = e.querySelector('.ag-prog'); if (!sp) { sp = document.createElement('span'); sp.className = 'ag-prog'; e.appendChild(sp); } sp.textContent = st.capMs ? ` · ${sec} giây / tối đa ${Math.round(st.capMs / 1000)} giây` : ` · ${sec} giây`; } } // B165: tiến độ + trần thời gian (phần riêng, không đụng câu trạng thái)
+    if (st.elapsedMs != null) { const e = $('#genStats'); if (e) { const text = agentProgress({ mode: state.mode, viewingRun: viewingThisRun(), elapsedMs: st.elapsedMs, capMs: st.capMs }); let sp = e.querySelector('.ag-prog'); if (!text) { if (sp) sp.remove(); } else { if (!sp) { sp = document.createElement('span'); sp.className = 'ag-prog'; e.appendChild(sp); } sp.textContent = text; } } } // B165/B200: tiến độ + trần thời gian chỉ khi đang xem đúng việc (phần riêng, không đụng câu trạng thái)
     if (st.stage === 'slow' && st.text) setGenNote(st.text); // B165: cảnh báo trước khi chạy (ít hơn nửa số lớp trên GPU)
     if (st.stage === 'recover') { reply.content = ''; reply.steps = []; paintBody(); paintSteps(); setGenNote(st.grow ? `Ngữ cảnh chưa đủ cho yêu cầu này — đang nạp lại mô hình với ngữ cảnh ${Number(st.ctx).toLocaleString(LOC())}…` : `Bộ máy AI vừa dừng — đang tự nạp lại mô hình (ngữ cảnh ${st.ctx}) và thử lại…`); return; }
     if (st.stage === 'verify') { reply.content = ''; paintBody(); setGenNote('Đang kiểm tra lại: câu trả lời chưa khớp với các bước đã làm…'); }
@@ -1741,6 +1748,7 @@ function paintGenChrome() {
   if (send) send.hidden = plan.sendHidden;
   if (stop) stop.hidden = plan.stopHidden;
   if (gs && state._genStatsShown !== plan.genStats) { state._genStatsShown = plan.genStats; gs.textContent = plan.genStats; }
+  if (gs && !keepAgentProgress({ mode: state.mode, genKind: state.genKind || null, viewingRun: viewingThisRun() })) { const sp = gs.querySelector('.ag-prog'); if (sp) sp.remove(); } // B200: /moi và hết lượt không để “ · N giây” dính trên #genStats
   // Trang AIVN AGENT đang nghỉ giữ thanh “Kết quả” thêm vài giây. Mọi trường hợp khác vẽ đúng kế hoạch.
   if (state.genKind || !isAgent()) setPhase(plan.phase);
   else setPhase(plan.phase); // B184: đổi sang việc trống thì thanh bước không giữ của lượt trước
