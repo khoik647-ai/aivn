@@ -240,6 +240,11 @@ for (const lang of ['vi', 'en', 'zh']) {
     assert.strictEqual(d.company.qr_ready, true); assert.ok(d.company.logo > 1000 && d.company.logo < 400 * 1024, 'logo đã thu nhỏ và lưu');
     // nghiệm thu: nhận 6/10 → tồn 6, chờ nhập 4, giá vốn 1.000.000; hoá đơn NCC 6 bàn + vận chuyển; trả 2.000.000 → còn 5.140.000
     assert.deepStrictEqual(d.stock, [{ name: 'Bàn làm việc gỗ sồi', on_hand: 6, incoming: 4, cost: 1000000 }]);
+    // #42 K1: xác nhận đơn mua → hỏi cập nhật bảng giá NCC (đã dịch) → đồng ý → bảng giá NCC có Bàn 1.000.000; số liệu C2 không đổi
+    assert.strictEqual(d.vendorAsk.open, true); assert.strictEqual(d.vendorAsk.closed, true);
+    assert.strictEqual(d.vendorAsk.title, { vi: 'Cập nhật bảng giá nhà cung cấp?', en: 'Update the vendor price list?', zh: '更新供应商价格表？' }[lang]);
+    assert.strictEqual(d.vendorAsk.yes, { vi: 'Cập nhật', en: 'Update', zh: '更新' }[lang]); if (lang !== 'vi') assert.ok(!/thêm|với giá/.test(d.vendorAsk.msg), d.vendorAsk.msg);
+    assert.ok(d.vendorPrices.some(v => v.price === 1000000), JSON.stringify(d.vendorPrices));
     assert.match(d.bill.number, /^BILL\/\d{4}\/\d{2}\/0001$/);
     assert.strictEqual(d.payable.agedTotals.total, 5140000); assert.strictEqual(d.overview.payable, 5140000); assert.strictEqual(d.overview.poToReceive, 1);
     assert.strictEqual(d.inv.qr, true);

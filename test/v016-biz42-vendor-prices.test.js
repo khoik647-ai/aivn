@@ -97,7 +97,7 @@ test('giao diện + IPC + vi/en/zh: gọi được qua danh sách trắng, form 
   for (const k of ['listVendorPrices', 'saveVendorPrices', 'deleteVendorPrice', 'vendorPrice', 'vendorPriceChanges', 'applyVendorPrices']) assert.ok(BIZ_CALLS.includes(k), k);
   const r = fs.readFileSync(path.join(root, 'src/renderer/biz.js'), 'utf8');
   assert.match(r, /vendorSection\(p\)/); assert.match(r, /t === 'vprices' \? await vendorPricesForm/); assert.match(r, /C\('vendorPrice', \{ productId: l\.product_id, partnerId: e\.partner_id, qty: l\.qty/);
-  assert.match(r, /if \(a === 'confirmPurchase'\) await askVendorPrices\(o\)/); assert.match(r, /C\('applyVendorPrices', o\.id\)/);
+  assert.match(r, /if \(a === 'confirmPurchase'\) \{ await rerender\(\); await askVendorPrices\(o\)/); assert.match(r, /C\('applyVendorPrices', o\.id\)/);
   const en = require('../src/i18n/en'); const zh = require('../src/i18n/zh');
   const keys = ['Cập nhật bảng giá nhà cung cấp?', 'Sửa giá nhà cung cấp…', 'Từ SL', 'Giao trong (ngày)', 'Đã lưu giá nhà cung cấp ✓', '{0}: {1} → {2} (từ SL {3})', 'Số ngày giao “{0}” phải là số nguyên từ 0 đến 365.'];
   for (const k of keys) { assert.ok(en[k] && zh[k], k); }

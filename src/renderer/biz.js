@@ -451,7 +451,7 @@
       // Mua hàng
       if (a === 'savePurchase') { readForm(); const o = await C('savePurchase', poPayload()); B.form = { type: 'purchase', id: o.id }; B.edit = null; toast('Đã lưu ✓'); return rerender(); }
       if (a === 'sendRfq' || a === 'confirmPurchase') { readForm(); if (['draft', 'sent'].includes(B.edit.state)) await C('savePurchase', poPayload()); const o = await C(a, f.id); B.edit = null; toast(a === 'confirmPurchase' ? (o.pickings.length ? `Đã xác nhận đơn mua ${o.number} · đã tạo phiếu nhập kho` : `Đã xác nhận đơn mua ${o.number}`) : 'Đã đánh dấu yêu cầu báo giá đã gửi');
-        if (a === 'confirmPurchase') await askVendorPrices(o); return rerender(); }
+        if (a === 'confirmPurchase') { await rerender(); await askVendorPrices(o); return; } return rerender(); }
       if (a === 'receivePurchase' || a === 'openPoPickings') { const o = await C('getPurchase', f.id); const ready = o.pickings.filter(p => ['draft', 'ready'].includes(p.state)); const list = a === 'receivePurchase' && ready.length ? ready : o.pickings; return list.length === 1 ? open('picking', list[0].id, 'stock') : (crm.tab = 'stock', B.sub.stock = 'in', B.form = null, $('#crmQ').value = o.number, renderCrm()); }
       if (a === 'createBill') { const inv = await C('createBill', f.id); toast('Đã tạo hoá đơn nhà cung cấp nháp'); return open('invoice', inv.id, 'invoices'); }
       if (a === 'openBills') { const o = await C('getPurchase', f.id); return o.bills.length === 1 ? open('invoice', o.bills[0].id, 'invoices') : (crm.tab = 'invoices', B.sub.invoices = 'bills', B.form = null, $('#crmQ').value = o.number, renderCrm()); }

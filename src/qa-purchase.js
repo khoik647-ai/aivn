@@ -54,6 +54,12 @@ async function qaPurchase({ win, app, VI }) {
     await step('04-rfq-luu', click('[data-biz-act=savePurchase]'), 1100);
     await step('05-rfq-da-gui', click('[data-biz-act=sendRfq]'), 1000);
     await step('06-don-mua', click('[data-biz-act=confirmPurchase]'), 1200);
+    // #42 K1: xác nhận đơn với giá chưa có trong bảng giá NCC → hỏi cập nhật bảng giá NCC (như Odoo) → đồng ý
+    await until(`!document.querySelector('#confirmModal').hidden`, 8000);
+    out.vendorAsk = await js(`({ open: !document.querySelector('#confirmModal').hidden, title: document.querySelector('#cfTitle').innerText, msg: document.querySelector('#cfMsg').innerText, yes: document.querySelector('#cfYes').innerText, no: document.querySelector('#cfNo').innerText })`);
+    await shot('06b-hoi-gia-ncc'); await js(yes); await W(900);
+    out.vendorAsk.closed = await js(`document.querySelector('#confirmModal').hidden`);
+    out.vendorPrices = (await C('listVendorPrices', {})).map(v => ({ price: v.price, min_qty: v.min_qty, delay: v.delay }));
     out.po = await js(`({ total: document.querySelector('.biz-totals .grand b').innerText, taxes: [...document.querySelectorAll('.biz-totals > div')].map(d => d.innerText.replace(/\\s+/g, ' ')), smart: [...document.querySelectorAll('.biz-smart')].map(b => b.innerText) })`);
     // ---- nhận 6/10 → phiếu chờ 4
     await step('07-phieu-nhap', click('[data-biz-act=receivePurchase]'), 1100);
