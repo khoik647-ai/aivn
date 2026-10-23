@@ -54,11 +54,13 @@ test('ADV-A5 báo có lớn hơn số còn nợ → phần dư là nợ lại kh
   const rf = biz.postInvoice(biz.creditNote(I.id, {}).id); // 1.1M → đối trừ 400k, dư 700k
   assert.strictEqual(rf.residual, 700000);
   let r = biz.invoiceReport({}); let ov = biz.overview();
-  assert.strictEqual(r.agedTotals.total, 550000 - 700000 + 330000); assert.strictEqual(r.agedTotals.credit, 700000);
+  // 700k báo có đối trừ hoá đơn J 550k (cũ nhất còn mở); còn 150k chưa đối trừ. K (khách khác) giữ 330k. Phải thu không âm.
+  assert.strictEqual(r.agedTotals.total, 330000); assert.strictEqual(r.agedTotals.credit, 150000); assert.strictEqual(r.agedTotals.d30, 0);
   assert.strictEqual(ov.receivable, r.agedTotals.total); assert.strictEqual(ov.customerCredit, r.agedTotals.credit); assert.strictEqual(sumB(r.agedTotals), r.agedTotals.total);
   biz.registerPayment(rf.id, { amount: 300000, date: '2026-10-16' });
   r = biz.invoiceReport({}); ov = biz.overview();
-  assert.strictEqual(r.agedTotals.credit, 400000); assert.strictEqual(ov.receivable, r.agedTotals.total); assert.strictEqual(r.totals.refunded, 300000);
+  assert.strictEqual(r.agedTotals.credit, 0, '400k còn lại đối trừ hết vào J'); assert.strictEqual(r.agedTotals.total, 150000 + 330000);
+  assert.strictEqual(ov.receivable, r.agedTotals.total); assert.strictEqual(r.totals.refunded, 300000);
   assert.strictEqual(r.totals.paid, 700000, 'đối trừ báo có không phải tiền thu');
 });
 
@@ -71,7 +73,10 @@ test('ADV-A6 KPI “quá hạn” dùng agedTotals.overdue: khớp Tổng quan v
   console.log('report total', r.agedTotals.total, 'current', r.agedTotals.current, 'quá hạn KPI', overdueKpi, '| overview overdue', JSON.stringify(ov.overdue), 'receivable', ov.receivable);
   assert.strictEqual(overdueKpi, ov.overdue.sum, 'quá hạn báo cáo ≠ Tổng quan');
   assert.ok(overdueKpi >= 0, 'quá hạn âm');
-  assert.strictEqual(r.agedTotals.total - r.agedTotals.current, -1100000, 'báo có vẫn hiện trong bảng tuổi nợ');
+  assert.strictEqual(r.agedTotals.older, 0); assert.strictEqual(r.agedTotals.d30, 0);
+  assert.strictEqual(r.agedTotals.current, 2200000); assert.strictEqual(r.agedTotals.total, 2200000);
+  assert.strictEqual(r.agedTotals.credit, 1100000, 'báo có của khách kia chưa có hoá đơn mở để đối trừ');
+  assert.ok(r.agedTotals.total >= 0);
 });
 
 // adapted from the reviewer's probe per the #90 review fix
@@ -79,11 +84,12 @@ test('ADV-A7 báo có đăng hôm qua, thanh toán ngay → nhóm 1–30 ngày �
   const { biz, c1 } = await setup();
   day = '2026-10-22'; const A = post(biz, c1.id, 1000000); biz.registerPayment(A.id, {}); biz.postInvoice(biz.creditNote(A.id, {}).id);
   day = '2026-10-23'; const r = biz.invoiceReport({}); console.log('A7 buckets', JSON.stringify(r.agedTotals));
-  assert.strictEqual(r.agedTotals.d30, -1100000, 'báo có vào nhóm tuổi theo hạn');
+  assert.strictEqual(r.agedTotals.d30, 0, 'báo có không vào nhóm 1–30');
+  assert.strictEqual(r.agedTotals.total, 0); assert.strictEqual(r.agedTotals.credit, 1100000);
   assert.strictEqual(r.agedTotals.overdue, 0);
 });
 
-test('ADV-A8 ngẫu nhiên 200 thao tác: Tổng quan.receivable = agedTotals.total; tổng các nhóm = total; credit = tổng residual báo có', async () => {
+test('ADV-A8 ngẫu nhiên 200 thao tác: Tổng quan.receivable = agedTotals.total ≥ 0; nhóm tuổi không âm; total − credit chưa đối trừ = số ròng', async () => {
   day = '2026-10-01'; const { db, biz, c1, c2 } = await setup();
   const invs = [];
   let seed = 7; const rnd = (n) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
@@ -97,10 +103,11 @@ test('ADV-A8 ngẫu nhiên 200 thao tác: Tổng quan.receivable = agedTotals.to
     } catch (e) { if (!/vượt|đã được|toàn bộ|Hạn|lớn hơn|Chỉ/.test(e.message)) throw e; }
     const r = biz.invoiceReport({}); const ov = biz.overview();
     assert.strictEqual(ov.receivable, r.agedTotals.total, 'bước ' + k); assert.strictEqual(sumB(r.agedTotals), r.agedTotals.total);
-    const cred = db.all("SELECT * FROM invoices WHERE state='posted' AND kind='out_refund'").reduce((a, i) => a + Math.max(0, i.amount_total - i.amount_paid), 0);
-    assert.strictEqual(r.agedTotals.credit, cred); assert.strictEqual(ov.customerCredit, cred);
+    assert.ok(r.agedTotals.total >= 0, 'bước ' + k);
+    for (const bk of ['current', 'd30', 'd60', 'd90', 'older']) { assert.ok(r.agedTotals[bk] >= 0, bk + ' bước ' + k); for (const row of r.aged) assert.ok(row[bk] >= 0 && row.total >= 0, bk); }
+    assert.strictEqual(ov.customerCredit, r.agedTotals.credit);
     const net = db.all("SELECT * FROM invoices WHERE state='posted'").reduce((a, i) => a + (i.kind === 'out_refund' ? -1 : 1) * Math.max(0, i.amount_total - i.amount_paid), 0);
-    assert.strictEqual(r.agedTotals.total, net);
+    assert.strictEqual(r.agedTotals.total - r.agedTotals.credit, net, 'bước ' + k);
     // Đã thu không lọc = tổng payments hoá đơn
     assert.strictEqual(r.totals.paid, db.get("SELECT COALESCE(SUM(p.amount),0) s FROM payments p JOIN invoices i ON i.id=p.invoice_id WHERE i.kind='out_invoice'").s);
   }
