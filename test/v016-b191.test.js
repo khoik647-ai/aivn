@@ -509,6 +509,10 @@ test('review #64 vòng 6 X6/X7: “gõ X vào <tệp>” chỉ bỏ bảo vệ k
     await DK.run(ag, q, [T('b')]);
     assert.strictEqual(w.st.tabs.length, 1, q); assert.strictEqual(w.st.tabs[0].text, 'ab', q);
   }
+  // ngoại lệ 2 chỉ khi dòng lệnh KẾT THÚC bằng vào/into + tên tệp có đuôi văn bản
+  for (const q of ['type X into readme.md in a new Notepad window', 'gõ X vào notes.txt trong thẻ mới', 'type hi into Notepad', 'gõ hello vào Notepad', 'gõ hello vào app.exe']) {
+    assert.strictEqual(FD.freshDocTask(q), true, q); assert.strictEqual(FD.namedTarget(q), null, q);
+  }
   assert.strictEqual(FD.sameFile('notes.txt', '*notes.txt - Notepad'), true);
   assert.strictEqual(FD.sameFile('Untitled.txt', '*Untitled - Notepad'), false);
 });
