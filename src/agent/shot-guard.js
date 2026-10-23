@@ -10,8 +10,8 @@ const MASK = '[đã che]';
 const WARN = 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá';
 // tiêu đề / tên tiến trình: từ khoá (có dấu, để “khoa học” không bị tính)
 const TITLE_RE = [
-  ['key', /khoá|khóa|\bkey(?:s|file|store|chain)?\b|\.pem\b|\.key\b|\.p12\b|\.pfx\b|id_rsa|id_ed25519|密钥|钥匙/i],
-  ['activation', /kích hoạt|activat|licen[cs]e|serial|product key|激活|许可证|授权/i],
+  ['key', /khoá|khóa|\bkey(?:s|file|store|chain)?\b|\.pem\b|\.key\b|\.p12\b|\.pfx\b|id_rsa|id_ed25519|aivn-admin-key|admin-issued|密钥|钥匙/i],
+  ['activation', /kích[\s_-]*hoạt|kich[\s_-]*hoat|activat|licen[cs]e|serial|product key|激活|许可证|授权/i],
   ['password', /mật khẩu|password|passwd|\bpwd\b|keepass|bitwarden|1password|密码/i],
   ['env', /(?:^|[\s\\/"“])\.env\b|\.env\.|credential|secret|bí mật|凭据|机密/i],
   ['token', /token|mã truy cập|令牌/i],
@@ -20,7 +20,9 @@ const TITLE_RE = [
 // chuỗi nhiều đoạn ngắn nối bằng - / _ (vd. Bao-cao-cuoi-ky-2026) là tên tệp/slug, không phải khoá
 const wordy = (m) => { const p = m.split(/[-_]+/).filter(Boolean); return p.length >= 3 && p.every(x => x.length <= 12); };
 const SECRET_RE = [
-  ['aivn-code', /\b(?:[0-9A-Z]{5}-){5,}[0-9A-Z]{1,5}\b/g], // mã kích hoạt AIVN: base32 nhóm 5 ký tự (src/license.js)
+  // mã kích hoạt AIVN: Crockford base32, issueCode nhóm 6 (src/license.js). Nhóm 5 vẫn bắt (đề phòng bản cũ). Không có chữ thường.
+  ['aivn-code', /\b(?:[0-9A-Z]{5,6}-){5,}[0-9A-Z]{1,6}\b/g],
+  ['aivn-code', /\b[0-9A-HJKMNP-TV-Z]{80,}\b/g], // cùng mã khi mở không có dấu gạch (I/L/O/U không thuộc Crockford)
   ['sk', /\bsk-[A-Za-z0-9_-]{16,}/g],
   ['github', /\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}/g],
   ['private-key', /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g],
@@ -34,13 +36,30 @@ const TEXT_RE = [
   ['env', /^\s*[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)\s*=/m],
 ];
 // quét: trả về danh sách TÊN loại (không có giá trị). Trống = không thấy gì.
+const REASON_OK = /^(?:title|text|window):[a-z0-9-]{1,40}$/;
+const reasonList = (xs) => (Array.isArray(xs) ? xs : []).filter(x => typeof x === 'string' && REASON_OK.test(x));
 const hit = (re, s, skip) => { re.lastIndex = 0; let m; while ((m = re.exec(s))) { if (!skip || !skip(m[0])) { re.lastIndex = 0; return true; } if (!m[0]) re.lastIndex++; } re.lastIndex = 0; return false; };
+// cửa sổ thu nhỏ / ẩn không nằm trên ảnh chụp
+const onScreen = (w) => !!w && w.min !== true && w.minimized !== true && w.visible !== false;
 function scan({ title = '', proc = '', text = '' } = {}) {
   const out = new Set(); const t = String(title || '') + ' ' + String(proc || ''); const x = String(text || '');
   for (const [k, re] of TITLE_RE) if (re.test(t)) out.add('title:' + k);
   for (const [k, re, skip] of SECRET_RE) { if (hit(re, t, skip)) out.add('title:' + k); if (hit(re, x, skip)) out.add('text:' + k); }
   for (const [k, re] of TEXT_RE) if (re.test(x)) out.add('text:' + k);
   return [...out];
+}
+// Cả màn hình: tiêu đề/tiến trình/chữ của cửa sổ đích, cộng mọi cửa sổ KHÁC đang hiện (tệp mã kích hoạt mở bên cạnh vẫn lọt vào ảnh toàn màn hình).
+// titles chỉ để che log; không đưa vào tệp kết quả.
+function screenSecrets({ title = '', proc = '', text = '', windows = [] } = {}) {
+  const reasons = new Set(scan({ title, proc, text })); const titles = [];
+  for (const w of Array.isArray(windows) ? windows : []) {
+    if (!onScreen(w)) continue;
+    const r = scan({ title: w.title || '', proc: w.proc || '' });
+    if (!r.length) continue;
+    for (const x of r) reasons.add(x);
+    if (w.title) titles.push(String(w.title));
+  }
+  return { reasons: [...reasons], titles };
 }
 // che chuỗi trông như khoá (giữ phần chữ còn lại để vẫn đọc được bước đã làm gì)
 function redactSecrets(s) {
@@ -57,14 +76,15 @@ function redactTitles(s, titles = []) {
   return redactSecrets(o);
 }
 // thẻ bước trong app (agent.js): bước có chữ/cửa sổ nhạy cảm → bỏ ảnh nhỏ (khỏi lưu vào cuộc trò chuyện), cảnh báo trên thanh bước,
-// che chuỗi trông như khoá trong phần “Kết quả” hiển thị (mô hình vẫn nhận nguyên kết quả qua forModel)
+// che chuỗi trông như khoá trong phần “Kết quả”. agent.js cũng che forModel trước khi gửi cho mô hình.
 function guardStep(step, out, { warn = () => WARN } = {}) {
   if (!step || !out) return step;
   const w = out.window && typeof out.window === 'object' ? out.window : null;
   if (w && (w.hwnd != null || w.title)) step.win = { hwnd: w.hwnd ?? null, pid: w.pid ?? null, proc: w.proc || null, title: w.title || '', b: Array.isArray(w.b) ? w.b : undefined };
-  const hits = scan({ title: w ? w.title : '', proc: w ? w.proc : '', text: [out.forModel, out.summary, out.detail].filter(x => typeof x === 'string').join('\n') });
+  const hits = [...new Set([...reasonList(out.sensitive), ...scan({ title: w ? w.title : '', proc: w ? w.proc : '', text: [out.forModel, out.summary, out.detail].filter(x => typeof x === 'string').join('\n') })])];
   if (hits.length) {
     step.sensitive = hits;
+    out.thumb = null; if (typeof out.image === 'string') out.image = null; // đừng giữ ảnh gốc trong kết quả công cụ (bộ nhớ seen)
     for (const k of Object.keys(step)) if (/^(thumb|image|img|shot|screenshot|png|jpeg|jpg)$/i.test(k) || (typeof step[k] === 'string' && /^data:image\//.test(step[k]))) delete step[k]; // không còn trường ảnh nào để lưu (slimStep)
     const ts = w && w.title ? [w.title] : []; // tiêu đề cửa sổ nhạy cảm (vd. tên tệp mã kích hoạt) → che trong thẻ bước + nhật ký (logTool)
     if (typeof step.summary === 'string') step.summary = redactTitles(step.summary, ts);
@@ -103,13 +123,35 @@ async function shot({ capture, target = null, reasons = [], image = undefined, m
   const rect = target && target.b ? rectInShot(target.b, c) : null;
   const meta = { scope: rect ? 'window' : 'screen', rect: rect || null, redacted: false, reasons: [...reasons] };
   if (!I) { // không xử lý ảnh được: ảnh nhạy cảm thì KHÔNG ghi gì; còn lại ghi ảnh toàn màn hình như trước
-    if (reasons.length) return { ...meta, buf: null, skipped: 'sensitive-no-image' };
+    if (reasons.length) { if (c && typeof c === 'object') c.dataUrl = null; return { ...meta, buf: null, skipped: 'sensitive-no-image' }; }
     return { ...meta, scope: 'screen', rect: null, buf: Buffer.from(String(c.dataUrl).split(',')[1] || '', 'base64') };
   }
   let img = I.decode(c.dataUrl); if (rect) img = I.crop(img, rect);
   const z = I.size(img);
-  if (reasons.length) { img = null; return { ...meta, redacted: true, buf: I.jpeg(I.blank(z.width, z.height)) }; }
+  if (reasons.length) { img = null; if (c && typeof c === 'object') c.dataUrl = null; return { ...meta, redacted: true, buf: I.jpeg(I.blank(z.width, z.height)) }; }
   return { ...meta, buf: I.jpeg(img) };
+}
+// Xoá điểm ảnh đang giữ trong bộ nhớ (data URL). Gọi TRƯỚC khi đưa ảnh cho thẻ bước, thẻ xin phép, hoặc mô hình nhìn ảnh.
+function dropShotPixels(shot) {
+  if (!shot || typeof shot !== 'object') return shot;
+  shot.dataUrl = null; shot.redacted = true;
+  for (const k of ['thumb', 'png', 'jpeg', 'jpg', 'image', 'bitmap']) if (k in shot) shot[k] = null;
+  return shot;
+}
+// Ảnh đã ghi trong lượt này (chưa che) — xoá khi sau đó mới biết màn hình có mã. Chỉ tệp step-*.jpg đúng thư mục shots.
+function forgetShots(steps, dir) {
+  const res = { removed: 0 };
+  let real; try { real = fs.realpathSync(dir); } catch { return res; }
+  if (isRootish(real)) { res.refused = true; return res; }
+  for (const s of Array.isArray(steps) ? steps : []) {
+    if (!s || !s.shot || s.shotRedacted) continue;
+    let st; try { st = fs.lstatSync(s.shot); } catch { continue; }
+    if (st.isSymbolicLink() || !st.isFile()) continue;
+    let rp; try { rp = fs.realpathSync(s.shot); } catch { continue; }
+    if (path.dirname(rp) !== real || !SHOT_NAME.test(path.basename(rp))) continue;
+    try { fs.unlinkSync(rp); s.shot = null; s.shotRedacted = true; s.shotPurged = true; res.removed++; } catch {}
+  }
+  return res;
 }
 // dọn ảnh cũ: chỉ tệp step-*.jpg ngay trong thư mục shots (realpath), bỏ qua symlink / thư mục / tên có '..', không bao giờ xoá thư mục
 const SHOT_NAME = /^step-\d{2,}-[\w-]+\.jpg$/;
@@ -135,4 +177,4 @@ function prune(dir, { maxAgeMs = 24 * 3600e3, maxBytes = 200 * 1024 * 1024, now 
   while (left.length && total > maxBytes) { const f = left.shift(); if (del(f)) total -= f.size; }
   res.kept = left.length; return res;
 }
-module.exports = { scan, redactSecrets, redactTitles, guardStep, rectInShot, shot, prune, electronImage, WARN, MASK, SHOT_NAME };
+module.exports = { scan, screenSecrets, reasonList, redactSecrets, redactTitles, guardStep, rectInShot, shot, dropShotPixels, forgetShots, prune, electronImage, WARN, MASK, SHOT_NAME };

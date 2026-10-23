@@ -30,6 +30,17 @@ test('scan: tiêu đề / chữ nhạy cảm → chỉ TÊN loại, không có g
   assert.ok(SG.scan({ text: 'API_TOKEN=abc' }).includes('text:env'));
   assert.deepStrictEqual(SG.scan({ title: 'Untitled - Notepad', proc: 'notepad', text: 'Xin chào, khoa học máy tính. C:\\Users\\a\\Documents\\Bao-cao-cuoi-ky-2026-ban-chinh-thuc-v12345.docx' }), []);
   assert.deepStrictEqual(SG.scan({ title: 'Calculator', text: '12 + 30 = 42' }), []);
+  // mã thật (src/license.js issueCode) là nhóm 6, không phải nhóm 5 — và cả dạng không gạch
+  const fake6 = Array.from({ length: 10 }, (_, i) => 'A1B2C' + String.fromCharCode(68 + (i % 10))).join('-');
+  const bare = ('ZM' + 'A1B2C3D4').repeat(8);
+  assert.ok(SG.scan({ title: 'Untitled - Notepad', text: 'code: ' + fake6 }).includes('text:aivn-code'), fake6);
+  assert.ok(SG.scan({ text: bare }).includes('text:aivn-code'));
+  assert.ok(!JSON.stringify(SG.scan({ text: fake6 })).includes(fake6));
+  assert.ok(SG.scan({ title: 'license.json - Notepad' }).includes('title:activation'));
+  assert.ok(SG.scan({ title: 'aivn-admin-key.json - Notepad' }).includes('title:key'));
+  assert.deepStrictEqual(SG.screenSecrets({ title: 'Calculator', windows: [{ title: FAKE_TITLE, proc: 'notepad', min: true }] }).reasons, []);
+  const bg = SG.screenSecrets({ title: 'Calculator', text: '12 + 30 = 42', windows: [{ title: 'license.json - Notepad', proc: 'notepad' }] });
+  assert.ok(bg.reasons.includes('title:activation')); assert.ok(!JSON.stringify(bg.reasons).includes('license'));
 });
 test('redactSecrets / redactTitles: che mã + tiêu đề, giữ phần còn lại', () => {
   const s = SG.redactSecrets('mã ' + FAKE_CODE + ' xong'); assert.ok(!s.includes(FAKE_CODE)); assert.match(s, /^mã \[đã che\] xong$/);
@@ -89,11 +100,12 @@ test('prune: chỉ xoá step-*.jpg cũ/vượt dung lượng trong đúng thư m
 });
 
 // chạy QA thật (runAgentTurn giả): Notepad đang mở tệp mã kích hoạt GIẢ
-async function qaRun({ title, text, windowInfo, image = fakeImage(), steps = null }) {
+async function qaRun({ title, text, windowInfo, image = fakeImage(), steps = null, windows = undefined }) {
   const d = tmp(); const shots = path.join(d, 'shots'); const logs = []; let tapFn = null;
   const LOG = { log: (tag, m) => { const l = `[${tag}] ${m}`; logs.push(l); tapFn && tapFn(l); }, tap: (f) => { tapFn = f; return () => { tapFn = null; }; } };
   const win = { hwnd: 42, pid: 7, proc: 'notepad', title };
   const deps = { version: 't', engine: { status: () => ({ loaded: true, id: 'm', path: '/m.gguf' }) }, listModels: () => [], LOG, capture, image, deadlineGraceMs: 500,
+    ...(windows !== undefined ? { windows: typeof windows === 'function' ? windows : async () => windows } : {}),
     windowInfo: windowInfo === undefined ? async (w) => (w.hwnd === 42 ? { b: [100, 50, 800, 600], title, proc: 'notepad', text } : null) : windowInfo,
     runAgentTurn: async ({ qa }) => {
       for (const st of steps || [{ id: 1, name: 'ensure_app', out: { window: win, summary: `Notepad: cửa sổ “${title}” đã ở trước`, forModel: text } }, { id: 2, name: 'screenshot', out: { summary: 'đã chụp màn hình' } }]) {
@@ -126,6 +138,62 @@ test('QA: không đọc được khung/chữ cửa sổ nhưng tiêu đề nhạ
   // chữ trên cửa sổ có mã (tiêu đề vô hại) → vẫn che
   const c = await qaRun({ title: 'Untitled - Notepad', text: 'ghi chú\n' + FAKE_CODE });
   assert.ok(c.res.steps.every(s => s.shotRedacted && s.shotWarn.includes('text:aivn-code'))); assert.ok(!c.json.includes(FAKE_CODE));
+});
+test('dropShotPixels: ảnh đã chụp mất data URL ngay tại chỗ, không còn mã', () => {
+  const fake6 = Array.from({ length: 10 }, (_, i) => 'A1B2C' + String.fromCharCode(68 + (i % 10))).join('-');
+  const shot = { dataUrl: 'data:image/jpeg;base64,' + Buffer.from(MARK + fake6).toString('base64'), width: 20, height: 10, thumb: MARK };
+  SG.dropShotPixels(shot);
+  assert.strictEqual(shot.dataUrl, null); assert.strictEqual(shot.thumb, null); assert.ok(shot.redacted);
+  assert.ok(!JSON.stringify(shot).includes(fake6) && !JSON.stringify(shot).includes('ORIGINAL'));
+});
+test('guardStep: cửa sổ mã kích hoạt đang mở (kể cả không phải đích) → bỏ ảnh, không chép giá trị vào lý do', () => {
+  const fake6 = Array.from({ length: 10 }, (_, i) => 'A1B2C' + String.fromCharCode(68 + (i % 10))).join('-');
+  const out = { summary: 'Calculator: đã ở trước', forModel: '12 + 30 = 42', thumb: IMG, sensitive: ['title:activation', fake6] };
+  const step = { summary: 'Calculator: đã ở trước', thumb: IMG };
+  SG.guardStep(step, out, { warn: () => 'đã ẩn ảnh chụp' });
+  assert.ok(!('thumb' in step)); assert.strictEqual(out.thumb, null); assert.match(step.summary, /đã ẩn ảnh chụp/);
+  assert.deepStrictEqual(step.sensitive, ['title:activation']);
+  assert.ok(!JSON.stringify(step).includes(fake6) && !JSON.stringify(step).includes('ORIGINAL'));
+});
+test('QA: tệp mã kích hoạt đang mở ở cửa sổ khác → ảnh bước không chứa điểm ảnh gốc', async () => {
+  const { res, files, json } = await qaRun({ title: 'Calculator', text: '12 + 30 = 42', windows: [{ title: 'license.json - Notepad', proc: 'notepad' }, { title: 'Calculator', proc: 'calc' }] });
+  assert.ok(files.length >= 1);
+  for (const f of files) { const b = fs.readFileSync(f, 'latin1'); assert.ok(!b.includes('ORIGINAL') && !b.includes(MARK.slice(0, 12)), f); }
+  assert.ok(res.steps.every(s => s.shotRedacted && s.shotWarn.includes('title:activation')));
+  assert.ok(!json.includes('license.json') && !json.includes('ORIGINAL'));
+});
+test('QA: ảnh đã ghi trong lượt này bị xoá khi sau đó mới thấy tệp mã kích hoạt', async () => {
+  let n = 0; const windows = async () => (++n === 1 ? [] : [{ title: FAKE_TITLE, proc: 'notepad' }]);
+  const { res, files, json } = await qaRun({ title: 'Calculator', text: '12 + 30 = 42', windows, steps: [{ id: 1, name: 'screenshot', out: { summary: 'đã chụp màn hình' } }, { id: 2, name: 'screenshot', out: { summary: 'đã chụp màn hình' } }] });
+  assert.strictEqual(res.steps[0].shot, null); assert.ok(res.steps[0].shotPurged);
+  assert.ok(res.steps[1].shotRedacted);
+  for (const f of files) assert.ok(!fs.readFileSync(f, 'latin1').includes('ORIGINAL'), f);
+  assert.ok(!json.includes(FAKE_TITLE) && !json.includes(FAKE_CODE) && !json.includes('ORIGINAL'));
+});
+test('QA: tệp mã kích hoạt đang thu nhỏ (không nằm trên màn hình) → ảnh cửa sổ thường vẫn giữ', async () => {
+  const { res, files } = await qaRun({ title: 'Calculator', text: '12 + 30 = 42', windows: [{ title: FAKE_TITLE, proc: 'notepad', min: true }] });
+  assert.ok(res.steps.every(s => !s.shotRedacted && s.shotScope.scope === 'window'));
+  assert.match(fs.readFileSync(files[0], 'latin1'), /^JPGCROP100,50,800,600:/);
+});
+test('forgetShots: không đi theo symlink ra ngoài thư mục shots, không đụng thư mục gốc', () => {
+  const d = tmp(); const shots = path.join(d, 'shots'); fs.mkdirSync(shots);
+  const outside = path.join(d, 'secret.jpg'); fs.writeFileSync(outside, MARK + FAKE_CODE);
+  fs.symlinkSync(outside, path.join(shots, 'step-01-link.jpg'));
+  const linkStep = { shot: path.join(shots, 'step-01-link.jpg') };
+  assert.strictEqual(SG.forgetShots([linkStep], shots).removed, 0);
+  assert.strictEqual(fs.readFileSync(outside, 'utf8'), MARK + FAKE_CODE);
+  assert.ok(fs.lstatSync(path.join(shots, 'step-01-link.jpg')).isSymbolicLink());
+  const kept = path.join(shots, 'step-02-click.jpg'); fs.writeFileSync(kept, 'ok');
+  assert.ok(SG.forgetShots([{ shot: kept }], '/').refused);
+  assert.strictEqual(fs.readFileSync(kept, 'utf8'), 'ok');
+  const dot = path.join(shots, 'step-03-..jpg'); fs.writeFileSync(dot, 'x');
+  assert.strictEqual(SG.forgetShots([{ shot: dot }], shots).removed, 0); assert.ok(fs.existsSync(dot));
+});
+test('desktop-agent: quét và xoá điểm ảnh trước khi gửi cho mắt nhìn hoặc thẻ xin phép', () => {
+  const src = fs.readFileSync(path.join(__dirname, '../src/desktop-agent.js'), 'utf8');
+  const seal = src.indexOf('SG.screenSecrets'); const desc = src.indexOf('SC.describe');
+  assert.ok(seal > 0 && seal < desc, 'phải quét trước khi gửi ảnh cho mô hình nhìn');
+  assert.match(src, /dropShotPixels\(shot\)/); assert.match(src, /shotOk/);
 });
 test('QA: cửa sổ thường → chỉ chụp khung cửa sổ đích (ghi rõ phạm vi), bước không có đích → cả màn hình như trước', async () => {
   const { res, files } = await qaRun({ title: 'Calculator', text: '12 + 30 = 42' });

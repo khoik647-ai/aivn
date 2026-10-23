@@ -973,12 +973,12 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       Object.assign(step, { status: out.ask ? 'asked' : out.error ? 'error' : 'ok', summary: out.summary, detail: out.detail ?? out.forModel, ms: Date.now() - step.startedAt });
       SG.guardStep(step, out, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá') }); // B193: bước tự chạy (ensure_app/open_app/system_action) cũng che
       onStep({ ...step }); logTool(step); calls++;
-      deps.log && deps.log(`[aivn agent] ensure_app “${ensureTarget}” → ${step.status}: ${String(out.summary || '').slice(0, 160)}`);
+      deps.log && deps.log(`[aivn agent] ensure_app “${ensureTarget}” → ${step.status}: ${String(step.summary || '').slice(0, 160)}`);
       const base = { steps, usage, finishReason: 'stop', urls: [], memories: sys.memories.map(m => m.text), tools: names, warning: null };
       if (out.ask) return { ...base, text: out.ask, asked: out.code || 'login', outcome: 'asked_user' };
       if (out.error && out.code !== 'not-found') return { ...base, text: `Mình chưa làm được: ${String(out.error).slice(0, 400)}`, outcome: 'failed' };
       msgs.push({ role: 'assistant', content: '', tool_calls: [{ id, type: 'function', function: { name: 'ensure_app', arguments: JSON.stringify(args) } }] });
-      msgs.push({ role: 'tool', tool_call_id: id, content: String(out.forModel || out.summary || '') });
+      msgs.push({ role: 'tool', tool_call_id: id, content: step.sensitive && step.sensitive.length ? SG.redactTitles(String(out.forModel || out.summary || ''), step.win && step.win.title ? [step.win.title] : []) : String(out.forModel || out.summary || '') });
       if (!out.error) {
         autoOpen = { ok: true, out };
         // B109 (máy thật beta.2.5): ứng dụng chat vừa được KHỞI ĐỘNG / mở lại từ khay (màn hình chào, chưa mở chat nào), hoặc việc là “mở chat X”
@@ -990,16 +990,17 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
           const def2 = defOf('screen_act'); const st2 = { id: id2, name: 'screen_act', label: def2.label, icon: def2.icon, args: args2, status: 'running', startedAt: Date.now(), round: 0, pre: '', auto: true };
           steps.push(st2); onStep({ ...st2 });
           let o2; try { o2 = await exec('screen_act', args2, ctx); } catch (e) { const msg = (e && e.message) || String(e); o2 = { error: msg, forModel: `Lỗi: ${msg}`, summary: msg.split('\n')[0] }; }
-          Object.assign(st2, { status: o2.ask ? 'asked' : o2.refused ? 'refused' : o2.error ? 'error' : 'ok', summary: o2.summary, detail: o2.detail ?? o2.forModel, ms: Date.now() - st2.startedAt });
+          Object.assign(st2, { status: o2.ask ? 'asked' : o2.refused ? 'refused' : o2.error ? 'error' : 'ok', summary: o2.summary, detail: o2.detail ?? o2.forModel, thumb: o2.thumb, ms: Date.now() - st2.startedAt });
+          SG.guardStep(st2, o2, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá') }); // B193: open_chat tự chạy cũng che ảnh
           onStep({ ...st2 }); logTool(st2); calls++;
-          deps.log && deps.log(`[aivn agent] open_chat tự động “${rcpA}” sau ensure_app (${launchedA ? 'vừa khởi động' : 'việc mở chat'}) → ${st2.status}: ${String(o2.summary || '').slice(0, 160)}`);
+          deps.log && deps.log(`[aivn agent] open_chat tự động “${rcpA}” sau ensure_app (${launchedA ? 'vừa khởi động' : 'việc mở chat'}) → ${st2.status}: ${String(st2.summary || '').slice(0, 160)}`);
           if (o2.ask) return { ...base, text: o2.ask, asked: 'recipient', outcome: 'asked_user' };
           msgs.push({ role: 'assistant', content: '', tool_calls: [{ id: id2, type: 'function', function: { name: 'screen_act', arguments: JSON.stringify(args2) } }] });
-          msgs.push({ role: 'tool', tool_call_id: id2, content: String(o2.forModel || o2.summary || '') });
+          msgs.push({ role: 'tool', tool_call_id: id2, content: st2.sensitive && st2.sensitive.length ? SG.redactTitles(String(o2.forModel || o2.summary || ''), st2.win && st2.win.title ? [st2.win.title] : []) : String(o2.forModel || o2.summary || '') });
           // việc CHỈ mở chat (không có nội dung tin) và đã kiểm tiêu đề → xong ngay, không để mô hình gõ gì (B108)
           if (chatVerifiedStep(st2) && !SVa.msgSend(query) && !SVa.quotedIn(query).length) return { ...base, text: `Đã mở cuộc trò chuyện “${rcpA}” trong ${ensureTarget} (đã kiểm tiêu đề khung chat). Mình không gõ hay gửi gì.`, outcome: 'done' };
         }
-        if (intent && !intent.rest) return { ...base, text: `Đã mở ${ensureTarget}${out.window && out.window.title ? ` (“${out.window.title}”)` : ''} và sẵn sàng.`, outcome: 'done' };
+        if (intent && !intent.rest) { const tShow = out.window && out.window.title && !SG.scan({ title: out.window.title }).length ? ` (“${out.window.title}”)` : ''; return { ...base, text: `Đã mở ${ensureTarget}${tShow} và sẵn sàng.`, outcome: 'done' }; }
       }
     }
     if (intent && !autoOpen) {
@@ -1015,10 +1016,11 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       onStep({ ...step }); logTool(step); calls++;
       seen.set('open_app:' + JSON.stringify(call.arguments), out);
       msgs.push({ role: 'assistant', content: '', tool_calls: [{ id: call.id, type: 'function', function: { name: 'open_app', arguments: JSON.stringify(call.arguments) } }] });
-      msgs.push({ role: 'tool', tool_call_id: call.id, content: String(out.forModel || out.summary || '') });
+      msgs.push({ role: 'tool', tool_call_id: call.id, content: step.sensitive && step.sensitive.length ? SG.redactTitles(String(out.forModel || out.summary || ''), step.win && step.win.title ? [step.win.title] : []) : String(out.forModel || out.summary || '') });
       autoOpen = { ok: !out.error, out };
       if (autoOpen.ok && !intent.rest) { // chỉ cần mở ứng dụng: xong, không cần mô hình
-        return { text: `Đã mở ${out.summary ? out.summary.replace(/^Đã mở\s*/, '') : intent.name}.`, steps, usage, finishReason: 'stop', urls: [], memories: sys.memories.map(m => m.text), tools: names, warning: null };
+        const opened = SG.redactTitles(String(step.summary || out.summary || ''), step.win && step.win.title ? [step.win.title] : []).replace(/\s*·\s*⚠[\s\S]*$/, '');
+        return { text: `Đã mở ${opened ? opened.replace(/^Đã mở\s*/, '') : intent.name}.`, steps, usage, finishReason: 'stop', urls: [], memories: sys.memories.map(m => m.text), tools: names, warning: null };
       }
     }
     // B44: câu chỉ là MỘT lệnh hệ thống rõ ràng (“tăng âm lượng lên”, “âm lượng 100”, “khoá màn hình”) → làm ngay bằng công cụ thật, không qua mô hình
@@ -1231,9 +1233,10 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
         Object.assign(step, { status: out.refused ? 'refused' : out.error ? 'error' : 'ok' /* B166: bước có step.check hiện “không có tác dụng” (màu hổ phách), không phải “xong” xanh */, check: step.check || null, summary: out.summary, detail: out.detail ?? out.forModel, urls: out.urls, file: out.file, thumb: out.thumb, verify: out.verify, draftIn: out.draftIn || undefined, ms: Date.now() - step.startedAt });
         SG.guardStep(step, out, { warn: () => say(LG, 'đã ẩn ảnh chụp: màn hình có thể chứa mã kích hoạt, mật khẩu hoặc khoá') }); // B193: bước có cửa sổ/chữ nhạy cảm (mã kích hoạt, mật khẩu, khoá) → bỏ ảnh nhỏ, cảnh báo trên thanh bước, che chuỗi trông như khoá
         logTool(step);
-        cyc.push(call.name, args, { error: out.error, refused: out.refused, bad: !!step.check, summary: out.summary, verified: !!(out.verify && out.verify.sent), sig: out.sig || (out.raw && out.raw.sig) || null });
+        cyc.push(call.name, args, { error: out.error, refused: out.refused, bad: !!step.check, summary: step.summary, verified: !!(out.verify && out.verify.sent), sig: out.sig || (out.raw && out.raw.sig) || null });
         onStep({ ...step });
-        msgs.push({ role: 'tool', tool_call_id: call.id, content: typeof out.forModel === 'string' && out.forModel ? out.forModel : String(out.forModel ?? out.message ?? out.summary ?? JSON.stringify(out)) || '(không có kết quả)' });
+        { const rawTool = typeof out.forModel === 'string' && out.forModel ? out.forModel : String(out.forModel ?? out.message ?? out.summary ?? '') || '(không có kết quả)';
+          msgs.push({ role: 'tool', tool_call_id: call.id, content: step.sensitive && step.sensitive.length ? SG.redactTitles(rawTool, step.win && step.win.title ? [step.win.title] : []) : rawTool }); }
         // B164: vừa gõ + Enter (hoặc bấm Enter) trong trình duyệt cho việc “tìm rồi cho biết” → AIVN đọc trang NGAY, không chờ mô hình
         // (beta.2.8: mô hình bấm ctrl+f/ctrl+t sau khi tìm, mất trang kết quả). Chạy cả khi bước bị đánh dấu “chưa có tác dụng” (trang có thể đang tải).
         if (webInfo && !(autoRead && autoRead.ok) && !submitRead && call.name === 'screen_act' && !out.error && !out.refused && submitted(args) && !(signal && signal.aborted)) {

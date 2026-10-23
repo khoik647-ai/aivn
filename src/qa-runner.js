@@ -157,6 +157,12 @@ async function winInfoOf(deps, tgt) {
   if (!get || !tgt || tgt.hwnd == null) return null;
   try { return await Promise.race([get(tgt), new Promise(r => setTimeout(() => r(null), 8000).unref?.())]); } catch { return null; }
 }
+// B193: mọi cửa sổ đang hiện (không chỉ cửa sổ đích). Linux/mac không tự gọi uitree trừ khi deps.windows được truyền.
+async function windowsOf(deps) {
+  const get = deps.windows !== undefined ? deps.windows : (process.platform === 'win32' ? () => require('./agent/uitree').windows() : null);
+  if (!get) return [];
+  try { const r = await Promise.race([Promise.resolve(get()), new Promise(res => setTimeout(() => res([]), 8000).unref?.())]); return Array.isArray(r) ? r : []; } catch { return []; }
+}
 const exitCodeOf = (status) => status === 'done' ? 0 : status === 'asked_user' ? 3 : status === 'cancelled' ? 4 : 2;
 function writeJson(file, obj) { fs.mkdirSync(path.dirname(file), { recursive: true }); const tmp = file + '.tmp-' + process.pid; fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8'); fs.renameSync(tmp, file); }
 // dòng nhật ký có toạ độ bấm / mã phím (B62/B66c) → gắn vào bước
@@ -200,10 +206,13 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
           if (Array.isArray(s.sensitive) && s.sensitive.length && tgt) tgt.sensitive = [...new Set([...tgt.sensitive, ...s.sensitive])];
           step.summary = SG.redactTitles(step.summary, [...titles]); step.debug = step.debug.map(l => SG.redactTitles(l, [...titles]));
           if (args.shots && deps.capture) { try { const f = path.join(args.shots, `step-${String(n).padStart(2, '0')}-${String(s.name || 'step').replace(/[^\w-]/g, '_')}.jpg`);
-            // B193: chỉ chụp cửa sổ đích (khi biết khung của nó); cửa sổ/chữ nhạy cảm → CHỈ ghi ảnh đã che, không bao giờ ghi ảnh gốc
-            const info = tgt ? await winInfoOf(deps, tgt) : null; if (info && info.title) titles.add(String(info.title));
-            const reasons = [...new Set([...(Array.isArray(s.sensitive) ? s.sensitive : []), ...(tgt ? tgt.sensitive : []), ...(tgt ? SG.scan({ title: info ? info.title : tgt.title, proc: info ? info.proc : tgt.proc, text: info ? info.text : '' }) : [])])];
+            // B193: chỉ chụp cửa sổ đích (khi biết khung của nó); tệp mã kích hoạt đang hiện ở BẤT KỲ cửa sổ nào, hoặc chữ nhạy cảm → CHỈ ghi ảnh đã che, không bao giờ ghi ảnh gốc
+            const [info, wins] = await Promise.all([tgt ? winInfoOf(deps, tgt) : null, windowsOf(deps)]); if (info && info.title) titles.add(String(info.title));
+            const sec = SG.screenSecrets({ title: info ? info.title : (tgt && tgt.title) || '', proc: info ? info.proc : (tgt && tgt.proc) || '', text: info && info.text ? info.text : '', windows: wins });
+            for (const t of sec.titles) titles.add(t);
+            const reasons = [...new Set([...SG.reasonList(s.sensitive), ...(tgt ? SG.reasonList(tgt.sensitive) : []), ...sec.reasons])];
             if (tgt && reasons.length) tgt.sensitive = reasons; // còn nhạy cảm cho các bước sau trên cùng cửa sổ
+            if (reasons.length) { const gone = SG.forgetShots(res.steps, args.shots); if (gone.removed) deps.LOG && deps.LOG.log('qa', `B193: xoá ${gone.removed} ảnh đã chụp trước đó trong lượt này (màn hình có nội dung nhạy cảm)`); }
             const b = info && Array.isArray(info.b) ? info.b : tgt && Array.isArray(tgt.b) ? tgt.b : null;
             const g = await SG.shot({ capture: deps.capture, target: b ? { b } : null, reasons, image: deps.image, maxW: 1920 });
             step.shotScope = { scope: g.scope, rect: g.rect, window: !!b }; if (reasons.length) { step.shotRedacted = true; step.shotWarn = reasons; deps.LOG && deps.LOG.log('qa', `B193: bước ${n} — ảnh chụp có thể chứa nội dung nhạy cảm (${reasons.join(', ')}) → ${g.buf ? 'chỉ ghi ảnh đã che' : 'không ghi ảnh'}`); }

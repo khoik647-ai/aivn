@@ -18,6 +18,7 @@ const D = require('./agent/dpi');
 const PD = require('./agent/pixdiff');
 const SMALL_RE = /(?:^|[^0-9.])(?:0\.\d|[1-4](?:\.\d)?)\s*b(?:[^a-z]|$)/i; // mô hình ≤ 4B
 const U = require('./agent/uitree');
+const SG = require('./agent/shot-guard'); // B193: ảnh bước không giữ điểm ảnh của tệp mã kích hoạt
 const BP = require('./agent/browser-profile');
 const OB = require('./agent/ocr-boost');
 
@@ -290,6 +291,12 @@ function createDesktopAgent(deps) {
     }
     const obs = U.normalize(raw, { ocr: ocrLines, max: 160 });
     s.idReg = s.idReg || {}; U.stabilizeIds(obs.elements, s.idReg); // B55: id ổn định giữa các lần quan sát
+    // B193: khoá điểm ảnh TRƯỚC khi lưu / đưa cho mắt nhìn / thẻ bước. Tệp mã kích hoạt mở ở cửa sổ khác vẫn nằm trong ảnh toàn màn hình.
+    const rawText = (Array.isArray(raw.els) ? raw.els : []).map(e => [e && e.n, e && e.v].filter(Boolean).join(' ')).join('\n');
+    let sec = { reasons: [], titles: [] };
+    try { sec = SG.screenSecrets({ title: obs.win ? obs.win.title : '', proc: (obs.win && obs.win.proc) || proc, text: rawText + '\n' + ocrLines.map(l => l.text).join('\n'), windows: await U.windows() }); } catch {}
+    if (sec.reasons.length) { SG.dropShotPixels(shot); s.sensitive = sec.reasons; deps.log && deps.log('desk', `B193: không giữ ảnh chụp (${sec.reasons.join(', ')})`); }
+    else s.sensitive = null;
     s.obs = obs; s.shot = shot;
     let list = obs.elements;
     if (query) { const fqs = U.queryVariants(query); const fq = fqs[0] || U.fold(query); const hit = list.filter(e => fqs.some(v => U.fold(e.name).includes(v) || (e.value && U.fold(e.value).includes(v)))); list = hit.length ? [...hit, ...list.filter(e => !hit.includes(e))] : list; }
@@ -299,7 +306,7 @@ function createDesktopAgent(deps) {
     const text = U.formatForModel({ win: obs.win, elements: list }, { toNorm: to1000, limit: small ? 30 : query ? 60 : 110 });
     // cây giao diện nghèo (Zalo, ứng dụng Electron…): tự chuyển sang ảnh chụp + mô hình nhìn ảnh
     let seen = '', eyesKind = null;
-    if ((poor || question) && vision !== 'off') {
+    if (!sec.reasons.length && (poor || question) && vision !== 'off') {
       const e = await eyes();
       if (e) {
         status(e.kind === 'mắt nhìn' ? 'Đang nhìn màn hình bằng mắt nhìn…' : 'Đang nhìn màn hình bằng mô hình chính…'); // B33: chuỗi trọn để dịch được
@@ -310,14 +317,16 @@ function createDesktopAgent(deps) {
     s.lastSeen = seen;
     const src = [raw.noTree ? null : raw.error ? 'cây giao diện lỗi: ' + raw.error.slice(0, 120) : `cây giao diện ${named} phần tử có tên`, ocrLines.length ? `OCR ${ocrLines.length} cụm chữ` : null, eyesKind ? 'ảnh chụp + ' + eyesKind : null].filter(Boolean).join(' · ');
     s.obsN = (s.obsN || 0) + 1;
-    deps.log && deps.log('desk', `Quan sát: "${obs.win ? obs.win.title : '?'}" · ${obs.elements.length} phần tử (${src}) · ${Date.now() - t0} ms`);
+    const shownTitle = sec.reasons.length ? SG.MASK : (obs.win ? obs.win.title : '?');
+    deps.log && deps.log('desk', `Quan sát: "${shownTitle}" · ${obs.elements.length} phần tử (${src}) · ${Date.now() - t0} ms`);
     status(`Đã quan sát: ${obs.elements.length} phần tử`);
     let text2 = text;
     const ak = U.appKeys(proc, obs.win ? obs.win.title : '');
     if (ak && ak.search && poor) text2 += `\nPhím tắt của ${ak.name}: hotkey "${ak.search}" = mở ô tìm kiếm (chắc chắn hơn bấm chữ “Tìm kiếm” đọc bằng OCR); sau đó type_text KHÔNG kèm element.`;
     if (seen) text2 += `\nMô tả màn hình (${eyesKind} nhìn ảnh chụp, có thể chưa chính xác):\n${seen.slice(0, 2500)}`;
     else if (poor && s.needEyes && vision !== 'off') text2 += `\nLƯU Ý: ứng dụng ${proc || 'này'} gần như không cho đọc nút/ô (chỉ có chữ OCR) và mô hình hiện tại KHÔNG nhìn được ảnh. Đừng kết luận "không có/không tìm thấy" chỉ dựa vào danh sách này; báo người dùng bấm "Nạp thêm mắt nhìn" để AIVN nhìn được màn hình.`;
-    return { obs, text: text2, src, shot, thumb: thumb ? thumbOf(shot) : null, poor, seen };
+    const safeThumb = !thumb || sec.reasons.length || !shot || !shot.dataUrl ? null : thumbOf(shot);
+    return { obs, text: text2, src, shot, thumb: safeThumb, poor, seen, sensitive: sec.reasons.length ? sec.reasons : undefined, window: obs.win || null };
   }
 
   // ---------- xin phép (thẻ trên lớp phủ) ----------
@@ -674,15 +683,15 @@ function createDesktopAgent(deps) {
     if (action !== 'wait' && ++s.actions > budget) return { error: `Đã dùng hết ${budget} thao tác cho lượt này`, forModel: `Đã dùng hết ${budget} thao tác màn hình cho lượt này. Dừng lại và báo người dùng những gì đã làm được.`, summary: 'hết số bước cho phép' };
     if (ctx.signal && ctx.signal.aborted) throw new Error('Đã dừng.');
 
-    if (action === 'wait') { const sec = Math.max(0.2, Math.min(10, Number(a.seconds) || 1)); status(`Chờ ${sec} giây…`); await sleep(sec * 1000); const o = await observe(ctx, { thumb: true }); return { forModel: `Đã chờ ${sec} giây.\n${o.text}`, summary: `chờ ${sec} giây`, thumb: o.thumb }; }
+    if (action === 'wait') { const sec = Math.max(0.2, Math.min(10, Number(a.seconds) || 1)); status(`Chờ ${sec} giây…`); await sleep(sec * 1000); const o = await observe(ctx, { thumb: true }); return { forModel: `Đã chờ ${sec} giây.\n${o.text}`, summary: `chờ ${sec} giây`, thumb: o.thumb, sensitive: o.sensitive, window: o.window }; }
     if (action === 'focus_window') {
       const q = String(a.window || a.element || a.target || '').trim(); if (!q) throw new Error('Cần tên cửa sổ (window).');
       status(`Đang chuyển tới cửa sổ “${q}”…`);
       const list = await U.windows(); const w = U.matchWindow(list, q);
-      if (!w) return { error: 'không thấy cửa sổ', forModel: `Không thấy cửa sổ nào khớp "${q}". Các cửa sổ đang mở: ${list.map(x => `"${x.title}"${x.proc ? ' (' + x.proc + ')' : ''}`).slice(0, 15).join(', ') || '(không có)'}. Nếu ứng dụng chưa mở, dùng open_app.`, summary: 'không thấy cửa sổ ' + q };
+      if (!w) { const lab = (x) => SG.scan({ title: x.title, proc: x.proc }).length ? SG.MASK : x.title; return { error: 'không thấy cửa sổ', forModel: `Không thấy cửa sổ nào khớp "${q}". Các cửa sổ đang mở: ${list.map(x => `"${lab(x)}"${x.proc ? ' (' + x.proc + ')' : ''}`).slice(0, 15).join(', ') || '(không có)'}. Nếu ứng dụng chưa mở, dùng open_app.`, summary: 'không thấy cửa sổ ' + q }; }
       await U.focus(w); s.target = { hwnd: w.hwnd, pid: w.pid, proc: w.proc, title: w.title }; await sleep(500);
       const o = await observe(ctx);
-      return { forModel: `Đã chuyển tới cửa sổ "${w.title}".\n${o.text}`, summary: `cửa sổ “${w.title}”`, thumb: o.thumb };
+      return { forModel: `Đã chuyển tới cửa sổ "${w.title}".\n${o.text}`, summary: `cửa sổ “${w.title}”`, thumb: o.thumb, sensitive: o.sensitive, window: o.window || w };
     }
     // B65 (Zalo thật: mô hình gõ NỘI DUNG “AIVN test 100%” vào ô tìm kiếm): mở cuộc trò chuyện bằng mã, không để mô hình tự gõ tên người nhận
     if (action === 'open_chat') return openChat(a, ctx);
@@ -969,18 +978,19 @@ function createDesktopAgent(deps) {
     }
     if (!autoGo && (mode === 'each' || risk)) {
       status(risk ? 'Cần bạn cho phép bước quan trọng' : 'Chờ bạn cho phép');
-      const crop = s.shot ? thumbOf(s.shot).src : null;
+      const shotOk = !!(s.shot && s.shot.dataUrl && !s.shot.redacted && !(s.sensitive && s.sensitive.length)); // B193: không đưa ảnh/tiêu đề tệp mã kích hoạt lên thẻ
       const logWho = gate.send && gateRcp ? ` · người nhận “${gateRcp}”` : '';
       deps.log && deps.log('desk', `Xin phép (đã hỏi)${gate.send ? ' — bước GỬI' : risk ? ' — bước quan trọng' : ''}: screen_act ${action} · ${desc}${logWho}`);
       // B93: thẻ GỬI mang đúng tên người nhận (theo lệnh) + tên cuộc trò chuyện đang hiện trên màn hình (tiêu đề khung giữa / chữ gợi ý ô soạn)
       const sendInfo = gate.send ? (() => { const sendText = action === 'type_text' ? String(a.text || '').replace(/\n+$/, '') : s.lastTyped || ''; let shown = null;
         try { const R = SV.regionsOf(s.obs); const P0 = SV.parseSeen(s.lastSeen || '');
           // B97: cùng đầu vào + cùng cách làm sạch với cổng người nhận (B90); kèm kết quả cổng đã chốt trong lượt này (chatOpen + chữ gợi ý ô soạn đã khớp)
-          shown = { header: SV.cleanHeader([...(R ? R.header : []), P0.header].filter(Boolean)).slice(0, 4), headerRaw: R ? R.header.slice(0, 4) : [], gate: { chatOpen: s.chatOpen || null, placeholder: s.placeholderSeen && s.placeholderSeen.key === s.chatOpen ? s.placeholderSeen.name : null, openedBy: s.openedBy || null }, composer: SV.composerTarget([...(R ? R.composer : []), ...((s.obs && s.obs.elements) || []).flatMap(e => [e.placeholder, e.name])].filter(Boolean)), title: s.obs && s.obs.win ? s.obs.win.title : '' }; } catch {}
+          const winTitle = s.obs && s.obs.win ? s.obs.win.title : '';
+          shown = { header: SV.cleanHeader([...(R ? R.header : []), P0.header].filter(Boolean)).slice(0, 4), headerRaw: R ? R.header.slice(0, 4) : [], gate: { chatOpen: s.chatOpen || null, placeholder: s.placeholderSeen && s.placeholderSeen.key === s.chatOpen ? s.placeholderSeen.name : null, openedBy: s.openedBy || null }, composer: SV.composerTarget([...(R ? R.composer : []), ...((s.obs && s.obs.elements) || []).flatMap(e => [e.placeholder, e.name])].filter(Boolean)), title: winTitle && SG.scan({ title: winTitle, proc: s.obs.win.proc }).length ? SG.MASK : winTitle }; } catch {}
         return { send: true, recipient: gateRcp || null, sendText, shown }; })() : {};
       if (ctx.signal && ctx.signal.aborted) throw new Error('Đã dừng.'); // B117: không hiện thẻ sau hạn chót
       const r = await ask({ action, title: risk ? '⚠ Bước quan trọng — kiểm tra kỹ' : 'AIVN AGENT muốn làm bước này', desc: desc.charAt(0).toUpperCase() + desc.slice(1), risk, text: action === 'type_text' ? String(a.text) : null,
-        window: s.obs && s.obs.win ? s.obs.win.title : '', image: s.shot ? s.shot.dataUrl : crop, box, via: t ? t.via : null, mode, ...sendInfo }, ctx.signal);
+        window: shotOk && s.obs && s.obs.win ? s.obs.win.title : '', image: shotOk ? s.shot.dataUrl : null, box, via: t ? t.via : null, mode, ...sendInfo }, ctx.signal);
       deps.log && deps.log('desk', `Xin phép: người dùng ${r.ok ? 'CHO PHÉP' : r.timeout ? 'không trả lời (hết giờ)' : 'TỪ CHỐI'} — screen_act ${action} · ${desc}${logWho}${r.reason ? ` · lý do “${String(r.reason).slice(0, 80)}”` : ''}`);
       if (!r.ok && r.cancelled) { ov('target', { box: null }); s.lastAction = null; deps.log && deps.log('desk', `B117: thẻ xin phép bị huỷ (${r.reason}) — không làm bước: ${desc}`); throw new Error('Đã dừng.'); }
       if (!r.ok && r.timeout) { // B25: không ai trả lời thẻ ≠ người dùng từ chối
@@ -1244,7 +1254,7 @@ function createDesktopAgent(deps) {
     // B101: việc gửi tin đã GỬI + KIỂM CHỨNG (bong bóng tin + ô soạn trống + đúng người nhận) → báo agent.js kết thúc việc là XONG
     const sentDone = verify && verify.sent && gate.send && bodyTyping ? { msg: String(a.text || '').replace(/\n\s*$/, ''), to: SV.recipientOf(ctx.userQuery) || s.chatOpen || '', auto: !!a.__autoSubmit } : null;
     if (sentDone) { s.draftTyped = null; deps.log && deps.log('desk', `B101: đã gửi “${sentDone.msg.slice(0, 60)}” tới “${sentDone.to}” và KIỂM CHỨNG trên màn hình (thấy tin trong khung chat, ô soạn trống) → việc xong`); }
-    return { ...(sentDone ? { sentDone } : {}), ...(draftIn ? { draftIn } : {}), ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.filter(Boolean).join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, detail: checks.join(' '), verify };
+    return { ...(sentDone ? { sentDone } : {}), ...(draftIn ? { draftIn } : {}), ...(autoGo ? { auto: auto.why } : {}), forModel: `Đã ${desc}.\nKiểm tra: ${checks.filter(Boolean).join(' ')}\nMàn hình bây giờ (id mới, dùng các id này cho bước tiếp):\n${o2.text}`, summary: desc + (t && t.via ? ` · ${t.via}` : '') + (verify ? (verify.sent ? ' · đã kiểm chứng trên màn hình' : ' · CHƯA kiểm chứng') : ''), thumb: o2.thumb, sensitive: o2.sensitive, window: o2.window, detail: checks.join(' '), verify };
   }
 
   async function look(a, ctx) {
@@ -1267,10 +1277,17 @@ function createDesktopAgent(deps) {
     if (wall) {
       const name = (o.obs.win && o.obs.win.title) || 'Ứng dụng';
       const ask = EAx.loginAsk(`“${name}”`, wall);
-      return { error: 'màn hình đăng nhập', code: 'login', ask, stop: true, forModel: ask, summary: 'màn hình đăng nhập — hỏi bạn', thumb: o.thumb, detail: o.text };
+      return { error: 'màn hình đăng nhập', code: 'login', ask, stop: true, forModel: ask, summary: 'màn hình đăng nhập — hỏi bạn', thumb: o.thumb, sensitive: o.sensitive, window: o.window, detail: o.text };
     }
     let extra = '';
-    if (a && a.question && deps.engine.status().vision) { try { extra = '\nMô tả của mô hình nhìn ảnh: ' + await SC.describe(deps.engine, await withOverlayHidden(() => SC.capture({ maxW: 1280 })), a.question, { signal: ctx.signal }); } catch {} }
+    if (a && a.question && deps.engine.status().vision && !(o.sensitive && o.sensitive.length)) {
+      try {
+        const cap = await withOverlayHidden(() => SC.capture({ maxW: 1280 }));
+        const secQ = SG.screenSecrets({ title: o.window && o.window.title, proc: o.window && o.window.proc, text: o.text, windows: await U.windows().catch(() => []) });
+        if (secQ.reasons.length) SG.dropShotPixels(cap);
+        else extra = '\nMô tả của mô hình nhìn ảnh: ' + await SC.describe(deps.engine, cap, a.question, { signal: ctx.signal });
+      } catch {}
+    }
     let hint = '';
     if (a && a.query) {
       const fq = U.fold(String(a.query)); const hit = o.obs.elements.some(e => fq.split(' ').filter(w => w.length > 2 && !['nut', 'cua', 'cho'].includes(w)).some(w => U.fold(e.name || '').includes(w)));
@@ -1281,14 +1298,16 @@ function createDesktopAgent(deps) {
       if (session && session.lastLook === fq && !hit) hint += ' Bạn vừa tìm đúng thứ này và không thấy — ĐỪNG tìm lại, hãy làm cách khác.';
       if (session) session.lastLook = fq;
     }
-    return { forModel: `Quan sát (${o.src}):\n${o.text}${extra}${hint}\nDùng screen_act với element = id [eN] ở trên.`, summary: `${o.obs.win ? '“' + o.obs.win.title + '” · ' : ''}${o.obs.elements.length} phần tử`, thumb: o.thumb, detail: o.text };
+    return { forModel: `Quan sát (${o.src}):\n${o.text}${extra}${hint}\nDùng screen_act với element = id [eN] ở trên.`, summary: `${o.obs.win ? '“' + o.obs.win.title + '” · ' : ''}${o.obs.elements.length} phần tử`, thumb: o.thumb, sensitive: o.sensitive, window: o.window, detail: o.text };
   }
   async function readText(a, ctx) {
     await begin(ctx); status('Đang đọc chữ trên màn hình…');
     const shot = await capture();
     const r = await ocrShot(shot, null);
     const text = r.map(l => l.text).join('\n').slice(0, 6000);
-    return { forModel: `Chữ đọc được trên màn hình (OCR, có thể sai chính tả):\n<<<\n${text || '(không đọc được chữ nào)'}\n>>>`, summary: `${r.length} dòng chữ`, thumb: thumbOf(shot), detail: text };
+    let secR = { reasons: [] }; try { secR = SG.screenSecrets({ text, windows: await U.windows() }); } catch {}
+    if (secR.reasons.length) SG.dropShotPixels(shot);
+    return { forModel: `Chữ đọc được trên màn hình (OCR, có thể sai chính tả):\n<<<\n${text || '(không đọc được chữ nào)'}\n>>>`, summary: `${r.length} dòng chữ`, thumb: secR.reasons.length || !shot.dataUrl ? null : thumbOf(shot), sensitive: secR.reasons.length ? secR.reasons : undefined, detail: text };
   }
   // open_app vừa mở xong: ghi nhớ cửa sổ mục tiêu để quan sát/thao tác đúng cửa sổ
   async function adoptApp(name, ctx) {
