@@ -2,8 +2,6 @@
 // B190: VRAM trống thật, đo tốc độ sau khi nạp, câu lỗi đếm đúng số lần thử, và #102 (ngữ cảnh huấn luyện, logits, nhãn tràn, regex phi).
 const test = require('node:test');
 const assert = require('node:assert');
-const fs = require('fs');
-const path = require('path');
 const V = require('../src/vram-query');
 const G = require('../src/gguf');
 const F = require('../src/fit');
@@ -60,7 +58,7 @@ test('nvidia-smi: đọc memory.free và chọn đúng GPU theo tổng VRAM', ()
   assert.strictEqual(V.pickNvidiaRow(V.parseNvidiaSmi('nope'), 4096 * MiB), null);
 });
 
-test('VRAM trống: nvidia-smi thắng Vulkan trên máy lẫn GPU; không đo được thì dùng tổng', () => {
+test('VRAM trống: nvidia-smi thắng Vulkan trên máy lẫn GPU; không đo được thì dùng tổng', async () => {
   const mixed = V.resolveVram({ total: 4 * GiB, reportedFree: 3.55 * GiB, mixed: true }, { freeBytes: 0.7 * GiB });
   assert.strictEqual(mixed.freeKnown, true);
   assert.strictEqual(mixed.freeSource, 'nvidia-smi');
@@ -73,8 +71,27 @@ test('VRAM trống: nvidia-smi thắng Vulkan trên máy lẫn GPU; không đo �
   assert.strictEqual(discrete.freeKnown, true);
   assert.strictEqual(discrete.freeSource, 'vulkan');
   assert.strictEqual(discrete.free, 6 * GiB);
-  assert.match(fs.readFileSync(path.join(__dirname, '../src/engine.js'), 'utf8'), /UNKNOWN_FREE_LOG/);
   assert.match(V.UNKNOWN_FREE_LOG, /tạm tính theo tổng VRAM/);
+  const prev = process.env.AIVN_VRAM_LIMIT;
+  process.env.AIVN_VRAM_LIMIT = String(4 * GiB);
+  const logs = [];
+  const orig = console.log;
+  console.log = (...a) => { logs.push(a.map(String).join(' ')); };
+  try {
+    const E = require('../src/engine');
+    const info = await E.vramInfo({
+      gpu: 'vulkan',
+      getVramState: async () => ({ total: 12 * GiB, free: 10 * GiB, unifiedSize: 8 * GiB }),
+    });
+    assert.strictEqual(info.freeKnown, false);
+    assert.strictEqual(info.freeSource, 'total');
+    assert.strictEqual(info.free, 4 * GiB);
+    assert.ok(logs.some((l) => l.includes('tạm tính theo tổng VRAM')), logs.join('\n') || '(không có nhật ký)');
+  } finally {
+    console.log = orig;
+    if (prev == null) delete process.env.AIVN_VRAM_LIMIT;
+    else process.env.AIVN_VRAM_LIMIT = prev;
+  }
 });
 
 test('3B trên 4 GB mà chỉ còn 0,7 GB trống thì không còn 37/37 lớp', () => {
@@ -120,10 +137,8 @@ test('câu lỗi: số cách, danh sách và số lần nạp là một', () => 
   assert.strictEqual(LF.shouldPersistGpuOff({ cpuLoaded: false }), false);
   assert.strictEqual(LF.shouldPersistGpuOff({ cpuLoaded: true }), true);
   assert.strictEqual(LF.shouldPersistGpuOff({ cpuLoaded: true, attempts: [{ mode: 'gpu (29 lớp GPU, ngữ cảnh 4096)', message: 'chậm: 16 token/giây', slow: true }] }), false);
-  const main = fs.readFileSync(path.join(__dirname, '../src/main.js'), 'utf8');
-  assert.match(main, /shouldPersistGpuOff\(\{ cpuLoaded: true, attempts: e\.attempts \}\)/);
-  assert.match(main, /mọi cách nạp đều lỗi, giữ cài đặt GPU/);
-  assert.doesNotMatch(main, /đã thử \$\{n\} cách: GPU, GPU một phần, CPU/);
+  assert.strictEqual(LF.shouldPersistGpuOff({ cpuLoaded: false, attempts }), false, 'mọi cách đều lỗi thì không ghi tắt GPU');
+  assert.doesNotMatch(s, /GPU, GPU một phần, CPU/);
 });
 
 test('thông báo chậm có bản en/zh, không sót tiếng Việt', () => {

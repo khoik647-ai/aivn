@@ -6,6 +6,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function mkModel(opts) {
   const m = {
     gpuLayers: opts.gpuLayers,
+    path: opts.modelPath || '',
     disposed: false,
     tokenize: (t) => Array.from({ length: Math.max(1, Math.ceil(String(t).length / 4)) }),
     async createContext(o) {
@@ -46,6 +47,7 @@ export async function getLlama(o = {}) {
     async getGpuDeviceNames() { return ['NVIDIA GeForce RTX 3050 Ti Laptop GPU']; },
     async loadModel(opts) {
       S.log.push('load ' + opts.gpuLayers);
+      if (S.loadDelayMs) await sleep(S.loadDelayMs);
       if (S.loadFail) throw new Error(S.loadFail);
       return mkModel(opts);
     },
@@ -60,6 +62,7 @@ export class LlamaChatSession {
   async promptWithMeta(prompt, o) {
     const tag = prompt === 'Hi' ? 'probe' : 'user';
     S.log.push('gen-start ' + tag + ' ' + (this.seq && this.seq._m ? this.seq._m.gpuLayers : '?'));
+    if (this.seq && this.seq._m && this.seq._m.path) S.log.push('gen-path ' + tag + ' ' + this.seq._m.path);
     const n = tag === 'probe' ? (S.probeTokens ?? 8) : (S.userTokens ?? 8);
     const per = tag === 'probe'
       ? (typeof S.msFor === 'function' ? S.msFor(this.seq._m.gpuLayers) : (S.probeMsPerTok ?? 5))

@@ -116,7 +116,13 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
     busy: () => inflight.size > 0,
     // Khởi động lại tiến trình bộ máy với biến môi trường mới (vd. AIVN_GPU=off để chỉ dùng CPU)
     async restart(envPatch = {}, reason = 'đổi cài đặt bộ máy') {
-      extraEnv = { ...extraEnv, ...envPatch };
+      const patch = { ...envPatch };
+      // Chuỗi rỗng không đè biến môi trường gốc (AIVN_VRAM_LIMIT, GGML_VK_VISIBLE_DEVICES đặt từ ngoài).
+      // Chỉ gỡ bản ghi đè của lần khởi động lại trước, để process.env còn khi spawn tiến trình mới.
+      for (const k of Object.keys(patch)) {
+        if (patch[k] === '' || patch[k] == null) { delete extraEnv[k]; delete patch[k]; }
+      }
+      extraEnv = { ...extraEnv, ...patch };
       const c = child; restarting = true; if (c) { killReason = reason; log('[engine] khởi động lại: ' + reason + (inflight.size ? ' (đang có ' + inflight.size + ' lệnh chạy)' : '')); }
       if (c) await new Promise((r) => { const t = setTimeout(r, 8000); c.once('exit', () => { clearTimeout(t); r(); }); try { c.kill(); } catch { r(); } });
       restarting = false; cached = { loaded: false };
