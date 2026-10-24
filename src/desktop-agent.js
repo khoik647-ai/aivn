@@ -149,15 +149,16 @@ function createDesktopAgent(deps) {
     const edge = TB.edgeOf(d); const thick = TB.thickFrom(d, b, work, primaryPhysH());
     if (s && !s.tbGeom) { s.tbGeom = true; const gap = TB.workGap(b, work); deps.log && deps.log('desk', `B121: màn hình vật lý ${b.width}×${b.height} tại ${b.x},${b.y} · khung làm việc ${work ? `${work.width}×${work.height} tại ${work.x},${work.y}` : 'không đọc được'} · lệch đáy ${gap ? Math.round(gap.bottom) : '?'} px · dày ${thick || 0} px, cạnh ${TB.EDGE_VI[edge] || edge}`); }
     if (!d.autoHide) { if (inBand) deps.log && deps.log('desk', `B121: điểm bấm y=${Math.round(y)} trong dải đáy ${band} px của màn hình ${b.width}×${b.height} nhưng thanh tác vụ không tự ẩn → bấm như cũ`); return { x, y }; }
-    const p = TB.place(x, y, b, box, { autoHide: true, edge, thick, win });
+    if (!TB.barOnMonitor(d, b, primaryPhysH())) { deps.log && deps.log('desk', `B121: màn hình ${b.width}×${b.height} tại ${b.x},${b.y} không có thanh tác vụ — giữ điểm bấm (${Math.round(x)},${Math.round(y)})`); return { x, y }; }
+    const p = TB.place(x, y, b, box, { autoHide: true, edge, thick, win, owns: true });
     if (p.why === 'outside') return { x, y };
     // #27: đưa chuột ra giữa cửa sổ TRƯỚC khi tới mép, để thanh tác vụ kịp ẩn. Điểm bấm đã nằm ngoài dải, nên cú rê sau không chạm mép.
     await awayFromTaskbar('B121: thanh tác vụ tự ẩn — đưa chuột ra giữa cửa sổ cho thanh tác vụ kịp ẩn, rồi mới bấm');
     if (a) a.__tbAdjusted = true;
-    const noteStrip = 'phía trong màn hình, vì khung phần tử nằm trọn trong dải';
+    const noteStrip = 'trong khung, vì khung phần tử nằm trọn trong dải';
     const noteBox = 'trong phần khung còn nằm ngoài dải';
-    const note = p.why === 'out-of-strip' ? noteStrip : noteBox;
-    deps.log && deps.log('desk', p.moved
+    const note = p.wholly ? noteStrip : noteBox;
+    deps.log && deps.log('desk', (p.moved || p.why === 'in-box')
       ? `B121: thanh tác vụ tự ẩn — điểm (${Math.round(x)},${Math.round(y)}) trong dải mép ${p.band} px (cạnh ${TB.EDGE_VI[edge] || edge}, màn hình ${b.width}×${b.height} vật lý) → bấm (${Math.round(p.x)},${Math.round(p.y)}) ${note}${box ? ` (khung ${Math.round(box[1])}–${Math.round(box[1] + box[3])})` : ''}`
       : `B121: thanh tác vụ tự ẩn — điểm bấm y=${Math.round(y)} trong dải đáy nhưng không dời được`);
     return { x: p.x, y: p.y };
@@ -495,7 +496,13 @@ function createDesktopAgent(deps) {
     deps.log && deps.log('desk', `Không đưa được chuột tới đúng chỗ: cần (${want.x}, ${want.y}), con trỏ ở (${got.x}, ${got.y})`);
     return { ok: false, got, want };
   }
-  async function fgWin() { if (deps.fakeScreen && !deps.fgWin) return null; try { if (deps.fgWin) return await deps.fgWin(); const w = (await U.windows()).find(x => x.active); return w ? { title: w.title, pid: w.pid, hwnd: w.hwnd } : null; } catch { return null; } }
+  // Cửa sổ trước đúng dạng U.windows() (proc, class, tiêu đề). Thanh tác vụ là Shell_TrayWnd / explorer, tiêu đề rỗng — bỏ proc/class thì isTaskbarFg luôn sai.
+  function shapeFg(w) {
+    if (!w || typeof w !== 'object') return null;
+    const cls = w.class || w.className || w.cls || '';
+    return { title: w.title == null ? '' : w.title, pid: w.pid, hwnd: w.hwnd, proc: w.proc || '', class: cls, cls };
+  }
+  async function fgWin() { try { if (deps.fgWin) return shapeFg(await deps.fgWin()); const w = (await U.windows()).find(x => x.active); return shapeFg(w); } catch { return null; } }
   // B94: xoá chữ trong ô đang chọn (Ctrl/Cmd+A rồi Delete) — chỉ dùng cho ô tìm kiếm / chữ vừa gõ nhầm, không bao giờ cho tài liệu
   async function clearFocused() { try { const n = SC.libnut(); n.keyTap('a', require('./agent/keys').primaryOf(process.platform)); await sleep(120); n.keyTap('delete'); await sleep(150); } catch (e) { deps.log && deps.log('desk', 'Không xoá được chữ trong ô: ' + e.message); } }
   async function performAt(action, x, y, a) {
@@ -546,19 +553,34 @@ function createDesktopAgent(deps) {
       if (action === 'right_click') await press('right');
       if (action === 'type_text' && x != null) { await press('left'); await sleep(250); }
     } finally { if (hidOv && overlay && !overlay.isDestroyed() && session) overlay.showInactive(); }
-    // #27: cú bấm trong dải mép có thể rơi vào thanh tác vụ vừa trồi lên (mất tiêu điểm cửa sổ đích). Ẩn thanh tác vụ, đưa cửa sổ đích lên, bấm lại đúng điểm đã dời.
+    // Cú bấm đã rơi vào cửa sổ đích (không phải thanh tác vụ) thì bấm lại sẽ lặp tác dụng (nút, nháy đúp).
+    function clickAlreadyLanded(under, target) {
+      if (!under || typeof under !== 'object') return false;
+      if (TB.isTaskbarFg(under)) return false;
+      const title = String(under.title || '').trim();
+      if (/^(taskbar|thanh tác vụ)$/i.test(title)) return false;
+      if (target && under.hwnd != null && target.hwnd != null && String(under.hwnd) === String(target.hwnd)) return true;
+      if (title && target && under.pid != null && target.pid != null && Number(under.pid) === Number(target.pid)) return true;
+      return !!title;
+    }
+    // #27: cú bấm trong dải mép có thể rơi vào thanh tác vụ vừa trồi lên (mất tiêu điểm cửa sổ đích). Ẩn thanh tác vụ, đưa cửa sổ đích lên.
+    // Chỉ bấm lại khi cú bấm CHƯA tới cửa sổ đích — bấm lại lúc đã tới sẽ làm hai lần.
     if (clicky && a && a.__tbAdjusted && !a.__tbRetried) {
       let fgTb = null; try { fgTb = await fgWin(); } catch {}
       if (TB.isTaskbarFg(fgTb)) {
         a.__tbRetried = true;
-        deps.log && deps.log('desk', 'B121: thanh tác vụ chiếm tiêu điểm sau cú bấm — đưa chuột ra xa, đưa lại cửa sổ đích rồi bấm lại');
+        const landed = clickAlreadyLanded(a.__under, session && session.target);
         await awayFromTaskbar('B121: thanh tác vụ tự ẩn — đưa chuột ra giữa cửa sổ cho thanh tác vụ kịp ẩn, rồi mới bấm');
         await refocus();
-        const m2 = await moveTo(x, y); a.__moved = m2;
-        if (!m2 || !m2.ok) { const e = new Error(`Chuột không tới được đúng chỗ cần bấm (cần ${m2 && m2.want ? m2.want.x : '?'},${m2 && m2.want ? m2.want.y : '?'}; con trỏ ở ${m2 && m2.got ? m2.got.x : '?'},${m2 && m2.got ? m2.got.y : '?'}) — AIVN không bấm để tránh bấm nhầm.`); e.code = 'CURSOR_OFF'; throw e; }
-        if (action === 'double_click') await press('left', 2);
-        else if (action === 'right_click') await press('right');
-        else { await press('left'); if (action === 'type_text') await sleep(250); }
+        if (landed) deps.log && deps.log('desk', 'B121: thanh tác vụ chiếm tiêu điểm sau cú bấm nhưng cú bấm đã tới cửa sổ đích — đưa chuột ra xa, đưa lại cửa sổ đích, không bấm lại');
+        else {
+          deps.log && deps.log('desk', 'B121: thanh tác vụ chiếm tiêu điểm sau cú bấm — đưa chuột ra xa, đưa lại cửa sổ đích rồi bấm lại');
+          const m2 = await moveTo(x, y); a.__moved = m2;
+          if (!m2 || !m2.ok) { const e = new Error(`Chuột không tới được đúng chỗ cần bấm (cần ${m2 && m2.want ? m2.want.x : '?'},${m2 && m2.want ? m2.want.y : '?'}; con trỏ ở ${m2 && m2.got ? m2.got.x : '?'},${m2 && m2.got ? m2.got.y : '?'}) — AIVN không bấm để tránh bấm nhầm.`); e.code = 'CURSOR_OFF'; throw e; }
+          if (action === 'double_click') await press('left', 2);
+          else if (action === 'right_click') await press('right');
+          else { await press('left'); if (action === 'type_text') await sleep(250); }
+        }
       }
     }
     // B191 review #64 vòng 4 (1): kiểm lại tài liệu SAU cú bấm và TRƯỚC khi dán/bấm phím (hook do act() đặt); không chắc → không gõ gì

@@ -9,15 +9,16 @@ const OCR = [400, 1398, 1400, 20]; // QA: khung chữ 1398–1418
 const LIMIT = 1440 - Math.round(1440 * 0.03) - 1; // 1396, pixel cuối phía trên dải 43 px
 const GEO = { scale: 1.25, dip: { x: 0, y: 0, width: 2048, height: 1152 }, phys: { x: 0, y: 0, width: 2560, height: 1440 } };
 
-test('#27: khung OCR nằm trọn trong dải đáy → bấm ngay phía trên dải, không bấm dòng trên của khung, không nhảy theo chiều cao DIP', () => {
+test('#27: khung OCR nằm trọn trong dải đáy → bấm trong khung, không kéo ra ngoài khung (y=1396), không nhảy theo chiều cao DIP', () => {
   assert.strictEqual(LIMIT, 1396);
   const p = T.place(1100, 1408, P, OCR, { autoHide: true, edge: 'bottom' });
-  assert.strictEqual(p.y, 1396, 'beta.3 dừng ở y=1401');
+  assert.strictEqual(p.y, 1408, 'phải ở trong khung 1398–1418, không phải y=1396 ngoài khung');
+  assert.ok(p.y >= OCR[1] && p.y < OCR[1] + OCR[3]);
   assert.strictEqual(p.x, 1100, 'không lệch theo trục ngang');
-  assert.strictEqual(p.why, 'out-of-strip');
-  assert.ok(p.y <= LIMIT, 'không còn nằm trong dải đáy');
+  assert.strictEqual(p.why, 'in-box');
   assert.ok(p.y > 1300, 'không trừ cả chiều cao DIP (1152 → khoảng 1116)');
-  assert.strictEqual(T.safeY(1408, P, OCR), 1396);
+  assert.strictEqual(T.safeY(1408, P, OCR), 1408);
+  assert.notStrictEqual(p.y, 1396);
   assert.notStrictEqual(p.y, 1401);
   const dipLimit = 1152 - Math.round(1152 * 0.03) - 1;
   assert.notStrictEqual(p.y, dipLimit);
@@ -30,7 +31,7 @@ test('#27: khung làm việc trùng màn hình (tự ẩn) không tắt việc d
   assert.strictEqual(T.thickFrom({ edge: 'bottom', sm: { w: 2048, h: 1152 } }, P, dipWork, 1440), 0, 'lệch 288 px là lệch đơn vị, không phải độ dày');
   assert.strictEqual(T.thickFrom({ edge: 'bottom' }, P, { x: 0, y: 0, width: 2560, height: 1438 }, 1440), 0, 'viền 2 px của thanh tác vụ đang ẩn');
   const p = T.place(1100, 1408, P, OCR, { autoHide: true, edge: 'bottom', thick: T.thickFrom({ edge: 'bottom' }, P, dipWork, 1440) });
-  assert.strictEqual(p.x, 1100); assert.strictEqual(p.y, 1396);
+  assert.strictEqual(p.x, 1100); assert.strictEqual(p.y, 1408);
   assert.notStrictEqual(p.y, 1408 - (1440 - 1152));
   assert.notStrictEqual(p.y, 1408 - 2);
   // thanh tác vụ luôn hiện (khung làm việc đã trừ sẵn): không dời, không trừ thêm
@@ -47,8 +48,8 @@ test('#27: 125 % — độ dày thanh tác vụ đo ở toạ độ logic đư�
   assert.match(T.describe(det), /cạnh đáy/);
   const work = T.workToPhys(GEO, { x: 0, y: 0, width: 2048, height: 1152 });
   assert.strictEqual(T.thickFrom(det, P, work, 1440), 60, '48 px logic × 1,25 = 60 px vật lý; viền ABM 2 px bị bỏ');
-  // dòng OCR mỏng: KHÔNG nhảy lên quá cả thanh 60 px (sẽ trượt khỏi ô). Ẩn thanh trước, bấm ngay trên dải 3 %.
-  assert.strictEqual(T.place(1100, 1408, P, OCR, { autoHide: true, edge: 'bottom', thick: 60 }).y, 1396);
+  // dòng OCR mỏng nằm trọn trong dải: KHÔNG nhảy lên quá cả thanh 60 px (sẽ trượt khỏi ô). Bấm trong khung.
+  assert.strictEqual(T.place(1100, 1408, P, OCR, { autoHide: true, edge: 'bottom', thick: 60 }).y, 1408);
   const side = { x: 2560, y: 0, width: 1920, height: 1080 };
   assert.strictEqual(T.thickFrom(det, side, null, 1440), 0, 'thanh màn hình chính không áp vào màn hình bên');
 });
@@ -69,11 +70,12 @@ test('#27: có khung ô nhập thật (UIA) cao hơn dòng OCR → bấm trong �
   assert.ok(ny <= 1396 && ny >= 1394, String(ny));
 });
 
-test('#27: thanh tác vụ ở đỉnh / bên trái — dời đúng trục; điểm đã ở ngoài dải thì giữ nguyên', () => {
+test('#27: thanh tác vụ ở đỉnh / bên trái — khung trọn trong dải thì bấm trong khung; điểm đã ở ngoài dải thì giữ nguyên', () => {
   const top = T.place(100, 8, P, [80, 2, 400, 16], { autoHide: true, edge: 'top' });
-  assert.strictEqual(top.y, 43); assert.strictEqual(top.x, 100); assert.strictEqual(top.why, 'out-of-strip');
+  assert.strictEqual(top.y, 8); assert.strictEqual(top.x, 100); assert.strictEqual(top.why, 'in-box');
+  assert.ok(top.y >= 2 && top.y < 18);
   const left = T.place(4, 700, P, [1, 680, 12, 30], { autoHide: true, edge: 'left' });
-  assert.strictEqual(left.x, Math.max(6, Math.round(2560 * 0.03))); assert.strictEqual(left.y, 700);
+  assert.strictEqual(left.x, 4); assert.strictEqual(left.y, 700);
   const mid = T.place(400, 700, P, null, { autoHide: true, edge: 'bottom' });
   assert.strictEqual(mid.y, 700); assert.strictEqual(mid.why, 'outside');
   assert.strictEqual(T.safeY(1000, { x: 0, y: 1440, width: 1920, height: 1080 }, null), 1000);

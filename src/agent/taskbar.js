@@ -1,7 +1,7 @@
 'use strict';
 // B115/B121 (máy thật beta.2.5/2.6) và #27 (beta.3, d1b150d): thanh tác vụ Windows TỰ ẨN trồi lên khi chuột chạm mép màn hình và che ô soạn tin.
-// beta.3 đã nhận ra tự ẩn (ABM_GETSTATE=1, StuckRects3=3) nhưng vẫn bấm y=1401: khung OCR của ô soạn (1398–1418) nằm trọn trong dải đáy 43 px,
-// nên điểm “dòng trên của khung” vẫn nằm trong dải. Chuột tới đó làm thanh tác vụ che đúng ô và có thể lấy mất tiêu điểm.
+// beta.3 đã nhận ra tự ẩn (ABM_GETSTATE=1, StuckRects3=3) nhưng vẫn bấm y=1401: khung OCR của ô soạn (1398–1418) nằm trọn trong dải đáy 43 px.
+// Kéo điểm ra ngoài khung (y=1396) thì bấm trượt ô. Đưa chuột ra xa cho thanh tác vụ kịp ẩn, rồi bấm TRONG khung. Chỉ làm vậy trên màn hình đang có thanh tác vụ.
 // Phát hiện: SHAppBarMessage(ABM_GETSTATE=4) & ABS_AUTOHIDE; không đọc được thì byte 8 của
 // HKCU\...\Explorer\StuckRects3\Settings (3 = tự ẩn, 2 = không). Cạnh và độ dày: ABM_GETTASKBARPOS (5) + GetWindowRect(Shell_TrayWnd).
 // Toạ độ bấm và khung màn hình là ĐIỂM ẢNH VẬT LÝ. Khung làm việc (work area) khi tự ẩn trùng khung màn hình — không được lấy chỗ lệch đó làm gốc toạ độ,
@@ -152,17 +152,27 @@ function thickFrom(det, bounds, work, primaryH) {
 }
 function seg(box, i, n) { return Array.isArray(box) && box.length >= 4 && box[n] > 0 ? [box[i], box[n]] : [0, 0]; }
 function wseg(win, i, n) { return Array.isArray(win) && win.length >= 4 && win[n] > 0 ? [win[i], win[n]] : [null, 0]; }
-// Điểm an toàn phía trong mép CAO (đáy / phải). Khung nằm trọn trong dải → bấm ngay phía trên dải, không bấm dòng trên của khung.
+// Giữ toạ độ trong đoạn [box0, box0+boxN). Không có khung thì trả pos.
+function insideSpan(pos, box0, boxN) {
+  if (!(boxN > 0)) return pos;
+  const a = box0, b = box0 + boxN - 1;
+  if (b < a) return a;
+  return Math.max(a, Math.min(b, pos));
+}
+// Điểm an toàn phía trong mép CAO (đáy / phải). Khung còn nhô ra khỏi dải → bấm trong phần đó.
+// Khung nằm trọn trong dải → giữ điểm TRONG khung (người gọi đã đưa chuột ra xa trước). Không bao giờ kéo ra ngoài khung.
 function safeHigh(pos, origin, span, box0, boxN, win0, winN, band) {
   const limit = origin + span - band - 1;
   if (pos <= limit) return pos;
-  if (boxN > 0 && box0 + 2 <= limit) return Math.max(box0 + 2, Math.min(limit, box0 + boxN - 2));
+  if (boxN > 0 && box0 + 2 <= limit) return insideSpan(Math.max(box0 + 2, Math.min(limit, box0 + boxN - 2)), box0, boxN);
+  if (boxN > 0) return insideSpan(pos, box0, boxN);
   return clampOut(limit, win0, winN, limit, 'high');
 }
 function safeLow(pos, origin, span, box0, boxN, win0, winN, band) {
   const limit = origin + band;
   if (pos >= limit) return pos;
-  if (boxN > 0 && box0 + boxN - 2 >= limit) return Math.min(box0 + boxN - 2, Math.max(limit, box0 + 2));
+  if (boxN > 0 && box0 + boxN - 2 >= limit) return insideSpan(Math.min(box0 + boxN - 2, Math.max(limit, box0 + 2)), box0, boxN);
+  if (boxN > 0) return insideSpan(pos, box0, boxN);
   return clampOut(limit, win0, winN, limit, 'low');
 }
 // Không kéo điểm bấm ngược vào dải. Cửa sổ kết thúc trước dải thì bấm mép trong của cửa sổ.
@@ -202,8 +212,18 @@ function preferBox(box, el, elements) {
   }
   return best || box;
 }
+// Thanh tác vụ đo được có thuộc đúng màn hình này không. Không có khung đo được → chỉ màn gốc (0,0),
+// để màn phụ không bị dải 3 % khi chưa đọc được vị trí thanh. Có khung thì chỉ màn chứa thanh đó.
+function barOnMonitor(det, bounds, primaryH) {
+  if (!bounds) return false;
+  const k = dpiK(det, primaryH || (bounds.x === 0 && bounds.y === 0 ? bounds.height : 0));
+  const rects = [det && det.tray, det && det.tray2, det && det.abmPos && det.abmPos.rect].map(r => scaleRect(r, k)).filter(r => r && r.r > r.l && r.b > r.t);
+  if (rects.length) return rects.some(r => ownsBar(r, bounds));
+  return bounds.x === 0 && bounds.y === 0;
+}
 // Quyết định điểm bấm. autoHide tắt → giữ nguyên (cửa sổ đã nằm trong khung làm việc, không cộng thêm lệch).
-// autoHide bật và khung làm việc trùng màn hình → vẫn dời điểm ra khỏi dải mép. Không bao giờ cộng lệch khung làm việc vào toạ độ.
+// Chỉ dời trên màn hình đang có thanh tác vụ (opt.owns, hoặc opt.det). Không truyền gì → coi là màn có thanh (tương thích B121).
+// Có khung phần tử → điểm bấm luôn nằm trong khung. Khung trọn trong dải: giữ điểm trong khung, không kéo ra ngoài.
 function place(x, y, bounds, box, opt = {}) {
   if (!bounds || !(bounds.width > 0) || !(bounds.height > 0)) return { x, y, moved: false, why: 'no-screen', band: 0 };
   const edge = EDGES.includes(opt.edge) ? opt.edge : 'bottom';
@@ -214,17 +234,22 @@ function place(x, y, bounds, box, opt = {}) {
   const full = plausible(thick, span) ? thick + 2 : 0;
   const band = full && reaches(edge, bounds, box, full) ? Math.max(heur, full) : heur;
   if (!opt.autoHide) return { x, y, moved: false, why: 'shown', band };
+  const owns = opt.owns != null ? !!opt.owns : (opt.det ? barOnMonitor(opt.det, bounds, opt.primaryH) : true);
+  if (!owns) return { x, y, moved: false, why: 'no-bar', band };
   if (!inDanger(x, y, bounds, edge, band)) return { x, y, moved: false, why: 'outside', band };
   const win = opt.win; let nx = x, ny = y;
   if (edge === 'bottom') { const [a, n] = seg(box, 1, 3); const [wa, wn] = wseg(win, 1, 3); ny = safeHigh(y, bounds.y, bounds.height, a, n, wa, wn, band); }
   else if (edge === 'top') { const [a, n] = seg(box, 1, 3); const [wa, wn] = wseg(win, 1, 3); ny = safeLow(y, bounds.y, bounds.height, a, n, wa, wn, band); }
   else if (edge === 'right') { const [a, n] = seg(box, 0, 2); const [wa, wn] = wseg(win, 0, 2); nx = safeHigh(x, bounds.x, bounds.width, a, n, wa, wn, band); }
   else { const [a, n] = seg(box, 0, 2); const [wa, wn] = wseg(win, 0, 2); nx = safeLow(x, bounds.x, bounds.width, a, n, wa, wn, band); }
+  if (Array.isArray(box) && box.length >= 4 && box[2] > 0 && box[3] > 0) { nx = insideSpan(nx, box[0], box[2]); ny = insideSpan(ny, box[1], box[3]); }
   const moved = nx !== x || ny !== y;
   const wholly = !reaches(edge, bounds, box, band);
-  return { x: nx, y: ny, moved, why: !moved ? 'still' : wholly ? 'out-of-strip' : 'in-box', band };
+  const inB = Array.isArray(box) && box.length >= 4 && box[2] > 0 && box[3] > 0 && nx >= box[0] && nx < box[0] + box[2] && ny >= box[1] && ny < box[1] + box[3];
+  const why = inB ? 'in-box' : (!moved ? 'still' : 'out-of-strip');
+  return { x: nx, y: ny, moved, why, wholly, band };
 }
-// điểm bấm an toàn theo dải ĐÁY 3 % (tương thích B115/B121). Khung nằm trọn trong dải → phía trên dải (#27), không bấm dòng trên của khung.
+// điểm bấm an toàn theo dải ĐÁY 3 % (tương thích B115/B121). Khung nằm trọn trong dải → bấm trong khung (#27), không kéo ra ngoài khung.
 function safeY(y, bounds, box, win) {
   if (!bounds || !(bounds.height > 0)) return y;
   const [a, n] = seg(box, 1, 3); const [wa, wn] = wseg(win, 1, 3);
@@ -243,5 +268,5 @@ function isTaskbarFg(fg) {
 const _reset = () => { cache = null; };
 module.exports = {
   detect, autoHide, describe, safeY, bandOf, parseState, PS, _reset,
-  place, preferBox, thickFrom, edgeOf, inDanger, isTaskbarFg, workToPhys, workGap, dpiK, ownsBar, EDGE_VI, EDGES,
+  place, preferBox, thickFrom, edgeOf, inDanger, isTaskbarFg, workToPhys, workGap, dpiK, ownsBar, barOnMonitor, EDGE_VI, EDGES,
 };
