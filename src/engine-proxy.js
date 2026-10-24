@@ -69,6 +69,12 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
       try { cached = await call('loadModel', id, modelPath, opts); return cached; }
       finally { loading = null; }
     },
+    // Giữ status().loading xuyên lúc restart (GPU lỗi → thử CPU). Token riêng để finally của loadModel không xoá cờ này sớm.
+    holdLoading(id) {
+      const token = { id: id || true };
+      loading = token;
+      return () => { if (loading === token) loading = null; };
+    },
     async unloadModel() { if (!child) { cached = { loaded: false }; return; } cached = await call('unloadModel'); },
     status: () => (cached.loaded ? cached : { loaded: false, loading: !!loading }),
     async generate(messages, { signal, onToken, ...opts } = {}) {
