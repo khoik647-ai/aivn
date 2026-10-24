@@ -287,6 +287,7 @@ function createDesktopAgent(deps) {
   }
   // B193: OCR mọi ảnh đã chụp. Chữ UIA chỉ được cộng vào chữ OCR. UIA không thay OCR và không kết luận ảnh an toàn.
   // OCR lỗi, rỗng, hoặc quá hạn → failed. Hai lần đọc cửa sổ lệch nhau → vẫn che, kể cả khi OCR không thấy mã.
+  // #89 N1: không có OCR → failed luôn, không giữ ảnh chưa kiểm (kể cả mustOcr false và không có cửa sổ đang hiện).
   async function sealShot(shot, { title = '', proc = '', text = '', mustOcr = false, prior = null } = {}) {
     let imageText = '';
     const canOcr = !!(shot && shot.dataUrl && deps.engine && typeof deps.engine.ocrLines === 'function');
@@ -295,7 +296,7 @@ function createDesktopAgent(deps) {
       try { imageText = (await ocrShot(shot, null)).map(l => l && l.text).filter(Boolean).join('\n'); }
       catch { return fail(); }
       if (!String(imageText).trim()) return fail();
-    } else if (mustOcr) return fail();
+    } else if (mustOcr || !canOcr) return fail();
     const after = await ShotGuard.readWindows({ loadWindows: () => U.windows(), loadText: readWindowText });
     const snapFail = !after.ok || (prior && prior.ok === false);
     const torn = !snapFail && !!prior && (prior.torn || ShotGuard.snapshotsDiffer(prior, after));
