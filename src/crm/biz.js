@@ -67,7 +67,7 @@ function agedReceivable(open, t) {
       remain.set(i.id, left[k]);
       if (!(left[k] > 0)) return;
       const b = ageBucket(i.due_date, t); row[b] += left[k]; row.total += left[k];
-      if (isDate(i.due_date) && i.due_date < t) { overdueN += 1; overdueSum += left[k]; }
+      if (i.kind === 'out_invoice' && isDate(i.due_date) && i.due_date < t) { overdueN += 1; overdueSum += left[k]; }
     });
     if (row.total > 0 || row.credit > 0) rows.push(row);
   }
@@ -301,7 +301,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => civilOf(Date
     const residual = inv.state === 'posted' ? Math.max(0, inv.amount_total - inv.amount_paid) : inv.amount_total;
     let ps = inv.state !== 'posted' ? 'not_paid' : residual <= 0 && inv.amount_total > 0 ? 'paid' : inv.amount_paid > 0 ? 'partial' : 'not_paid';
     if (inv.kind === 'out_invoice' && inv.state === 'posted' && residual <= 0) { const cr = refundsOf(inv.id).reduce((a, r) => a + r.amount_total, 0); if (cr >= inv.amount_total) ps = 'reversed'; }
-    const overdue = inv.state === 'posted' && residual > 0 && isDate(inv.due_date) && inv.due_date < today();
+    const overdue = inv.kind === 'out_invoice' && inv.state === 'posted' && residual > 0 && isDate(inv.due_date) && inv.due_date < today();
     return { ...inv, residual, payment_state: ps, payment_state_vi: PAY_STATE[ps], state_vi: INV_STATE[inv.state], kind_vi: INV_KIND[inv.kind], overdue, partner_name: (partner(inv.partner_id) || {}).name || '', display_number: inv.number || 'Nháp' };
   }
   function cleanInvLines(lines) {
@@ -363,7 +363,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => civilOf(Date
     if (q) { where.push('(lower(i.number) LIKE ? OR c.name_norm LIKE ? OR lower(s.number) LIKE ?)'); p.push('%' + q.toLowerCase() + '%', '%' + T.fold(q) + '%', '%' + q.toLowerCase() + '%'); }
     let rows = db.all(`SELECT i.* FROM invoices i LEFT JOIN contacts c ON c.id = i.partner_id LEFT JOIN quotes s ON s.id = i.so_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY COALESCE(i.invoice_date, '9999') DESC, i.created_at DESC`, p).map(pubInvoice);
     rows = clearOffsetOverdue(rows);
-    if (payment === 'overdue') rows = rows.filter(r => r.overdue); else if (payment === 'unpaid') rows = rows.filter(r => r.state === 'posted' && r.residual > 0); else if (payment) rows = rows.filter(r => r.payment_state === payment);
+    if (payment === 'overdue') rows = rows.filter(r => r.kind === 'out_invoice' && r.overdue); else if (payment === 'unpaid') rows = rows.filter(r => r.state === 'posted' && r.residual > 0); else if (payment) rows = rows.filter(r => r.payment_state === payment);
     return rows;
   }
   // Vào sổ (Odoo: Confirm/Post): gán số hoá đơn, ngày hoá đơn, hạn thanh toán; giấy báo có thì trừ vào hoá đơn gốc
