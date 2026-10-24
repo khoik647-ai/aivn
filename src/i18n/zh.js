@@ -2762,6 +2762,10 @@
     "Khoá này không khớp với bản AIVN này. Bạn có thể cần bản AIVN mới hơn.": "此密钥与当前 AIVN 版本不匹配。你可能需要更新的 AIVN 版本。",
     "Chuyển mô hình đang chờ ổ đích. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu. Sẽ thử lại khi thư mục này truy cập được: {0}": "模型移动正在等待目标磁盘。部分文件目前可能只在缺失的目标磁盘上。此文件夹可访问时会再试：{0}",
     "Chuyển mô hình đang chờ ổ đích {0}, thư mục “{1}”. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu, và sẽ được phục hồi khi ổ này có lại.": "模型移动正在等待目标磁盘 {0}，文件夹“{1}”。部分文件目前可能只在缺失的目标磁盘上，重新连接后会恢复。",
+    "Chuyển mô hình đang chờ vì có tệp trong nhật ký không còn ở thư mục cũ và cũng không thấy ở thư mục đích hiện tại. Nhật ký được giữ, không hoàn tác. Sẽ thử lại khi đúng thư mục đích truy cập được: {0}": "模型移动正在等待，因为日志中的某个文件已不在原文件夹，当前目标文件夹里也没有。日志会保留，不会回滚。正确的目标文件夹可访问时会再试：{0}",
+    "Chuyển mô hình đang chờ vì thư mục đích hiện tại không nằm trên ổ đã ghi trong nhật ký. Nhật ký được giữ, không hoàn tác. Sẽ thử lại khi đúng ổ đích truy cập được: {0}": "模型移动正在等待，因为当前目标文件夹不在日志记录的磁盘上。日志会保留，不会回滚。正确的目标磁盘可访问时会再试：{0}",
+    "Chuyển mô hình đang chờ ổ đích {0}, thư mục “{1}”. Có tệp không thấy ở cả hai thư mục nên chưa hoàn tác. Sẽ thử lại khi đúng ổ này có lại.": "模型移动正在等待目标磁盘 {0}，文件夹“{1}”。有文件在两个文件夹里都没有，因此尚未回滚。正确的磁盘恢复后会再试。",
+    "Chuyển mô hình đang chờ ổ đích {0}, thư mục “{1}”. Thư mục đang thấy không phải ổ đã ghi trong nhật ký nên chưa hoàn tác. Sẽ thử lại khi đúng ổ này có lại.": "模型移动正在等待目标磁盘 {0}，文件夹“{1}”。当前看到的文件夹不是日志记录的磁盘，因此尚未回滚。正确的磁盘恢复后会再试。",
     "Đang chờ ổ đích của lần chuyển trước.": "正在等待上一次移动的目标磁盘。",
     "Đang dùng mô hình nên chưa hoàn tất được lần chuyển trước. Hãy gỡ mô hình rồi thử lại.": "正在使用模型，所以上一次移动还不能完成。请先卸载模型，然后再试。",
     "Chưa xoá được nhật ký lần chuyển trước. Hãy đóng chương trình đang mở tệp đó rồi thử lại.": "未能删除上一次移动的日志。请关闭正在打开该文件的程序后再试。"
