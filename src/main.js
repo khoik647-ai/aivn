@@ -121,7 +121,7 @@ async function ensureAfterCrash() {
   const st = engine.status();
   if (!engineDied || st.loaded || st.loading || !settings.data.lastModel) return;
   LOG.log('load', 'Tự nạp lại mô hình cho lượt mới sau khi bộ máy đã dừng', { model: settings.data.lastModel, ctx: lastCtx });
-  await loadById(settings.data.lastModel, { force: true, ctx: lastCtx || null, reason: 'nạp lại sau khi bộ máy dừng' });
+  await shareLoad(settings.data.lastModel, { force: true, ctx: lastCtx || null, reason: 'nạp lại sau khi bộ máy dừng' });
 }
 // 0.15.2: ngữ cảnh tối thiểu. Lời nhắc hệ thống + mô tả công cụ của AIVN AGENT ~2–4 nghìn token, nên AGENT cần ≥ 8192.
 const MIN_CTX_CHAT = 4096, MIN_CTX_AGENT = 8192;
@@ -149,7 +149,7 @@ async function withCtxGrow(fn, { minCtx = MIN_CTX_CHAT, maxCtx = 0, onGrow } = {
     if (!settings.data.lastModel || !st.loaded || want <= have) { engineLog('Ngữ cảnh không đủ, không tăng được', e, { have, need, train }); throw ctxSmallError(have, null); }
     engineLog(`Ngữ cảnh ${have} không đủ (cần ~${need || '?'} token): tự nạp lại mô hình với ngữ cảnh ${want}`, e, { have, need, want });
     onGrow && onGrow(want);
-    try { await loadById(settings.data.lastModel, { force: true, ctx: want, minCtx: want, reason: 'tăng ngữ cảnh' }); }
+    try { await shareLoad(settings.data.lastModel, { force: true, ctx: want, minCtx: want, reason: 'tăng ngữ cảnh' }); }
     catch (e2) { engineLog('Không nạp lại được với ngữ cảnh lớn hơn', e2, { want }); throw ctxSmallError(have, want); }
     const now = engine.status().contextSize || 0;
     try { return await fn(); }
@@ -170,7 +170,7 @@ async function withEngineRecovery(fn, { onRetry, minCtx = MIN_CTX_CHAT } = {}) {
     const ctx = Math.max(minCtx, prev > 8192 ? 8192 : MIN_CTX_CHAT); // 0.15.2: không xuống dưới 4096 (AIVN AGENT: 8192)
     engineLog('Bộ máy AI dừng giữa lượt: tự nạp lại mô hình với ngữ cảnh nhỏ hơn và thử lại một lần', e, { 'ngữ cảnh cũ': prev, 'ngữ cảnh mới': ctx, 'mã thoát': e.exitCode, 'tín hiệu': e.signal, 'lý do': e.killReason || 'không rõ (sập)' });
     onRetry && onRetry(ctx);
-    try { await loadById(settings.data.lastModel, { force: true, ctx, reason: 'tự phục hồi sau khi bộ máy dừng' }); }
+    try { await shareLoad(settings.data.lastModel, { force: true, ctx, reason: 'tự phục hồi sau khi bộ máy dừng' }); }
     catch (e2) { send('model:status', { loaded: false }); const x = new Error(e.message + ' AIVN đã thử nạp lại mô hình nhưng chưa được: ' + cleanMsg(e2.message)); x.code = 'ENGINE_EXIT'; throw x; }
     try { return await fn(); }
     catch (e3) { if (e3 && e3.code === 'ENGINE_EXIT') { engineDied = true; send('model:status', { loaded: false }); } if (e3 && e3.code === 'ENGINE_EXIT') e3.message += ` (đã tự khởi động lại và thử với ngữ cảnh ${ctx} nhưng vẫn lỗi — hãy chọn mô hình nhỏ hơn)`; throw e3; }
@@ -603,26 +603,33 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
           } catch {}
           const safeCtx = Math.max(MIN_CTX_CHAT, Math.min(MIN_CTX_AGENT, opts.contextSize || MIN_CTX_AGENT));
           engineLog('Bộ máy AI sập khi nạp ' + m.file + ', thử lại với cấu hình an toàn (CPU, ngữ cảnh ' + safeCtx + ')', e, { path: m.path, size: m.size, stderr: e.detail });
-          await engine.restart({ ...engineEnv(), AIVN_GPU: 'off' }, 'bộ máy sập khi nạp, thử lại chỉ CPU'); hwCache = null;
-          st = await engine.loadModel(m.id, m.path, { ...opts, contextSize: safeCtx, minContextSize: Math.min(opts.minContextSize, safeCtx), gpuLayers: 0 });
+          const releaseHold = holdEngineLoading(m.id);
+          try {
+            await engine.restart({ ...engineEnv(), AIVN_GPU: 'off' }, 'bộ máy sập khi nạp, thử lại chỉ CPU'); hwCache = null;
+            st = await engine.loadModel(m.id, m.path, { ...opts, contextSize: safeCtx, minContextSize: Math.min(opts.minContextSize, safeCtx), gpuLayers: 0 });
+          } finally { releaseHold(); }
           st = { ...st, mode: 'cpu-only', fallbackFrom: ['bộ máy sập: ' + e.message] };
           ctxNote = 'Đã nạp ở chế độ an toàn (chỉ CPU, ngữ cảnh ' + safeCtx + ') vì bộ máy AI bị sập khi nạp bình thường. Xem nhật ký để biết chi tiết.';
         } else {
         if (!(e.code === 'LOAD_FAILED' && e.gpu && engine.restart)) throw e;
         const LF = require('./load-fail');
         engineLog('GPU không nạp được ' + m.file + ', thử lại bằng bộ máy chỉ CPU', e, { path: m.path, size: m.size });
-        await engine.restart({ ...engineEnv(), AIVN_GPU: 'off' }, 'GPU không nạp được mô hình, chuyển sang chỉ CPU'); hwCache = null;
         const cpuOpts = LF.wantsCpuLadder(e.attempts, { memory: e.memory }) ? opts : { ...opts, singleTry: true };
+        // status().loading tắt giữa hai lần loadModel (restart chờ tối đa 8 s). Giữ cờ để người chờ API không nhận 503 sớm.
+        const releaseHold = holdEngineLoading(m.id);
         try {
-          st = await engine.loadModel(m.id, m.path, cpuOpts);
-          st = { ...st, mode: 'cpu-only', slow: e.slow || null, fallbackFrom: [...(e.attempts || []).map(a => a.mode + ': ' + a.message), ...(st.fallbackFrom || [])] };
-          // Chỉ ghi gpu=false khi CPU nạp được và GPU thật sự lỗi. Chỉ chậm: CPU cho lần này, không ghi. Mọi cách đều lỗi thì cũng không ghi.
-          if (LF.shouldPersistGpuOff({ cpuLoaded: true, attempts: e.attempts })) { settings.data.gpu = false; settings.save(); }
-        } catch (e2) {
-          try { await engine.restart(engineEnv(), 'mọi cách nạp đều lỗi, giữ cài đặt GPU'); hwCache = null; } catch {}
-          e2.attempts = [...(e.attempts || []), ...(e2.attempts || [])];
-          throw e2;
-        }
+          await engine.restart({ ...engineEnv(), AIVN_GPU: 'off' }, 'GPU không nạp được mô hình, chuyển sang chỉ CPU'); hwCache = null;
+          try {
+            st = await engine.loadModel(m.id, m.path, cpuOpts);
+            st = { ...st, mode: 'cpu-only', slow: e.slow || null, fallbackFrom: [...(e.attempts || []).map(a => a.mode + ': ' + a.message), ...(st.fallbackFrom || [])] };
+            // Chỉ ghi gpu=false khi CPU nạp được và GPU thật sự lỗi. Chỉ chậm: CPU cho lần này, không ghi. Mọi cách đều lỗi thì cũng không ghi.
+            if (LF.shouldPersistGpuOff({ cpuLoaded: true, attempts: e.attempts })) { settings.data.gpu = false; settings.save(); }
+          } catch (e2) {
+            try { await engine.restart(engineEnv(), 'mọi cách nạp đều lỗi, giữ cài đặt GPU'); hwCache = null; } catch {}
+            e2.attempts = [...(e.attempts || []), ...(e2.attempts || [])];
+            throw e2;
+          }
+        } finally { releaseHold(); }
       }
       }
     } catch (e) {
@@ -687,14 +694,20 @@ function otherStartedSince(id, ticket) {
   return false;
 }
 function loadIsPlain(opts) {
-  // Hộp nạp (Ctrl+L) có load/force/ctx: không gom, vì lựa chọn ngữ cảnh và GPU khác lần nạp thường.
+  // Hộp nạp (Ctrl+L) có load/force/ctx: không gom chung một lời hứa, vì lựa chọn ngữ cảnh và GPU khác lần nạp thường.
   return !opts.force && opts.ctx == null && opts.load == null && !opts.reason && opts.minCtx == null;
+}
+function holdEngineLoading(id) {
+  if (!engine || typeof engine.holdLoading !== 'function') return () => {};
+  return engine.holdLoading(id);
 }
 function shareLoad(id, opts = {}) {
   const key = String(id);
-  if (!loadIsPlain(opts)) { noteLoadStart(key); return loadById(id, opts); }
+  const plain = loadIsPlain(opts);
   const hit = loadInflight.get(key);
-  if (hit && !otherStartedSince(key, hit.ticket)) {
+  // Lần nạp thường gom vào lời hứa đang chạy. Hộp nạp, nạp ép và tự phục hồi vẫn nạp riêng (tuỳ chọn khác),
+  // nhưng phải có mặt trong loadInflight: giữa GPU lỗi và lần thử CPU, status().loading tắt nên người chờ API nhận 503 sớm.
+  if (plain && hit && !otherStartedSince(key, hit.ticket)) {
     return hit.p.then((st) => {
       if (!opts.api) { settings.data.lastModel = id; settings.save(); }
       return st;
@@ -738,8 +751,15 @@ async function ensureModel(requested, { api = false, signal = null } = {}) {
         const uiKey = String(uiPick.id);
         const uiHit = loadInflight.get(uiKey);
         if (st.loading || (uiHit && uiHit.ui)) {
+          const waitMs = Number(settings && settings.data && settings.data.apiLoadWaitMs) > 0 ? Number(settings.data.apiLoadWaitMs) : 180000;
+          const deadline = Date.now() + waitMs;
           while (engine.status().loading || (loadInflight.get(uiKey) && loadInflight.get(uiKey).ui)) {
             if (stopped()) return;
+            if (Date.now() >= deadline) {
+              const timeout = new Error('Hết thời gian chờ mô hình đang nạp. Hãy thử lại.');
+              timeout.status = 504; timeout.type = 'timeout';
+              throw timeout;
+            }
             await new Promise((r) => setTimeout(r, 20));
           }
           if (stopped()) return;
