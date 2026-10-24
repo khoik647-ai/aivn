@@ -87,6 +87,46 @@ async function visionFreeBytes() {
   visionVramCache = { at: now, free, ok };
   return free;
 }
+// Khoá nhận GPU: phiên bản driver và/hoặc id thiết bị mà thư viện đã báo. Đổi driver thì nhớ offload không còn khớp.
+async function gpuDriverKey(l) {
+  const bits = [];
+  try {
+    if (l && typeof l.getGpuDriverVersion === 'function') {
+      const v = await l.getGpuDriverVersion();
+      if (v) bits.push(String(v));
+    } else if (l && l.gpuDriver) bits.push(String(l.gpuDriver));
+  } catch {}
+  try {
+    let devs = [];
+    if (l && typeof l.getGpuDevices === 'function') devs = (await l.getGpuDevices()) || [];
+    else if (l && Array.isArray(l.devices)) devs = l.devices;
+    const ids = [];
+    for (const d of devs) {
+      if (!d || typeof d !== 'object') continue;
+      const id = d.id || d.deviceId || d.uuid;
+      if (id) ids.push(String(id));
+    }
+    if (ids.length) bits.push(ids.join(','));
+  } catch {}
+  return bits.join('|');
+}
+let nvidiaDriverCache;
+async function nvidiaDriverVersion() {
+  if (nvidiaDriverCache !== undefined) return nvidiaDriverCache;
+  nvidiaDriverCache = '';
+  try {
+    const { execFile } = require('child_process');
+    const bins = require('./vram-query').nvidiaSmiCandidates();
+    for (const bin of bins) {
+      const text = await new Promise((resolve) => {
+        execFile(bin, ['--query-gpu=driver_version', '--format=csv,noheader'], { timeout: 800, windowsHide: true }, (err, out) => resolve(err ? '' : String(out || '')));
+      });
+      const line = String(text).split(/\r?\n/).map((s) => s.trim()).find((s) => /^\d/.test(s));
+      if (line) { nvidiaDriverCache = line.split(',')[0].trim(); break; }
+    }
+  } catch { nvidiaDriverCache = ''; }
+  return nvidiaDriverCache;
+}
 async function hardwareInfo() {
   const l = await getLlama();
   let vram = await vramInfo(l).catch(() => null);
@@ -98,7 +138,9 @@ async function hardwareInfo() {
   const cpu = (os.cpus()[0] || {}).model || '';
   // B168: GPU tích hợp thường đứng trước trong danh sách Vulkan → nhãn dùng gpuName (GPU rời được ưu tiên), danh sách xếp GPU rời trước
   const GP = require('./gpu-pick'); const pk = GP.pick(devices); const gpuName = pk ? pk.name : null;
-  return { gpu: l.gpu || false, vram, devices: GP.order(devices), devicesRaw: devices, gpuName, gpuMixed: GP.mixed(devices), ram: os.totalmem(), freeRam: os.freemem(), cpus: os.cpus().length, mathCores: l.cpuMathCores || null, cpu, platform: process.platform, arch: process.arch, cpuOnly: process.env.AIVN_GPU === 'off' };
+  let driver = await gpuDriverKey(l);
+  if (!driver) { try { driver = await nvidiaDriverVersion(); } catch { driver = ''; } }
+  return { gpu: l.gpu || false, vram, devices: GP.order(devices), devicesRaw: devices, gpuName, gpuMixed: GP.mixed(devices), ram: os.totalmem(), freeRam: os.freemem(), cpus: os.cpus().length, mathCores: l.cpuMathCores || null, cpu, platform: process.platform, arch: process.arch, cpuOnly: process.env.AIVN_GPU === 'off', driver: driver || '' };
 }
 
 // Đọc số lớp + kích thước KV từ GGUF để tự chọn số lớp đưa lên GPU (có chừa khoảng trống)
@@ -761,7 +803,7 @@ function embed(texts, kind = 'passage') {
 function countTokens(text) { if (!current) return Math.ceil(text.length / 3); try { return current.model.tokenize(text).length; } catch { return Math.ceil(text.length / 3); } }
 
 async function countTokensAsync(texts) { if (visionOn) { const r = await getVision().countTokens(texts); if (r) return r; } return texts.map(countTokens); }
-module.exports = { setLoadProgress, loadPlans, oomSchedule, explicitFlash, flashForContext, contextTries, modelGeometry, vramInfo, countTokens, countTokensAsync, hardwareInfo, loadModel, unloadModel, status, whenReady, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount, exclusiveLoad };
+module.exports = { setLoadProgress, loadPlans, oomSchedule, explicitFlash, flashForContext, contextTries, modelGeometry, vramInfo, countTokens, countTokensAsync, hardwareInfo, gpuDriverKey, loadModel, unloadModel, status, whenReady, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount, exclusiveLoad };
 
 // B123: llama-server CUDA → 'cuda'; bản đi kèm → vulkan (Windows) / metal (Mac) / cpu (Linux); 0 lớp lên GPU → 'cpu'
 function serverBackend(v) { if (!v) return null; if (v.gpuLayers === 0) return 'cpu'; if (v.runtime === 'cuda') return 'cuda'; return process.platform === 'win32' ? 'vulkan' : process.platform === 'darwin' ? 'metal' : 'cpu'; }

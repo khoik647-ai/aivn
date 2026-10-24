@@ -48,8 +48,9 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
   const err = (res, code, message, type = 'invalid_request_error') => { if (code !== 401) log(`  → ${code} ${String(message).slice(0, 200)}`); return send(res, code, { error: { message, type, code } }); };
   const modelErr = (res, e) => {
     if (e && (e.status === 503 || e.status === 504)) return err(res, e.status, e.message, e.type || 'api_error');
-    // Tệp đúng id nhưng hỏng: không phải "không có mô hình". Cùng câu với lần nạp đang chạy bị lỗi.
-    if (e && e.code === 'BAD_FILE') return err(res, 503, 'Nạp mô hình không thành công. Hãy thử lại.', 'api_error');
+    if (e && e.status === 409) return err(res, 409, e.message, e.type || 'model_changed');
+    // Tệp đúng id nhưng hỏng hoặc tải dở: bảo xoá rồi tải lại, không phải "không có mô hình".
+    if (e && e.code === 'BAD_FILE') return err(res, 503, 'Tệp mô hình bị hỏng hoặc tải chưa xong. Hãy xoá mô hình này và tải lại.', 'api_error');
     return err(res, 400, e.message, 'model_not_found');
   };
   const listNow = () => { try { return typeof models === 'function' ? models() : []; } catch { return []; } };

@@ -467,7 +467,9 @@ function startIdleUnload() {
       const st = engine.status(); if (!st.loaded || busy > 0 || generations.size) return;
       const p = await perfProfile(); if (!p.idleUnloadMin) return;
       if (Date.now() - lastUse < p.idleUnloadMin * 60000) return;
-      if (api.status().running) return; // máy chủ API đang bật: giữ mô hình
+      if (api.status().running) return; // máy chủ API đang bật: TTL của API giữ mô hình JIT
+      // Chỉ gỡ mô hình nạp theo yêu cầu API. Mô hình chọn trên giao diện (kể cả chọn lại đúng id JIT) không bị gỡ.
+      if (!apiJit || st.id !== apiJit.id) return;
       await engine.unloadModel(); send('model:status', engine.status());
       send('perf:unloaded', { id: st.id, minutes: p.idleUnloadMin }); log(`[hiệu năng] đã gỡ ${st.id} sau ${p.idleUnloadMin} phút không dùng`);
     } catch {}
@@ -514,7 +516,7 @@ function noteLayers(id, st, kvUsed) {
 const OM = require('./offload-memory');
 function offloadIdentity(m, h) {
   const d = settings.data || {};
-  return OM.identity({ file: m && m.path, size: m && m.size, mtime: m && m.mtime, backend: h && h.gpu || '', gpuName: h && h.gpuName || '', vramTotal: h && h.vram && h.vram.total || 0, settings: [d.gpu, d.gpuDevice, d.gpuLayers, d.vramLimitGB].join('|') });
+  return OM.identity({ file: m && m.path, size: m && m.size, mtime: m && m.mtime, backend: h && h.gpu || '', gpuName: h && h.gpuName || '', vramTotal: h && h.vram && h.vram.total || 0, driver: h && h.driver || '', settings: [d.gpu, d.gpuDevice, d.gpuLayers, d.vramLimitGB].join('|') });
 }
 async function noteOffload(id, st, m) {
   const o = st && st.offload; if (!o || !Number.isInteger(o.gpu)) return;
@@ -732,10 +734,18 @@ async function ensureModel(requested, { api = false, signal = null } = {}) {
   if (stopped()) return;
   const st = engine.status();
   if (requested) {
-    const { resolveModel, sameModel } = require('./model-ref');
+    const { resolveModel, sameModel, ambiguousPrefix } = require('./model-ref');
     // Khớp danh sách trên đĩa trước. Id đang nạp dài hơn (…-abliterated) cũng là tiền tố của id đúng
     // trên đĩa; trả sớm ở bước đó thì chat và messages 409 mãi, không bao giờ nạp đúng mô hình.
-    const m = resolveModel(listModels(), requested);
+    const models = listModels();
+    // Nhiều id cùng một tiền tố: 409 như lúc mô hình đổi giữa chừng. Không trả lời bằng mô hình khác, không 404.
+    if (ambiguousPrefix(models, requested)) {
+      const have = st.loaded && st.id ? st.id : 'chưa có mô hình';
+      const clash = new Error(`Mô hình đã đổi trong lúc nạp (${have}). Yêu cầu này không trả lời bằng mô hình khác. Hãy gửi lại.`);
+      clash.status = 409; clash.type = 'model_changed';
+      throw clash;
+    }
+    const m = resolveModel(models, requested);
     if (st.loaded && m && sameModel(st.id, m.id)) return;
     if (!m && st.loaded && resolveModel([{ id: st.id }], requested)) return;
     if (m) {
