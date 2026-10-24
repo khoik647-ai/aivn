@@ -98,5 +98,7 @@ test('B24 thật (chỉ soạn, đừng gửi): gõ tên + Enter ở ô tìm ki�
   const by = Object.fromEntries(d.steps.map(s => [s.name, s]));
   assert.ok(by['type-search'].asks.every(a => a.risk === null), 'tìm người nhận không phải bước gửi'); assert.deepStrictEqual(by['type-search'].state.searches, ['Trần Quỳnh Anh']);
   assert.strictEqual(by['click-result'].state.cur, 'Trần Quỳnh Anh');
-  assert.ok(by['send-message'].asks.some(a => a.risk), 'gửi tin thật vẫn là bước rủi ro'); assert.deepStrictEqual(d.final.sent, [], 'chế độ chỉ soạn: không gửi gì');
+  assert.ok(by['send-message'].blocked, 'B219 từ chối bước gửi khi chỉ soạn');
+  assert.match(String(by['send-message'].forModel || by['send-message'].summary), /KHÔNG gửi|không phải lệnh gửi/);
+  assert.deepStrictEqual(d.final.sent, [], 'chế độ chỉ soạn: không gửi gì');
 });
