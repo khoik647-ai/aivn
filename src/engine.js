@@ -295,6 +295,17 @@ function exclusiveLoad(fn) {
   });
   return run;
 }
+// Hết VRAM khi nhìn ảnh: bước xuống phải thấp hơn số lớp thật. 1000−4 = 996 vẫn là mọi lớp nếu mô hình chỉ có vài chục lớp.
+function visionRetryLayers(gpuLayers, layers, sureLayers, partialLayers) {
+  const real = Number.isInteger(layers) && layers > 0 ? layers : null;
+  const down = (n) => {
+    const base = real != null ? Math.min(n, real) : n;
+    return Math.max(1, base - (base >= 16 ? 4 : 2));
+  };
+  if (sureLayers != null) return down(sureLayers);
+  if (Number.isInteger(gpuLayers) && gpuLayers > 0) return down(gpuLayers);
+  return partialLayers == null ? null : partialLayers;
+}
 async function loadModel(id, modelPath, opts = {}) {
   // cùng tệp đã nạp: giữ nguyên, TRỪ khi cần ngữ cảnh lớn hơn ngữ cảnh đang có (0.15.2: tự tăng ngữ cảnh)
   const wantCtx = opts.minContextSize || Math.min(Number(opts.contextSize) || 0, 8192);
@@ -327,7 +338,7 @@ async function loadModel(id, modelPath, opts = {}) {
       } catch (e) {
         if (!(l && l.gpu) || ['VCREDIST', 'NO_SERVER'].includes(e.code)) throw e;
         // một bước xuống (bớt lớp, vẫn đúng ngữ cảnh) rồi mới CPU — tối đa 2 lần thử lại
-        const stepped = sureLayers != null ? Math.max(1, sureLayers - (sureLayers >= 16 ? 4 : 2)) : (Number.isInteger(opts.gpuLayers) && opts.gpuLayers > 0 ? Math.max(1, opts.gpuLayers - (opts.gpuLayers >= 16 ? 4 : 2)) : partialLayers);
+        const stepped = visionRetryLayers(opts.gpuLayers, geoV && geoV.layers, sureLayers, partialLayers);
         let recovered = false;
         if (stepped != null) {
           try { console.warn('[engine] máy chủ nhìn ảnh hết VRAM, thử lại với ít lớp hơn: ' + stepped); await visionTry({ gpuLayers: stepped, fitTargetMiB: 0 }); recovered = true; }
@@ -803,7 +814,7 @@ function embed(texts, kind = 'passage') {
 function countTokens(text) { if (!current) return Math.ceil(text.length / 3); try { return current.model.tokenize(text).length; } catch { return Math.ceil(text.length / 3); } }
 
 async function countTokensAsync(texts) { if (visionOn) { const r = await getVision().countTokens(texts); if (r) return r; } return texts.map(countTokens); }
-module.exports = { setLoadProgress, loadPlans, oomSchedule, explicitFlash, flashForContext, contextTries, modelGeometry, vramInfo, countTokens, countTokensAsync, hardwareInfo, gpuDriverKey, loadModel, unloadModel, status, whenReady, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount, exclusiveLoad };
+module.exports = { setLoadProgress, loadPlans, oomSchedule, explicitFlash, flashForContext, contextTries, modelGeometry, vramInfo, countTokens, countTokensAsync, hardwareInfo, gpuDriverKey, loadModel, unloadModel, status, whenReady, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount, exclusiveLoad, visionRetryLayers };
 
 // B123: llama-server CUDA → 'cuda'; bản đi kèm → vulkan (Windows) / metal (Mac) / cpu (Linux); 0 lớp lên GPU → 'cpu'
 function serverBackend(v) { if (!v) return null; if (v.gpuLayers === 0) return 'cpu'; if (v.runtime === 'cuda') return 'cuda'; return process.platform === 'win32' ? 'vulkan' : process.platform === 'darwin' ? 'metal' : 'cpu'; }

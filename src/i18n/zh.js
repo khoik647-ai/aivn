@@ -2765,7 +2765,10 @@
     "Chuyển mô hình đang chờ ổ đích {0}, thư mục “{1}”. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu, và sẽ được phục hồi khi ổ này có lại.": "模型移动正在等待目标磁盘 {0}，文件夹“{1}”。部分文件目前可能只在缺失的目标磁盘上，重新连接后会恢复。",
     "Đang chờ ổ đích của lần chuyển trước.": "正在等待上一次移动的目标磁盘。",
     "Đang dùng mô hình nên chưa hoàn tất được lần chuyển trước. Hãy gỡ mô hình rồi thử lại.": "正在使用模型，所以上一次移动还不能完成。请先卸载模型，然后再试。",
-    "Chưa xoá được nhật ký lần chuyển trước. Hãy đóng chương trình đang mở tệp đó rồi thử lại.": "未能删除上一次移动的日志。请关闭正在打开该文件的程序后再试。"
+    "Chưa xoá được nhật ký lần chuyển trước. Hãy đóng chương trình đang mở tệp đó rồi thử lại.": "未能删除上一次移动的日志。请关闭正在打开该文件的程序后再试。",
+    "Chưa nạp mô hình nào.": "尚未加载模型。",
+    "Hết thời gian chờ mô hình đang nạp. Hãy thử lại.": "等待模型加载超时。请再试一次。",
+    "Đang nạp mô hình…": "正在加载模型…"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

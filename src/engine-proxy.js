@@ -12,7 +12,9 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
   const pending = new Map(); // id -> {resolve, reject}
   const tokenCbs = new Map(); // reqId -> onToken
   let cached = { loaded: false }; let groundCached = { loaded: false };
-  let loading = null;
+  // Đếm lần giữ. loadModel xong thì finally của nó không được xoá cờ mà loadById đã bật từ trước.
+  let loadPins = 0;
+  let loadingId = null;
   let ratio = 1 / 3;
   let errTail = '', ready = false; const kids = new Set(); // pid llama-server do engine-host sinh ra // 0.15.1: giữ phần cuối stderr để báo đúng lỗi thật khi bộ máy sập (vd. thiếu mô-đun khi đóng gói)
   let extraEnv = {}, restarting = false, killReason = null; const inflight = new Map(); // id -> tên lệnh (ghi vào nhật ký khi bộ máy dừng) // token / ký tự, được hiệu chỉnh theo văn bản thật
@@ -37,7 +39,7 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
       child.on('error', (e) => { log('[engine] lỗi khởi động: ' + e.message); reject(e); });
       child.on('exit', (code, signal) => {
         for (const pid of kids) { try { process.kill(pid); log(`[engine] dừng llama-server mồ côi (pid ${pid})`); } catch {} pidFile && pidFile.remove(pid); } kids.clear();
-        const wasLoaded = cached.loaded || !!loading;
+        const wasLoaded = cached.loaded || loadPins > 0;
         child = null; readyP = null; cached = { loaded: false }; groundCached = { loaded: false };
         const busy = [...inflight.values()]; inflight.clear();
         const why = killReason; killReason = null;
@@ -60,7 +62,22 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
     return new Promise((resolve, reject) => { const id = ++seq; pending.set(id, { resolve, reject }); inflight.set(id, method); child.send({ id, method, args }); });
   }
 
-  function status() { return cached.loaded ? cached : { loaded: false, loading: !!loading }; }
+  function pinLoading(id) {
+    loadPins++;
+    if (id != null && id !== true) loadingId = id;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      loadPins = Math.max(0, loadPins - 1);
+      if (loadPins === 0) loadingId = null;
+    };
+  }
+  function status() {
+    if (cached.loaded) return cached;
+    const id = typeof loadingId === 'object' && loadingId ? loadingId.id : loadingId;
+    return { loaded: false, loading: loadPins > 0, ...(id ? { id } : {}) };
+  }
   const LOAD_FAILED_MSG = 'Nạp mô hình không thành công. Hãy thử lại.';
   // UI gửi generate trong lúc restart CPU: status().loading còn, tiến trình con thì chưa nạp. Giữ như API (tối đa 3 phút, theo AbortSignal).
   async function waitIfLoading(signal) {
@@ -90,16 +107,13 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
     start,
     hardwareInfo: () => call('hardwareInfo'),
     async loadModel(id, modelPath, opts) {
-      loading = id;
+      const release = pinLoading(id);
       try { cached = await call('loadModel', id, modelPath, opts); return cached; }
-      finally { loading = null; }
+      finally { release(); }
     },
-    // Giữ status().loading xuyên lúc restart (GPU lỗi → thử CPU). Token riêng để finally của loadModel không xoá cờ này sớm.
-    holdLoading(id) {
-      const token = { id: id || true };
-      loading = token;
-      return () => { if (loading === token) loading = null; };
-    },
+    // Giữ status().loading xuyên lúc restart (GPU lỗi → thử CPU) và trước khi loadModel chạy.
+    // Bộ đếm: finally của loadModel chỉ thả pin của chính nó, không xoá lần giữ bên ngoài.
+    holdLoading(id) { return pinLoading(id); },
     async unloadModel() { if (!child) { cached = { loaded: false }; return; } cached = await call('unloadModel'); },
     status,
     async generate(messages, { signal, onToken, ...opts } = {}) {

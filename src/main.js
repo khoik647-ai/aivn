@@ -544,7 +544,11 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
   if (!m) throw new Error(`Không tìm thấy mô hình "${id}"`);
   const ml = { ...modelLoadFor(id), ...cleanLoad(load) };
   if (!ctx && ml.contextSize) ctx = ml.contextSize;
-  send('model:status', { loading: true, id });
+  // Cờ nạp phải có trước mọi await. Nếu không, generate 31 ms sau lúc bắt đầu vẫn thấy "Chưa nạp mô hình nào."
+  const releaseHold = holdEngineLoading(m.id);
+  let held = true;
+  const endHold = () => { if (!held) return; held = false; try { releaseHold(); } catch {} };
+  send('model:status', { loading: true, id: m.id });
   try {
     let st;
     try { verifyGguf(m); } catch (e) { engineLog('Tệp mô hình không hợp lệ: ' + m.file, e, { path: m.path, size: m.size }); throw e; }
@@ -667,7 +671,13 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
     send('model:status', st);
     return st;
     } finally { ep.release(); }
-  } catch (e) { send('model:status', engine.status()); throw e; }
+  } catch (e) {
+    endHold();
+    let st = { loaded: false, loading: false };
+    try { st = engine.status() || st; } catch {}
+    send('model:status', { ...st, loading: false, error: e && e.message ? e.message : String(e), id: m.id });
+    throw e;
+  } finally { endHold(); }
 }
 
 const { createJitGuard } = require('./jit-load');

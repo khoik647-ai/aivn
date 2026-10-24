@@ -2765,7 +2765,10 @@
     "Chuyển mô hình đang chờ ổ đích {0}, thư mục “{1}”. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu, và sẽ được phục hồi khi ổ này có lại.": "A model move is waiting for destination drive {0}, folder “{1}”. Some files may currently exist only on the missing destination drive, and will be recovered when this drive is back.",
     "Đang chờ ổ đích của lần chuyển trước.": "Waiting for the destination drive of the previous move.",
     "Đang dùng mô hình nên chưa hoàn tất được lần chuyển trước. Hãy gỡ mô hình rồi thử lại.": "A model is in use, so the previous move cannot be finished. Unload the model, then try again.",
-    "Chưa xoá được nhật ký lần chuyển trước. Hãy đóng chương trình đang mở tệp đó rồi thử lại.": "Could not delete the log of the previous move. Close the program that has that file open, then try again."
+    "Chưa xoá được nhật ký lần chuyển trước. Hãy đóng chương trình đang mở tệp đó rồi thử lại.": "Could not delete the log of the previous move. Close the program that has that file open, then try again.",
+    "Chưa nạp mô hình nào.": "No model is loaded.",
+    "Hết thời gian chờ mô hình đang nạp. Hãy thử lại.": "Timed out waiting for the model to load. Try again.",
+    "Đang nạp mô hình…": "Loading the model…"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.en = D;
   if (typeof module === 'object' && module.exports) module.exports = D;
