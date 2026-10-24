@@ -747,6 +747,17 @@ async function ensureModel(requested, { api = false, signal = null } = {}) {
       return;
     }
     if (st.loaded) return; // dùng mô hình đang nạp nếu tên không khớp
+    // Tên không có trên đĩa, chưa có mô hình nào nạp xong, nhưng một lần nạp đang chạy
+    // (kể cả trước khi engine báo loading): chờ xong rồi trả lời bằng mô hình đó.
+    // Không tự nạp tên lạ. Chỉ lỗi khi không có mô hình và không có lần nạp nào.
+    if (st.loading || loadInflight.size) {
+      while (engine.status().loading || loadInflight.size) {
+        if (stopped()) return;
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      if (stopped()) return;
+      if (engine.status().loaded) return;
+    }
     const missing = new Error(`Mô hình "${requested}" chưa có trên máy`);
     missing.status = 404; missing.type = 'not_found_error';
     throw missing;

@@ -40,8 +40,9 @@ function sameModel(a, b) {
 }
 
 // 409 chỉ khi (a) tên trùng một mô hình có trên đĩa nhưng mô hình đang nạp là mô hình khác,
-// hoặc (b) id đang nạp đổi trong lúc xử lý so với trước ensureModel.
+// hoặc (b) id đang nạp đổi trong lúc xử lý so với một mô hình ĐÃ nạp trước ensureModel.
 // Tên lạ (gpt-4o-mini, claude-3-5-sonnet-latest, …) giữ mô hình đang nạp.
+// Chưa nạp gì rồi lần nạp đang chạy xong: đó là mô hình để trả lời, không phải đổi mô hình.
 function modelChanged(list, requested, before, after) {
   if (requested == null || requested === '') return null;
   const afterId = after && after.loaded && after.id ? String(after.id) : '';
@@ -54,6 +55,7 @@ function modelChanged(list, requested, before, after) {
     }
     return null;
   }
+  if (!beforeId && afterId) return null;
   if (normId(beforeId) !== normId(afterId)) {
     const have = afterId || 'chưa có mô hình';
     return `Mô hình đã đổi trong lúc nạp (${have}). Yêu cầu này không trả lời bằng mô hình khác. Hãy gửi lại.`;

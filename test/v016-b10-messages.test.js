@@ -80,7 +80,7 @@ test('POST /v1/messages không stream: system, khối text, usage, tham số l�
     assert.strictEqual(r.status, 200);
     const j = await r.json();
     assert.match(j.id, /^msg_/); assert.strictEqual(j.type, 'message'); assert.strictEqual(j.role, 'assistant');
-    assert.strictEqual(j.model, 'aivn-local');
+    assert.strictEqual(j.model, 'm1');
     assert.deepStrictEqual(j.content, [{ type: 'text', text: 'Xin chào' }]);
     assert.strictEqual(j.stop_reason, 'end_turn'); assert.strictEqual(j.stop_sequence, null);
     assert.strictEqual(j.usage.output_tokens, 7);

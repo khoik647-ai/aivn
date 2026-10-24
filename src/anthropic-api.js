@@ -274,7 +274,7 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
   const gone = modelChanged(list, translated.model, before, st);
   if (gone) return fail(409, 'invalid_request_error', gone);
   const id = 'msg_' + crypto.randomBytes(12).toString('hex');
-  const model = translated.model || (st && st.id) || '';
+  const model = (st && st.id) || translated.model || '';
   const inputTokens = countInput(engine, translated.messages);
 
   if (!translated.stream) {
