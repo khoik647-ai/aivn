@@ -20,7 +20,7 @@ const newId = (p) => p + '_' + crypto.randomBytes(6).toString('hex');
 const str = (v, max = 500) => (v == null ? '' : String(v)).trim().slice(0, max);
 const num = (v) => { const n = T.parseQty(v); return Number.isFinite(n) ? n : 0; }; // B50: “1.000” = 1000, làm tròn 3 chữ số
 // Ngày chứng từ là lịch dân sự, không qua múi giờ máy (new Date('YYYY-MM-DD') lệch một ngày ở UTC−).
-// Mốc thời gian (lúc xác nhận đơn) quy về giờ Việt Nam UTC+7, không giờ mùa — R3-K1 trước đây chỉ đúng khi máy đang ở UTC+7.
+// Mốc thời gian (lúc xác nhận đơn, và “hôm nay” cho quá hạn) quy về giờ Việt Nam UTC+7, không giờ mùa — cùng civilOf với R3-K1.
 const VN_MS = 7 * 60 * 60 * 1000;
 const pad2 = (n) => String(n).padStart(2, '0');
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
@@ -82,7 +82,7 @@ const EPS = 1e-9;
 // B52 (QA lượt 6): thuế suất không hợp lệ (vd. 7%) → báo lỗi, không tự đổi thành 10%
 const vatOf = (x) => { if (x === undefined || x === null || x === '') return 10; const n = Number(String(x).replace('%', '').trim()); if (![0, 5, 8, 10].includes(n)) throw new CrmError(`Thuế suất GTGT “${x}” không hợp lệ — chỉ nhận 0%, 5%, 8% hoặc 10%.`); return n; };
 
-function createBiz({ db, crm, now = () => Date.now(), today = () => civilOf(Date.now()), log = () => {} }) {
+function createBiz({ db, crm, now = () => Date.now(), today = () => civilOf(now()), log = () => {} }) {
   const hist = (partnerId, text) => { if (partnerId) db.run('INSERT INTO history(id, contact_id, lead_id, kind, text, at) VALUES (?,?,?,?,?,?)', [newId('h'), partnerId, null, 'biz', str(text, 2000), now()]); };
   const year = () => today().slice(0, 4);
   // số chứng từ theo Odoo: WH/OUT/00001, INV/2026/00001, RINV/2026/00001, PAY/2026/00001
