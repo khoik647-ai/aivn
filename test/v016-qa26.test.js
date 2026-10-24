@@ -97,7 +97,7 @@ test('B121: phát hiện ABM_GETSTATE → StuckRects3; toạ độ vật lý; b�
   assert.match(T.PS, /SHAppBarMessage\(4, ref d\)/); assert.match(T.PS, /StuckRects3/); assert.match(T.PS, /\$v\[8\]/);
   assert.deepStrictEqual(T.parseState('ABM=1;STUCK=3;ERR='), { abm: 1, stuck: 3, autoHide: true, via: 'ABM_GETSTATE', err: '' });
   assert.strictEqual(T.parseState('ABM=-1;STUCK=3;ERR=Add-Type lỗi').via, 'StuckRects3'); assert.strictEqual(T.parseState('ABM=-1;STUCK=3;ERR=x').autoHide, true);
-  assert.strictEqual(T.parseState('ABM=0;STUCK=3;ERR=').autoHide, true, 'một trong hai nguồn báo tự ẩn → coi là tự ẩn (dời điểm bấm vô hại)');
+  assert.strictEqual(T.parseState('ABM=0;STUCK=3;ERR=').autoHide, false, 'ABM_GETSTATE=0 là không tự ẩn, dù StuckRects3=3 chưa được Explorer áp');
   assert.strictEqual(T.parseState('ABM=0;STUCK=2;ERR=').autoHide, false); assert.strictEqual(T.parseState('ABM=-1;STUCK=-1;ERR=x').autoHide, false);
   T._reset(); const d = await T.detect({ run: () => 'ABM=-1;STUCK=3;ERR=' }); assert.strictEqual(d.autoHide, true);
   assert.match(T.describe(d), /thanh tác vụ tự ẩn: CÓ \(theo StuckRects3; ABM_GETSTATE=-1, StuckRects3=3\)/);
