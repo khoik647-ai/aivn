@@ -143,7 +143,8 @@ function splitClauses(line) {
   //   (2) 再把 / 再在 (chỉ lấy chữ 再, 把/在 còn ở mệnh đề sau để “在 notes.txt” vẫn ghim được);
   //   (3) 再 đứng ngay sau đầu câu, khoảng trắng, hoặc dấu câu.
   // “输入再打开” dính vào chữ trước và không phải các mẫu trên → không ngắt (thà không cắt 再见).
-  const re = /[.!?…](?=\s)|[,，;；](?=\s)|[。！？…]|[，；]|然后再|然後再|然后|然後|再(?=把|在)|(?<=^|[\s,，;；。！？…])再/gu;
+  // r14 M1: 再 ngay sau phủ định (不要/别/別/勿/不准/不能/禁止/不用) không ngắt. Cả mệnh đề giữ phủ định, tên tệp không được ghim (“不要再在 notes.txt…”).
+  const re = /[.!?…](?=\s)|[,，;；](?=\s)|[。！？…]|[，；]|然后再|然後再|然后|然後|(?<!不要|別|别|勿|不准|不能|禁止|不用)再(?=把|在)|(?<=^|[\s,，;；。！？…])再/gu;
   const parts = []; let start = 0; let m;
   while ((m = re.exec(line))) { parts.push({ text: line.slice(start, m.index), sep: /[,，;；]|然后|然後|再/u.test(m[0]) ? 'comma' : 'stop' }); start = m.index + m[0].length; }
   parts.push({ text: line.slice(start), sep: null });

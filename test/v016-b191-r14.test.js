@@ -77,3 +77,10 @@ test('R14 N2 再次 is not a clause boundary', () => {
   assert.strictEqual(FD.commandPart('打开记事本 再把 notes.txt 打开输入你好').includes('notes.txt'), true);
   assert.strictEqual(FD.freshDocTask('不要在 x.txt 里写再把 notes.txt 打开输入你好'), false);
 });
+
+test('R14 M1 再 right after a negation does not pin the file', () => {
+  for (const q of ['不要再在 notes.txt 里输入你好', '别再在 notes.txt 里写你好', '打开记事本，不要再在 notes.txt 里输入你好']) {
+    assert.strictEqual(FD.freshDocTask(q), true, q);
+    assert.strictEqual(FD.namedTarget(q), null, q);
+  }
+});

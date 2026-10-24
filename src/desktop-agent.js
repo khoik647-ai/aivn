@@ -304,8 +304,6 @@ function createDesktopAgent(deps) {
     const wins = [...((prior && prior.wins) || []), ...after.wins];
     const sec = ShotGuard.screenSecrets({ title, proc, text: [text, imageText].filter(Boolean).join('\n'), windows: wins });
     if (torn) return { reasons: [...new Set([...(sec.reasons || []), 'text:unreadable'])], titles: sec.titles || [], failed: true, unread: sec.unread || [] };
-    if (sec.failed) return sec;
-    if (!canOcr && wins.some(w => ShotGuard.onScreen(w))) return { reasons: [...new Set([...(sec.reasons || []), 'text:unreadable'])], titles: sec.titles || [], failed: true, unread: sec.unread || [] };
     return sec;
   }
   async function observe(ctx, { query = '', ocr = 'auto', thumb = true, vision = 'auto', question = '' } = {}) {
