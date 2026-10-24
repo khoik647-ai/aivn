@@ -517,7 +517,7 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
   }
   async function count(texts) {
     const list = Array.isArray(texts) ? texts : [];
-    return enqueue(async () => {
+    return runFree(() => enqueue(async () => {
       if (!proc) return list.reduce((s, t) => s + Math.ceil(String(t).length / 3), 0);
       disarm();
       let n = 0;
@@ -531,7 +531,7 @@ function createEmbedServer({ log = () => {}, idleMs, healthMs = 120000, findExe 
         }
       } finally { arm(); }
       return n;
-    });
+    }));
   }
 
   return {
