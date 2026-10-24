@@ -484,13 +484,14 @@ function createDesktopAgent(deps) {
       if (blocksUnaskedSend(action, a, tgt219, null, qRaw)) { deps.log && deps.log('desk', `CHẶN (B219): không phải lệnh gửi — ${action} ${String((a && (a.keys || a.text)) || '').slice(0, 60)}`); throw new Error('AIVN chặn: câu này không phải lệnh gửi.'); }
     }
     if (a && !a.__sendOk && !a.__notSend) {
-      const SendGate = require('./agent/send-gate'); const k = SendGate.normKeys(a.keys); const sess = session || {};
+      const gateMod = require('./agent/send-gate'); const k = gateMod.normKeys(a.keys); const sess = session || {};
       const nm = `${a.__el ? a.__el.name || '' : ''} ${a.__q || ''}`;
       const stG = a.__sendState || sendCtx(a && a.__el ? { el: a.__el, query: a.__q || '' } : (x != null ? { x, y, via: 'toạ độ', query: (a && a.__q) || '' } : null), a, null);
-      const sendLike = SendGate.classify(action, a, stG).send
+      const classify = gateMod.classify;
+      const sendLike = classify(action, a, stG).send
         || (action === 'type_text' && (a.__submit || a.submit || /\n\s*$/.test(String(a.text || ''))))
-        || (action === 'hotkey' && (SendGate.SEND_COMBO.test(k) || /(^|\+)(enter|return)$/.test(k)) && !!(sess.lastTyped || sess.chatOpen))
-        || (['click', 'double_click'].includes(action) && SendGate.SEND_NAME.test(nm));
+        || (action === 'hotkey' && (gateMod.SEND_COMBO.test(k) || /(^|\+)(enter|return)$/.test(k)) && !!(sess.lastTyped || sess.chatOpen))
+        || (['click', 'double_click'].includes(action) && gateMod.SEND_NAME.test(nm));
       if (sendLike) { deps.log && deps.log('desk', `CHẶN (B69): thao tác có thể gửi chưa qua chốt duyệt: ${action} ${String(a.keys || a.text || nm).slice(0, 60)}`); throw new Error('AIVN chặn: thao tác có thể GỬI tin chưa được duyệt.'); }
     }
     const n = SC.libnut();
