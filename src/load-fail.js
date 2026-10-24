@@ -35,10 +35,18 @@ function slowOnlyFailure(attempts) {
   return rows.length > 0 && rows.every((a) => a && a.slow);
 }
 
-// Chỉ ghi settings.gpu = false khi đường CPU nạp được và GPU thật sự lỗi (LOAD_FAILED từ backend, thiết bị không hợp lệ).
+// Lỗi backend/driver lúc tạo ngữ cảnh (DeviceLost, thiết bị không hợp lệ). Hết VRAM không thuộc nhóm này.
+function isDriverError(msg) {
+  return /DeviceLost|device lost|VK_ERROR_DEVICE_LOST|invalid device/i.test(String(msg || ''));
+}
+
+// Chỉ ghi settings.gpu = false khi đường CPU nạp được và GPU thật sự lỗi (LOAD_FAILED từ backend, thiết bị không hợp lệ, DeviceLost).
 // Mọi đường đều lỗi, chỉ chậm, hoặc không có lần GPU nào thất bại (0 lớp vừa vì VRAM trống thấp) thì không ghi tắt.
+// Lần thử tạo ngữ cảnh bị DeviceLost vẫn là lỗi driver. Hết bộ nhớ / VRAM thì không ghi, kể cả khi lỗi nằm ở bước tạo ngữ cảnh.
 function shouldPersistGpuOff({ cpuLoaded, attempts } = {}) {
   if (!cpuLoaded) return false;
+  const rows = Array.isArray(attempts) ? attempts.filter((a) => a && !a.slow) : null;
+  if (rows && rows.some((a) => isDriverError(a.message) && !isMemoryError(a.message))) return true;
   if (slowOnlyFailure(attempts)) return false;
   if (Array.isArray(attempts) && modelAttempts(attempts).length === 0) return false;
   return true;

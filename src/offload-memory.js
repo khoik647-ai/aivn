@@ -15,12 +15,13 @@ function identity(x = {}) {
     backend: String(x.backend || ''),
     gpuName: String(x.gpuName || ''),
     vramTotal: Number(x.vramTotal) || 0,
+    driver: String(x.driver || ''),
     settings: String(x.settings ?? ''),
   };
 }
 function same(rec, id, now) {
   if (!rec || !id) return false;
-  for (const k of ['file', 'size', 'mtime', 'backend', 'gpuName', 'vramTotal', 'settings']) if (rec[k] !== id[k]) return false;
+  for (const k of ['file', 'size', 'mtime', 'backend', 'gpuName', 'vramTotal', 'driver', 'settings']) if (rec[k] !== id[k]) return false;
   if (!(rec.at > 0) || (now || Date.now()) - rec.at > EXPIRY_MS) return false;
   return true;
 }

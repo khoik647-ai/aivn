@@ -267,7 +267,7 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
     if (ac.signal.aborted || clientGone(req, res)) return;
     if (missingModel(e)) return fail(404, 'not_found_error', e.message);
     if (e && (e.status === 503 || e.status === 504)) return fail(e.status, e.type || 'api_error', e.message);
-    if (e && e.code === 'BAD_FILE') return fail(503, 'api_error', 'Nạp mô hình không thành công. Hãy thử lại.');
+    if (e && e.code === 'BAD_FILE') return fail(503, 'api_error', 'Tệp mô hình bị hỏng hoặc tải chưa xong. Hãy xoá mô hình này và tải lại.');
     return fail(e.status || 400, 'invalid_request_error', e.message);
   }
   if (ac.signal.aborted || clientGone(req, res)) return;

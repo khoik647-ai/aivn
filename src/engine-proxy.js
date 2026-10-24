@@ -7,7 +7,7 @@ function firstErrorLine(t) {
   const l = lines.find(x => /^(\w*Error|Error)\b[:\s]/.test(x) || /^(Uncaught|FATAL|Fatal)/i.test(x)) || lines.find(x => /cannot find module|not found|failed|lỗi/i.test(x));
   return l ? l.slice(0, 240) : '';
 }
-function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () => {}, onProgress = () => {}, pidFile = null }) {
+function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () => {}, onProgress = () => {}, pidFile = null, loadWaitMs = 180000 }) {
   let child = null, readyP = null, seq = 0;
   const pending = new Map(); // id -> {resolve, reject}
   const tokenCbs = new Map(); // reqId -> onToken
@@ -60,6 +60,31 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
     return new Promise((resolve, reject) => { const id = ++seq; pending.set(id, { resolve, reject }); inflight.set(id, method); child.send({ id, method, args }); });
   }
 
+  function status() { return cached.loaded ? cached : { loaded: false, loading: !!loading }; }
+  const LOAD_FAILED_MSG = 'Nạp mô hình không thành công. Hãy thử lại.';
+  // UI gửi generate trong lúc restart CPU: status().loading còn, tiến trình con thì chưa nạp. Giữ như API (tối đa 3 phút, theo AbortSignal).
+  async function waitIfLoading(signal) {
+    if (!status().loading) return null;
+    const limit = Number(loadWaitMs) > 0 ? Number(loadWaitMs) : 180000;
+    const deadline = Date.now() + limit;
+    while (status().loading) {
+      if (signal && signal.aborted) return 'abort';
+      if (Date.now() >= deadline) {
+        const e = new Error(LOAD_FAILED_MSG);
+        e.status = 503; e.type = 'api_error';
+        throw e;
+      }
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    if (signal && signal.aborted) return 'abort';
+    if (!status().loaded) {
+      const e = new Error(LOAD_FAILED_MSG);
+      e.status = 503; e.type = 'api_error';
+      throw e;
+    }
+    return null;
+  }
+
   return {
     external: true,
     start,
@@ -76,8 +101,10 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
       return () => { if (loading === token) loading = null; };
     },
     async unloadModel() { if (!child) { cached = { loaded: false }; return; } cached = await call('unloadModel'); },
-    status: () => (cached.loaded ? cached : { loaded: false, loading: !!loading }),
+    status,
     async generate(messages, { signal, onToken, ...opts } = {}) {
+      const held = await waitIfLoading(signal);
+      if (held === 'abort') return { text: '', thought: null, finishReason: 'abort', stopReason: 'abort', usage: { completion_tokens: 0, tokensPerSecond: 0, seconds: 0, ttft: null, contextTokens: null, contextSize: null } };
       const reqId = 'g' + (++seq);
       if (onToken) tokenCbs.set(reqId, onToken);
       const onAbort = () => { try { child && child.send({ type: 'abort', reqId }); } catch {} };
@@ -86,6 +113,8 @@ function createEngineProxy({ nodePath, hostScript, log = () => {}, onCrash = () 
       finally { tokenCbs.delete(reqId); signal?.removeEventListener('abort', onAbort); }
     },
     async chatStep(messages, { signal, onToken, ...opts } = {}) {
+      const held = await waitIfLoading(signal);
+      if (held === 'abort') return { text: '', toolCalls: [], finishReason: 'abort', usage: { completion_tokens: 0, tokensPerSecond: 0, seconds: 0 } };
       const reqId = 's' + (++seq);
       if (onToken) tokenCbs.set(reqId, onToken);
       const onAbort = () => { try { child && child.send({ type: 'abort', reqId }); } catch {} };
