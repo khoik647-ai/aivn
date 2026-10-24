@@ -137,11 +137,12 @@ function createDesktopAgent(deps) {
   }
   function primaryPhysH() { try { const g = D.primaryOf(SC.geos()); return g && g.phys ? g.phys.height : 0; } catch { return 0; } }
   async function taskbarSafe(a, x, y) {
-    const d = await TB.detect(); const s = session;
-    if (s && !s.tbLogged) { s.tbLogged = true; deps.log && deps.log('desk', `B121: ${TB.describe(d)}`); }
-    const b = physBoundsAt(x, y); if (!b) { deps.log && deps.log('desk', 'B121: không biết khung màn hình (vật lý) của điểm bấm — không kiểm dải đáy'); return { x, y }; }
+    const det = await TB.detect(); const s = session;
+    const b = physBoundsAt(x, y); if (!b) { if (s && !s.tbLogged) { s.tbLogged = true; deps.log && deps.log('desk', `B121: ${TB.describe(det)}`); } deps.log && deps.log('desk', 'B121: không biết khung màn hình (vật lý) của điểm bấm — không kiểm dải đáy'); return { x, y }; }
     const band = TB.bandOf(b); const inBand = y > b.y + b.height - band - 1;
     const work = physWorkAt(x, y);
+    const d = TB.decideAutoHide(det, b, work);
+    if (s && !s.tbLogged) { s.tbLogged = true; deps.log && deps.log('desk', `B121: ${TB.describe(d)}`); }
     const raw = a && a.__el && Array.isArray(a.__el.b) ? a.__el.b : null;
     const box = TB.preferBox(raw, a && a.__el, s && s.obs && s.obs.elements);
     if (box && raw && (box[1] !== raw[1] || box[3] !== raw[3])) deps.log && deps.log('desk', `B121: dùng khung ô nhập thay cho khung chữ (${Math.round(raw[1])}–${Math.round(raw[1] + raw[3])} → ${Math.round(box[1])}–${Math.round(box[1] + box[3])})`);
@@ -150,8 +151,6 @@ function createDesktopAgent(deps) {
     if (s && !s.tbGeom) { s.tbGeom = true; const gap = TB.workGap(b, work); deps.log && deps.log('desk', `B121: màn hình vật lý ${b.width}×${b.height} tại ${b.x},${b.y} · khung làm việc ${work ? `${work.width}×${work.height} tại ${work.x},${work.y}` : 'không đọc được'} · lệch đáy ${gap ? Math.round(gap.bottom) : '?'} px · dày ${thick || 0} px, cạnh ${TB.EDGE_VI[edge] || edge}`); }
     if (!d.autoHide) { if (inBand) deps.log && deps.log('desk', `B121: điểm bấm y=${Math.round(y)} trong dải đáy ${band} px của màn hình ${b.width}×${b.height} nhưng thanh tác vụ không tự ẩn → bấm như cũ`); return { x, y }; }
     if (!TB.barOnMonitor(d, b, primaryPhysH())) { deps.log && deps.log('desk', `B121: màn hình ${b.width}×${b.height} tại ${b.x},${b.y} không có thanh tác vụ — giữ điểm bấm (${Math.round(x)},${Math.round(y)})`); return { x, y }; }
-    // Add-Type lỗi thì WORK/SM rỗng, via còn StuckRects3. Khung làm việc Electron bị trừ đúng cạnh đã biết → thanh đang hiện, không dời.
-    if (d.via === 'StuckRects3' && TB.workInsetShowsBar(b, work, d.edge)) { deps.log && deps.log('desk', `B121: StuckRects3 báo tự ẩn nhưng khung làm việc Electron bị trừ thanh cạnh ${TB.EDGE_VI[d.edge] || d.edge} — thanh đang hiện, giữ điểm bấm (${Math.round(x)},${Math.round(y)})`); return { x, y }; }
     const p = TB.place(x, y, b, box, { autoHide: true, edge, thick, win, owns: true });
     if (p.why === 'outside') return { x, y };
     // #27: đưa chuột ra giữa cửa sổ TRƯỚC khi tới mép, để thanh tác vụ kịp ẩn. Điểm bấm đã nằm ngoài dải, nên cú rê sau không chạm mép.
@@ -167,9 +166,14 @@ function createDesktopAgent(deps) {
   }
   // B115: thanh tác vụ tự ẩn có thể đang che ô soạn (chuột vừa chạm đáy) → đưa chuột lên giữa cửa sổ đích, chờ thanh tác vụ ẩn rồi mới đọc lại
   async function awayFromTaskbar(why) {
-    try { const dd = await TB.detect(); if (session && !session.tbLogged) { session.tbLogged = true; deps.log && deps.log('desk', `B121: ${TB.describe(dd)}`); } if (!dd.autoHide) return false; const s = session; const W = s && s.obs && s.obs.win && Array.isArray(s.obs.win.b) ? s.obs.win.b : null;
-      const b = W ? null : (physBoundsAt(0, 0) || displayBoundsAt(0, 0)); const x = W ? W[0] + W[2] / 2 : b.x + b.width / 2; const y = W ? W[1] + W[3] * 0.4 : b.y + b.height * 0.4;
-      await moveTo(x, y); await sleep(900); deps.log && deps.log('desk', why || 'B115: thanh tác vụ tự ẩn — đưa chuột ra xa đáy màn hình rồi mới đọc lại ô soạn'); return true; } catch { return false; }
+    try {
+      const raw = await TB.detect(); const s = session; const W = s && s.obs && s.obs.win && Array.isArray(s.obs.win.b) ? s.obs.win.b : null;
+      const fb = W ? null : (physBoundsAt(0, 0) || displayBoundsAt(0, 0)); const x = W ? W[0] + W[2] / 2 : fb.x + fb.width / 2; const y = W ? W[1] + W[3] * 0.4 : fb.y + fb.height * 0.4;
+      const b = physBoundsAt(x, y); const work = b ? physWorkAt(x, y) : null; const d = TB.decideAutoHide(raw, b, work);
+      if (s && !s.tbLogged) { s.tbLogged = true; deps.log && deps.log('desk', `B121: ${TB.describe(d)}`); }
+      if (!d.autoHide) return false;
+      await moveTo(x, y); await sleep(900); deps.log && deps.log('desk', why || 'B115: thanh tác vụ tự ẩn — đưa chuột ra xa đáy màn hình rồi mới đọc lại ô soạn'); return true;
+    } catch { return false; }
   }
   function displayBoundsAt(x, y) { try { const { screen } = require('electron'); return screen.getDisplayNearestPoint({ x: Math.round(x), y: Math.round(y) }).bounds; } catch { return null; } }
   async function cleanupDraft({ clear = true } = {}) {

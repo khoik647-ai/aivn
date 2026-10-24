@@ -75,6 +75,13 @@ function workInsetShowsBar(bounds, work, edge) {
   const gap = edge === 'left' ? g.left : edge === 'right' ? g.right : edge === 'top' ? g.top : g.bottom;
   return plausible(gap, span);
 }
+// Quyết định tự ẩn dùng chung: ABM / StuckRects3 từ detect, rồi bác bằng khung làm việc Electron khi via còn StuckRects3 và cạnh đã biết.
+// Không sửa object detect (bị nhớ cache).
+function decideAutoHide(det, bounds, work) {
+  const d = det && typeof det === 'object' ? { ...det } : { autoHide: false, via: 'không đọc được', abm: -1, stuck: -1 };
+  if (d.via === 'StuckRects3' && workInsetShowsBar(bounds, work, d.edge)) { d.autoHide = false; d.via = 'khung làm việc'; }
+  return d;
+}
 // đọc kết quả PowerShell: ABM=<số>;STUCK=<byte>;ERR=<chữ>[;EDGE=;SM=;TRAY=;...]. Cũ: chỉ một số (trạng thái ABM)
 // abm >= 0: chỉ bit ABS_AUTOHIDE của ABM_GETSTATE. StuckRects3 chỉ khi ABM không có (âm hoặc lỗi).
 function parseState(out) {
@@ -291,5 +298,5 @@ function isTaskbarFg(fg) {
 const _reset = () => { cache = null; };
 module.exports = {
   detect, autoHide, describe, safeY, bandOf, parseState, PS, _reset,
-  place, preferBox, thickFrom, edgeOf, inDanger, isTaskbarFg, workToPhys, workGap, workInsetShowsBar, dpiK, ownsBar, barOnMonitor, EDGE_VI, EDGES,
+  place, preferBox, thickFrom, edgeOf, inDanger, isTaskbarFg, workToPhys, workGap, workInsetShowsBar, decideAutoHide, dpiK, ownsBar, barOnMonitor, EDGE_VI, EDGES,
 };
