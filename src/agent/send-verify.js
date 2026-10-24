@@ -33,25 +33,49 @@ function peelEmbeddedSend(r) {
   const m = /(?:^|\s)(?:outlook|olk)\s+(?:gửi|nhắn|send)\s+(?:(?:cho|tới|đến|với|to)\s+)?(.+)$/iu.exec(x);
   return m && m[1].trim() ? m[1].trim() : x;
 }
-// “gửi Lan và Minh”: từ dừng “và” cắt mất người thứ hai. Ghép lại khi phần sau “và” vẫn là tên.
+// “gửi Lan và Minh”: ghép tên viết hoa đứng ngay sau “và”. Không nuốt cc/đính kèm/nhắc/nhưng/đừng.
+// “cả” đứng giữa thì bỏ. Không dùng \s+ trên chuỗi dài (lùi bậc hai).
+const NOT_JOIN = /^(?:cc|bcc|đính|kèm|nhắc|rồi|lưu|nhưng|đừng|không|nói|bảo|hỏi|chúc|mời|và|and|or|but|mà|là|rằng|với|trên|ở|qua|bằng|nhé|nha|giúp|hộ|ngay|lúc|khỏi|nội|dung|tiêu|đề|chủ)$/iu;
+const capWord = (w) => /^\p{Lu}/u.test(w);
 function withCoRecipients(query, name) {
   const n = String(name || '').trim();
   if (!n || /\svà\s/iu.test(n)) return name;
-  const re = new RegExp(n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + String.raw`\s+và\s+([\p{L}][\p{L}'’.-]*(?:\s+[\p{L}][\p{L}'’.-]*){0,3})`, 'iu');
-  const m = re.exec(String(query || ''));
-  if (!m) return name;
-  let extra = m[1].trim();
-  const cut = extra.search(/\s+(?:nhưng|but|mà|là|rằng|nội dung|với nội dung|tiêu đề|chủ đề|nói|bảo|hỏi|nhắc|chúc|mời|không|đừng|khỏi|rồi|nhé|nha|giúp|hộ|ngay|trên|ở|qua|bằng|and|or)\b/iu);
-  if (cut >= 0) extra = extra.slice(0, cut).trim();
-  if (!extra || NOT_NAME.test(extra) || NOT_RECIPIENT.test(extra) || rcpStop(extra) || extra.split(/\s+/).length > 4) return name;
-  if (/^(?:đừng|không|nói|bảo|hỏi|nhắc|chúc|rồi|nhé|nha|giúp|hộ|mà|nhưng|với|trên|ở|the|a|an)$/iu.test(extra.split(/\s+/)[0])) return name;
+  const q = String(query || '');
+  const hay = q.toLowerCase();
+  const needle = n.toLowerCase();
+  let from = 0; let at = -1;
+  while (from < hay.length) {
+    const i = hay.indexOf(needle, from);
+    if (i < 0) break;
+    const prev = i === 0 ? '' : q[i - 1];
+    if ((i === 0 || /[\s,.(["“«]/.test(prev)) && /^\s{1,3}và\s{1,3}/iu.test(q.slice(i + n.length, i + n.length + 12))) { at = i; break; }
+    from = i + 1;
+  }
+  if (at < 0) return name;
+  let rest = q.slice(at + n.length).replace(/^\s{1,3}và\s{1,3}/iu, '');
+  const punct = rest.search(/[:"“”«»,;.!?]/u);
+  if (punct >= 0) rest = rest.slice(0, punct);
+  const words = rest.slice(0, 80).trim().split(' ').filter(Boolean);
+  let i = 0;
+  if (words[0] && /^cả$/iu.test(words[0])) i++;
+  const picked = [];
+  while (i < words.length && picked.length < 4) {
+    const w = words[i].replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}'’.-]+$/gu, '');
+    if (!w || NOT_JOIN.test(w) || !capWord(w)) break;
+    picked.push(w);
+    i++;
+  }
+  if (!picked.length) return name;
+  const extra = picked.join(' ');
+  if (NOT_NAME.test(extra) || NOT_RECIPIENT.test(extra) || rcpStop(extra)) return name;
   return `${n} và ${extra}`;
 }
 function recipientOf(query) {
-  const q0 = String(query || '').replace(EN_HONOR_DOT, '$1').replace(NEG_SEND, ' ');
+  const flat = String(query || '').replace(/\s+/g, ' ').trim();
+  const q0 = flat.replace(EN_HONOR_DOT, '$1').replace(NEG_SEND, ' ').replace(/\s+/g, ' ').trim();
   const raw = recipientOf0(q0);
   const peeled = raw ? peelEmbeddedSend(raw) : raw;
-  const r = peeled ? withCoRecipients(q0, peeled) : peeled; if (!r) return r;
+  const r = peeled ? withCoRecipients(flat, peeled) : peeled; if (!r) return r;
   if (NOT_RECIPIENT.test(String(r).trim()) || notAName(r) || rcpStop(r) || /^(?:hiện tại|đang mở|này|hiện giờ|current|this)$/iu.test(String(r).trim())) return null;
   { const z = String(r).replace(/\s*的\s*(?:聊天|对话|對話|会话|會話|聊天窗口)$/u, '').trim(); if (z !== String(r).trim()) return z || null; }
   const x = stripHonorAfter(r) || r; const y = x.replace(EN_HONOR_LEAD, '').trim(); return y || x;
@@ -707,7 +731,9 @@ function readMail(elements) {
   for (const e of elements || []) {
     const k = mailFieldKind(e);
     if (!k || k === 'subject') continue;
-    if (e.valueError || e.unreadable) return { to, cc, bcc, unreadable: true };
+    // uitree cắt giá trị ở 200 ký tự và không gắn cờ riêng cho ô. Ô đủ 200 ký tự có thể mất “; evil@…”.
+    const val = e.value == null ? '' : String(e.value);
+    if (e.valueError || e.unreadable || val.length >= 200) return { to, cc, bcc, unreadable: true };
     const bucket = k === 'to' ? to : k === 'cc' ? cc : bcc;
     for (const p of splitRcpt(e.value)) bucket.push(p);
   }
@@ -716,6 +742,7 @@ function readMail(elements) {
 // Khung thư chính (Inbox / Thư mới / Reply / Sent). Thấy các nút này thì cửa sổ không phải ô soạn bị cắt mất.
 function seesMailChrome(elements) {
   for (const e of elements || []) {
+    if (!/^(?:Button|TreeItem|TabItem)$/.test(String(e && e.role || ''))) continue;
     const n = fold(e && e.name);
     if (/^(?:inbox|hop thu den|hop thu|new mail|new message|thu moi|sent items|sent|muc da gui|reply|reply all|tra loi|tra loi tat ca)$/.test(n)) return true;
   }
@@ -788,6 +815,9 @@ function gateFields({ obs = null, win = null, elements = null, target = null, fo
   const mail = readMail(els);
   const unreadTree = treeUnreadable(obs, els);
   if (unreadTree) mail.unreadable = true;
+  // Cây cụt có thể còn ô To nhưng Cc/Bcc đã bị cắt. Vẫn nới composeHot ở cửa sổ chính (không biến Inbox thành gửi),
+  // nhưng bước gửi thì không đọc đủ người nhận.
+  if (obs && obs.truncated && isOutlookApp(sendApp)) mail.unreadable = true;
   // Khung đọc và thanh Inbox/New mail/Reply/Search/Archive không phải ô soạn. Chỉ tính nội dung khi đang ở vùng soạn.
   // Cây không đọc được (lỗi UIA, hết giờ, dưới 3 phần tử có tên, Outlook cụt mà không thấy ô To): coi là đang có nội dung.
   // partial (cắt giá trị dài) không làm cây thành không đọc được.
@@ -826,8 +856,15 @@ function outlookGate({ query, text, searchField = false, submit = false, state =
     return `CHƯA gửi thư: không xác định được NGƯỜI NHẬN trong yêu cầu. Ô To/Cc/Bcc ${got.length ? `đang là “${got.slice(0, 3).join(', ')}”` : 'đang trống'}. Hỏi người dùng: ${state.askWho}`;
   }
   if (!got.length) return `CHƯA gửi thư: ô To/Cc/Bcc đang trống — cần đúng người nhận “${recipient}”, không gửi khi chưa có người nhận.`;
-  if (got.length !== 1) return `CHƯA gửi thư: To/Cc/Bcc có ${got.length} người (${got.slice(0, 4).join(', ')}) — chỉ được đúng “${recipient}”, không thêm người nhận.`;
-  if (!recipientMatches(recipient, got[0])) return `CHƯA gửi thư: người nhận “${got[0]}” trên ô To/Cc/Bcc không khớp “${recipient}”.`;
+  const want = String(recipient).split(/\s+và\s+/iu).map(s => s.trim()).filter(Boolean);
+  const used = new Set();
+  const same = want.length === got.length && want.every(w => {
+    const i = got.findIndex((g, idx) => !used.has(idx) && recipientMatches(w, g));
+    if (i < 0) return false;
+    used.add(i);
+    return true;
+  });
+  if (!same) return `CHƯA gửi thư: To/Cc/Bcc (${got.slice(0, 4).join(', ')}) không khớp “${recipient}”.`;
   return null;
 }
 function chatGate({ query, text, searchField = false, submit = false, proc = '', title = '', state = {}, header = [], ocrHeader = null, seenHeader = null, composer = [], className = '', url = '', host = '', elements = null, mail = null, mailField = '' } = {}) {

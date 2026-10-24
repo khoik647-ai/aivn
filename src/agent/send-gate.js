@@ -8,7 +8,7 @@
 // một phần tên), hay không phải việc nhắn tin và ô đích đã xác nhận là ô tìm kiếm.
 const fold = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/[^\p{L}\p{N} ]/gu, ' ').replace(/\s+/g, ' ').trim();
 // B220: nhãn gửi ngoài vi/en/zh (送信, Envoyer, Enviar, Senden…) cũng là nút Gửi — không chỉ là thẻ rủi ro.
-const SEND_WORD = 'gửi|gui|senden|envoyer|enviar|invia|send|sent|送信|보내기|发送|發送|传送|傳送|送出|submit tin';
+const SEND_WORD = 'gửi|gui|senden|envoyer|enviar|invia|kirim|verzenden|отправить|send|sent|送信|보내기|发送|發送|传送|傳送|送出|submit tin';
 const SEND_NAME = new RegExp(String.raw`(^|[\s“"'(\[])(?:${SEND_WORD})(?=$|[\s”"')\].,:!])|nút gửi|send button|send message|gửi tin|➤|➢|✈|paper ?plane`, 'iu');
 const ENTERISH = /(^|\+)(enter|return|numpad_enter|kp_enter)$/i;
 const Keys = require('./keys');
