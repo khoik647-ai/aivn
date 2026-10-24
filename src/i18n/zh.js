@@ -2755,7 +2755,6 @@
     "Chưa xác minh được “{0}” ở đích, không xoá bản gốc": "未能在目标位置验证“{0}”，因此未删除原文件。",
     "Không chuyển được vì thư mục đích đã có tệp cùng tên nhưng không giống hệt. Mọi tệp vẫn ở thư mục cũ và cài đặt chưa đổi. Hãy đổi tên hoặc dời các tệp này rồi thử lại: {0}": "无法移动模型文件夹，因为目标位置已有同名但内容不同的文件。所有文件仍在原文件夹中，设置未更改。请重命名或移走这些文件后再试：{0}",
     "Đích đã có tệp cùng tên.": "目标位置已有同名文件。",
-    "Đích “{0}” không khớp sau khi đọc lại": "重新读取后，目标文件“{0}”不一致。",
     "Đổi tên “{0}” không khớp nội dung": "重命名“{0}”后内容不一致。",
     "Thư mục này trỏ tới chính thư mục mô hình hiện tại (đường tắt, liên kết, hoặc cùng một thư mục với tên khác). Hãy chọn thư mục khác.": "此文件夹指向当前的模型文件夹（快捷方式、链接，或同一文件夹的另一个名称）。请选择其他文件夹。",
     "Không chuyển liên kết “{0}”. Đây là đường tắt, không phải tệp mô hình. Liên kết và tệp mà nó trỏ tới vẫn còn nguyên. Hãy thay bằng tệp thật hoặc dời liên kết đi rồi thử lại.": "无法移动链接“{0}”，因为它是快捷方式，不是模型文件。链接及其指向的文件均未改动。请换成真实文件，或先移走该链接再试。",

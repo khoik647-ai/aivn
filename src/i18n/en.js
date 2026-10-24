@@ -2755,7 +2755,6 @@
     "Chưa xác minh được “{0}” ở đích, không xoá bản gốc": "Could not verify “{0}” at the destination, so the original was not deleted.",
     "Không chuyển được vì thư mục đích đã có tệp cùng tên nhưng không giống hệt. Mọi tệp vẫn ở thư mục cũ và cài đặt chưa đổi. Hãy đổi tên hoặc dời các tệp này rồi thử lại: {0}": "Could not move the models folder because the destination already has a file with the same name that is not identical. Every file is still in the old folder and settings were not changed. Rename or move these files, then try again: {0}",
     "Đích đã có tệp cùng tên.": "The destination already has a file with the same name.",
-    "Đích “{0}” không khớp sau khi đọc lại": "The destination “{0}” does not match when read back.",
     "Đổi tên “{0}” không khớp nội dung": "Renaming “{0}” did not keep the same contents.",
     "Thư mục này trỏ tới chính thư mục mô hình hiện tại (đường tắt, liên kết, hoặc cùng một thư mục với tên khác). Hãy chọn thư mục khác.": "This folder points at the current models folder (a shortcut, a link, or the same folder under another name). Choose a different folder.",
     "Không chuyển liên kết “{0}”. Đây là đường tắt, không phải tệp mô hình. Liên kết và tệp mà nó trỏ tới vẫn còn nguyên. Hãy thay bằng tệp thật hoặc dời liên kết đi rồi thử lại.": "Could not move the link “{0}” because it is a shortcut, not a model file. The link and the file it points at are unchanged. Replace it with a real file, or move the link aside, then try again.",
