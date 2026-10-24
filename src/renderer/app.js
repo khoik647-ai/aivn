@@ -247,6 +247,7 @@ $('#modelTable').addEventListener('click', async (e) => {
   refreshModels();
 });
 async function loadModel(id, extra = {}) {
+  if (loadWait && loadWait.expectedId && String(loadWait.expectedId) !== String(id)) abortLoadWait();
   if (!id) return false;
   let ok = false;
   let r = await A.loadModel(id, extra).catch(err => ({ ok: false, error: cleanErr(err.message) }));
@@ -263,10 +264,72 @@ async function loadModel(id, extra = {}) {
   refreshModels();
   return ok;
 }
+// Một ngân sách thời gian cho cả lần chờ. Hết giờ thì không gọi generate (backend còn 180 giây nữa).
+function loadWaitBudget() {
+  const n = Number(globalThis.AIVN_LOAD_WAIT_MS);
+  return n > 0 ? n : 180000;
+}
+let loadWait = null;
+function abortLoadWait() {
+  state.loadWaitDiscarded = true;
+  if (loadWait) loadWait.ac.abort();
+}
+function lockSend(on) {
+  state.awaitingLoad = !!on;
+  const b = $('#sendBtn');
+  if (b) b.disabled = !!on;
+  paintGenChrome();
+}
+// Đang nạp: chờ model:status thành đã nạp hoặc lỗi, rồi mới gửi. Không bỏ tin.
+async function waitForLoad(expectedId) {
+  if (loadWait) return false;
+  const ac = new AbortController();
+  const convId = state.current ? state.current.id : null;
+  loadWait = { ac, expectedId, convId };
+  state.loadWaitDiscarded = false;
+  lockSend(true);
+  const deadline = Date.now() + loadWaitBudget();
+  let result = { ok: false, error: 'Hết thời gian chờ mô hình đang nạp. Hãy thử lại.' };
+  try {
+    while (Date.now() < deadline) {
+      if (ac.signal.aborted || (convId && (!state.current || state.current.id !== convId))) { result = { ok: false, discarded: true }; break; }
+      const pushed = state.status || {};
+      let polled = null;
+      try { polled = await A.modelStatus(); } catch {}
+      if (ac.signal.aborted || (convId && (!state.current || state.current.id !== convId))) { result = { ok: false, discarded: true }; break; }
+      const err = (pushed && pushed.error) || (polled && polled.error) || '';
+      const loaded = (polled && polled.loaded && polled) || (pushed && pushed.loaded && pushed) || null;
+      const loading = !!((polled && polled.loading) || (pushed && pushed.loading));
+      if (loaded && loaded.loaded && !loaded.loading && (!expectedId || loaded.id === expectedId)) {
+        if (!state.status.loaded || state.status.id !== loaded.id) setStatus(loaded);
+        result = { ok: true, status: loaded };
+        break;
+      }
+      if (err && !loading) { result = { ok: false, error: err }; break; }
+      if (!loading) { result = { ok: false, error: err || 'Chưa nạp mô hình nào.' }; break; }
+      if (expectedId && loaded && loaded.loaded && loaded.id !== expectedId && !loading) { result = { ok: false, discarded: true }; break; }
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  } finally {
+    if (loadWait && loadWait.ac === ac) loadWait = null;
+    lockSend(false);
+  }
+  if (result.ok && expectedId && result.status.id !== expectedId) return false;
+  if (result.discarded) { state.loadWaitDiscarded = true; return false; }
+  if (!result.ok) { state.loadWaitDiscarded = false; toast(result.error, true); return false; }
+  return true;
+}
 // Gửi tin khi chưa nạp mô hình: tự nạp mô hình đang chọn / dùng lần trước; nếu chưa có mô hình nào thì chỉ đường tới Khám phá
 async function ensureLoaded() {
-  if (state.status.loaded) return true;
-  if (state.status.loading) { toast('Mô hình đang được nạp, chờ một chút rồi gửi lại', true); return false; }
+  if (state.awaitingLoad) return false;
+  const live0 = await A.modelStatus().catch(() => null);
+  if (state.status.loaded && !state.status.loading && (!live0 || !live0.loading)) return true;
+  if (live0 && live0.loaded && !live0.loading && !state.status.loading) { setStatus(live0); return true; }
+  const loading = !!(state.status && state.status.loading) || !!(live0 && live0.loading);
+  if (loading) {
+    const expectedId = (state.status && state.status.loading && state.status.id) || (live0 && live0.id) || null;
+    return waitForLoad(expectedId);
+  }
   if (!state.models || !state.models.length) await refreshModels();
   const list = state.models || [];
   // AIVN AGENT: chỉ tự nạp mô hình dùng được cho agent (mạnh nhất chạy mượt)
@@ -281,7 +344,7 @@ async function ensureLoaded() {
   toast(`Đang nạp ${pick.catalog ? pick.catalog.name : pick.file}…`);
   return loadModel(pick.id);
 }
-$('#modelSelect').addEventListener('change', e => e.target.value && loadModel(e.target.value));
+$('#modelSelect').addEventListener('change', e => { abortLoadWait(); if (e.target.value) loadModel(e.target.value); });
 $('#ejectBtn').addEventListener('click', async () => { await A.unloadModel(); refreshModels(); });
 const doImport = async () => { state.models = await A.importModel(); refreshModels(); if (!$('#sugArea').hidden) renderCatalog(); };
 $('#importBtn').addEventListener('click', doImport); $('#importBtn2').addEventListener('click', doImport);
@@ -713,6 +776,7 @@ $('#convoList').addEventListener('click', async (e) => {
   const row = e.target.closest('.convo'); if (!row) return;
   if (e.target.closest('.exp')) { await exportConvo(row.dataset.id); return; }
   if (e.target.classList.contains('del')) { await A.deleteConvo(row.dataset.id); if (state.current && state.current.id === row.dataset.id) state.current = null; await loadConvos(); renderMessages(); return; }
+  if (!state.current || state.current.id !== row.dataset.id) abortLoadWait();
   const genRow = ChatStream.generatingFor(state.mode, state.generatingConv, state.generatingByMode);
   state.current = (genRow && genRow.id === row.dataset.id) ? genRow : state.convos.find(c => c.id === row.dataset.id);
   if (isAgent() && state.current && state.generatingByMode.agent && state.current.id === state.generatingByMode.agent.id) { state.agentExplicitNew = false; state.lastByMode.agent = state.current.id; }
@@ -725,6 +789,7 @@ $('#messages').addEventListener('click', async (e) => {
 });
 A.onEngineCrash((e) => toast(e.message, true));
 $('#newChat').addEventListener('click', () => {
+  abortLoadWait();
   const page = state.mode === 'agent' ? 'agent' : 'chat';
   state.current = null;
   // B178: “＋ Việc mới” trong lúc AGENT đang chạy phải thắng. Không chọn lại việc đó giữa lượt hay khi lượt xong.
@@ -957,6 +1022,7 @@ function holdSharedModel() {
 }
 $('#composer').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (state.awaitingLoad) return;
   let text = input.value.trim(); $('#slashPop').hidden = true;
   // lệnh / chạy ngay cả khi đang tạo câu trả lời (chỉ đổi cài đặt cục bộ), trừ /moi
   if (!isAgent() && text.startsWith('/') && runSlash(text)) return;
@@ -976,7 +1042,7 @@ $('#composer').addEventListener('submit', async (e) => {
   const directImgs = vision ? [...docsToSend.filter(a => a.kind === 'image' && a.vis), ...docsToSend.flatMap(a => (a.frames || []).map(f => ({ vis: f, frame: true })))].slice(0, 4) : [];
   if (!text && docsToSend.length) text = docsToSend.every(a => a.kind === 'image') ? (directImgs.length ? 'Hãy mô tả chi tiết bức ảnh này.' : 'Hãy cho biết nội dung chữ trong ảnh và tóm tắt ý chính.') : docsToSend.every(a => a.kind === 'audio' || a.kind === 'video') ? 'Hãy tóm tắt nội dung chính của tệp ghi âm/video đính kèm, kèm mốc thời gian của các ý quan trọng.' : 'Hãy tóm tắt nội dung chính của tài liệu đính kèm.';
   if (!text) return;
-  if (!state.status.loaded && !(await ensureLoaded())) return;
+  if ((state.status.loading || !state.status.loaded) && !(await ensureLoaded())) return;
   if (!state.current) state.current = { id: uid(), title: text.slice(0, 48), messages: [], createdAt: Date.now(), updatedAt: Date.now(), mode: 'chat' };
   const conv = state.current;
   const userMsg = { role: 'user', content: text, at: Date.now() };
@@ -1101,8 +1167,9 @@ $('#messages').addEventListener('click', async (e) => {
   if (act !== 'copy' && holdSharedModel()) return;
   if (act === 'copy') { await A.copyText(m.content); toast('Đã sao chép ✓'); }
   if (act === 'regen') {
+    if (state.awaitingLoad) return;
     const u = conv.messages[i - 1]; if (!u || u.role !== 'user') return;
-    if (!state.status.loaded && !(await ensureLoaded())) return;
+    if ((state.status.loading || !state.status.loaded) && !(await ensureLoaded())) return;
     if (i < conv.messages.length - 1) { const ok = await modalAsk({ icon: '↻', title: 'Tạo lại câu trả lời này?', message: `Các tin nhắn phía sau (${conv.messages.length - 1 - i}) sẽ bị bỏ. Nếu muốn giữ, hãy dùng “Rẽ nhánh” trước.`, okLabel: 'Tạo lại', noLabel: 'Huỷ' }); if (!ok) return; conv.messages.splice(i + 1); }
     if (!m.alts) { m.alts = [snapAlt(m)]; }
     m.content = ''; m.thought = null; m.stats = null; m.sources = null; delete m.error; m.model = state.status.id;
@@ -1130,9 +1197,10 @@ function editMsg(i) {
   const ta = el.querySelector('.edit-box'); ta.style.height = Math.min(320, ta.scrollHeight + 4) + 'px'; ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
   const done = async (how) => {
     const v = ta.value.trim(); if (how === 'cancel' || !v) { renderMessages(); return; }
+    if (how === 'save') { m.content = v; delete m.context; conv.updatedAt = Date.now(); await A.saveConvo(conv); renderMessages(); return; }
+    if (state.awaitingLoad) return;
+    if ((state.status.loading || !state.status.loaded) && !(await ensureLoaded())) { if (state.loadWaitDiscarded) renderMessages(); return; }
     m.content = v; delete m.context; conv.updatedAt = Date.now();
-    if (how === 'save') { await A.saveConvo(conv); renderMessages(); return; }
-    if (!state.status.loaded && !(await ensureLoaded())) { renderMessages(); return; }
     conv.messages.splice(i + 1); const reply = { role: 'assistant', content: '', model: state.status.id }; conv.messages.push(reply);
     await runTurn(conv, m, reply);
   };
@@ -1140,7 +1208,7 @@ function editMsg(i) {
   ta.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); done('cancel'); } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done('send'); } });
 }
 let genStartedAt = 0;
-$('#stopBtn').addEventListener('click', () => { if (!state.generating) return; if (Date.now() - genStartedAt < 700) return; /* bấm đúp nút Gửi: cú bấm thứ hai rơi vào nút Dừng */ A.stop(state.generating); });
+$('#stopBtn').addEventListener('click', () => { if (state.awaitingLoad) { abortLoadWait(); return; } if (!state.generating) return; if (Date.now() - genStartedAt < 700) return; /* bấm đúp nút Gửi: cú bấm thứ hai rơi vào nút Dừng */ A.stop(state.generating); });
 
 // ---------- 0.16: tham số trò chuyện + preset (bố cục kiểu LM Studio: Hệ thống · Lấy mẫu · Đầu ra) ----------
 const PRM = [
@@ -1606,8 +1674,9 @@ async function agentAttachments(atts, text) {
   return { atts, content: imgs.length ? [{ type: 'text', text: full }, ...imgs.map(url => ({ type: 'image_url', image_url: { url } }))] : full, files: atts.filter(a => a.path).map(a => ({ path: a.path, name: a.name })) };
 }
 async function sendAgent(text) {
+  if (state.awaitingLoad) return;
   const cloudOn = !!(state.settings && state.settings.cloudBrain && state.settings.cloudBrain.on);
-  if (!state.status.loaded && !cloudOn && !(await ensureLoaded())) return;
+  if (!cloudOn && (state.status.loading || !state.status.loaded) && !(await ensureLoaded())) return;
   if (!(await agentGateOk())) return; // mô hình không dùng được cho AIVN AGENT: chặn, giữ nguyên tệp đính kèm và chữ đã nhập
   let atts = pending.filter(a => a.ok); pending = []; renderChips();
   drafts.stash('agent', { input: input.value }, pending);
@@ -1721,7 +1790,13 @@ function paintGenChrome() {
   const gs = $('#genStats');
   const plan = planGenChrome({ mode: state.mode, genKind: state.genKind || null, genPhase: state.genPhase || null, genNote: state.genNote || '', agentFoot: state.agentFoot || '' });
   const send = $('#sendBtn'); const stop = $('#stopBtn');
-  if (send) send.hidden = plan.sendHidden;
+  if (state.awaitingLoad) {
+    if (send) { send.hidden = false; send.disabled = true; }
+    if (stop) stop.hidden = false;
+    if (gs) { state._genStatsShown = 'Đang nạp mô hình…'; gs.textContent = 'Đang nạp mô hình…'; }
+    return;
+  }
+  if (send) { send.hidden = plan.sendHidden; send.disabled = false; }
   if (stop) stop.hidden = plan.stopHidden;
   if (gs && state._genStatsShown !== plan.genStats) { state._genStatsShown = plan.genStats; gs.textContent = plan.genStats; }
   // Trang AIVN AGENT đang nghỉ giữ thanh “Kết quả” thêm vài giây. Mọi trường hợp khác vẽ đúng kế hoạch.
@@ -1974,7 +2049,7 @@ async function paintPerf(pf) {
     const info = pf ? { profile: pf } : await A.perfInfo(); const p = info.profile;
     $('#perfTier').innerHTML = `Máy này: <b>${esc(p.tierLabel)}</b> (${esc(p.why)}). Đang dùng chế độ <b>${esc(p.effectiveLabel)}</b>${p.mode === 'auto' ? ' (tự chọn)' : ''}.`;
     $('#perfMode').value = p.mode || 'auto';
-    $('#perfCfg').innerHTML = `<span title="Số luồng CPU dùng để suy luận">🧵 ${p.threads} luồng</span> · <span title="Độ dài ngữ cảnh mặc định khi nạp">📏 ngữ cảnh ${p.ctx}</span> · <span title="Số token xử lý mỗi lượt khi đọc câu hỏi">📦 lô ${p.batchSize}</span>${p.kvQuant ? ' · <span title="Nén bộ nhớ đệm ngữ cảnh q8_0">🗜 KV q8_0</span>' : ''}${p.idleUnloadMin ? ` · <span title="Tự gỡ mô hình khi không dùng">💤 gỡ sau ${p.idleUnloadMin} phút</span>` : ''}${p.uiLite ? ' · <span title="Tắt hiệu ứng, gộp cập nhật chữ">🪶 giao diện nhẹ</span>' : ''}`;
+    $('#perfCfg').innerHTML = `<span title="Số luồng CPU dùng để suy luận">🧵 ${p.threads} luồng</span> · <span title="Độ dài ngữ cảnh mặc định khi nạp">📏 ngữ cảnh ${p.ctx}</span> · <span title="Số token xử lý mỗi lượt khi đọc câu hỏi">📦 lô ${p.batchSize}</span>${p.kvQuant ? ' · <span title="Nén bộ nhớ đệm ngữ cảnh q8_0">🗜 KV q8_0</span>' : ''}${p.idleUnloadMin ? ` · <span title="Mô hình chọn trên giao diện không tự gỡ">💤 không gỡ mô hình đang chọn</span>` : ''}${p.uiLite ? ' · <span title="Tắt hiệu ứng, gộp cập nhật chữ">🪶 giao diện nhẹ</span>' : ''}`;
     $('#perfTips').innerHTML = (p.tips || []).map(t => `<li>${esc(t)}</li>`).join('');
     const runs = await A.perfRuns();
     $('#perfRuns').innerHTML = runs.length ? '<tr><th>Lúc</th><th>Mô hình</th><th>Chế độ</th><th>Chữ đầu</th><th>Tốc độ</th></tr>' + runs.slice(-6).reverse().map(r => `<tr><td>${new Date(r.at).toLocaleTimeString(LOC())}</td><td>${esc(String(r.model).slice(0, 28))}</td><td>${esc(r.modeLabel)}</td><td>${(r.ttftMs / 1000).toFixed(1)} giây</td><td><b>${r.tokPerSec}</b> token/giây</td></tr>`).join('') : '';
@@ -2171,7 +2246,7 @@ $('#bgTray').addEventListener('change', async (e) => { state.settings = await A.
 $('#bgLogin').addEventListener('change', async (e) => { state.settings = await A.setSettings({ openAtLogin: e.target.checked }); });
 $('#notifyTest').addEventListener('click', async () => { const r = await A.notifyTest(); if (r && !r.supported) toast('Hệ điều hành này chưa hỗ trợ thông báo cho AIVN', true); });
 A.onSchedChanged(() => { if ($('#view-schedule').classList.contains('active')) refreshSched(); else refreshSchedCount(); });
-async function openConvo(id) { await loadConvos(); const c = state.convos.find(x => x.id === id); if (!c) return; show(convoMode(c) === 'agent' ? 'agent' : 'chat'); state.current = c; renderConvos(); renderMessages(); }
+async function openConvo(id) { abortLoadWait(); await loadConvos(); const c = state.convos.find(x => x.id === id); if (!c) return; show(convoMode(c) === 'agent' ? 'agent' : 'chat'); state.current = c; renderConvos(); renderMessages(); }
 A.onConvosChanged(async ({ id }) => { const was = state.current && state.current.id; await loadConvos(); if (was === id && !state.generating) { state.current = state.convos.find(c => c.id === id) || state.current; renderMessages(); } });
 A.onConvosOpen(({ id }) => openConvo(id));
 

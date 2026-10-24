@@ -1618,7 +1618,7 @@
     "Từ giờ chỉ hỏi bước quan trọng (gửi, thanh toán, xoá, nộp biểu mẫu vẫn luôn hỏi). Các bước khác AIVN AGENT sẽ tự làm — chỉ bật khi bạn tin tưởng việc đang làm.": "此后只在重要步骤时询问（发送、付款、删除、提交表单仍会每次询问）。其他步骤 AIVN AGENT 会自行完成 — 仅在你信任当前任务时开启。",
     "Tự bật khi mở ứng dụng": "打开应用时自动启动",
     "Tự dùng công cụ ngay trên máy bạn · mỗi bước đều hiện bên dưới": "直接在你的电脑上使用工具 · 每一步都显示在下方",
-    "Tự gỡ mô hình khi không dùng": "空闲时自动卸载模型",
+    "Mô hình chọn trên giao diện không tự gỡ": "在界面中选择的模型不会自动卸载",
     "Tự gỡ mô hình nạp theo yêu cầu API": "自动卸载由 API 请求加载的模型（TTL）",
     "Tự khoá khi không dùng": "空闲时自动锁定",
     "Tự kích hoạt máy này bằng khoá quản trị": "使用管理密钥激活本机",
@@ -2406,7 +2406,7 @@
     "Đính kèm tệp": "附加文件",
     "Đính kèm tệp: PDF (kể cả bản scan, đọc bằng OCR) · Word DOCX/ODT · Excel XLSX/ODS · PowerPoint PPTX/ODP · ZIP · TXT/MD/CSV/JSON · mã nguồn · ảnh PNG/JPG/WEBP/GIF/BMP (đọc chữ bằng OCR) · âm thanh/video MP3/WAV/M4A/OGG/FLAC/MP4/WEBM/MOV (chép lời trên máy) · tài liệu tối đa 20 MB, âm thanh/video tối đa 1 GB": "附加文件：PDF（含扫描件，OCR 识别）· Word DOCX/ODT · Excel XLSX/ODS · PowerPoint PPTX/ODP · ZIP · TXT/MD/CSV/JSON · 源代码 · 图片 PNG/JPG/WEBP/GIF/BMP（OCR 识别文字）· 音频/视频 MP3/WAV/M4A/OGG/FLAC/MP4/WEBM/MOV（在本机转写）· 文档最大 20 MB，音视频最大 1 GB",
     "Đóng": "关闭",
-    "Đóng bớt trình duyệt/ứng dụng nặng khi trò chuyện; AIVN tự gỡ mô hình sau 10 phút không dùng để trả lại RAM.": "对话时关闭占用较大的浏览器/应用；AIVN 会在闲置 10 分钟后卸载模型以释放内存。",
+    "Đóng bớt trình duyệt/ứng dụng nặng khi trò chuyện để trả lại RAM. Mô hình đang chọn không tự gỡ.": "对话时关闭占用较大的浏览器和应用以释放内存。当前选择的模型不会自动卸载。",
     "Đóng bớt ứng dụng dùng GPU (trò chơi, trình duyệt nhiều tab) rồi nạp lại có thể giúp.": "关闭占用 GPU 的应用（游戏、开了很多标签页的浏览器）后重新加载可能会有帮助。",
     "Đóng cửa sổ sẽ thoát AIVN": "关闭窗口将退出 AIVN",
     "Đóng cửa sổ sẽ thu AIVN xuống khay, lịch vẫn chạy": "关闭窗口会将 AIVN 最小化到托盘，定时任务继续运行",
@@ -2650,7 +2650,7 @@
     "👁 Tải & nạp thêm mắt nhìn": "👁 下载并加载眼睛模型",
     "👁 nhìn ảnh": "👁 可识图",
     "👁 {0} Nhìn được ảnh": "👁 {0} 可识图",
-    "💤 gỡ sau {0} phút": "💤 {0} 分钟后卸载",
+    "💤 không gỡ mô hình đang chọn": "💤 不卸载当前选择的模型",
     "💻 Truy cập máy tính": "💻 电脑访问",
     "📁 Mở thư mục": "📁 打开文件夹",
     "📁 filesystem (chọn thư mục)": "📁 filesystem（选择文件夹）",
@@ -2765,7 +2765,10 @@
     "Chuyển mô hình đang chờ ổ đích {0}, thư mục “{1}”. Một số tệp có thể lúc này chỉ còn ở ổ đích đang thiếu, và sẽ được phục hồi khi ổ này có lại.": "模型移动正在等待目标磁盘 {0}，文件夹“{1}”。部分文件目前可能只在缺失的目标磁盘上，重新连接后会恢复。",
     "Đang chờ ổ đích của lần chuyển trước.": "正在等待上一次移动的目标磁盘。",
     "Đang dùng mô hình nên chưa hoàn tất được lần chuyển trước. Hãy gỡ mô hình rồi thử lại.": "正在使用模型，所以上一次移动还不能完成。请先卸载模型，然后再试。",
-    "Chưa xoá được nhật ký lần chuyển trước. Hãy đóng chương trình đang mở tệp đó rồi thử lại.": "未能删除上一次移动的日志。请关闭正在打开该文件的程序后再试。"
+    "Chưa xoá được nhật ký lần chuyển trước. Hãy đóng chương trình đang mở tệp đó rồi thử lại.": "未能删除上一次移动的日志。请关闭正在打开该文件的程序后再试。",
+    "Chưa nạp mô hình nào.": "尚未加载模型。",
+    "Hết thời gian chờ mô hình đang nạp. Hãy thử lại.": "等待模型加载超时。请再试一次。",
+    "Đang nạp mô hình…": "正在加载模型…"
   };
   root.AIVN_I18N = root.AIVN_I18N || {}; root.AIVN_I18N.zh = D;
   if (typeof module === 'object' && module.exports) module.exports = D;

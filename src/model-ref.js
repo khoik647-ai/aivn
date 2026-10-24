@@ -19,6 +19,18 @@ function isPrefix(id, req) {
   return next === '-' || next === '_' || next === '.';
 }
 
+// Tiền tố chỉ xét id trong thư mục mô hình. Đường dẫn tệp không được khớp theo tiền tố.
+function looksLikePath(s) {
+  const t = String(s || '');
+  return /[\\/]/.test(t) || /^[a-z]:/i.test(t);
+}
+
+function prefixHits(list, requested) {
+  const req = normId(requested);
+  if (!req || looksLikePath(requested)) return [];
+  return (list || []).filter((m) => m && m.id != null && !looksLikePath(m.id) && isPrefix(normId(m.id), req));
+}
+
 function resolveModel(list, requested) {
   const req = normId(requested);
   if (!req || !Array.isArray(list)) return null;
@@ -28,9 +40,20 @@ function resolveModel(list, requested) {
   const bases = rows.filter((m) => basenameOf(m) === req && normId(m.id) !== req);
   if (bases.length > 1) return null;
   if (bases.length === 1) return bases[0];
-  const prefixed = rows.filter((m) => isPrefix(normId(m.id), req));
+  const prefixed = prefixHits(rows, requested);
   if (prefixed.length === 1) return prefixed[0];
   return null;
+}
+
+// Đúng một tiền tố thì resolveModel trả mô hình đó. Nhiều hơn một: không chọn, người gọi trả 409.
+function ambiguousPrefix(list, requested) {
+  const req = normId(requested);
+  if (!req || !Array.isArray(list) || looksLikePath(requested)) return false;
+  const rows = list.filter(Boolean);
+  if (rows.some((m) => normId(m.id) === req)) return false;
+  const bases = rows.filter((m) => basenameOf(m) === req && normId(m.id) !== req);
+  if (bases.length === 1) return false;
+  return prefixHits(rows, requested).length > 1;
 }
 
 function sameModel(a, b) {
@@ -63,4 +86,4 @@ function modelChanged(list, requested, before, after) {
   return null;
 }
 
-module.exports = { normId, resolveModel, sameModel, modelChanged };
+module.exports = { normId, resolveModel, sameModel, modelChanged, ambiguousPrefix, prefixHits };

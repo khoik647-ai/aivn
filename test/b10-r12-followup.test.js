@@ -286,12 +286,14 @@ test('P3: corrupt model requested by exact id is 503, not 400', async () => {
     ]);
     console.log('# p3', JSON.stringify({ chat: chat.status, messages: messages.status, chatBody: chat.json, msgBody: messages.json }));
     assert.strictEqual(chat.status, 503, JSON.stringify(chat.json));
-    assert.match(chat.json.error.message, /Nạp mô hình không thành công/);
+    assert.match(chat.json.error.message, /xoá/);
+    assert.match(chat.json.error.message, /tải lại/);
     assert.doesNotMatch(chat.json.error.message, /chưa có trên máy/);
     assert.notStrictEqual(chat.json.error.type, 'model_not_found');
     assert.strictEqual(messages.status, 503, JSON.stringify(messages.json));
     assert.strictEqual(messages.json.type, 'error');
-    assert.match(messages.json.error.message, /Nạp mô hình không thành công/);
+    assert.match(messages.json.error.message, /xoá/);
+    assert.match(messages.json.error.message, /tải lại/);
     assert.doesNotMatch(messages.json.error.message, /chưa có trên máy/);
     assert.notStrictEqual(messages.json.error.type, 'invalid_request_error');
   } finally { await api.stop(); }

@@ -464,12 +464,23 @@ function startIdleUnload() {
   clearInterval(idleUnloadTimer);
   idleUnloadTimer = setInterval(async () => {
     try {
-      const st = engine.status(); if (!st.loaded || busy > 0 || generations.size) return;
+      const st = engine.status();
+      const busy0 = busy;
+      const gen0 = generations.size;
+      const jit0 = apiJit && apiJit.id;
+      if (!st.loaded || busy0 > 0 || gen0) return;
+      // Chỉ gỡ mô hình nạp theo yêu cầu API. Mô hình chọn trên giao diện (kể cả chọn lại đúng id JIT) không bị gỡ.
+      if (!jit0 || st.id !== jit0) return;
       const p = await perfProfile(); if (!p.idleUnloadMin) return;
       if (Date.now() - lastUse < p.idleUnloadMin * 60000) return;
-      if (api.status().running) return; // máy chủ API đang bật: giữ mô hình
+      if (api.status().running) return; // máy chủ API đang bật: TTL của API giữ mô hình JIT
+      // perfProfile() có await. Đọc lại: trong lúc chờ người dùng có thể chọn mô hình, máy bận, hoặc có lượt mới.
+      const st2 = engine.status();
+      const jit1 = apiJit && apiJit.id;
+      if (!st2.loaded || busy !== busy0 || generations.size !== gen0) return;
+      if (st2.id !== st.id || jit1 !== jit0 || st2.id !== jit1) return;
       await engine.unloadModel(); send('model:status', engine.status());
-      send('perf:unloaded', { id: st.id, minutes: p.idleUnloadMin }); log(`[hiệu năng] đã gỡ ${st.id} sau ${p.idleUnloadMin} phút không dùng`);
+      send('perf:unloaded', { id: st2.id, minutes: p.idleUnloadMin }); log(`[hiệu năng] đã gỡ ${st2.id} sau ${p.idleUnloadMin} phút không dùng`);
     } catch {}
   }, 60000);
   if (idleUnloadTimer.unref) idleUnloadTimer.unref();
@@ -514,7 +525,7 @@ function noteLayers(id, st, kvUsed) {
 const OM = require('./offload-memory');
 function offloadIdentity(m, h) {
   const d = settings.data || {};
-  return OM.identity({ file: m && m.path, size: m && m.size, mtime: m && m.mtime, backend: h && h.gpu || '', gpuName: h && h.gpuName || '', vramTotal: h && h.vram && h.vram.total || 0, settings: [d.gpu, d.gpuDevice, d.gpuLayers, d.vramLimitGB].join('|') });
+  return OM.identity({ file: m && m.path, size: m && m.size, mtime: m && m.mtime, backend: h && h.gpu || '', gpuName: h && h.gpuName || '', vramTotal: h && h.vram && h.vram.total || 0, driver: h && h.driver || '', settings: [d.gpu, d.gpuDevice, d.gpuLayers, d.vramLimitGB].join('|') });
 }
 async function noteOffload(id, st, m) {
   const o = st && st.offload; if (!o || !Number.isInteger(o.gpu)) return;
@@ -533,7 +544,11 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
   if (!m) throw new Error(`Không tìm thấy mô hình "${id}"`);
   const ml = { ...modelLoadFor(id), ...cleanLoad(load) };
   if (!ctx && ml.contextSize) ctx = ml.contextSize;
-  send('model:status', { loading: true, id });
+  // Cờ nạp phải có trước mọi await. Nếu không, generate 31 ms sau lúc bắt đầu vẫn thấy "Chưa nạp mô hình nào."
+  const releaseHold = holdEngineLoading(m.id);
+  let held = true;
+  const endHold = () => { if (!held) return; held = false; try { releaseHold(); } catch {} };
+  send('model:status', { loading: true, id: m.id });
   try {
     let st;
     try { verifyGguf(m); } catch (e) { engineLog('Tệp mô hình không hợp lệ: ' + m.file, e, { path: m.path, size: m.size }); throw e; }
@@ -656,7 +671,13 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
     send('model:status', st);
     return st;
     } finally { ep.release(); }
-  } catch (e) { send('model:status', engine.status()); throw e; }
+  } catch (e) {
+    endHold();
+    let st = { loaded: false, loading: false };
+    try { st = engine.status() || st; } catch {}
+    send('model:status', { ...st, loading: false, error: e && e.message ? e.message : String(e), id: m.id });
+    throw e;
+  } finally { endHold(); }
 }
 
 const { createJitGuard } = require('./jit-load');
@@ -732,10 +753,18 @@ async function ensureModel(requested, { api = false, signal = null } = {}) {
   if (stopped()) return;
   const st = engine.status();
   if (requested) {
-    const { resolveModel, sameModel } = require('./model-ref');
+    const { resolveModel, sameModel, ambiguousPrefix, prefixHits } = require('./model-ref');
     // Khớp danh sách trên đĩa trước. Id đang nạp dài hơn (…-abliterated) cũng là tiền tố của id đúng
     // trên đĩa; trả sớm ở bước đó thì chat và messages 409 mãi, không bao giờ nạp đúng mô hình.
-    const m = resolveModel(listModels(), requested);
+    const models = listModels();
+    // Nhiều id cùng một tiền tố: 409 mã riêng, liệt kê id. Không bảo gửi lại (client sẽ thử mãi), không 404.
+    if (ambiguousPrefix(models, requested)) {
+      const ids = prefixHits(models, requested).map((m) => m.id);
+      const clash = new Error(`Tên "${requested}" chưa rõ: khớp ${ids.join(', ')}. Hãy ghi đúng một id.`);
+      clash.status = 409; clash.type = 'model_ambiguous';
+      throw clash;
+    }
+    const m = resolveModel(models, requested);
     if (st.loaded && m && sameModel(st.id, m.id)) return;
     if (!m && st.loaded && resolveModel([{ id: st.id }], requested)) return;
     if (m) {

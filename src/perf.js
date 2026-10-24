@@ -43,7 +43,7 @@ function tipsFor(t, p) {
   const tips = [];
   if (t.tier === 'weak') {
     tips.push('Dùng mô hình nhỏ 0,5–3 tỉ tham số bản Q4_K_M (vd. Qwen3 1.7B, Gemma 3 1B) để trả lời nhanh.');
-    tips.push('Đóng bớt trình duyệt/ứng dụng nặng khi trò chuyện; AIVN tự gỡ mô hình sau 10 phút không dùng để trả lại RAM.');
+    tips.push('Đóng bớt trình duyệt/ứng dụng nặng khi trò chuyện để trả lại RAM. Mô hình đang chọn không tự gỡ.');
   } else if (t.tier === 'medium') {
     tips.push(t.discrete ? `GPU ${t.vram.toFixed(0)} GB: mô hình 3–4 tỉ (Q4_K_M) nằm trọn trên GPU, 7–8 tỉ chạy một phần GPU + CPU.` : 'Mô hình 3–4 tỉ tham số (Q4_K_M) là cân bằng tốt giữa tốc độ và chất lượng.');
   } else {
