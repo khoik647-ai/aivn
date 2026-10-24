@@ -1798,6 +1798,7 @@
     "chưa dùng được cho AIVN AGENT:": "暂不能用于 AIVN AGENT：",
     "chưa gõ — chưa thấy ô soạn tin": "未输入——未找到消息输入框",
     "chưa gõ — con trỏ không ở ô soạn tin": "未输入——光标不在消息输入框中",
+    "chưa gửi — người nhận trên To/Cc/Bcc chưa khớp": "尚未发送——To/Cc/Bcc 上的收件人不相符",
     "chưa hẹn giờ": "未设定时间",
     "chưa kiểm chứng được là đã gửi": "还不能确认已经发出",
     "chưa kiểm tra được": "无法检查",

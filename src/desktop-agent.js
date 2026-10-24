@@ -339,6 +339,7 @@ function createDesktopAgent(deps) {
       } catch (e) { ocrFailed = true; deps.log && deps.log('desk', 'OCR lỗi: ' + e.message); }
     } else if (wantOcr) ocrFailed = true;
     const obs = U.normalize(raw, { ocr: ocrLines, max: 160 });
+    SV.attachTreeMeta(obs, raw); // lớp cửa sổ (rctrl_renwnd32) và cờ cây cụt nằm ở diag — normalize bỏ chúng
     if (ocrFailed) obs.ocrFailed = true; // B191 review #64 vòng 4: OCR lỗi ≠ “không có chữ” (fresh-doc coi là không chắc)
     s.idReg = s.idReg || {}; U.stabilizeIds(obs.elements, s.idReg); // B55: id ổn định giữa các lần quan sát
     // B193: khoá điểm ảnh TRƯỚC khi lưu / đưa cho mắt nhìn / thẻ bước. Quét chữ MỌI cửa sổ đang hiện và (khi OCR chỉ cắt cửa sổ đích) cả ảnh.

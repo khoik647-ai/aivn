@@ -11,9 +11,25 @@ const fold = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g,
 const SEND_WORD = 'gửi|gui|senden|envoyer|enviar|invia|send|sent|送信|보내기|发送|發送|传送|傳送|送出|submit tin';
 const SEND_NAME = new RegExp(String.raw`(^|[\s“"'(\[])(?:${SEND_WORD})(?=$|[\s”"')\].,:!])|nút gửi|send button|send message|gửi tin|➤|➢|✈|paper ?plane`, 'iu');
 const ENTERISH = /(^|\+)(enter|return|numpad_enter|kp_enter)$/i;
-// Ctrl+Enter và Ctrl+Numpad Enter đều gửi thư (Outlook). Alt+S là phím gửi của Outlook.
-const SEND_COMBO = /^(?:(?:control|ctrl|cmd|command|meta)\+(?:enter|return|numpad_enter|kp_enter)|alt\+s)$/i;
+const Keys = require('./keys');
+// Ctrl+Enter, Ctrl+Shift+Enter, Ctrl+Numpad Enter và Alt+S đều gửi thư. Tên phím đi qua keys.parse
+// (option/altgr/ralt, ctl/strg/rctrl) chứ không so chuỗi thô.
+function parsedCombo(k) { try { return Keys.parse(k); } catch { return null; } }
+function isSendCombo(k) {
+  const p = parsedCombo(k); if (!p) return false;
+  if (/^(?:alt|right_alt)\+s$/.test(p.combo)) return true;
+  if (/^(?:control|right_control|cmd|meta)(?:\+shift)?\+(?:enter|numpad_enter)$/.test(p.combo)) return true;
+  return false;
+}
+const SEND_COMBO = { test: (k) => isSendCombo(k) };
 const normKeys = (k) => String(k || '').toLowerCase().replace(/\s*\+\s*/g, '+').trim();
+function focusedSendKind(st) {
+  if (!st || st.focusedName == null) return '';
+  const nm = String(st.focusedName);
+  if (SEND_NAME.test(nm) || SEND_NAME.test(visibleName(nm))) return 'named';
+  if (st.sendApp && isUnnamed(nm)) return 'unnamed';
+  return '';
+}
 // id “e12” không phải tên nút. Glyph một ký tự (biểu tượng Fluent) cũng là không tên.
 function visibleName(targetName) {
   return String(targetName || '').split(/\s+/).filter(p => p && !/^e\d+$/i.test(p)).join(' ').trim();
@@ -43,10 +59,15 @@ function classify(action, a = {}, st = {}) {
   if (action === 'hotkey') {
     const k = normKeys(a.keys);
     const inApp = !!st.sendApp;
-    if (SEND_COMBO.test(k) && (st.lastTyped || st.chatOpen || st.messaging || inApp)) return { send: true, kind: 'hotkey', text: st.lastTyped || '', why: `phím ${a.keys} gửi thư/tin` };
+    if (isSendCombo(a.keys) && (st.lastTyped || st.chatOpen || st.messaging || inApp)) return { send: true, kind: 'hotkey', text: st.lastTyped || '', why: `phím ${a.keys} gửi thư/tin` };
     // Alt rồi S ở hai bước: Alt một mình trong cửa sổ thư/tin là khởi đầu của Alt+S. Không tự cho phép.
     if (inApp && k === 'alt') return { send: true, kind: 'hotkey', failClosed: 'alt', text: st.lastTyped || '', why: 'phím Alt trong cửa sổ thư/tin (có thể là Alt rồi S để gửi)' };
     if (inApp && st.altArmed && k === 's') return { send: true, kind: 'hotkey', failClosed: 'alt-s', text: st.lastTyped || '', why: 'phím S ngay sau Alt = Alt+S gửi thư' };
+    // Enter hoặc Space khi con trỏ đang ở nút Gửi (có tên, hoặc không tên trong ứng dụng thư/tin) — kể cả chưa gõ gì trong lượt này.
+    const bare = parsedCombo(a.keys);
+    const onBtn = bare && bare.mods.length === 0 && (bare.key === 'enter' || bare.key === 'space' || bare.key === 'numpad_enter') ? focusedSendKind(st) : '';
+    if (onBtn === 'named') return { send: true, kind: 'hotkey', text: st.lastTyped || '', why: `phím ${a.keys} trên nút Gửi` };
+    if (onBtn === 'unnamed') return { send: true, kind: 'hotkey', failClosed: 'unnamed', text: st.lastTyped || '', why: `phím ${a.keys} trên nút gửi không tên` };
     if (ENTERISH.test(k) && (st.lastTyped || st.chatOpen)) return { send: true, kind: 'hotkey', text: st.lastTyped || '', why: 'bấm Enter sau khi gõ chữ có thể GỬI tin' };
     // Enter trong ô soạn, hoặc khi không đọc được ô soạn / To: coi là gửi. Enter ở danh sách thư (ô soạn trống, đọc được) thì không.
     if (ENTERISH.test(k) && inApp && !st.searchTarget && (st.inCompose || st.composeUnreadable)) return { send: true, kind: 'hotkey', text: st.lastTyped || '', why: 'bấm Enter trong ô soạn thư/tin' };
@@ -73,4 +94,4 @@ function unasked(action, a = {}, st = {}) {
 }
 // B70: đã bấm gửi (người nhận, nội dung) một lần trong việc này → không bao giờ tự gửi lại
 const sendKey = (recipient, text) => `${fold(recipient) || '?'}|${fold(text)}`;
-module.exports = { classify, unasked, isUnnamed, visibleName, looksLikeRecipient, sendKey, SEND_NAME, SEND_COMBO, normKeys, fold };
+module.exports = { classify, unasked, isUnnamed, visibleName, looksLikeRecipient, sendKey, SEND_NAME, SEND_COMBO, isSendCombo, normKeys, fold };

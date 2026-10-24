@@ -25,6 +25,7 @@ function keymap(pf) {
     // bàn phím số
     ...Object.fromEntries([0, 1, 2, 3, 4, 5, 6, 7, 8, 9].flatMap(n => [['numpad' + n, 'numpad_' + n], ['num' + n, 'numpad_' + n], ['kp' + n, 'numpad_' + n]])),
     numpaddecimal: 'numpad_decimal', numdecimal: 'numpad_decimal', numpaddot: 'numpad_decimal', numpadequal: 'numpad_equal',
+    numpadenter: 'numpad_enter', kpenter: 'numpad_enter',
     // phím đa phương tiện
     volumeup: 'audio_vol_up', volup: 'audio_vol_up', audiovolumeup: 'audio_vol_up', volumedown: 'audio_vol_down', voldown: 'audio_vol_down', audiovolumedown: 'audio_vol_down',
     mute: 'audio_mute', volumemute: 'audio_mute', audiomute: 'audio_mute', playpause: 'audio_play', mediaplaypause: 'audio_play', play: 'audio_play', mediaplay: 'audio_play',
@@ -37,7 +38,7 @@ function keymap(pf) {
 // Mã phím ảo Windows (VK_*) và mã quét (set 1) để ghi nhật ký từng lần bấm — libnut gửi SendInput bằng VK; phím “mở rộng”
 // (mũi tên, Home/End, PgUp/PgDn, Insert/Delete, phím Windows, Ctrl/Alt phải) cần cờ KEYEVENTF_EXTENDEDKEY.
 const VK = { control: [0x11, 0x1d], right_control: [0xa3, 0x1d, 1], alt: [0x12, 0x38], right_alt: [0xa5, 0x38, 1], shift: [0x10, 0x2a], right_shift: [0xa1, 0x36], meta: [0x5b, 0x5b, 1], cmd: [0x5b, 0x5b, 1],
-  enter: [0x0d, 0x1c], escape: [0x1b, 0x01], tab: [0x09, 0x0f], space: [0x20, 0x39], backspace: [0x08, 0x0e], delete: [0x2e, 0x53, 1], insert: [0x2d, 0x52, 1],
+  enter: [0x0d, 0x1c], numpad_enter: [0x0d, 0x1c, 1], escape: [0x1b, 0x01], tab: [0x09, 0x0f], space: [0x20, 0x39], backspace: [0x08, 0x0e], delete: [0x2e, 0x53, 1], insert: [0x2d, 0x52, 1],
   up: [0x26, 0x48, 1], down: [0x28, 0x50, 1], left: [0x25, 0x4b, 1], right: [0x27, 0x4d, 1], home: [0x24, 0x47, 1], end: [0x23, 0x4f, 1], pageup: [0x21, 0x49, 1], pagedown: [0x22, 0x51, 1],
   printscreen: [0x2c, 0x37, 1], menu: [0x5d, 0x5d, 1], caps_lock: [0x14, 0x3a], add: [0x6b, 0x4e], '-': [0xbd, 0x0c], '=': [0xbb, 0x0d], ',': [0xbc, 0x33], '.': [0xbe, 0x34], '/': [0xbf, 0x35], ';': [0xba, 0x27], '\'': [0xde, 0x28], '[': [0xdb, 0x1a], ']': [0xdd, 0x1b], '\\': [0xdc, 0x2b], '`': [0xc0, 0x29],
   right_meta: [0x5c, 0x5c, 1], right_cmd: [0x5c, 0x5c, 1], numpad_decimal: [0x6e, 0x53], numpad_equal: [0x92, 0x59],
