@@ -25,12 +25,13 @@ test('câu tái hiện #81: gpt-oss-20b MXFP4, không metadata, RTX 4070 SUPER',
   const m = { size: 12109566624, params: '20B (MoE)' };
   const a = F.machineFit(m, card, { ctx: 8192 });
   const b = F.machineFit(m, card, { ctx: 16384 });
-  // Ước tính bộ nhớ vẫn khớp lần nạp 25/25, nhưng loader (gpuFit) chỉ để 21/25 và 20/25 lớp trên GPU.
-  assert.strictEqual(a.label, 'Chạy chậm', a.hint);
-  assert.match(a.hint, /Khoảng 84 % mô hình nằm trên GPU/);
-  assert.strictEqual(a.tight, false);
+  // Loader B190 (bộ đệm tính toán theo lô) để 24/25 lớp ở 8K: ≥ 90 % nên vẫn “Chạy mượt”, nhưng không được ghi “nằm trọn”.
+  // 16K vượt VRAM trống (không phải tổng) một chút → tràn, không phải “Tràn 0,0 GB”.
+  assert.strictEqual(a.label, 'Chạy mượt', a.hint);
+  assert.match(a.hint, /Khoảng 96 % mô hình nằm trên GPU/);
+  assert.strictEqual(a.tight, true);
   assert.strictEqual(b.label, 'Chạy chậm', b.hint);
-  assert.match(b.hint, /Khoảng 80 % mô hình nằm trên GPU/);
+  assert.match(b.hint, /Tràn 0,1 GB sang RAM/);
   assert.strictEqual(b.tight, false);
   assert.ok(!/Nằm trọn trong VRAM/.test(a.hint + b.hint));
   assert.ok(b.need <= 12 * GiB, (b.need / GiB).toFixed(2));
@@ -59,8 +60,8 @@ test('danh mục gpt-oss và 30B-A3B: KV theo kiến trúc, không theo bảng �
 
 // profile, model, ctx, group, tight (null = không xét)
 const ROWS = [
-  ['4070S 12GB', card, { size: oss.size, params: oss.params, id: oss.id, arch: oss.arch }, 4096, 'slow', false],
-  ['4070S 12GB', card, { size: oss.size, params: oss.params, id: oss.id, arch: oss.arch }, 8192, 'slow', false],
+  ['4070S 12GB', card, { size: oss.size, params: oss.params, id: oss.id, arch: oss.arch }, 4096, 'smooth', false],
+  ['4070S 12GB', card, { size: oss.size, params: oss.params, id: oss.id, arch: oss.arch }, 8192, 'smooth', true],
   ['4070S 12GB', card, { size: oss.size, params: oss.params, id: oss.id, arch: oss.arch }, 16384, 'slow', false],
   ['4070S 12GB', card, { size: oss.size, params: oss.params, id: oss.id, arch: oss.arch }, 32768, 'slow', false],
   ['4070S 12GB', card, { size: q14.size, params: q14.params, id: q14.id, arch: q14.arch }, 8192, 'smooth', false],

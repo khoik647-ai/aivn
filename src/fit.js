@@ -75,27 +75,34 @@ const QWEN2_BANDS = [
   { max: 100, layers: 64, kvHeads: 8, headDim: 128, vocab: QWEN_VOCAB },
 ];
 // Phi-3.5-mini: MHA 32 đầu × head 96 (393 KB/token). Phi-4-mini: GQA 8×128. Phi-4 14B: 40 lớp, 10 đầu KV.
-const PHI35_MINI = { layers: 32, kvHeads: 32, headDim: 96, vocab: 32064 };
-const PHI4_MINI = { layers: 32, kvHeads: 8, headDim: 128, vocab: 200064 };
-const PHI4 = { layers: 40, kvHeads: 10, headDim: 128, vocab: 100352 };
-// SmolLM2 1.7B: MHA 32 đầu × head 64, không phải bucket 115 KB/token.
-const SMOLLM2 = { layers: 24, kvHeads: 32, headDim: 64, vocab: 49152 };
+const PHI35_MINI = { layers: 32, kvHeads: 32, headDim: 96, vocab: 32064, trainCtx: 131072 };
+const PHI4_MINI = { layers: 32, kvHeads: 8, headDim: 128, vocab: 200064, trainCtx: 131072 };
+const PHI4 = { layers: 40, kvHeads: 10, headDim: 128, vocab: 100352, trainCtx: 16384 };
+// SmolLM2 1.7B: MHA 32 đầu × head 64, ngữ cảnh huấn luyện 8192, không phải bucket 115 KB/token.
+const SMOLLM2 = { layers: 24, kvHeads: 32, headDim: 64, vocab: 49152, trainCtx: 8192 };
+// Llama 3 / 3.1 / 3.2: vocab 128256. Logits f32 = n_ubatch × vocab × 4 (~250 MiB ở n_ubatch 512).
+// Ngữ cảnh huấn luyện phụ thuộc đời (3 = 8192, 3.1/3.2 = 131072) — xem inferredTrainCtx, không gắn vào band.
+const LLAMA3_VOCAB = 128256;
 const LLAMA3_BANDS = [
-  { max: 1.5, layers: 16, kvHeads: 8, headDim: 64 },
-  { max: 4, layers: 28, kvHeads: 8, headDim: 128 },
-  { max: 12, layers: 32, kvHeads: 8, headDim: 128 },
-  { max: 200, layers: 80, kvHeads: 8, headDim: 128 },
+  { max: 1.5, layers: 16, kvHeads: 8, headDim: 64, vocab: LLAMA3_VOCAB },
+  { max: 4, layers: 28, kvHeads: 8, headDim: 128, vocab: LLAMA3_VOCAB },
+  { max: 12, layers: 32, kvHeads: 8, headDim: 128, vocab: LLAMA3_VOCAB },
+  { max: 200, layers: 80, kvHeads: 8, headDim: 128, vocab: LLAMA3_VOCAB },
 ];
-// Gemma 3: mỗi lớp thứ 6 (1-based) là full attention, còn lại cửa sổ trượt.
-function gemma3(layers, kvHeads, slidingWindow) {
+// Mistral 7B (vocab 32768) và Tekken (Mistral Nemo / Small 3, vocab 131072). Không có hồ sơ thì logits bị bỏ sót.
+const MISTRAL7 = { layers: 32, kvHeads: 8, headDim: 128, vocab: 32768, trainCtx: 32768 };
+const MISTRAL_TEKKEN = { layers: 40, kvHeads: 8, headDim: 128, vocab: 131072, trainCtx: 131072 };
+// Gemma 3: vocab 262144 → logits đúng 512 MiB. Mỗi lớp thứ 6 (1-based) là full attention, còn lại cửa sổ trượt.
+const GEMMA3_VOCAB = 262144;
+function gemma3(layers, kvHeads, slidingWindow, trainCtx) {
   const full = Math.floor(layers / 6);
-  return { layers, kvHeads, headDim: 256, slidingWindow, swaLayers: layers - full };
+  return { layers, kvHeads, headDim: 256, slidingWindow, swaLayers: layers - full, vocab: GEMMA3_VOCAB, trainCtx };
 }
 const GEMMA3 = {
-  1: gemma3(26, 1, 512),
-  4: gemma3(34, 4, 1024),
-  12: gemma3(48, 8, 1024),
-  27: gemma3(62, 16, 1024),
+  1: gemma3(26, 1, 512, 32768),
+  4: gemma3(34, 4, 1024, 131072),
+  12: gemma3(48, 8, 1024, 131072),
+  27: gemma3(62, 16, 1024, 131072),
 };
 
 function textOf(m) { return `${m && m.id || ''} ${m && m.file || ''} ${m && m.arch || ''} ${m && m.name || ''}`; }
@@ -116,6 +123,17 @@ function totalB(m) {
   if (idm) return parseFloat(idm[1]);
   return parseParams(raw, m && m.size).total || 0;
 }
+// “phi” là một token (phi-3, phi3, phi-4), không phải đoạn nằm trong delphi / sophia / dolphin.
+function isPhiName(t) {
+  return /(?:^|[^a-z0-9])phi(?:[-_.]?\d|[^a-z0-9]|$)/i.test(String(t || ''));
+}
+// Llama 3 thuần 8192; Llama 3.1 và 3.2 là 131072. Không hạ 3.1/3.2 xuống 8192.
+function inferredTrainCtx(m) {
+  const t = textOf(m);
+  if (/llama-?3\.(?:1|2)/i.test(t)) return 131072;
+  if (/llama-?3/i.test(t)) return 8192;
+  return 0;
+}
 function familyOf(m) {
   if (!m || typeof m !== 'object') return null;
   const t = textOf(m);
@@ -124,7 +142,7 @@ function familyOf(m) {
   // Đúng câu tái hiện của #81: danh mục chỉ có size + “20B (MoE)”, không có id trong lời gọi tối thiểu.
   if (/^20\s*B\s*\(MoE\)$/i.test(String(m.params || '').trim()) && m.size && Math.abs(m.size - GPT_OSS_20B_MXFP4) < MiB) return GPT_OSS;
   if (/smollm2|smol-?lm-?2/i.test(t)) return SMOLLM2;
-  if (/phi/i.test(t) || m.arch === 'phi3') {
+  if (isPhiName(t) || m.arch === 'phi' || m.arch === 'phi3' || m.arch === 'phi4') {
     if (/phi-?4-mini/i.test(t)) return PHI4_MINI;
     if (/phi-?3\.5|phi-?3-mini/i.test(t)) return PHI35_MINI;
     if (/phi-?4/i.test(t) || P >= 10) return PHI4;
@@ -135,6 +153,8 @@ function familyOf(m) {
   if (/qwen3\.5|qwen35/i.test(t) || m.arch === 'qwen35' || m.arch === 'qwen35moe') return null;
   if (/qwen3/i.test(t) || m.arch === 'qwen3' || m.arch === 'qwen3vl') return band(QWEN3_BANDS, P);
   if (/qwen2/i.test(t) || m.arch === 'qwen2' || m.arch === 'qwen2vl') return band(QWEN2_BANDS, P);
+  if (/mistral-small-3|mistral-nemo|tekken/i.test(t)) return MISTRAL_TEKKEN;
+  if (/mistral/i.test(t) || m.arch === 'mistral') return MISTRAL7;
   if (/llama-?3/i.test(t)) return band(LLAMA3_BANDS, P);
   return null;
 }
@@ -159,6 +179,7 @@ function resolveGeo(m) {
     swaLayers: swaLayers > 0 ? swaLayers : 0,
     cpuResident: cpuResident > 0 ? cpuResident : 0,
     vocab: pos(src.vocab) || prof.vocab || 0,
+    trainCtx: pos(src.trainCtx) || prof.trainCtx || inferredTrainCtx(src) || 0,
     explicitKv: pos(src.kvPerToken),
   };
 }
@@ -263,7 +284,7 @@ function metaOf({ catalog = null, size = 0, mmprojSize = null, file = '', kvPerT
 const GPU_BW = [
   [/5090/, 1790], [/5080/, 960], [/5070 ?ti/i, 896], [/5070/, 672], [/5060 ?ti/i, 448], [/5060/, 448],
   [/4090/, 1008], [/4080/, 717], [/4070 ?ti ?super/i, 672], [/4070 ?ti/i, 504], [/4070 ?super/i, 504], [/4070/, 504], [/4060 ?ti/i, 288], [/4060/, 272],
-  [/3090/, 936], [/3080/, 760], [/3070/, 448], [/3060 ?ti/i, 448], [/3060/, 360], [/3050/, 224], [/2080/, 448], [/2070/, 448], [/2060/, 336], [/1660/, 192], [/1650/, 128],
+  [/3090/, 936], [/3080/, 760], [/3070/, 448], [/3060 ?ti/i, 448], [/3060/, 360], [/3050 ?ti ?laptop/i, 192], [/3050/, 224], [/2080/, 448], [/2070/, 448], [/2060/, 336], [/1660/, 192], [/1650/, 128],
   [/7900 ?xtx/i, 960], [/7900/, 800], [/7800/, 624], [/7700/, 432], [/7600/, 288], [/6800/, 512], [/6700/, 384], [/6600/, 224],
   [/arc.*a770/i, 560], [/arc.*a750/i, 512],
 ];
@@ -282,21 +303,34 @@ function scratchOf(m, ctx, g) {
   return graphBytes(m, ctx, g) + (m.mmprojSize ? VISION_BUF : 0);
 }
 // gpuFit (loader) phải đưa hết lớp lên GPU thì mới được ghi “Nằm trọn trong VRAM”.
-function loaderLayers(m, g, hw, ctx) {
+function loaderLayers(m, g, hw, ctx, o = {}) {
   if (!g || !(g.layers > 0) || !hw || !hw.vram || !(hw.vram.total > 0)) return null;
   const kv = g.explicitKv || (g.kvHeads > 0 && g.keyLen > 0 && g.valLen > 0 ? g.layers * g.kvHeads * (g.keyLen + g.valLen) * 2 : 0);
-  const n = require('./gguf').gpuFit({ fileSize: Math.max(0, m.size || 0), layers: g.layers, kvPerToken: kv }, { ctx, vram: hw.vram });
+  const n = require('./gguf').gpuFit({ fileSize: Math.max(0, m.size || 0), layers: g.layers, kvPerToken: kv }, { ctx, vram: hw.vram, kvScale: o.kvScale > 0 ? o.kvScale : 1 });
   if (n == null) return null;
   return { n, total: g.layers + 1 };
+}
+// Ngân sách VRAM cho nhãn vừa máy. Biết VRAM trống thì tính từ số trống (đã trừ tiến trình khác), chỉ chừa một khoảng nhỏ cho driver.
+// Không biết số trống thì trừ phần màn hình/Windows trên tổng, và caller phải nói rõ trong nhật ký.
+function vramBudgetOf(vram) {
+  const total = vram && vram.total > 0 ? vram.total : 0;
+  if (!total) return { budget: 0, freeUnknown: true };
+  const freeKnown = vram.freeKnown !== false && vram.free != null && Number.isFinite(Number(vram.free));
+  if (!freeKnown) return { budget: Math.max(0, total - Math.max(600 * MiB, total * 0.06)), freeUnknown: true };
+  const free = Math.max(0, Math.min(total, Number(vram.free)));
+  const slack = Math.min(96 * MiB, Math.max(32 * MiB, free * 0.005));
+  return { budget: Math.max(0, free - slack), freeUnknown: false };
 }
 
 // m: { size, mmprojSize?, params?, kvPerToken?, id?, layers?, kvHeads?, keyLength?, slidingWindow? }; o: { ctx, kvScale?, swaFull? }
 function machineFit(m, hw, o = {}) {
   if (!hw || !hw.ram) return null;
-  const ctx = clampCtx(o.ctx);
+  const asked = clampCtx(o.ctx);
   // B78: tệp quá nhỏ (GGUF giả/hỏng 2 KB từng được ước “Chạy mượt ~1000 token/giây”) — mô hình thật nhỏ nhất cũng ~100 MB
-  if ((m.size || 0) < 16 * MiB) return { group: 'no', label: LABEL.no, level: 'big', hint: 'Tệp quá nhỏ, không phải mô hình dùng được (có thể tải lỗi hoặc tệp hỏng)', ctx, need: m.size || 0, vram: 0, ram: 0, tps: 0, measured: false, invalid: true };
+  if ((m.size || 0) < 16 * MiB) return { group: 'no', label: LABEL.no, level: 'big', hint: 'Tệp quá nhỏ, không phải mô hình dùng được (có thể tải lỗi hoặc tệp hỏng)', ctx: asked, need: m.size || 0, vram: 0, ram: 0, tps: 0, measured: false, invalid: true };
   const g = resolveGeo(m);
+  // Không gợi ý ngữ cảnh dài hơn ngữ cảnh mô hình được huấn luyện (loader cũng cắt ở đây).
+  const ctx = g.trainCtx > 0 ? Math.min(asked, g.trainCtx) : asked;
   const w = weightSplit(m, g);
   const kv = kvCacheBytes(m, ctx, o);
   const scratch = scratchOf(m, ctx, g);
@@ -308,7 +342,9 @@ function machineFit(m, hw, o = {}) {
     need = Math.max(w.gpu + w.mm, meas.bytes + (kv - kvCacheBytes(m, ctx0, o)) + (graphBytes(m, ctx, g) - graphBytes(m, ctx0, g)));
   }
   const vramTotal = hw.gpu && hw.gpu !== 'metal' && hw.vram && hw.vram.total && !hw.vram.integratedOnly && !hw.cpuOnly ? hw.vram.total : 0;
-  const vramBudget = vramTotal ? vramTotal - Math.max(600 * MiB, vramTotal * 0.06) : 0; // màn hình và Windows giữ một phần VRAM
+  const budgetInfo = vramTotal ? vramBudgetOf(hw.vram) : { budget: 0, freeUnknown: false };
+  const vramBudget = budgetInfo.budget;
+  const freeUnknown = !!budgetInfo.freeUnknown;
   const ramBudget = Math.max(0, hw.ram * 0.85 - 1.5 * GB); // chừa cho hệ điều hành và ứng dụng khác
   const p = parseParams(m.params || m.sizeLabel, m.size);
   const readFrac = p.active && p.total ? Math.min(1, p.active / p.total) : 1; // MoE: mỗi token chỉ đọc phần hoạt động
@@ -318,7 +354,7 @@ function machineFit(m, hw, o = {}) {
   // llama.cpp chia lớp: VRAM TRỐNG thật của GPU rời − lề --fit-target − bộ đệm tính toán, chia cho trọng số + K/V (có thể q8_0).
   // Phần lớp không vừa chạy bằng CPU. ≥ 90 % số lớp trên GPU → “Chạy mượt” (vd. Qwen3-VL 2B @8K, K/V q8_0: ~100 %).
   if (o.server && hw.gpu && hw.gpu !== 'metal' && vramTotal && !meas) {
-    const kvS = kv; const free = Math.min(hw.vram.free || vramTotal, vramTotal);
+    const kvS = kv; const free = freeUnknown ? vramTotal : Math.max(0, Math.min(Number(hw.vram.free), vramTotal));
     const graph = graphBytes(m, ctx, g);
     const avail = free - Math.max(1024 * MiB, (m.mmprojSize || 0) + 512 * MiB) - graph;
     const frac = Math.max(0, Math.min(1, avail / Math.max(1, w.gpu + kvS)));
@@ -332,7 +368,7 @@ function machineFit(m, hw, o = {}) {
       if (tight) hint = 'Nằm trọn trong VRAM, sát giới hạn';
     }
     const r = { group, label: LABEL[group], level: group === 'smooth' ? 'fit' : group === 'slow' ? 'slow' : 'big', hint, ctx, need: Math.round(need), vram: Math.round(vramUse), ram: Math.round(ramUse),
-      tps: tps ? Math.max(0.5, Math.round(tps * 10) / 10) : 0, measured: false, tight, gpuFrac: Math.round(frac * 100) / 100, server: true, kv: o.kvScale && o.kvScale < 1 ? 'q8_0' : 'f16',
+      tps: tps ? Math.max(0.5, Math.round(tps * 10) / 10) : 0, measured: false, tight, freeUnknown, gpuFrac: Math.round(frac * 100) / 100, server: true, kv: o.kvScale && o.kvScale < 1 ? 'q8_0' : 'f16',
       parts: { weights: Math.round(w.gpu), mmproj: Math.round(w.mm), kv: Math.round(kvS), compute: Math.round(graph), cpuResident: Math.round(w.cpu) } };
     if (m.measuredTps > 0 && group !== 'no') { r.tps = Math.round(m.measuredTps * 10) / 10; r.tpsMeasured = true; }
     return r;
@@ -350,7 +386,7 @@ function machineFit(m, hw, o = {}) {
       group = 'smooth'; vramUse = need; tight = (vramBudget - need) < TIGHT_SLACK;
       tps = perTok ? 1 / (perTok / (gpuBandwidth(hw) * EFF_GPU * GB) + TOK_OVH_GPU) : 0;
       hint = tight ? 'Nằm trọn trong VRAM, sát giới hạn' : 'Nằm trọn trong VRAM';
-      const off = loaderLayers(m, g, hw, ctx);
+      const off = loaderLayers(m, g, hw, ctx, o);
       if (off && off.n < off.total) {
         const frac = off.n / off.total;
         hint = `Khoảng ${Math.round(frac * 100)} % mô hình nằm trên GPU, phần còn lại chạy bằng CPU`;
@@ -364,7 +400,14 @@ function machineFit(m, hw, o = {}) {
       group = 'slow'; vramUse = vramBudget; ramUse = need - vramBudget;
       const onGpu = Math.max(0, Math.min(1, (vramBudget - kv - scratch) / Math.max(1, w.gpu + w.mm)));
       const t = perTok * onGpu / (gpuBandwidth(hw) * EFF_GPU * GB) + perTok * (1 - onGpu) / (cpuBandwidth(hw) * EFF_CPU * GB) + TOK_OVH_GPU;
-      tps = t ? 1 / t : 0; hint = `Tràn ${(ramUse / 1024 ** 3).toFixed(1).replace('.', ',')} GB sang RAM, phần đó chạy bằng CPU`;
+      tps = t ? 1 / t : 0;
+      const spillGb = (ramUse / 1024 ** 3).toFixed(1);
+      // Vài MiB làm tròn thành “0,0 GB” không phải tràn. Mô hình vẫn vừa, sát giới hạn.
+      if (spillGb === '0.0') {
+        group = 'smooth'; tight = true; ramUse = 0; vramUse = need;
+        tps = perTok ? 1 / (perTok / (gpuBandwidth(hw) * EFF_GPU * GB) + TOK_OVH_GPU) : 0;
+        hint = 'Nằm trọn trong VRAM, sát giới hạn';
+      } else hint = `Tràn ${spillGb.replace('.', ',')} GB sang RAM, phần đó chạy bằng CPU`;
     } else { group = 'no'; hint = 'Lớn hơn VRAM + RAM của máy'; tps = 0; ramUse = need; }
   } else {
     // máy không có GPU rời: “mượt” khi vừa RAM và ước tính ≥ 10 token/giây trên CPU
@@ -372,12 +415,17 @@ function machineFit(m, hw, o = {}) {
     group = need > ramBudget ? 'no' : tps >= 10 ? 'smooth' : 'slow';
     hint = group === 'no' ? 'Lớn hơn RAM của máy' : group === 'smooth' ? 'Chạy bằng CPU, vừa RAM' : 'Chạy bằng CPU, khá chậm';
   }
-  const r = { group, label: LABEL[group], level: group === 'smooth' ? 'fit' : group === 'slow' ? 'slow' : 'big', hint, ctx, tight,
+  const r = { group, label: LABEL[group], level: group === 'smooth' ? 'fit' : group === 'slow' ? 'slow' : 'big', hint, ctx, tight, freeUnknown,
     need: Math.round(need), vram: Math.round(vramUse), ram: Math.round(ramUse), tps: tps ? Math.max(0.5, Math.round(tps * 10) / 10) : 0, measured: !!meas,
     parts: { weights: Math.round(w.gpu), mmproj: Math.round(w.mm), kv: Math.round(kv), compute: Math.round(scratch), cpuResident: Math.round(w.cpu) } };
   if (m.measuredTps > 0 && group !== 'no') { r.tps = Math.round(m.measuredTps * 10) / 10; r.tpsMeasured = true; }
   // B78: số đo thật quá chậm (“Đo được 0,1 token/giây”) mà nhãn vẫn “Chạy mượt” → theo số đo: Chạy chậm
   if (r.tpsMeasured && r.tps < 5 && r.group === 'smooth') Object.assign(r, { group: 'slow', label: LABEL.slow, level: 'slow', tight: false, hint: `Đo được chỉ ~${String(r.tps).replace('.', ',')} token/giây trên máy này` });
+  // Nhóm vừa máy không bao giờ mang chữ “Tràn”, kể cả khi số làm tròn về 0.
+  if (r.group === 'smooth' && /Tràn/.test(r.hint || '')) {
+    r.hint = r.tight ? 'Nằm trọn trong VRAM, sát giới hạn' : 'Nằm trọn trong VRAM';
+    r.ram = 0;
+  }
   r.text = fmtFit(r); r.detail = fitDetail(r); return r;
 }
 const ORDER = { smooth: 0, slow: 1, no: 2 };
@@ -393,8 +441,8 @@ function groupByFit(list, fitOf) {
 // “Khoảng 55 token/giây · 7,4 GB VRAM” / “~3 token/giây · 12 GB VRAM + 9,8 GB RAM”
 function fmtFit(f) {
   if (!f || f.invalid) return ''; // B78: tệp hỏng — không ghi số ước tính vô nghĩa (chú thích nằm ở hint)
-  const gb = (b) => (b / 1024 ** 3).toFixed(1).replace('.', ',') + ' GB'; // GiB, khớp cách Windows/NVIDIA ghi dung lượng
-  const mem = f.group === 'no' ? `cần ~${gb(f.need)}` : [f.vram ? gb(f.vram) + ' VRAM' : '', f.ram ? gb(f.ram) + ' RAM' : ''].filter(Boolean).join(' + ');
+  const gb = (b) => { const s = (b / 1024 ** 3).toFixed(1); if (s === '0.0') return ''; return s.replace('.', ',') + ' GB'; }; // GiB, khớp cách Windows/NVIDIA ghi dung lượng. 0,0 GB không phải một dòng tràn.
+  const mem = f.group === 'no' ? (gb(f.need) ? `cần ~${gb(f.need)}` : '') : [f.vram && gb(f.vram) ? gb(f.vram) + ' VRAM' : '', f.ram && gb(f.ram) ? gb(f.ram) + ' RAM' : ''].filter(Boolean).join(' + ');
   const sp = f.tps ? `~${f.tps >= 10 ? Math.round(f.tps) : String(f.tps).replace('.', ',')} token/giây` : '';
   return [sp, mem].filter(Boolean).join(' · ');
 }
@@ -406,4 +454,4 @@ function fitDetail(f) {
   if (f.parts.mmproj) return `Ước tính ở ngữ cảnh ${f.ctx}: trọng số ${gb(f.parts.weights)} + tệp thị giác ${gb(f.parts.mmproj)} + bộ đệm KV ${gb(f.parts.kv)} + bộ đệm tính toán ${gb(f.parts.compute)} = ${gb(f.need)}${ms}`;
   return `Ước tính ở ngữ cảnh ${f.ctx}: trọng số ${gb(f.parts.weights)} + bộ đệm KV ${gb(f.parts.kv)} + bộ đệm tính toán ${gb(f.parts.compute)} = ${gb(f.need)}${ms}`;
 }
-module.exports = { GROUPS, LABEL, parseParams, strength, kvPerToken, kvCacheBytes, resolveGeo, computeBuf, metaOf, gpuBandwidth, machineFit, sortByFit, groupByFit, fmtFit, fitDetail };
+module.exports = { GROUPS, LABEL, parseParams, strength, kvPerToken, kvCacheBytes, resolveGeo, computeBuf, metaOf, gpuBandwidth, vramBudgetOf, machineFit, sortByFit, groupByFit, fmtFit, fitDetail };
