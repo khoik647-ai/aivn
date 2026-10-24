@@ -751,12 +751,23 @@ async function ensureModel(requested, { api = false, signal = null } = {}) {
     // (kể cả trước khi engine báo loading): chờ xong rồi trả lời bằng mô hình đó.
     // Không tự nạp tên lạ. Chỉ lỗi khi không có mô hình và không có lần nạp nào.
     if (st.loading || loadInflight.size) {
+      // apiLoadWaitMs (mặc định 3 phút) chặn lần nạp treo. Client ngắt thì signal.abort dừng vòng chờ.
+      const waitMs = Number(settings && settings.data && settings.data.apiLoadWaitMs) > 0 ? Number(settings.data.apiLoadWaitMs) : 180000;
+      const deadline = Date.now() + waitMs;
       while (engine.status().loading || loadInflight.size) {
         if (stopped()) return;
+        if (Date.now() >= deadline) {
+          const timeout = new Error('Hết thời gian chờ mô hình đang nạp. Hãy thử lại.');
+          timeout.status = 504; timeout.type = 'timeout';
+          throw timeout;
+        }
         await new Promise((r) => setTimeout(r, 20));
       }
       if (stopped()) return;
       if (engine.status().loaded) return;
+      const failed = new Error('Nạp mô hình không thành công. Hãy thử lại.');
+      failed.status = 503; failed.type = 'api_error';
+      throw failed;
     }
     const missing = new Error(`Mô hình "${requested}" chưa có trên máy`);
     missing.status = 404; missing.type = 'not_found_error';

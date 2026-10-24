@@ -266,6 +266,7 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
   catch (e) {
     if (ac.signal.aborted || clientGone(req, res)) return;
     if (missingModel(e)) return fail(404, 'not_found_error', e.message);
+    if (e && (e.status === 503 || e.status === 504)) return fail(e.status, e.type || 'api_error', e.message);
     return fail(e.status || 400, 'invalid_request_error', e.message);
   }
   if (ac.signal.aborted || clientGone(req, res)) return;
