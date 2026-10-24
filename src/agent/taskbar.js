@@ -2,8 +2,10 @@
 // B115/B121 (máy thật beta.2.5/2.6) và #27 (beta.3, d1b150d): thanh tác vụ Windows TỰ ẨN trồi lên khi chuột chạm mép màn hình và che ô soạn tin.
 // beta.3 đã nhận ra tự ẩn (ABM_GETSTATE=1, StuckRects3=3) nhưng vẫn bấm y=1401: khung OCR của ô soạn (1398–1418) nằm trọn trong dải đáy 43 px.
 // Kéo điểm ra ngoài khung (y=1396) thì bấm trượt ô. Đưa chuột ra xa cho thanh tác vụ kịp ẩn, rồi bấm TRONG khung. Chỉ làm vậy trên màn hình đang có thanh tác vụ.
-// Phát hiện: SHAppBarMessage(ABM_GETSTATE=4) & ABS_AUTOHIDE; không đọc được thì byte 8 của
-// HKCU\...\Explorer\StuckRects3\Settings (3 = tự ẩn, 2 = không). Cạnh và độ dày: ABM_GETTASKBARPOS (5) + GetWindowRect(Shell_TrayWnd).
+// Phát hiện: SHAppBarMessage(ABM_GETSTATE=4) & ABS_AUTOHIDE là quyết định khi gọi được — trả 0 thì KHÔNG tự ẩn,
+// dù byte registry nói khác (Explorer có thể chưa áp). StuckRects3 byte 8 chỉ khi ABM không đọc được.
+// Trên đường đó, khung làm việc bị trừ độ dày thanh đúng cạnh (vd. đỉnh = 60) nghĩa là thanh đang hiện, không tự ẩn.
+// Cạnh và độ dày: ABM_GETTASKBARPOS (5) + GetWindowRect(Shell_TrayWnd).
 // Toạ độ bấm và khung màn hình là ĐIỂM ẢNH VẬT LÝ. Khung làm việc (work area) khi tự ẩn trùng khung màn hình — không được lấy chỗ lệch đó làm gốc toạ độ,
 // cũng không được so điểm vật lý với chiều cao DIP (125 %: 1152 thay vì 1440).
 const ABS_AUTOHIDE = 0x1;
@@ -54,7 +56,20 @@ function parsePair(s) {
   const p = String(s || '').split(','); if (p.length !== 2 || num(p[0].trim()) == null || num(p[1].trim()) == null) return null;
   return { w: Number(p[0].trim()), h: Number(p[1].trim()) };
 }
+// Khung làm việc (cùng đơn vị với SM_CXSCREEN) bị trừ một độ dày thanh hợp lý đúng cạnh → thanh đang hiện.
+// Lệch 0 (tự ẩn) và lệch dưới 8 px không tính. Chỉ bác StuckRects3; ABM đọc được thì không dùng đường này.
+function workAreaShowsBar(base) {
+  const sm = base && base.sm, work = base && base.work;
+  if (!sm || !work || !(sm.w > 0) || !(sm.h > 0)) return false;
+  const edges = base.edge ? [base.edge] : EDGES;
+  return edges.some((e) => {
+    const span = e === 'left' || e === 'right' ? sm.w : sm.h;
+    const gap = e === 'top' ? work.t : e === 'bottom' ? sm.h - work.b : e === 'left' ? work.l : sm.w - work.r;
+    return plausible(gap, span);
+  });
+}
 // đọc kết quả PowerShell: ABM=<số>;STUCK=<byte>;ERR=<chữ>[;EDGE=;SM=;TRAY=;...]. Cũ: chỉ một số (trạng thái ABM)
+// abm >= 0: chỉ bit ABS_AUTOHIDE của ABM_GETSTATE. StuckRects3 chỉ khi ABM không có (âm hoặc lỗi).
 function parseState(out) {
   const t = String(out || '').trim(); if (!t) return null;
   if (/^\d+$/.test(t)) { const n = Number(t); return { abm: n, stuck: -1, autoHide: !!(n & ABS_AUTOHIDE), via: 'ABM_GETSTATE', state: n }; }
@@ -62,7 +77,7 @@ function parseState(out) {
   const abm = num(g('ABM')); const stuckN = num(g('STUCK'));
   const abmV = abm == null ? -1 : abm; const stuck = stuckN == null ? -1 : stuckN;
   let base;
-  if (abmV >= 0) { const a = !!(abmV & ABS_AUTOHIDE); const st = stuck === 3; base = { abm: abmV, stuck, autoHide: a || st, via: a ? 'ABM_GETSTATE' : st ? 'StuckRects3 (ABM_GETSTATE báo không)' : 'ABM_GETSTATE', err: g('ERR') || '' }; }
+  if (abmV >= 0) base = { abm: abmV, stuck, autoHide: !!(abmV & ABS_AUTOHIDE), via: 'ABM_GETSTATE', err: g('ERR') || '' };
   else if (stuck >= 0) base = { abm: abmV, stuck, autoHide: stuck === 3, via: 'StuckRects3', err: g('ERR') || '' };
   else base = { abm: abmV, stuck, autoHide: false, via: 'không đọc được', err: g('ERR') || '' };
   if (g('EDGE') === '' && !g('SM') && !g('TRAY') && !g('TRAY2') && !g('ABMPOS') && !g('WORK')) return base;
@@ -73,6 +88,7 @@ function parseState(out) {
   base.tray2 = parseRect(g('TRAY2'));
   base.abmPos = pm ? { edge: Number(pm[1]) <= 3 ? EDGES[Number(pm[1])] : null, rect: parseRect(pm[2]) } : null;
   base.work = parseRect(g('WORK'));
+  if (abmV < 0 && base.autoHide && workAreaShowsBar(base)) { base.autoHide = false; base.via = 'khung làm việc'; }
   return base;
 }
 // chi tiết quyết định (Windows); hệ điều hành khác → { autoHide:false, via:'không phải Windows' }. Lưu 2 phút
