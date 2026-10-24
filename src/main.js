@@ -201,19 +201,24 @@ const serverLog = [];
 let modelsDirProblem = null;
 let recoverChain = Promise.resolve();
 let pendingAnnounced = false;
+let movePending = null; // lần chuyển đang chờ đích: giao diện hiện Thử lại / Về thư mục cũ / Chọn thư mục khác
 let moveRetryTimer = null;
 let dirMove = null; // { ac } khi đang chuyển; timer thử lại phải bỏ qua
 function modelInUse() { try { const st = engine && engine.status && engine.status(); return !!(st && (st.loaded || st.loading)); } catch { return false; } }
 function noteRecover(rec, live) {
-  if (!rec) return;
+  if (!rec) { movePending = null; return; }
   if (rec.pending) {
+    movePending = rec;
+    try { send('models:dir-state', { pending: true, notice: rec.notice, actions: rec.actions || ['retry', 'back', 'choose'] }); } catch {}
     if (pendingAnnounced) return;
     pendingAnnounced = true;
     LOG.log('app', T(rec.log));
     const text = T(rec.notice);
+    try { send('app:notice', { id: 'move-pending', text, kind: 'warn' }); } catch {}
     setTimeout(() => { try { send('app:notice', { id: 'move-pending', text, kind: 'warn' }); } catch {} }, 2500);
     return;
   }
+  movePending = null;
   const wasPending = pendingAnnounced;
   pendingAnnounced = false;
   if (wasPending) { try { send('app:notice', { id: 'move-pending', clear: true }); } catch {} }
@@ -223,7 +228,7 @@ function noteRecover(rec, live) {
 async function finishPendingMove(live) {
   const file = path.join(paths.userData, 'models-move.json');
   let rec = null;
-  try { rec = await require('./models-dir').recoverMove(file); }
+  try { rec = await require('./models-dir').recoverMove(file, { waitMs: require('./models-dir').PENDING_WAIT_MS }); }
   catch (e) { LOG.log('app', 'Không xử lý được bản chuyển mô hình còn dở: ' + e.message); return null; }
   noteRecover(rec, live); return rec;
 }
@@ -1552,7 +1557,7 @@ function registerIpc() {
   });
   // ---------- Đổi thư mục mô hình (beta.3) ----------
   const defaultModelsDir = () => path.join(paths.userData, 'models');
-  const dirInfo = () => { const MD = require('./models-dir'); const files = MD.listFiles(paths.models); return { dir: paths.models, isDefault: path.resolve(paths.models) === path.resolve(defaultModelsDir()), default: defaultModelsDir(), free: MD.freeBytes(paths.models), drive: MD.driveOf(paths.models), bytes: files.reduce((s, f) => s + f.size, 0), files: files.length, extra: (settings.data.modelDirsExtra || []).filter(d => fs.existsSync(d)), problem: modelsDirProblem, moving: !!dirMove, qaProfile: !!QA_PROFILE }; };
+  const dirInfo = () => { const MD = require('./models-dir'); const files = MD.listFiles(paths.models); const pend = !!(movePending && movePending.pending); return { dir: paths.models, isDefault: path.resolve(paths.models) === path.resolve(defaultModelsDir()), default: defaultModelsDir(), free: MD.freeBytes(paths.models), drive: MD.driveOf(paths.models), bytes: files.reduce((s, f) => s + f.size, 0), files: files.length, extra: (settings.data.modelDirsExtra || []).filter(d => fs.existsSync(d)), problem: modelsDirProblem, moving: !!dirMove && !pend, qaProfile: !!QA_PROFILE, pending: pend, pendingNotice: pend ? (movePending.notice || '') : '', pendingActions: pend ? (movePending.actions || ['retry', 'back', 'choose']) : [] }; };
   // Runtime CUDA/Vulkan (tab Runtime trong Cài đặt)
   const rtInfo = async () => { const st = engine.status() || {}; return { pref: settings.data.runtime || 'auto', cuda: await runtimes().status(),
     versions: { llamaServer: require('./runtimes').BUILD, nodeLlamaCpp: nodeLlamaVersion(), electron: process.versions.electron },
@@ -1612,6 +1617,47 @@ function registerIpc() {
     } finally { if (dirMove === hold) dirMove = null; }
   });
   ipcMain.handle('models:dir-cancel', () => { if (dirMove && dirMove.ac) dirMove.ac.abort(); return true; });
+  // E1: lối thoát khi đích mất. Giao diện không được đưa đường dẫn tuỳ ý — chỉ action, và path nếu có phải đúng nguồn/đích trong nhật ký.
+  ipcMain.handle('models:dir-escape', async (_e, body) => {
+    const MD = require('./models-dir');
+    const journal = path.join(paths.userData, 'models-move.json');
+    const action = body && typeof body === 'object' && typeof body.action === 'string' ? body.action : '';
+    const asked = body && typeof body === 'object' && typeof body.path === 'string' ? body.path : '';
+    if (QA_PROFILE) return { ok: false, error: 'Hồ sơ QA: không đổi thư mục mô hình.' };
+    if (dirMove) return { ok: false, error: 'Đang chuyển mô hình, hãy đợi xong.' };
+    const run = recoverChain.then(() => MD.escapePending(journal, { action, path: asked }));
+    recoverChain = run.then(() => {}, () => {});
+    const res = await run;
+    const keep = (extra) => { if (extra && extra.pending) movePending = { ...(movePending || {}), ...extra, pending: true, notice: extra.notice || extra.error || (movePending && movePending.notice) || '', actions: extra.actions || ['retry', 'back', 'choose'] }; return { ...(extra || { ok: false }), info: dirInfo() }; };
+    if (!res || !res.ok) return keep(res);
+    if (action === 'choose' && res.allow) {
+      const picked = await dialog.showOpenDialog(win, { title: 'Chọn thư mục lưu mô hình', buttonLabel: 'Chọn thư mục này', properties: ['openDirectory', 'createDirectory'] });
+      if (picked.canceled || !picked.filePaths[0]) return { ok: false, canceled: true, pending: true, info: dirInfo() };
+      const v = MD.validateTarget(picked.filePaths[0], { from: res.dir });
+      if (!v.ok) return { ...v, pending: true, info: dirInfo() };
+      const done = await MD.commitChoose(journal, v.dir);
+      if (!done.ok) return keep(done);
+      const old = done.dir;
+      const extra = new Set(settings.data.modelDirsExtra || []);
+      if (MD.listFiles(old).length) extra.add(old);
+      extra.delete(v.dir);
+      paths.models = v.dir; settings.data.modelsDir = v.dir; settings.data.modelDirsExtra = [...extra]; settings.save(); modelsDirProblem = null;
+      movePending = null; pendingAnnounced = false;
+      try { send('app:notice', { id: 'move-pending', clear: true }); } catch {}
+      try { send('models:dir-state', { pending: false }); } catch {}
+      LOG.log('app', 'Đã chọn thư mục mô hình khác khi lần chuyển đang chờ. Không xoá tệp mô hình nào. Thư mục cũ: ' + old);
+      return { ok: true, action: 'choose', dir: v.dir, info: dirInfo(), models: listModels() };
+    }
+    if (res.dir && (res.action === 'back' || res.resumed || res.rolledBack)) {
+      paths.models = res.dir; settings.data.modelsDir = res.dir; settings.save(); modelsDirProblem = null;
+      movePending = null; pendingAnnounced = false;
+      try { send('app:notice', { id: 'move-pending', clear: true }); } catch {}
+      try { send('models:dir-state', { pending: false }); } catch {}
+      if (res.action === 'back') LOG.log('app', 'Đã trỏ lại thư mục mô hình cũ. Không xoá tệp mô hình nào: ' + res.dir);
+      return { ...res, ok: true, info: dirInfo(), models: listModels() };
+    }
+    return { ...res, info: dirInfo(), models: listModels() };
+  });
   ipcMain.handle('models:dir-reset', () => { if (QA_PROFILE || dirMove) return { ok: false }; settings.data.modelsDir = null; paths.models = defaultModelsDir(); fs.mkdirSync(paths.models, { recursive: true }); settings.save(); return { ok: true, info: dirInfo() }; });
   ipcMain.handle('models:reveal', (_e, p) => { shell.showItemInFolder(p || paths.models); return true; });
   ipcMain.handle('model:status', () => engine.status());
