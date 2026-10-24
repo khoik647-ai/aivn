@@ -133,11 +133,24 @@ const CUT = /[\r\n]|[:：﹕∶꞉˸︓](?![\\/]|\d)|["“”„«»‹「『‘
 // Cùng lỗ trên CÙNG một dòng: “Đừng xoá tệp này. Mở Notepad và gõ…” / “Meeting notes from the current file, open Notepad and type…”
 // / “See readme.txt. Open Notepad and type the above” — mệnh đề đứng trước động từ ghi là nội dung, không được tắt bảo vệ.
 // Ngắt dòng Unicode (U+2028/U+2029) cũng là dòng mới. Giờ 10:30 không phải dấu phân cách; “notes.txt” / “3.14” không phải hết câu.
-const linesOf = (q) => String(q || '').replace(/(\d)[:：﹕∶](?=\d)/gu, '$1\u2009').split(/\r\n|[\r\n\u2028\u2029]/);
+// r14 I: bản sao CHỈ để phân loại (fresh/file). Gỡ Cf, filler (U+034F/115F/1160/3164/FFA0),
+// variation selector (FE00–FE0F) và dấu Mông Cổ (180B–180F) trước khi tách. Cờ u để khớp tag astral (U+E0020).
+// Không đổi chữ được gõ: desktop-agent gõ a.text từ userQuery, không đi qua linesOf.
+const linesOf = (q) => String(q || '').replace(/[\p{Cf}\u034f\u115f\u1160\u3164\uffa0\ufe00-\ufe0f\u180b-\u180f]/gu, '').replace(/(\d)[:：﹕∶](?=\d)/gu, '$1\u2009').split(/\r\n|[\r\n\u2028\u2029]/);
 const OPEN_START = /^\s*(?:(?:please|hãy|xin)\s+)?(?:mở|open|edit|sửa|打开|打開)(?![\p{L}])/iu;
 function splitClauses(line) {
-  // r13: mệnh đề phủ định kết thúc ở ，。;； và ở 然后 / 再 (然后再 là MỘT chỗ ngắt). 然后/再 là ngắt mềm như dấu phẩy.
-  const re = /[.!?…](?=\s)|[,，;；](?=\s)|[。！？…]|[，；]|然后再|然後再|然后|然後|再/gu;
+  // r13: mệnh đề phủ định kết thúc ở ，。;； và ở 然后 (然后再 là MỘT chỗ ngắt). 然后 là ngắt mềm như dấu phẩy.
+  // r14 N2 (#64): 再 chỉ là chỗ ngắt khi nó là từ nối thứ tự, không phải âm trong từ (再见, 再次, 再说…).
+  // Luật thận trọng — ngắt ở 再 chỉ khi một trong các mẫu sau:
+  //   (1) 然后再 / 然後再 (một chỗ ngắt, như r13);
+  //   (2) 再把 / 再在 (chỉ lấy chữ 再, 把/在 còn ở mệnh đề sau để “在 notes.txt” vẫn ghim được);
+  //   (3) 再 đứng ngay sau đầu câu, khoảng trắng, hoặc dấu câu.
+  // “输入再打开” dính vào chữ trước và không phải các mẫu trên → không ngắt (thà không cắt 再见).
+  // r14 M1: 再 ngay sau phủ định (不要/别/別/勿/不准/不能/禁止/不用) không ngắt. Cả mệnh đề giữ phủ định, tên tệp không được ghim (“不要再在 notes.txt…”).
+  // Vòng 2: giữa phủ định và 再 được cách bởi khoảng trắng (\s gồm NBSP, U+3000) và/hoặc thêm chữ 再 (“不要 再在”, “不要再再在”).
+  // P1/P2: cùng khe đó còn có 、 và gạch —/– (“不要、再在”, “不要——再在”). Xuống dòng không nằm ở đây: linesOf đã tách dòng trước.
+  const negZai = String.raw`(?<!(?:不要|別|别|勿|不准|不能|禁止|不用)[\s再、—–]*)`;
+  const re = new RegExp(String.raw`[.!?…](?=\s)|[,，;；](?=\s)|[。！？…]|[，；]|然后再|然後再|然后|然後|${negZai}再(?=把|在)|(?<=^|[\s,，;；。！？…])${negZai}再`, 'gu');
   const parts = []; let start = 0; let m;
   while ((m = re.exec(line))) { parts.push({ text: line.slice(start, m.index), sep: /[,，;；]|然后|然後|再/u.test(m[0]) ? 'comma' : 'stop' }); start = m.index + m[0].length; }
   parts.push({ text: line.slice(start), sep: null });
@@ -145,8 +158,10 @@ function splitClauses(line) {
 }
 // phủ định đứng đầu mệnh đề (“Don't type…”, “Đừng gõ…”, “Không được viết…”, “不要输入…”) — không bao giờ là lệnh tắt bảo vệ.
 // r13: 不要/别/勿/不准/不用/不能/禁止 vẫn là phủ định khi ký tự ngay sau là chữ Hán (“不要在…”). Anh/Việt giữ ranh giới chữ cái.
-const ZH_NEG = /不准|不用|不能|不要|禁止|别|別|勿/u;
-const NEGATED = /^\s*(?:(?:please|hãy|xin|请)\s+)?(?:(?:don't|do\s+not|never|đừng|chớ|không\s+được|không)(?![\p{L}])|不准|不用|不能|不要|禁止|别|別|勿)/iu;
+// r14 N1 (#64): 不要忘记 / 别忘了 = “đừng quên (hãy làm)” → khẳng định, không phải phủ định.
+// 特别 = “đặc biệt”, 别人 = “người khác” — chữ 别 nằm trong từ, không phải phủ định 别. Mọi ký tự khác sau 不要/别 vẫn là phủ định.
+const ZH_NEG = /不准|不用|不能|不要(?!忘记|忘記)|禁止|(?<!特)(?:别|別)(?!忘了|人)|勿/u;
+const NEGATED = /^\s*(?:(?:please|hãy|xin|请)\s+)?(?:(?:don't|do\s+not|never|đừng|chớ|không\s+được|không)(?![\p{L}])|不准|不用|不能|不要(?!忘记|忘記)|禁止|(?<!特)(?:别|別)(?!忘了|人)|勿)/iu;
 const negated = (s) => NEGATED.test(String(s || ''));
 // “do not / đừng” đứng ngay trước động từ ghi (“Open Notepad and do not type…”).
 // Tiếng Trung: dấu phủ định ở bất kỳ đâu trước động từ, kể cả khi cách động từ bởi “在 notes.txt 里”.
