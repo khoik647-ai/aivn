@@ -85,6 +85,30 @@ test('R14 M1 再 right after a negation does not pin the file', () => {
   }
 });
 
+function noPin(q) {
+  assert.strictEqual(FD.freshDocTask(q), true, JSON.stringify(q));
+  assert.strictEqual(FD.namedTarget(q), null, JSON.stringify(q));
+}
+const between = (cp) => `不要${String.fromCodePoint(cp)}再在 notes.txt 里输入你好`;
+
+test('R14 I1 U+00AD between 不要 and 再在 does not pin the file', () => { noPin(between(0x00AD)); });
+test('R14 I2 U+180E between 不要 and 再在 does not pin the file', () => { noPin(between(0x180E)); });
+test('R14 I3 U+2061 between 不要 and 再在 does not pin the file', () => { noPin(between(0x2061)); });
+test('R14 I4 U+200E between 不要 and 再在 does not pin the file', () => { noPin(between(0x200E)); });
+test('R14 I5 U+202A between 不要 and 再在 does not pin the file', () => { noPin(between(0x202A)); });
+test('R14 I6 U+FE0F between 不要 and 再在 does not pin the file', () => { noPin(between(0xFE0F)); });
+test('R14 I7 U+034F between 不要 and 再在 does not pin the file', () => { noPin(between(0x034F)); });
+test('R14 I8 U+3164 between 不要 and 再在 does not pin the file', () => { noPin(between(0x3164)); });
+test('R14 I9 U+E0020 between 不要 and 再在 does not pin the file', () => { noPin(between(0xE0020)); });
+
+test('R14 P1 ideographic comma between 不要 and 再在 does not pin the file', () => {
+  noPin('不要、再在 notes.txt 里输入你好');
+});
+test('R14 P2 dashes between 不要 and 再在 do not pin the file', () => {
+  noPin('不要——再在 notes.txt 里输入你好');
+  noPin('不要\u2013再在 notes.txt 里输入你好');
+});
+
 test('R14 M1 round 2 spaced, zero-width, or repeated 再 after a negation does not pin the file', () => {
   for (const q of [
     '不要 再在 notes.txt 里输入你好',
