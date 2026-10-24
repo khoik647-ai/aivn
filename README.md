@@ -24,7 +24,7 @@ Electron + node-llama-cpp (llama.cpp, MIT) + llama-server chính thức của ll
 - **Sao chép/dán**: menu Sửa (bắt buộc trên macOS để Cmd+C/Cmd+V hoạt động), menu chuột phải Cắt/Sao chép/Dán/Chọn tất cả, nút Sao chép câu trả lời.
 - **Bộ máy suy luận**: node-llama-cpp chạy trong tiến trình Node.js thuần đi kèm (`resources/node`, tải bằng `node build/fetch-node.cjs`), vì bộ cấp phát của Electron làm sập tiến trình khi cấp phát > 2 GB (mô hình 7B chạy CPU). Mô hình nhìn ảnh chạy bằng `llama-server` (tiến trình con, chỉ nghe 127.0.0.1, khoá API ngẫu nhiên mỗi lần nạp, tắt cùng ứng dụng). Hỏi đáp tài liệu (RAG) vẫn nhúng bằng BGE-M3 trên CPU trong cùng tiến trình engine. `POST /v1/embeddings` dùng một tiến trình `llama-server --embeddings` riêng (xem Máy chủ API).
 - **Mô hình của tôi**: nạp / gỡ khỏi bộ nhớ / xoá / mở thư mục.
-- **Máy chủ API**: tương thích OpenAI tại http://localhost:1234 (`GET /v1/models`, `POST /v1/chat/completions` có `stream: true` và ảnh `image_url` cho mô hình nhìn ảnh, `POST /v1/completions` kiểu cũ theo `prompt` (chuỗi/mảng, `stream`, `echo`, `stop`; mỗi prompt chạy như một tin nhắn qua mẫu trò chuyện của mô hình), `POST /v1/embeddings`). `/v1/chat/completions` nhận `tools` + `tool_choice` (`auto`, `none`, `required`, hoặc tên hàm) và trả `tool_calls` / `finish_reason: "tool_calls"` (cả khi stream), nhận tin nhắn `role: "tool"`; `response_format` `json_schema` hoặc `json_object` ràng buộc đầu ra bằng ngữ pháp (hỗ trợ tập con JSON Schema: object, array, string/number/integer/boolean, enum, const, anyOf/oneOf). Nếu gửi `model` là một mô hình chưa nạp nhưng có trên máy, ứng dụng sẽ tự nạp.
+- **Máy chủ API**: tương thích OpenAI tại http://localhost:1234 (`GET /v1/models`, `POST /v1/chat/completions` có `stream: true` và ảnh `image_url` cho mô hình nhìn ảnh, `POST /v1/completions` kiểu cũ theo `prompt` (chuỗi/mảng, `stream`, `echo`, `stop`; mỗi prompt chạy như một tin nhắn qua mẫu trò chuyện của mô hình), `POST /v1/embeddings` (tên mô hình nhúng kiểu OpenAI như `text-embedding-3-small` dùng BGE-M3 đã cài) với `input` chuỗi/mảng, `encoding_format` float/base64, `dimensions`, `POST /v1/messages` chuẩn Anthropic). `/v1/chat/completions` nhận `tools` + `tool_choice` (`auto`, `none`, `required`, hoặc tên hàm) và trả `tool_calls` / `finish_reason: "tool_calls"` (cả khi stream), nhận tin nhắn `role: "tool"`; `response_format` `json_schema` hoặc `json_object` ràng buộc đầu ra bằng ngữ pháp (hỗ trợ tập con JSON Schema: object, array, string/number/integer/boolean, enum, const, anyOf/oneOf). Nếu gửi `model` là một mô hình chưa nạp nhưng có trên máy, ứng dụng sẽ tự nạp. Tên dạng đường dẫn (có `/` hoặc `\`, ví dụ `C:\models\foo.gguf` hay `/models/foo.gguf`) không được mở thành tệp: khi đã có mô hình đang nạp, yêu cầu dùng mô hình đó và trả 200, không báo lỗi. `/v1/messages` dùng cùng đường mô hình đó: `system` tách riêng, `messages` với khối text, `max_tokens` bắt buộc, `stop_sequences`, `stream` (SSE `message_start`, `content_block_*`, `ping`, `message_delta`, `message_stop`), và `tool_use` / `tool_result` khi có công cụ. Tiêu đề `anthropic-version` được chấp nhận. Khoá API giống các đường OpenAI (Bearer hoặc `x-api-key`).
   - **Embeddings** (`POST /v1/embeddings` và `/embeddings`): `input` là chuỗi hoặc mảng chuỗi (mảng token thì 400), `encoding_format` là `float` hoặc `base64`, `dimensions` cắt bớt rồi chuẩn hoá L2. Phản hồi `{object:"list", data:[{object:"embedding", index, embedding}], model, usage:{prompt_tokens, total_tokens}}`. Lỗi cùng dạng OpenAI: 400 khi input sai, khi một chuỗi dài hơn 100000 ký tự, khi tổng văn bản dài hơn 1000000 ký tự, khi thân yêu cầu lớn hơn 2 MiB, khi `model` là mô hình trò chuyện đã cài, hoặc khi chưa có GGUF nhúng; 401 khi bật khoá API (Bearer hoặc `x-api-key`, bắt buộc nếu mở LAN); 503 khi llama-server không khởi động được. Tiến trình `llama-server --embeddings` chỉ bật ở yêu cầu đầu, một tiến trình cho mọi yêu cầu đồng thời, tự tắt sau 5 phút không dùng (`AIVN_EMBED_IDLE_MS`, mili giây), và được dừng trước khi nạp mô hình trò chuyện để đo VRAM trống. GPU rời từ 4 GB trở xuống, GPU tích hợp, hoặc mô hình trò chuyện đang nạp mà VRAM trống ≤ 2 GB thì chạy CPU (`-ngl 0`); VRAM trống ≤ 6 GB khi mô hình trò chuyện đang nạp thì chỉ vài lớp (`-ngl 4`); GPU rời trên 4 GB khi chưa nạp mô hình trò chuyện thì `-ngl 8` (không để llama-server chiếm hết VRAM). llama-server nhận `-b` và `-ub` bằng ngữ cảnh huấn luyện (trần 8192). Chuỗi dài hơn ngữ cảnh bị cắt còn `ngữ cảnh − 4` token trước khi gửi, cùng cách với nhúng RAG. Pooling lấy từ siêu dữ liệu GGUF. `model` trỏ tới GGUF nhúng đã cài (kiến trúc bert/nomic-bert/jina-bert/neo-bert/xlm-roberta, `pooling_type`, hoặc tên tệp kiểu embed/bge/nomic-embed/e5/gte — kể cả tên không khớp như all-MiniLM khi kiến trúc là bert); những tệp này không hiện như mô hình trò chuyện. Tên kiểu OpenAI (`text-embedding-3-small`) dùng mô hình mặc định — BGE-M3 nếu đã tải, không thì GGUF nhúng đầu tiên. Chưa cài thì API báo cần nomic-embed-text, bge-small hoặc BGE-M3 và **không tự tải**. `GET /v1/models` liệt kê các mô hình này một lần, với `type: "embedding"`. Hai client có thể gọi cùng lúc. Đổi mô hình giữa chừng thì khởi động lại llama-server.
 
 ```bash
@@ -45,6 +45,30 @@ curl http://localhost:1234/v1/chat/completions -H "Content-Type: application/jso
   "tools": [{"type": "function", "function": {"name": "get_weather", "description": "Thời tiết hiện tại",
     "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}]}'
 # → finish_reason "tool_calls", get_weather {"city":"Đà Nẵng"}; gửi lại kết quả bằng {"role":"tool","tool_call_id":…,"content":…}
+
+curl http://localhost:1234/v1/messages \
+  -H "content-type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "x-api-key: local" \
+  -d '{"model":"aivn","max_tokens":256,"system":"Bạn là trợ lý.","messages":[{"role":"user","content":"Xin chào"}]}'
+```
+
+```python
+import anthropic
+client = anthropic.Anthropic(base_url="http://localhost:1234", api_key="local")
+msg = client.messages.create(model="aivn", max_tokens=256, messages=[{"role": "user", "content": "Xin chào"}])
+print(msg.content[0].text)
+with client.messages.stream(model="aivn", max_tokens=256, messages=[{"role": "user", "content": "Xin chào"}]) as stream:
+    for text in stream.text_stream:
+        print(text, end="")
+```
+
+### Dùng AIVN với Claude Code
+
+Trỏ Claude Code vào máy chủ API của AIVN (đang chạy, đã nạp mô hình). SDK Anthropic tự thêm `/v1/messages`, nên `base_url` không có hậu tố `/v1`. Khi máy chủ đặt khoá API, dùng đúng khoá đó; chưa đặt khoá thì một chuỗi bất kỳ như `local` cũng được.
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:1234 ANTHROPIC_API_KEY=local claude
 ```
 
 Dữ liệu được lưu trong thư mục userData (Windows: `%APPDATA%\AIVN`): `models\`, `rag\` (chỉ mục tài liệu), `settings.json`, `conversations.json`, `memory.json` (Ghi nhớ), `schedules.json` (Lịch tự động).
@@ -57,7 +81,7 @@ npm start
 npm run dist:win     # NSIS + portable (cần wine để ghi icon/metadata vào exe)
 npm run dist:linux   # AppImage
 npm run dist:mac     # macOS arm64 + x64 (.zip, chạy được trên Linux)
-node --test test/    # kiểm thử trích xuất PDF/DOCX/TXT, OCR, Hugging Face, RAG, /v1/embeddings, Trợ lý (máy tính, hộp cát, thư mục được phép, lịch, ghi nhớ, SSRF)
+node --test test/    # kiểm thử trích xuất PDF/DOCX/TXT, OCR, Hugging Face, RAG, /v1/embeddings, /v1/messages, Trợ lý (máy tính, hộp cát, thư mục được phép, lịch, ghi nhớ, SSRF)
 ```
 
 ## Phát hành (GitHub)

@@ -2,7 +2,9 @@
 const http = require('http');
 const crypto = require('crypto');
 const { normalizeTools, dropNullOptionals } = require('./schema');
+const { handleMessages, anthropicError } = require('./anthropic-api');
 const { assertInputLengths, MAX_EMBED_BODY } = require('./embed-server');
+const { modelChanged } = require('./model-ref');
 
 // tool_choice kiểu OpenAI → 'auto' | 'none' | 'required' | { name }
 function parseToolChoice(tc, tools) {
@@ -41,21 +43,35 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
     res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', ...cors() });
     res.end(JSON.stringify(obj));
   };
-  const cors = () => (getOpts().cors ? { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' } : {});
+  const cors = () => (getOpts().cors ? { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key, anthropic-version', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' } : {});
   // B80: mọi phản hồi lỗi đều vào nhật ký kèm mã (trước đây 404 chỉ thấy “POST /v1/completions”, không thấy mã)
   const err = (res, code, message, type = 'invalid_request_error') => { if (code !== 401) log(`  → ${code} ${String(message).slice(0, 200)}`); return send(res, code, { error: { message, type, code } }); };
+  const listNow = () => { try { return typeof models === 'function' ? models() : []; } catch { return []; } };
 
-  const readBody = (req, max = 20e6, tooBig) => new Promise((resolve, reject) => {
-    let size = 0, failed = false; const chunks = [];
+  const readBody = (req, max = 20e6, tooBigMsg) => new Promise((resolve, reject) => {
+    let size = 0; const chunks = []; let settled = false;
+    const dump = () => { req.removeAllListeners('data'); req.on('data', () => {}); req.resume(); };
     req.on('data', c => {
-      if (failed) return;
+      if (settled) return;
       size += c.length;
-      if (size > max) { failed = true; reject(new Error(tooBig ? tooBig(max) : 'Body quá lớn')); setImmediate(() => { try { req.destroy(); } catch {} }); return; }
+      if (size > max) {
+        settled = true;
+        const e = new Error(typeof tooBigMsg === 'function' ? tooBigMsg(max) : (tooBigMsg || 'Body quá lớn'));
+        e.status = 413;
+        dump(); reject(e);
+        return;
+      }
       chunks.push(c);
     });
-    req.on('end', () => { if (!failed) resolve(Buffer.concat(chunks).toString('utf8')); });
-    req.on('error', (e) => { if (!failed) reject(e); });
+    req.on('end', () => { if (!settled) resolve(Buffer.concat(chunks).toString('utf8')); });
+    req.on('error', (e) => { if (!settled) { settled = true; reject(e); } });
   });
+  const tooBig = (e) => !!(e && e.status === 413);
+  const sseHeaders = (req) => {
+    const h = { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', ...cors() };
+    if (!req || req.httpVersion !== '1.0') h.Connection = 'keep-alive';
+    return h;
+  };
 
   // số token lời nhắc (OpenAI usage.prompt_tokens): lấy từ máy chạy nếu có, không thì đếm bằng bộ tách từ của mô hình
   const promptTokens = async (r, messages) => {
@@ -72,10 +88,15 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
     const url = new URL(req.url, 'http://localhost');
     const p = url.pathname.replace(/\/+$/, '');
     if (req.method === 'OPTIONS') { res.writeHead(204, cors()); return res.end(); }
+    const isAnthropic = p === '/v1/messages' || p === '/messages';
     const blocked = isBlocked && isBlocked();
-    if (blocked) return err(res, 423, blocked, 'locked');
+    if (blocked) return isAnthropic ? anthropicError(res, 423, 'api_error', blocked, cors()) : err(res, 423, blocked, 'locked');
     const key = getOpts().apiKey;
-    if (key && !keyOk(req, key)) { log(`${req.method} ${p} → 401 (thiếu hoặc sai khoá API) từ ${req.socket.remoteAddress || '?'}`); return err(res, 401, 'Thiếu hoặc sai khoá API. Gửi tiêu đề "Authorization: Bearer <khoá>" (khoá ở mục Máy chủ API của AIVN).', 'invalid_api_key'); }
+    if (key && !keyOk(req, key)) {
+      log(`${req.method} ${p} → 401 (thiếu hoặc sai khoá API) từ ${req.socket.remoteAddress || '?'}`);
+      const msg = 'Thiếu hoặc sai khoá API. Gửi tiêu đề "Authorization: Bearer <khoá>" (khoá ở mục Máy chủ API của AIVN).';
+      return isAnthropic ? anthropicError(res, 401, 'authentication_error', msg, cors()) : err(res, 401, msg, 'invalid_api_key');
+    }
     log(`${req.method} ${p}${host === '0.0.0.0' ? ` từ ${req.socket.remoteAddress || '?'}` : ''}`);
 
     if (req.method === 'GET' && (p === '/v1/models' || p === '/models')) {
@@ -96,9 +117,11 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
 
     if (req.method === 'POST' && (p === '/v1/chat/completions' || p === '/chat/completions')) {
       let body;
-      try { body = JSON.parse(await readBody(req) || '{}'); } catch { return err(res, 400, 'JSON không hợp lệ'); }
+      try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) { if (tooBig(e)) return err(res, 413, 'Body quá lớn', 'payload_too_large'); return err(res, 400, 'JSON không hợp lệ'); }
       if (!Array.isArray(body.messages) || !body.messages.length) return err(res, 400, 'Thiếu trường "messages"');
+      const beforeChat = engine.status();
       try { await ensureModel(body.model); } catch (e) { return err(res, 400, e.message, 'model_not_found'); }
+      const goneChat = modelChanged(listNow(), body.model, beforeChat, engine.status()); if (goneChat) return err(res, 409, goneChat, 'model_changed');
 
       const st = engine.status();
       const id = 'chatcmpl-' + crypto.randomBytes(12).toString('hex');
@@ -116,7 +139,7 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
         const toOpenAi = (calls) => calls.map((c, index) => ({ index, id: c.id, type: 'function', function: { name: c.name, arguments: JSON.stringify(dropNullOptionals(c.arguments ?? {}, byName.get(c.name)?.parameters)) } }));
         const stepOpts = { ...opts, tools, toolChoice, responseFormat };
         if (body.stream) {
-          res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', ...cors() });
+          res.writeHead(200, sseHeaders(req));
           const chunk = (delta, finish = null) => res.write('data: ' + JSON.stringify({ id, object: 'chat.completion.chunk', created, model: st.id, choices: [{ index: 0, delta, finish_reason: finish }] }) + '\n\n');
           chunk({ role: 'assistant', content: '' });
           try {
@@ -142,7 +165,7 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
       }
 
       if (body.stream) {
-        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', ...cors() });
+        res.writeHead(200, sseHeaders(req));
         const chunk = (delta, finish = null) => res.write('data: ' + JSON.stringify({ id, object: 'chat.completion.chunk', created, model: st.id, choices: [{ index: 0, delta, finish_reason: finish }] }) + '\n\n');
         chunk({ role: 'assistant', content: '' });
         try {
@@ -167,13 +190,15 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
     // mỗi prompt được gửi như MỘT tin của người dùng; phản hồi đúng dạng OpenAI text_completion (cả stream, n prompt, echo, stop).
     if (req.method === 'POST' && (p === '/v1/completions' || p === '/completions')) {
       let body;
-      try { body = JSON.parse(await readBody(req) || '{}'); } catch { return err(res, 400, 'JSON không hợp lệ'); }
+      try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) { if (tooBig(e)) return err(res, 413, 'Body quá lớn', 'payload_too_large'); return err(res, 400, 'JSON không hợp lệ'); }
       let prompts = body.prompt;
       if (typeof prompts === 'string') prompts = [prompts];
       if (!Array.isArray(prompts) || !prompts.length || prompts.some(x => typeof x !== 'string')) return err(res, 400, 'Thiếu trường "prompt" (chuỗi hoặc mảng chuỗi; chưa hỗ trợ mảng token)');
       if (prompts.length > 16) return err(res, 400, 'Tối đa 16 prompt mỗi yêu cầu');
       if (body.stream && prompts.length > 1) return err(res, 400, '"stream" chỉ dùng với một prompt');
+      const beforeCmp = engine.status();
       try { await ensureModel(body.model); } catch (e) { return err(res, 400, e.message, 'model_not_found'); }
+      const goneCmp = modelChanged(listNow(), body.model, beforeCmp, engine.status()); if (goneCmp) return err(res, 409, goneCmp, 'model_changed');
       const st = engine.status();
       const id = 'cmpl-' + crypto.randomBytes(12).toString('hex');
       const created = Math.floor(Date.now() / 1000);
@@ -184,7 +209,7 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
       const cut = (t) => { let at = -1; for (const x of stops) { const i = t.indexOf(x); if (i >= 0 && (at < 0 || i < at)) at = i; } return at < 0 ? { text: t, stopped: false } : { text: t.slice(0, at), stopped: true }; };
       const msgs = (pr) => [{ role: 'user', content: pr }];
       if (body.stream) {
-        res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive', ...cors() });
+        res.writeHead(200, sseHeaders(req));
         const chunk = (text, finish = null) => res.write('data: ' + JSON.stringify({ id, object: 'text_completion', created, model: st.id, choices: [{ index: 0, text, logprobs: null, finish_reason: finish }] }) + '\n\n');
         if (body.echo) chunk(prompts[0]);
         let acc = '', sent = 0, stopped = false;
@@ -233,6 +258,14 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
           usage: { prompt_tokens: tokens, total_tokens: tokens },
         });
       } catch (e) { return err(res, e.status || 500, e.message, e.status === 400 ? 'invalid_request_error' : 'server_error'); }
+    }
+    if (isAnthropic) {
+      if (req.method !== 'POST') {
+        const message = `Không tìm thấy ${req.method} ${p}`;
+        log(`  → 404 ${message}`);
+        return anthropicError(res, 404, 'not_found_error', message, cors());
+      }
+      return handleMessages({ req, res, engine, ensureModel, log, cors, readBody, models: listNow });
     }
     return err(res, 404, `Không tìm thấy ${req.method} ${p}`);
   }

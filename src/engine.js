@@ -8,6 +8,7 @@ let lib = null;           // module node-llama-cpp (ESM)
 let llama = null;         // instance Llama
 let current = null;       // { id, path, model, context }
 let loading = null;       // promise khi đang nạp
+let loadTail = Promise.resolve(); // hàng đợi nạp: hai lời gọi đang chờ không được chạy song song
 let queue = Promise.resolve(); // tuần tự hoá các yêu cầu sinh văn bản
 let vision = null;        // llama-server (mmproj) khi mô hình nhìn được ảnh
 let visionOn = false;
@@ -238,14 +239,27 @@ async function runSpeedProbe(draft, timeoutMs) {
   finally { clearTimeout(timer); }
 }
 
+// Một lần nạp tại một thời điểm. `if (loading) await loading` rồi gán lại khiến hai lời gọi
+// đang chờ cùng đi tiếp và gỡ mô hình của nhau. Hàng đợi gắn đuôi trước mọi await.
+function exclusiveLoad(fn) {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const prev = loadTail;
+  loadTail = gate;
+  const run = prev.catch(() => {}).then(async () => {
+    loading = run;
+    try { return await fn(); }
+    finally { if (loading === run) loading = null; release(); }
+  });
+  return run;
+}
 async function loadModel(id, modelPath, opts = {}) {
   // cùng tệp đã nạp: giữ nguyên, TRỪ khi cần ngữ cảnh lớn hơn ngữ cảnh đang có (0.15.2: tự tăng ngữ cảnh)
   const wantCtx = opts.minContextSize || Math.min(Number(opts.contextSize) || 0, 8192);
+  return exclusiveLoad(async () => {
   if (!opts.reload && !opts.mmproj && current && current.path === modelPath && !(wantCtx && current.context.contextSize < wantCtx)) return status();
   if (!opts.reload && opts.mmproj && visionOn && getVision().status()?.path === modelPath && !(wantCtx && (getVision().status().contextSize || 0) < wantCtx)) return status();
-  if (loading) await loading.catch(() => {});
   if (opts.mmproj) {
-    loading = (async () => {
       await unloadModel();
       const l = await getLlama().catch(() => null);
       const vramV = l && l.gpu ? await vramInfo(l).catch(() => null) : null;
@@ -284,11 +298,8 @@ async function loadModel(id, modelPath, opts = {}) {
         }
       }
       visionOn = true; visionVramCache = null;
-    })();
-    try { await loading; } finally { loading = null; }
-    return status();
+      return status();
   }
-  loading = (async () => {
     await unloadModel();
     const ctxMax = opts.contextSize || 4096;
     const attempts = [];
@@ -378,7 +389,7 @@ async function loadModel(id, modelPath, opts = {}) {
         }
         draft.attempts = attempts.map(a => a.mode + ': ' + a.message);
         current = draft;
-        return;
+        return status();
       } catch (e) {
         current = null;
         abandoned = true;
@@ -393,9 +404,7 @@ async function loadModel(id, modelPath, opts = {}) {
     err.code = 'LOAD_FAILED'; err.attempts = attempts; err.gpu = !!l.gpu; err.slow = steppedSlow;
     err.memory = !attempts.length || LF.wantsCpuLadder(attempts);
     throw err;
-  })();
-  try { await loading; } finally { loading = null; }
-  return status();
+  });
 }
 
 
@@ -410,10 +419,12 @@ async function unloadModel() {
 }
 
 function status() {
-  // Đang nạp, đang đo tốc độ hoặc đang bước xuống: chưa có mô hình cuối. Không báo loaded.
-  if (loading) return { loaded: false, loading: true };
-  // B123: bộ máy THẬT đang chạy mô hình nhìn ảnh (llama-server), không phải GPU của node-llama-cpp
+  // B123: bộ máy THẬT đang chạy mô hình nhìn ảnh (llama-server), không phải GPU của node-llama-cpp.
+  // Kiểm tra trước cờ loading: exclusiveLoad vẫn giữ loading lúc return status() sau khi visionOn đã bật.
   if (visionOn) { const v = getVision().status(); if (v) return { loaded: true, id: v.id, path: v.path, contextSize: v.contextSize, vision: true, gpu: llama && llama.gpu, backend: serverBackend(v), gpuLayers: v.gpuLayers ?? null, totalLayers: v.totalLayers ?? null, device: v.device || null, toolMode: v.textTools ? 'text' : 'native', runtime: v.runtime || 'bundled', runtimeFallback: v.runtimeFallback || null, meta: v.template ? { toolTemplate: !!v.template.nativeTools } : null }; }
+  // Đang nạp, đang đo tốc độ hoặc đang bước xuống: current chưa được công bố. Không báo loaded.
+  // exclusiveLoad đặt loading trước khi fn chạy; mô hình chữ đã công bố (current) vẫn là loaded.
+  if (loading && !current) return { loaded: false, loading: true };
   return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, meta: current.meta || null, perf: current.perf || null, offload: current.offload || null, slow: current.slow || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: false };
 }
 
@@ -684,7 +695,7 @@ function embed(texts, kind = 'passage') {
 function countTokens(text) { if (!current) return Math.ceil(text.length / 3); try { return current.model.tokenize(text).length; } catch { return Math.ceil(text.length / 3); } }
 
 async function countTokensAsync(texts) { if (visionOn) { const r = await getVision().countTokens(texts); if (r) return r; } return texts.map(countTokens); }
-module.exports = { setLoadProgress, loadPlans, oomSchedule, explicitFlash, flashForContext, contextTries, modelGeometry, vramInfo, countTokens, countTokensAsync, hardwareInfo, loadModel, unloadModel, status, whenReady, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount };
+module.exports = { setLoadProgress, loadPlans, oomSchedule, explicitFlash, flashForContext, contextTries, modelGeometry, vramInfo, countTokens, countTokensAsync, hardwareInfo, loadModel, unloadModel, status, whenReady, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount, exclusiveLoad };
 
 // B123: llama-server CUDA → 'cuda'; bản đi kèm → vulkan (Windows) / metal (Mac) / cpu (Linux); 0 lớp lên GPU → 'cpu'
 function serverBackend(v) { if (!v) return null; if (v.gpuLayers === 0) return 'cpu'; if (v.runtime === 'cuda') return 'cuda'; return process.platform === 'win32' ? 'vulkan' : process.platform === 'darwin' ? 'metal' : 'cpu'; }
