@@ -133,7 +133,8 @@ const CUT = /[\r\n]|[:：﹕∶꞉˸︓](?![\\/]|\d)|["“”„«»‹「『‘
 // Cùng lỗ trên CÙNG một dòng: “Đừng xoá tệp này. Mở Notepad và gõ…” / “Meeting notes from the current file, open Notepad and type…”
 // / “See readme.txt. Open Notepad and type the above” — mệnh đề đứng trước động từ ghi là nội dung, không được tắt bảo vệ.
 // Ngắt dòng Unicode (U+2028/U+2029) cũng là dòng mới. Giờ 10:30 không phải dấu phân cách; “notes.txt” / “3.14” không phải hết câu.
-const linesOf = (q) => String(q || '').replace(/(\d)[:：﹕∶](?=\d)/gu, '$1\u2009').split(/\r\n|[\r\n\u2028\u2029]/);
+// r14 M1 vòng 2: gỡ khoảng trắng rộng 0 (U+200B–U+200D, U+2060, BOM) trước khi tách, để phủ định và 再 không còn khe vô hình.
+const linesOf = (q) => String(q || '').replace(/[\u200b-\u200d\u2060\ufeff]/gu, '').replace(/(\d)[:：﹕∶](?=\d)/gu, '$1\u2009').split(/\r\n|[\r\n\u2028\u2029]/);
 const OPEN_START = /^\s*(?:(?:please|hãy|xin)\s+)?(?:mở|open|edit|sửa|打开|打開)(?![\p{L}])/iu;
 function splitClauses(line) {
   // r13: mệnh đề phủ định kết thúc ở ，。;； và ở 然后 (然后再 là MỘT chỗ ngắt). 然后 là ngắt mềm như dấu phẩy.
@@ -144,7 +145,9 @@ function splitClauses(line) {
   //   (3) 再 đứng ngay sau đầu câu, khoảng trắng, hoặc dấu câu.
   // “输入再打开” dính vào chữ trước và không phải các mẫu trên → không ngắt (thà không cắt 再见).
   // r14 M1: 再 ngay sau phủ định (不要/别/別/勿/不准/不能/禁止/不用) không ngắt. Cả mệnh đề giữ phủ định, tên tệp không được ghim (“不要再在 notes.txt…”).
-  const re = /[.!?…](?=\s)|[,，;；](?=\s)|[。！？…]|[，；]|然后再|然後再|然后|然後|(?<!不要|別|别|勿|不准|不能|禁止|不用)再(?=把|在)|(?<=^|[\s,，;；。！？…])再/gu;
+  // Vòng 2: giữa phủ định và 再 được cách bởi khoảng trắng (\s gồm NBSP, U+3000) và/hoặc thêm chữ 再 (“不要 再在”, “不要再再在”). Cả hai nhánh 再 dùng cùng lookbehind.
+  const negZai = String.raw`(?<!(?:不要|別|别|勿|不准|不能|禁止|不用)[\s再]*)`;
+  const re = new RegExp(String.raw`[.!?…](?=\s)|[,，;；](?=\s)|[。！？…]|[，；]|然后再|然後再|然后|然後|${negZai}再(?=把|在)|(?<=^|[\s,，;；。！？…])${negZai}再`, 'gu');
   const parts = []; let start = 0; let m;
   while ((m = re.exec(line))) { parts.push({ text: line.slice(start, m.index), sep: /[,，;；]|然后|然後|再/u.test(m[0]) ? 'comma' : 'stop' }); start = m.index + m[0].length; }
   parts.push({ text: line.slice(start), sep: null });

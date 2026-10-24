@@ -84,3 +84,18 @@ test('R14 M1 再 right after a negation does not pin the file', () => {
     assert.strictEqual(FD.namedTarget(q), null, q);
   }
 });
+
+test('R14 M1 round 2 spaced, zero-width, or repeated 再 after a negation does not pin the file', () => {
+  for (const q of [
+    '不要 再在 notes.txt 里输入你好',
+    '不要\u00A0再在 notes.txt 里输入你好',
+    '不要\u3000再在 notes.txt 里输入你好',
+    '不要\u200B再在 notes.txt 里输入你好',
+    '不要\u200D再在 notes.txt 里输入你好',
+    '别 再在 notes.txt 里写你好',
+    '不要再再在 notes.txt 里输入你好',
+  ]) {
+    assert.strictEqual(FD.freshDocTask(q), true, JSON.stringify(q));
+    assert.strictEqual(FD.namedTarget(q), null, JSON.stringify(q));
+  }
+});
