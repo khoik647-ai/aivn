@@ -56,17 +56,24 @@ function parsePair(s) {
   const p = String(s || '').split(','); if (p.length !== 2 || num(p[0].trim()) == null || num(p[1].trim()) == null) return null;
   return { w: Number(p[0].trim()), h: Number(p[1].trim()) };
 }
-// Khung làm việc (cùng đơn vị với SM_CXSCREEN) bị trừ một độ dày thanh hợp lý đúng cạnh → thanh đang hiện.
-// Lệch 0 (tự ẩn) và lệch dưới 8 px không tính. Chỉ bác StuckRects3; ABM đọc được thì không dùng đường này.
+// Khung làm việc (cùng đơn vị với SM_CXSCREEN) bị trừ một độ dày thanh hợp lý ĐÚNG cạnh đã biết → thanh đang hiện.
+// Không biết cạnh thì không bác: lệch có thể là appbar khác. Lệch 0 (tự ẩn) và lệch dưới 8 px không tính.
+// Chỉ bác StuckRects3; ABM đọc được thì không dùng đường này.
 function workAreaShowsBar(base) {
   const sm = base && base.sm, work = base && base.work;
-  if (!sm || !work || !(sm.w > 0) || !(sm.h > 0)) return false;
-  const edges = base.edge ? [base.edge] : EDGES;
-  return edges.some((e) => {
-    const span = e === 'left' || e === 'right' ? sm.w : sm.h;
-    const gap = e === 'top' ? work.t : e === 'bottom' ? sm.h - work.b : e === 'left' ? work.l : sm.w - work.r;
-    return plausible(gap, span);
-  });
+  const e = base && base.edge;
+  if (!e || !sm || !work || !(sm.w > 0) || !(sm.h > 0)) return false;
+  const span = e === 'left' || e === 'right' ? sm.w : sm.h;
+  const gap = e === 'top' ? work.t : e === 'bottom' ? sm.h - work.b : e === 'left' ? work.l : sm.w - work.r;
+  return plausible(gap, span);
+}
+// Cùng quy tắc trên khung VẬT LÝ (bounds) và khung làm việc Electron đã đổi sang vật lý. Cạnh phải biết.
+function workInsetShowsBar(bounds, work, edge) {
+  if (!bounds || !work || !EDGES.includes(edge)) return false;
+  const g = workGap(bounds, work); if (!g) return false;
+  const span = edge === 'left' || edge === 'right' ? bounds.width : bounds.height;
+  const gap = edge === 'left' ? g.left : edge === 'right' ? g.right : edge === 'top' ? g.top : g.bottom;
+  return plausible(gap, span);
 }
 // đọc kết quả PowerShell: ABM=<số>;STUCK=<byte>;ERR=<chữ>[;EDGE=;SM=;TRAY=;...]. Cũ: chỉ một số (trạng thái ABM)
 // abm >= 0: chỉ bit ABS_AUTOHIDE của ABM_GETSTATE. StuckRects3 chỉ khi ABM không có (âm hoặc lỗi).
@@ -78,7 +85,7 @@ function parseState(out) {
   const abmV = abm == null ? -1 : abm; const stuck = stuckN == null ? -1 : stuckN;
   let base;
   if (abmV >= 0) base = { abm: abmV, stuck, autoHide: !!(abmV & ABS_AUTOHIDE), via: 'ABM_GETSTATE', err: g('ERR') || '' };
-  else if (stuck >= 0) base = { abm: abmV, stuck, autoHide: stuck === 3, via: 'StuckRects3', err: g('ERR') || '' };
+  else if (stuck >= 0) base = { abm: abmV, stuck, autoHide: (stuck & ABS_AUTOHIDE) !== 0, via: 'StuckRects3', err: g('ERR') || '' };
   else base = { abm: abmV, stuck, autoHide: false, via: 'không đọc được', err: g('ERR') || '' };
   if (g('EDGE') === '' && !g('SM') && !g('TRAY') && !g('TRAY2') && !g('ABMPOS') && !g('WORK')) return base;
   const edgeN = num(g('EDGE')); const pos = String(g('ABMPOS') || ''); const pm = /^(\d+),(.*)$/.exec(pos); const pe = pm ? num(pm[1]) : null;
@@ -284,5 +291,5 @@ function isTaskbarFg(fg) {
 const _reset = () => { cache = null; };
 module.exports = {
   detect, autoHide, describe, safeY, bandOf, parseState, PS, _reset,
-  place, preferBox, thickFrom, edgeOf, inDanger, isTaskbarFg, workToPhys, workGap, dpiK, ownsBar, barOnMonitor, EDGE_VI, EDGES,
+  place, preferBox, thickFrom, edgeOf, inDanger, isTaskbarFg, workToPhys, workGap, workInsetShowsBar, dpiK, ownsBar, barOnMonitor, EDGE_VI, EDGES,
 };

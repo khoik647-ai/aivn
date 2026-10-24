@@ -150,6 +150,8 @@ function createDesktopAgent(deps) {
     if (s && !s.tbGeom) { s.tbGeom = true; const gap = TB.workGap(b, work); deps.log && deps.log('desk', `B121: màn hình vật lý ${b.width}×${b.height} tại ${b.x},${b.y} · khung làm việc ${work ? `${work.width}×${work.height} tại ${work.x},${work.y}` : 'không đọc được'} · lệch đáy ${gap ? Math.round(gap.bottom) : '?'} px · dày ${thick || 0} px, cạnh ${TB.EDGE_VI[edge] || edge}`); }
     if (!d.autoHide) { if (inBand) deps.log && deps.log('desk', `B121: điểm bấm y=${Math.round(y)} trong dải đáy ${band} px của màn hình ${b.width}×${b.height} nhưng thanh tác vụ không tự ẩn → bấm như cũ`); return { x, y }; }
     if (!TB.barOnMonitor(d, b, primaryPhysH())) { deps.log && deps.log('desk', `B121: màn hình ${b.width}×${b.height} tại ${b.x},${b.y} không có thanh tác vụ — giữ điểm bấm (${Math.round(x)},${Math.round(y)})`); return { x, y }; }
+    // Add-Type lỗi thì WORK/SM rỗng, via còn StuckRects3. Khung làm việc Electron bị trừ đúng cạnh đã biết → thanh đang hiện, không dời.
+    if (d.via === 'StuckRects3' && TB.workInsetShowsBar(b, work, d.edge)) { deps.log && deps.log('desk', `B121: StuckRects3 báo tự ẩn nhưng khung làm việc Electron bị trừ thanh cạnh ${TB.EDGE_VI[d.edge] || d.edge} — thanh đang hiện, giữ điểm bấm (${Math.round(x)},${Math.round(y)})`); return { x, y }; }
     const p = TB.place(x, y, b, box, { autoHide: true, edge, thick, win, owns: true });
     if (p.why === 'outside') return { x, y };
     // #27: đưa chuột ra giữa cửa sổ TRƯỚC khi tới mép, để thanh tác vụ kịp ẩn. Điểm bấm đã nằm ngoài dải, nên cú rê sau không chạm mép.
