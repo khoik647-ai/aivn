@@ -80,7 +80,7 @@ function recall(rec, { ctx, free, identity: id, now = Date.now() } = {}) {
     if (rec.totalLayers > 0 && up > rec.totalLayers) up = rec.totalLayers;
     const underCrash = !(rec.crashedGpu > 0) || up < rec.crashedGpu;
     // Chỉ bước lên khi còn dưới số lớp đã OOM. VRAM trống tăng ≥ FREE_ROSE thì nhánh rose ở trên đã bỏ trần để dò lại.
-    const underOom = !(rec.oomGpu > 0) || up < rec.oomGpu || rose;
+    const underOom = !(rec.oomGpu > 0) || up < rec.oomGpu;
     if (underCrash && underOom) cap = up;
   }
   if (rec.oom && cap > 0) out.capLayers = cap;
