@@ -8,6 +8,7 @@ let lib = null;           // module node-llama-cpp (ESM)
 let llama = null;         // instance Llama
 let current = null;       // { id, path, model, context }
 let loading = null;       // promise khi đang nạp
+let loadTail = Promise.resolve(); // hàng đợi nạp: hai lời gọi đang chờ không được chạy song song
 let queue = Promise.resolve(); // tuần tự hoá các yêu cầu sinh văn bản
 let vision = null;        // llama-server (mmproj) khi mô hình nhìn được ảnh
 let visionOn = false;
@@ -131,14 +132,27 @@ function loadPlans({ gpu, vram, fileSize, geo, ctx, userLayers, kvScale = 1, min
   return plans;
 }
 
+// Một lần nạp tại một thời điểm. `if (loading) await loading` rồi gán lại khiến hai lời gọi
+// đang chờ cùng đi tiếp và gỡ mô hình của nhau. Hàng đợi gắn đuôi trước mọi await.
+function exclusiveLoad(fn) {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const prev = loadTail;
+  loadTail = gate;
+  const run = prev.catch(() => {}).then(async () => {
+    loading = run;
+    try { return await fn(); }
+    finally { if (loading === run) loading = null; release(); }
+  });
+  return run;
+}
 async function loadModel(id, modelPath, opts = {}) {
   // cùng tệp đã nạp: giữ nguyên, TRỪ khi cần ngữ cảnh lớn hơn ngữ cảnh đang có (0.15.2: tự tăng ngữ cảnh)
   const wantCtx = opts.minContextSize || Math.min(Number(opts.contextSize) || 0, 8192);
+  return exclusiveLoad(async () => {
   if (!opts.reload && !opts.mmproj && current && current.path === modelPath && !(wantCtx && current.context.contextSize < wantCtx)) return status();
   if (!opts.reload && opts.mmproj && visionOn && getVision().status()?.path === modelPath && !(wantCtx && (getVision().status().contextSize || 0) < wantCtx)) return status();
-  if (loading) await loading.catch(() => {});
   if (opts.mmproj) {
-    loading = (async () => {
       await unloadModel();
       const l = await getLlama().catch(() => null);
       const vpf = opts.perf || {}; const vx = { ...(vpf.threads ? { threads: vpf.threads } : {}), ...(vpf.batchSize ? { batchSize: vpf.batchSize } : {}), extraArgs: opts.serverArgs, serverExe: opts.serverExe || null,
@@ -154,11 +168,8 @@ async function loadModel(id, modelPath, opts = {}) {
         await getVision().start({ id, modelPath, mmprojPath: opts.mmproj, contextSize: opts.contextSize || 4096, gpu: false, ...vx });
       }
       visionOn = true; visionVramCache = null;
-    })();
-    try { await loading; } finally { loading = null; }
-    return status();
+      return status();
   }
-  loading = (async () => {
     await unloadModel();
     const ctxMax = opts.contextSize || 4096;
     const attempts = [];
@@ -184,7 +195,7 @@ async function loadModel(id, modelPath, opts = {}) {
         let tokenPredictor; if (pf.lookup) { try { const { InputLookupTokenPredictor } = await getLib(); tokenPredictor = new InputLookupTokenPredictor(); } catch {} }
         current = { id, path: modelPath, model, context, tokenPredictor, loadedAt: Date.now(), mode: plan.mode, meta: { name: geo.name, arch: geo.arch, sizeLabel: geo.sizeLabel, toolTemplate: geo.toolTemplate, trainCtx: geo.trainCtx || null }, gpuLayers: model.gpuLayers, totalLayers: geo.layers ? geo.layers + 1 : null, attempts: attempts.map(a => a.mode + ': ' + a.message),
           perf: { threads: pf.threads || l.cpuMathCores || null, batchSize: pf.batchSize || 512, kv: kvUsed ? 'q8_0' : 'f16', flashAttention: context.flashAttention ?? null, lookup: !!tokenPredictor, profile: pf.effective || null } };
-        return;
+        return status();
       } catch (e) {
         attempts.push({ mode: `${plan.mode} (${plan.gpuLayers} lớp GPU, ngữ cảnh ${plan.ctx})`, message: String(e && e.message || e), stack: String(e && e.stack || '') });
         try { if (model) await model.dispose(); } catch {}
@@ -193,9 +204,7 @@ async function loadModel(id, modelPath, opts = {}) {
     const err = new Error(attempts[attempts.length - 1].message);
     err.code = 'LOAD_FAILED'; err.attempts = attempts; err.gpu = !!l.gpu;
     throw err;
-  })();
-  try { await loading; } finally { loading = null; }
-  return status();
+  });
 }
 
 
@@ -474,7 +483,7 @@ function embed(texts, kind = 'passage') {
 function countTokens(text) { if (!current) return Math.ceil(text.length / 3); try { return current.model.tokenize(text).length; } catch { return Math.ceil(text.length / 3); } }
 
 async function countTokensAsync(texts) { if (visionOn) { const r = await getVision().countTokens(texts); if (r) return r; } return texts.map(countTokens); }
-module.exports = { setLoadProgress, loadPlans, modelGeometry, vramInfo, countTokens, countTokensAsync, hardwareInfo, loadModel, unloadModel, status, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount };
+module.exports = { setLoadProgress, loadPlans, modelGeometry, vramInfo, countTokens, countTokensAsync, hardwareInfo, loadModel, unloadModel, status, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount, exclusiveLoad };
 
 // B123: llama-server CUDA → 'cuda'; bản đi kèm → vulkan (Windows) / metal (Mac) / cpu (Linux); 0 lớp lên GPU → 'cpu'
 function serverBackend(v) { if (!v) return null; if (v.gpuLayers === 0) return 'cpu'; if (v.runtime === 'cuda') return 'cuda'; return process.platform === 'win32' ? 'vulkan' : process.platform === 'darwin' ? 'metal' : 'cpu'; }
