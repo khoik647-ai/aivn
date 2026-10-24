@@ -628,7 +628,138 @@ function cleanHeader(lines = []) {
   return out;
 }
 const exactName = (names, x) => { const kx = nameKey(x); return !!kx && names.some(n => nameKey(n) === kx); };
-function chatGate({ query, text, searchField = false, submit = false, proc = '', title = '', state = {}, header = [], ocrHeader = null, seenHeader = null, composer = [] }) {
+// B220: nhận diện ứng dụng nhắn tin / Outlook bằng TÊN TIẾN TRÌNH, lớp cửa sổ, hoặc host của trình duyệt.
+// Tiêu đề cửa sổ không được dùng — tiêu đề giả không được mở cũng không được tắt cổng này.
+const OUTLOOK_HOSTS = new Set(['outlook.office.com', 'outlook.live.com', 'outlook.office365.com']);
+const BROWSER_PROC = /^(?:chrome|msedge|firefox|brave|opera|browser|coccoc|vivaldi|chromium|iexplore|safari)$/i;
+function procBase(proc) { return String(proc || '').replace(/^.*[\\/]/, '').replace(/\.exe$/i, '').toLowerCase(); }
+function hostName(v) {
+  const s = String(v || '').trim(); if (!s) return '';
+  try {
+    const withScheme = /^https?:\/\//i.test(s) ? s : (/^[\w.-]+\.[a-z]{2,}(?:[:/]|$)/i.test(s) ? 'https://' + s : '');
+    if (!withScheme) return '';
+    return new URL(withScheme).hostname.toLowerCase().replace(/\.$/, '');
+  } catch { return ''; }
+}
+function hostFromElements(elements) {
+  const ADDR = /address|omnibox|thanh địa chỉ|thanh dia chi|địa chỉ và tìm|địa chỉ|dia chi|^url$|address and search/i;
+  for (const e of elements || []) {
+    if (!e) continue;
+    if (e.url) { const h = hostName(e.url); if (h) return h; }
+    if (ADDR.test(`${e.name || ''} ${e.autoId || ''} ${e.role || ''}`)) { const h = hostName(e.value || ''); if (h) return h; }
+  }
+  return '';
+}
+function sendAppKind({ proc, className, url, host, elements } = {}) {
+  const p = procBase(proc);
+  if (p === 'zalo') return 'zalo';
+  if (/^(?:teams|ms-teams|msteams)$/.test(p)) return 'teams';
+  if (p === 'outlook') return 'outlook';
+  if (p === 'olk' || p === 'outlookforwindows') return 'outlook-new';
+  if (/^rctrl_renwnd32$/i.test(String(className || '')) && p !== 'notepad' && p !== 'winword' && p !== 'wordpad') return 'outlook';
+  const h = hostName(host) || hostName(url) || hostFromElements(elements);
+  if (BROWSER_PROC.test(p) && OUTLOOK_HOSTS.has(h)) return 'outlook-web';
+  return null;
+}
+function isOutlookApp(kind) { return kind === 'outlook' || kind === 'outlook-new' || kind === 'outlook-web'; }
+function mailFieldKind(el) {
+  if (!el) return '';
+  const raw = String(el.name || el.autoId || el.placeholder || '').trim();
+  const f = fold(raw).replace(/[:：]\s*$/, '');
+  if (/^(?:to|den|toi|nguoi nhan|para)$/.test(f)) return 'to';
+  if (/^(?:cc|dong gui)$/.test(f)) return 'cc';
+  if (/^(?:bcc|an gui)$/.test(f)) return 'bcc';
+  if (/^(?:subject|tieu de|chu de)$/.test(f)) return 'subject';
+  if (/^(?:收件人|宛先)$/.test(raw)) return 'to';
+  if (/^抄送$/.test(raw)) return 'cc';
+  if (/^(?:密送|密件抄送)$/.test(raw)) return 'bcc';
+  if (/^(?:主题|主旨|件名)$/.test(raw)) return 'subject';
+  return '';
+}
+function splitRcpt(v) {
+  return String(v || '').split(/[;,\n、]+/).map(s => s.trim()).filter(s => s && !/^(?:to|cc|bcc|đến|tới|người nhận)$/iu.test(s));
+}
+function readMail(elements) {
+  const to = [], cc = [], bcc = [];
+  for (const e of elements || []) {
+    const k = mailFieldKind(e);
+    if (!k || k === 'subject') continue;
+    if (e.valueError || e.unreadable) return { to, cc, bcc, unreadable: true };
+    const bucket = k === 'to' ? to : k === 'cc' ? cc : bcc;
+    for (const p of splitRcpt(e.value)) bucket.push(p);
+  }
+  return { to, cc, bcc, unreadable: false };
+}
+function treeUnreadable(obs, elements) {
+  if (obs && (obs.uiaError || obs.unread || obs.error || obs.partial || obs.truncated || obs.timedOut)) return true;
+  const els = elements || (obs && obs.elements) || [];
+  if (!els.length) return true;
+  const named = els.filter(e => String((e && (e.name || e.value)) || '').trim());
+  return named.length < 3;
+}
+function bodyHasText(elements, win) {
+  for (const e of elements || []) {
+    if (!e || mailFieldKind(e)) continue;
+    if (/tìm|tim kiem|search|find|搜索|查找/i.test(`${e.name || ''} ${e.placeholder || ''} ${e.autoId || ''}`)) continue;
+    const v = String(e.value || '').trim();
+    if (!v) continue;
+    if (e.editable || isComposerEl(e, win) || /message|body|nội dung|noi dung|thân|正文|document/i.test(`${e.name || ''} ${e.role || ''} ${e.kind || ''}`)) return true;
+  }
+  return false;
+}
+function focusIsCompose(el, win) {
+  if (!el) return false;
+  const blob = `${el.name || ''} ${el.autoId || ''} ${el.placeholder || ''}`;
+  if (/tìm|tim kiem|search|find|搜索|查找/i.test(blob)) return false;
+  if (mailFieldKind(el)) return false;
+  if (isComposerEl(el, win)) return true;
+  if (/document|message|nội dung|noi dung|thân|正文|compose/i.test(`${el.role || ''} ${el.kind || ''} ${blob}`)) return true;
+  return false;
+}
+function gateFields({ obs = null, win = null, elements = null, target = null, focusedEl = null, altArmed = false, composerFocus = false } = {}) {
+  const w = win || (obs && obs.win) || {};
+  const els = elements || (obs && obs.elements) || [];
+  const sendApp = sendAppKind({ proc: w.proc, className: w.className || w.cls || (obs && obs.diag && obs.diag.cls) || '', url: w.url || (obs && obs.url) || '', host: w.host || '', elements: els });
+  const coordinate = !!(target && (target.via === 'toạ độ' || (target.x != null && target.y != null && !target.el)));
+  const focus = (target && target.el && mailFieldKind(target.el)) ? target.el : (focusedEl || (target && target.el) || null);
+  const mailField = mailFieldKind(focus) || '';
+  if (!sendApp) return { sendApp: null, coordinate: false, composeHot: false, composeUnreadable: false, inCompose: false, altArmed: !!altArmed, mail: null, mailField: '' };
+  const mail = readMail(els);
+  if (treeUnreadable(obs, els)) mail.unreadable = true;
+  const composeHot = !!(mail.unreadable || mail.to.length || mail.cc.length || mail.bcc.length || bodyHasText(els, w));
+  const inCompose = !!(composerFocus || focusIsCompose(focusedEl, w) || focusIsCompose(target && target.el, w));
+  return { sendApp, coordinate, composeHot, composeUnreadable: !!mail.unreadable, inCompose, altArmed: !!altArmed, mail, mailField };
+}
+function recipientMatches(want, got) {
+  const g = String(got || '').trim(); if (!g || !want) return false;
+  const names = namesFor(want);
+  const hit = (x) => names.some(n => headerMatches(n, x) || fold(n) === fold(x));
+  if (hit(g)) return true;
+  const disp = g.replace(/<[^>]*>/g, ' ').replace(/["']/g, ' ').replace(/\s+/g, ' ').trim();
+  return !!(disp && disp !== g && hit(disp));
+}
+function outlookGate({ query, text, searchField = false, submit = false, state = {}, mail = null, mailField = '' }) {
+  if (lookOnly(query)) { if (searchField) return null; return LOOK_REFUSE; }
+  const recipient = recipientOf(query);
+  const box = mail || { to: [], cc: [], bcc: [], unreadable: true };
+  if (!submit && (mailField === 'to' || searchField) && recipient && (onlyName(text, recipient) || typingName(text, recipient))) return null;
+  if (!mail || box.unreadable) {
+    state.askWho = state.askWho || askWho();
+    return 'CHƯA gửi thư: không đọc được ô To/Cc/Bcc (cây giao diện lỗi hoặc thiếu). Không gửi khi không chắc người nhận.';
+  }
+  const got = [...(box.to || []), ...(box.cc || []), ...(box.bcc || [])].map(s => String(s).trim()).filter(Boolean);
+  if (!recipient) {
+    state.askWho = askWho();
+    return `CHƯA gửi thư: không xác định được NGƯỜI NHẬN trong yêu cầu. Ô To/Cc/Bcc ${got.length ? `đang là “${got.slice(0, 3).join(', ')}”` : 'đang trống'}. Hỏi người dùng: ${state.askWho}`;
+  }
+  if (!got.length) return `CHƯA gửi thư: ô To/Cc/Bcc đang trống — cần đúng người nhận “${recipient}”, không gửi khi chưa có người nhận.`;
+  if (got.length !== 1) return `CHƯA gửi thư: To/Cc/Bcc có ${got.length} người (${got.slice(0, 4).join(', ')}) — chỉ được đúng “${recipient}”, không thêm người nhận.`;
+  if (!recipientMatches(recipient, got[0])) return `CHƯA gửi thư: người nhận “${got[0]}” trên ô To/Cc/Bcc không khớp “${recipient}”.`;
+  return null;
+}
+function chatGate({ query, text, searchField = false, submit = false, proc = '', title = '', state = {}, header = [], ocrHeader = null, seenHeader = null, composer = [], className = '', url = '', host = '', elements = null, mail = null, mailField = '' } = {}) {
+  const app = sendAppKind({ proc, className, url, host, elements });
+  if (isOutlookApp(app)) return outlookGate({ query, text, searchField, submit, state, mail, mailField });
   if (!isChatContext(query, proc, title)) return null;
   // B219: câu chỉ nhìn ô soạn — không hỏi “Gửi cho ai?”. Mọi lần gõ vào ô chưa xác nhận là ô tìm kiếm đều bị chặn
   // (kể cả chữ nằm trong ngoặc kép của câu hỏi, ví dụ Is "hi" in the message box?): gõ rồi Enter sẽ lọt cổng B108.
@@ -796,4 +927,4 @@ function placeholderLike(name) {
 }
 const LOOK_REFUSE = 'KHÔNG gõ và KHÔNG gửi: câu này chỉ yêu cầu nhìn màn hình và trả lời, không soạn và không gửi.';
 const SEND_BLOCK = 'KHÔNG gửi: câu này không phải lệnh gửi rõ ràng, nên không bấm Enter, Ctrl+Enter, Alt+S hay nút gửi.';
-module.exports = { headerLike, textFromRequest, quotedIn, selfReport, msgSend, lookOnly, allowsSend, hasSendVerb, intentText, placeholderLike, DRAFT_ONLY, LOOK_REFUSE, SEND_BLOCK, cleanHeader, cleanHeaderLine, searchClose, searchRowText, fileAt, searchLeftover, isComposerEl, findComposer, nameLikeText, isFileTarget, wantsFiles, FILE_NAME, composerTarget, COMPOSER_TO, namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold };
+module.exports = { headerLike, textFromRequest, quotedIn, selfReport, msgSend, lookOnly, allowsSend, hasSendVerb, intentText, placeholderLike, DRAFT_ONLY, LOOK_REFUSE, SEND_BLOCK, cleanHeader, cleanHeaderLine, searchClose, searchRowText, fileAt, searchLeftover, isComposerEl, findComposer, nameLikeText, isFileTarget, wantsFiles, FILE_NAME, composerTarget, COMPOSER_TO, namesFor, ALIASES, FORMER, cancelWho, unclearWho, CANCELLED_WHO: CANCEL_WHO_MSG, notAName, missingRecipient, MSG_SEND, CURRENT_CHAT, currentChatName, askWho, ASK_WHO, ASKED_WHO, answerWho, chatShown, APP_TITLE, sameNameCandidates, onlyName, parenNotes, chatGate, typingName, relates, isChatContext, regionsOf, recipientOf, nameSeen, nameKey, headerMatches, isSendAction, verifySend, parseSeen, SEEN_QUESTION, fold, sendAppKind, gateFields, isOutlookApp };
