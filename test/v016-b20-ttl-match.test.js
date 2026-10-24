@@ -20,7 +20,6 @@ const OTHER = 'other-model';
 const PATH_ID = 'D:\\models\\qwen2.5-3b-instruct';
 const PATH_REQ = 'D:\\models\\qwen2.5-3b';
 const BAD_FILE_MSG = 'Tệp mô hình bị hỏng hoặc tải chưa xong. Hãy xoá mô hình này và tải lại.';
-const SHADOW = (have) => `Mô hình đã đổi trong lúc nạp (${have}). Yêu cầu này không trả lời bằng mô hình khác. Hãy gửi lại.`;
 const LOAD_FAIL = 'Nạp mô hình không thành công. Hãy thử lại.';
 const UNKNOWN = ['gpt-4o-mini', 'claude-3-5-sonnet-latest', 'claude-sonnet-4-20250514'];
 
@@ -212,10 +211,15 @@ test('tiền tố đúng một mô hình vẫn khớp; hai tiền tố thì HTTP
     ]);
     assert.strictEqual(chat.status, 409, JSON.stringify(chat.json));
     assert.strictEqual(messages.status, 409, JSON.stringify(messages.json));
-    assert.strictEqual(chat.json.error.message, SHADOW('chưa có mô hình'));
-    assert.strictEqual(chat.json.error.type, 'model_changed');
-    assert.strictEqual(messages.json.error.message, SHADOW('chưa có mô hình'));
-    assert.strictEqual(messages.json.error.type, 'invalid_request_error');
+    assert.strictEqual(chat.json.error.code, 'model_ambiguous');
+    assert.strictEqual(chat.json.error.type, 'model_ambiguous');
+    assert.match(chat.json.error.message, /qwen2\.5-3b-instruct/);
+    assert.match(chat.json.error.message, /qwen2\.5-3b-base/);
+    assert.doesNotMatch(chat.text, /gửi lại|resend/i);
+    assert.strictEqual(messages.json.error.code, 'model_ambiguous');
+    assert.strictEqual(messages.json.error.type, 'model_ambiguous');
+    assert.strictEqual(messages.json.error.message, chat.json.error.message);
+    assert.doesNotMatch(messages.text, /gửi lại|resend/i);
     assert.strictEqual(W.loaded, null);
   } finally { await api.stop(); }
 });
@@ -232,9 +236,11 @@ test('tiền tố mơ hồ khi đang có mô hình khác vẫn 409, không trả
     ]);
     assert.strictEqual(chat.status, 409, JSON.stringify(chat.json));
     assert.strictEqual(messages.status, 409, JSON.stringify(messages.json));
-    assert.strictEqual(chat.json.error.message, SHADOW(OTHER));
-    assert.strictEqual(chat.json.error.type, 'model_changed');
-    assert.strictEqual(messages.json.error.message, SHADOW(OTHER));
+    assert.strictEqual(chat.json.error.code, 'model_ambiguous');
+    assert.strictEqual(messages.json.error.code, 'model_ambiguous');
+    assert.match(chat.json.error.message, /qwen2\.5-3b-instruct/);
+    assert.match(messages.json.error.message, /qwen2\.5-3b-base/);
+    assert.doesNotMatch(chat.text + messages.text, /gửi lại|resend/i);
     assert.strictEqual(W.loaded, OTHER);
   } finally { await api.stop(); }
 });

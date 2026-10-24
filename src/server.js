@@ -45,9 +45,10 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
   };
   const cors = () => (getOpts().cors ? { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key, anthropic-version', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' } : {});
   // B80: mọi phản hồi lỗi đều vào nhật ký kèm mã (trước đây 404 chỉ thấy “POST /v1/completions”, không thấy mã)
-  const err = (res, code, message, type = 'invalid_request_error') => { if (code !== 401) log(`  → ${code} ${String(message).slice(0, 200)}`); return send(res, code, { error: { message, type, code } }); };
+  const err = (res, code, message, type = 'invalid_request_error', errorCode = code) => { if (code !== 401) log(`  → ${code} ${String(message).slice(0, 200)}`); return send(res, code, { error: { message, type, code: errorCode } }); };
   const modelErr = (res, e) => {
     if (e && (e.status === 503 || e.status === 504)) return err(res, e.status, e.message, e.type || 'api_error');
+    if (e && e.status === 409 && e.type === 'model_ambiguous') return err(res, 409, e.message, e.type, e.type);
     if (e && e.status === 409) return err(res, 409, e.message, e.type || 'model_changed');
     // Tệp đúng id nhưng hỏng hoặc tải dở: bảo xoá rồi tải lại, không phải "không có mô hình".
     if (e && e.code === 'BAD_FILE') return err(res, 503, 'Tệp mô hình bị hỏng hoặc tải chưa xong. Hãy xoá mô hình này và tải lại.', 'api_error');

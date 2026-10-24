@@ -86,4 +86,4 @@ function modelChanged(list, requested, before, after) {
   return null;
 }
 
-module.exports = { normId, resolveModel, sameModel, modelChanged, ambiguousPrefix };
+module.exports = { normId, resolveModel, sameModel, modelChanged, ambiguousPrefix, prefixHits };

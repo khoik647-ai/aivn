@@ -19,25 +19,35 @@ function identity(x = {}) {
     settings: String(x.settings ?? ''),
   };
 }
+function hasDriver(rec) {
+  return !!rec && Object.prototype.hasOwnProperty.call(rec, 'driver');
+}
 function same(rec, id, now) {
   if (!rec || !id) return false;
-  for (const k of ['file', 'size', 'mtime', 'backend', 'gpuName', 'vramTotal', 'driver', 'settings']) if (rec[k] !== id[k]) return false;
+  for (const k of ['file', 'size', 'mtime', 'backend', 'gpuName', 'vramTotal', 'settings']) if (rec[k] !== id[k]) return false;
+  // Bản ghi cũ (trước khi có khoá driver) vẫn là cùng máy. Khoá có mặt mà khác thì bỏ.
+  if (hasDriver(rec) && rec.driver !== id.driver) return false;
   if (!(rec.at > 0) || (now || Date.now()) - rec.at > EXPIRY_MS) return false;
   return true;
 }
 function blank(id, now) { return { ...identity(id), at: now }; }
+function adopt(prev, id, now) {
+  const known = { ...prev, at: now };
+  if (!hasDriver(prev)) known.driver = id.driver;
+  return known;
+}
 
 // event: { gpu, totalLayers, ctx, requestedCtx, oom, freeAt }
 // Trả null = xoá bản ghi (chỉ khi nạp trọn lớp, không oom, chưa sập).
 function note(prev, event = {}, id, now = Date.now()) {
-  const known = same(prev, id, now) ? { ...prev } : blank(id, now);
+  const known = same(prev, id, now) ? adopt(prev, id, now) : blank(id, now);
   known.at = now;
   // Số lớp đã hết VRAM. Bước +4 sau này không được chạm lại đúng mức đó.
   if (event.oomGpu > 0) known.oomGpu = known.oomGpu > 0 ? Math.min(known.oomGpu, event.oomGpu) : event.oomGpu;
   if (event.freeAt > 0) known.freeAt = event.freeAt;
   if (event.totalLayers > 0) known.totalLayers = event.totalLayers;
   if (!(event.gpu > 0)) {
-    if (!event.oom) return same(prev, id, now) ? { ...prev, at: now } : null;
+    if (!event.oom) return same(prev, id, now) ? adopt(prev, id, now) : null;
     known.cpuFail = true;
     known.oom = true;
     known.ctx = event.ctx || known.ctx || null;
@@ -61,7 +71,7 @@ function note(prev, event = {}, id, now = Date.now()) {
   return known;
 }
 function noteCrash(prev, id, { ctx, gpu } = {}, now = Date.now()) {
-  const known = same(prev, id, now) ? { ...prev } : blank(id, now);
+  const known = same(prev, id, now) ? adopt(prev, id, now) : blank(id, now);
   known.at = now; known.crash = true; known.safe = true;
   if (gpu > 0) known.crashedGpu = gpu;
   known.ctx = ctx || known.ctx || null;

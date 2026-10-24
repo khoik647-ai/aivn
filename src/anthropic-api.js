@@ -9,8 +9,10 @@ class AnthropicError extends Error {
   constructor(message, status = 400, type = 'invalid_request_error') { super(message); this.status = status; this.type = type; }
 }
 
-function anthropicError(res, status, type, message, headers) {
-  const body = JSON.stringify({ type: 'error', error: { type, message: String(message || '') } });
+function anthropicError(res, status, type, message, headers, errorCode) {
+  const error = { type, message: String(message || '') };
+  if (errorCode != null && errorCode !== '') error.code = errorCode;
+  const body = JSON.stringify({ type: 'error', error });
   if (res.writableEnded) return;
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', ...(headers || {}) });
   res.end(body);
@@ -249,7 +251,7 @@ function clientGone(req, res) {
 
 async function handleMessages({ req, res, engine, ensureModel, log, cors, readBody, models = null }) {
   const headers = cors();
-  const fail = (status, type, message) => { if (status !== 401) log(`  → ${status} ${String(message).slice(0, 200)}`); return anthropicError(res, status, type, message, headers); };
+  const fail = (status, type, message, errorCode) => { if (status !== 401) log(`  → ${status} ${String(message).slice(0, 200)}`); return anthropicError(res, status, type, message, headers, errorCode); };
   let body;
   try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) {
     if (e && e.status === 413) return fail(413, 'invalid_request_error', 'Body quá lớn');
@@ -268,6 +270,7 @@ async function handleMessages({ req, res, engine, ensureModel, log, cors, readBo
     if (missingModel(e)) return fail(404, 'not_found_error', e.message);
     if (e && (e.status === 503 || e.status === 504)) return fail(e.status, e.type || 'api_error', e.message);
     if (e && e.code === 'BAD_FILE') return fail(503, 'api_error', 'Tệp mô hình bị hỏng hoặc tải chưa xong. Hãy xoá mô hình này và tải lại.');
+    if (e && e.type === 'model_ambiguous') return fail(e.status || 409, e.type, e.message, e.type);
     return fail(e.status || 400, 'invalid_request_error', e.message);
   }
   if (ac.signal.aborted || clientGone(req, res)) return;

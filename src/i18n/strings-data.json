@@ -493,7 +493,7 @@
  "Đã xong {0}: {1}{2}",
  "Đã đảo",
  "Đích đã có tệp cùng tên.",
- "Đóng bớt trình duyệt/ứng dụng nặng khi trò chuyện; AIVN tự gỡ mô hình sau 10 phút không dùng để trả lại RAM.",
+ "Đóng bớt trình duyệt/ứng dụng nặng khi trò chuyện để trả lại RAM. Mô hình đang chọn không tự gỡ.",
  "Đơn bán hàng đã xác nhận: không sửa dòng được nữa. Huỷ đơn rồi “Đặt lại báo giá” nếu cần sửa.",
  "Đơn này đã được xác nhận.",
  "Đơn đã có hoá đơn hoặc đã giao hàng: không xoá được, chỉ huỷ.",
