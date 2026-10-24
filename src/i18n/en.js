@@ -1798,6 +1798,7 @@
     "chưa dùng được cho AIVN AGENT:": "not usable for AIVN AGENT yet:",
     "chưa gõ — chưa thấy ô soạn tin": "not typed — message box not found",
     "chưa gõ — con trỏ không ở ô soạn tin": "not typed — the cursor isn't in the message box",
+    "chưa gửi — người nhận trên To/Cc/Bcc chưa khớp": "not sent — the To/Cc/Bcc recipient does not match",
     "chưa hẹn giờ": "no time set",
     "chưa kiểm chứng được là đã gửi": "could not confirm that it was sent",
     "chưa kiểm tra được": "could not check",

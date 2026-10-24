@@ -108,10 +108,14 @@ function resolveModel(want, models = []) {
     || models.find(m => m.catalog && String(m.catalog.id).toLowerCase() === w)
     || (nw ? models.find(m => keys(m).some(x => x === nw)) || models.find(m => nw.length >= 6 && keys(m).some(x => x.startsWith(nw))) : null) || null;
 }
-const isRiskyAsk = (req = {}) => !!req.risk || RISK_RE.test([req.title, req.desc, req.text, req.label, req.tool, req.message].filter(Boolean).join(' '));
+// B220: thẻ gửi / bấm không tên / bấm toạ độ / ô soạn đang có chữ không bao giờ được QA tự cho phép.
+function autoSendBlocked(req = {}) {
+  return !!(req.failClosed || req.unnamed || req.coordinate || req.composeHot || req.composeUnreadable);
+}
+const isRiskyAsk = (req = {}) => !!req.risk || !!req.send || autoSendBlocked(req) || RISK_RE.test([req.title, req.desc, req.text, req.label, req.tool, req.message].filter(Boolean).join(' '));
 // thẻ xin phép bất kỳ trong chế độ QA → luôn từ chối bước quan trọng; bước thường (không rủi ro) của lớp phủ màn hình được làm như bài đo
 function answerFor(req, { draft }) {
-  if (isRiskyAsk(req)) return { ok: false, reason: draft ? 'Chỉ soạn sẵn, đừng gửi (chế độ QA: tự từ chối bước cần xin phép)' : 'Chế độ QA: tự từ chối bước cần xin phép' };
+  if (isRiskyAsk(req) || autoSendBlocked(req)) return { ok: false, reason: draft ? 'Chỉ soạn sẵn, đừng gửi (chế độ QA: tự từ chối bước cần xin phép)' : 'Chế độ QA: tự từ chối bước cần xin phép' };
   return { ok: true, reason: '' };
 }
 // trạng thái trung thực từ kết quả AIVN AGENT
@@ -239,6 +243,7 @@ async function run(args, deps, { runId = String(Date.now()) } = {}) {
   // --approve-send-to: CHỈ thẻ GỬI của lớp phủ màn hình, người nhận theo lệnh là cuộc trò chuyện của chính mình, tiêu đề khung giữa ĐÚNG là nó, chưa cho phép lần nào
   const selfSend = (kind, req) => {
     if (!args.approveSendTo || kind !== 'desk' || !req.send) return null;
+    if (autoSendBlocked(req)) return null; // B220: không tên / toạ độ / ô soạn có chữ không đi đường tự cho phép Cloud của tôi
     const v = selfChatShown(req);
     const why = draft ? 'lệnh nói chỉ soạn, đừng gửi' : sendApproved ? 'đã cho phép một lần gửi rồi' : !isSelfChat(req.recipient) ? `người nhận “${req.recipient || '?'}” không phải cuộc trò chuyện của chính bạn`
       : !v.ok ? v.why : null;
@@ -350,4 +355,4 @@ async function waitResult(out, runId, ms, sleep = (t) => new Promise(r => setTim
   while (Date.now() < end) { try { const j = JSON.parse(fs.readFileSync(out, 'utf8')); if (j && j.runId === runId) return j; } catch {} await sleep(500); }
   return null;
 }
-module.exports = { DRAFT_OK_RE, FAIL_CLAIM, finalAnswerOf, selfChatShown, isSelfChat, SELF_CHAT, parseArgs, validate, validateKind, fromArgv, resolveModel, isRiskyAsk, answerFor, statusOf, exitCodeOf, run, waitResult, writeJson, DRAFT_RE };
+module.exports = { DRAFT_OK_RE, FAIL_CLAIM, finalAnswerOf, selfChatShown, isSelfChat, SELF_CHAT, parseArgs, validate, validateKind, fromArgv, resolveModel, isRiskyAsk, autoSendBlocked, answerFor, statusOf, exitCodeOf, run, waitResult, writeJson, DRAFT_RE };
