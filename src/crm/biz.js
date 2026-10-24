@@ -20,7 +20,7 @@ const newId = (p) => p + '_' + crypto.randomBytes(6).toString('hex');
 const str = (v, max = 500) => (v == null ? '' : String(v)).trim().slice(0, max);
 const num = (v) => { const n = T.parseQty(v); return Number.isFinite(n) ? n : 0; }; // B50: “1.000” = 1000, làm tròn 3 chữ số
 // Ngày chứng từ là lịch dân sự, không qua múi giờ máy (new Date('YYYY-MM-DD') lệch một ngày ở UTC−).
-// Mốc thời gian (lúc xác nhận đơn) quy về giờ Việt Nam UTC+7, không giờ mùa — R3-K1 trước đây chỉ đúng khi máy đang ở UTC+7.
+// Mốc thời gian (lúc xác nhận đơn, và “hôm nay” cho quá hạn) quy về giờ Việt Nam UTC+7, không giờ mùa — cùng civilOf với R3-K1.
 const VN_MS = 7 * 60 * 60 * 1000;
 const pad2 = (n) => String(n).padStart(2, '0');
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
@@ -67,7 +67,7 @@ function agedReceivable(open, t) {
       remain.set(i.id, left[k]);
       if (!(left[k] > 0)) return;
       const b = ageBucket(i.due_date, t); row[b] += left[k]; row.total += left[k];
-      if (isDate(i.due_date) && i.due_date < t) { overdueN += 1; overdueSum += left[k]; }
+      if (i.kind === 'out_invoice' && isDate(i.due_date) && i.due_date < t) { overdueN += 1; overdueSum += left[k]; }
     });
     if (row.total > 0 || row.credit > 0) rows.push(row);
   }
@@ -82,7 +82,7 @@ const EPS = 1e-9;
 // B52 (QA lượt 6): thuế suất không hợp lệ (vd. 7%) → báo lỗi, không tự đổi thành 10%
 const vatOf = (x) => { if (x === undefined || x === null || x === '') return 10; const n = Number(String(x).replace('%', '').trim()); if (![0, 5, 8, 10].includes(n)) throw new CrmError(`Thuế suất GTGT “${x}” không hợp lệ — chỉ nhận 0%, 5%, 8% hoặc 10%.`); return n; };
 
-function createBiz({ db, crm, now = () => Date.now(), today = () => civilOf(Date.now()), log = () => {} }) {
+function createBiz({ db, crm, now = () => Date.now(), today = () => civilOf(now()), log = () => {} }) {
   const hist = (partnerId, text) => { if (partnerId) db.run('INSERT INTO history(id, contact_id, lead_id, kind, text, at) VALUES (?,?,?,?,?,?)', [newId('h'), partnerId, null, 'biz', str(text, 2000), now()]); };
   const year = () => today().slice(0, 4);
   // số chứng từ theo Odoo: WH/OUT/00001, INV/2026/00001, RINV/2026/00001, PAY/2026/00001
@@ -301,7 +301,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => civilOf(Date
     const residual = inv.state === 'posted' ? Math.max(0, inv.amount_total - inv.amount_paid) : inv.amount_total;
     let ps = inv.state !== 'posted' ? 'not_paid' : residual <= 0 && inv.amount_total > 0 ? 'paid' : inv.amount_paid > 0 ? 'partial' : 'not_paid';
     if (inv.kind === 'out_invoice' && inv.state === 'posted' && residual <= 0) { const cr = refundsOf(inv.id).reduce((a, r) => a + r.amount_total, 0); if (cr >= inv.amount_total) ps = 'reversed'; }
-    const overdue = inv.state === 'posted' && residual > 0 && isDate(inv.due_date) && inv.due_date < today();
+    const overdue = inv.kind === 'out_invoice' && inv.state === 'posted' && residual > 0 && isDate(inv.due_date) && inv.due_date < today();
     return { ...inv, residual, payment_state: ps, payment_state_vi: PAY_STATE[ps], state_vi: INV_STATE[inv.state], kind_vi: INV_KIND[inv.kind], overdue, partner_name: (partner(inv.partner_id) || {}).name || '', display_number: inv.number || 'Nháp' };
   }
   function cleanInvLines(lines) {
@@ -363,7 +363,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => civilOf(Date
     if (q) { where.push('(lower(i.number) LIKE ? OR c.name_norm LIKE ? OR lower(s.number) LIKE ?)'); p.push('%' + q.toLowerCase() + '%', '%' + T.fold(q) + '%', '%' + q.toLowerCase() + '%'); }
     let rows = db.all(`SELECT i.* FROM invoices i LEFT JOIN contacts c ON c.id = i.partner_id LEFT JOIN quotes s ON s.id = i.so_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY COALESCE(i.invoice_date, '9999') DESC, i.created_at DESC`, p).map(pubInvoice);
     rows = clearOffsetOverdue(rows);
-    if (payment === 'overdue') rows = rows.filter(r => r.overdue); else if (payment === 'unpaid') rows = rows.filter(r => r.state === 'posted' && r.residual > 0); else if (payment) rows = rows.filter(r => r.payment_state === payment);
+    if (payment === 'overdue') rows = rows.filter(r => r.kind === 'out_invoice' && r.overdue); else if (payment === 'unpaid') rows = rows.filter(r => r.state === 'posted' && r.residual > 0); else if (payment) rows = rows.filter(r => r.payment_state === payment);
     return rows;
   }
   // Vào sổ (Odoo: Confirm/Post): gán số hoá đơn, ngày hoá đơn, hạn thanh toán; giấy báo có thì trừ vào hoá đơn gốc
