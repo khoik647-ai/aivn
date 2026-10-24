@@ -355,8 +355,10 @@ async function loadModel(id, modelPath, opts = {}) {
         const draft = { id, path: modelPath, model, context, tokenPredictor, loadedAt: Date.now(), mode: plan.mode, meta: { name: geo.name, arch: geo.arch, sizeLabel: geo.sizeLabel, toolTemplate: geo.toolTemplate, trainCtx: geo.trainCtx || null }, gpuLayers: model.gpuLayers, totalLayers: geo.layers ? geo.layers + 1 : null, attempts: attempts.map(a => a.mode + ': ' + a.message),
           offload: { gpu: Number.isInteger(plan.gpuLayers) ? plan.gpuLayers : model.gpuLayers, ctx: plan.ctx, requestedCtx: ctxMax, kv: kvUsed ? 'q8_0' : 'f16', oom: abandoned, ...(oomGpu > 0 ? { oomGpu } : {}), confident: !!plan.confident },
           perf: { threads: pf.threads || l.cpuMathCores || null, batchSize: Math.max(1, Math.min(batchCap, plan.ctx)), kv: kvUsed ? 'q8_0' : 'f16', flashAttention: context.flashAttention ?? faUsed, lookup: !!tokenPredictor, profile: pf.effective || null } };
-        if (gpuPlan && !(vram && vram.integratedOnly) && !opts.skipSpeedProbe && process.env.AIVN_SKIP_SPEED_PROBE !== '1') {
-          // Chưa công bố current: status() vẫn là đang nạp, yêu cầu API chờ whenReady / loading.
+        // Trần nhớ từ lần nạp trước (capLayers) mà lần này nạp đúng mức đó: không đo tốc độ lại. Kế hoạch mới vẫn đo.
+        const atRememberedCap = Number.isInteger(opts.capLayers) && opts.capLayers > 0 && plan.gpuLayers === opts.capLayers;
+        if (gpuPlan && !atRememberedCap && !(vram && vram.integratedOnly) && !opts.skipSpeedProbe && process.env.AIVN_SKIP_SPEED_PROBE !== '1') {
+          // Chưa công bố current: status() vẫn báo đang nạp. generate và chatStep đợi whenReady đến mô hình cuối.
           const layersOn = Number.isInteger(plan.gpuLayers) ? plan.gpuLayers : (Number(model.gpuLayers) || 0);
           const totalL = geo.layers ? geo.layers + 1 : layersOn;
           const gpuFrac = totalL > 0 ? Math.min(1, layersOn / totalL) : 1;
@@ -428,10 +430,80 @@ function status() {
   return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, meta: current.meta || null, perf: current.perf || null, offload: current.offload || null, slow: current.slow || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: false };
 }
 
-// Một promise cho cả lần nạp: resolve khi mô hình cuối đã được công bố (hoặc lần nạp kết thúc không có mô hình).
-function whenReady() {
-  if (!loading) return Promise.resolve(status());
-  return loading.then(() => status(), () => status());
+// Đợi lần nạp đang chạy, kể cả khi một lần nạp khác nối đuôi (đổi A sang B). Có hạn, và dừng được theo AbortSignal.
+const LOAD_WAIT_MS = 10 * 60 * 1000;
+function abortErr() { const e = new Error('Đã dừng.'); e.name = 'AbortError'; return e; }
+function waitOrAbort(promise, ms, signal) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(done, ms);
+    function done(err) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (signal) signal.removeEventListener('abort', onAbort);
+      if (err) reject(err); else resolve();
+    }
+    function onAbort() { done(abortErr()); }
+    if (signal) {
+      if (signal.aborted) done(abortErr());
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
+    Promise.resolve(promise).then(() => done(), () => done());
+  });
+}
+async function whenReady(signal) {
+  const deadline = Date.now() + LOAD_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (signal && signal.aborted) throw abortErr();
+    const pending = loading;
+    if (pending) {
+      await waitOrAbort(pending.catch(() => {}), Math.max(1, deadline - Date.now()), signal);
+      continue;
+    }
+    return status();
+  }
+  return status();
+}
+async function waitPublished(signal) {
+  const deadline = Date.now() + LOAD_WAIT_MS;
+  while (Date.now() < deadline) {
+    const st = await whenReady(signal);
+    if (loading) continue;
+    if (st && st.loaded) return st;
+    throw new Error('Chưa nạp mô hình nào.');
+  }
+  if (status().loaded) return status();
+  throw new Error('Chưa nạp mô hình nào.');
+}
+function enqueueWhenReady(signal, run, onAbort) {
+  const go = async () => {
+    await waitPublished(signal);
+    for (;;) {
+      const ticket = current;
+      const sawVision = visionOn;
+      const wrapped = async () => {
+        if (loading || current !== ticket || visionOn !== sawVision) {
+          const e = new Error('đang nạp');
+          e.code = 'RETRY_LOAD';
+          throw e;
+        }
+        return run();
+      };
+      try {
+        const p = queue.then(wrapped, wrapped);
+        queue = p.catch(() => {});
+        return await p;
+      } catch (e) {
+        if (e && e.code === 'RETRY_LOAD') { await waitPublished(signal); continue; }
+        throw e;
+      }
+    }
+  };
+  return go().catch((e) => {
+    if (e && e.name === 'AbortError') return onAbort();
+    throw e;
+  });
 }
 
 // Một chuỗi ngữ cảnh dùng lại giữa các lượt (giữ bộ nhớ đệm KV: lượt sau chỉ tính phần mới của lời nhắc)
@@ -455,7 +527,6 @@ async function chatGrammar(schema) { // đầu ra JSON theo lược đồ cho tr
 // 0.16: seed, chuỗi dừng, đầu ra JSON theo lược đồ, khối suy nghĩ (onToken(t, 'think')), thời gian ra token đầu (ttft), lý do dừng, số token trong ngữ cảnh
 function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal, onToken, sampling = null, seed = null, stop = null, jsonSchema = null } = {}) {
   const run = async () => {
-    if (loading) await loading.catch(() => {});
     if (visionOn) return getVision().generate(messages, { temperature, maxTokens, topP, signal, onToken, sampling, seed, stop, jsonSchema });
     if (!current) throw new Error('Chưa nạp mô hình nào.');
     const { LlamaChatSession } = await getLib();
@@ -509,9 +580,7 @@ function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal,
     let contextTokens = null; try { contextTokens = sequence.contextTokens.length; } catch {}
     return { text, thought: thought || null, finishReason, stopReason, usage: { completion_tokens: completionTokens, tokensPerSecond: completionTokens > 1 ? (completionTokens - 1) / genSecs : 0, seconds: secs, ttft, contextTokens, contextSize: current ? current.context.contextSize : null } };
   };
-  const p = queue.then(run, run);
-  queue = p.catch(() => {});
-  return p;
+  return enqueueWhenReady(signal, run, () => ({ text: '', thought: null, finishReason: 'abort', stopReason: 'abort', usage: { completion_tokens: 0, tokensPerSecond: 0, seconds: 0, ttft: null, contextTokens: null, contextSize: null } }));
 }
 
 // ---- Một bước hội thoại có công cụ (tool calling) / đầu ra JSON theo lược đồ ----
@@ -634,7 +703,6 @@ function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = 
   // vẫn không vừa thì báo rõ cách sửa thay vì lỗi tiếng Anh của node-llama-cpp
   const CTX_RE = TP.CTX_RE;
   const runSafe = async () => {
-    if (loading) await loading.catch(() => {});
     try { return await run(messages, tools); }
     catch (e) {
       if (!CTX_RE.test(String(e && e.message))) throw e;
@@ -646,9 +714,7 @@ function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = 
       }
     }
   };
-  const p = queue.then(runSafe, runSafe);
-  queue = p.catch(() => {});
-  return p;
+  return enqueueWhenReady(signal, runSafe, () => ({ text: '', toolCalls: [], finishReason: 'abort', usage: { completion_tokens: 0, tokensPerSecond: 0, seconds: 0 } }));
 }
 
 

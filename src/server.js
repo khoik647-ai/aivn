@@ -46,7 +46,12 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
   const cors = () => (getOpts().cors ? { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key, anthropic-version', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' } : {});
   // B80: mọi phản hồi lỗi đều vào nhật ký kèm mã (trước đây 404 chỉ thấy “POST /v1/completions”, không thấy mã)
   const err = (res, code, message, type = 'invalid_request_error') => { if (code !== 401) log(`  → ${code} ${String(message).slice(0, 200)}`); return send(res, code, { error: { message, type, code } }); };
-  const modelErr = (res, e) => (e && (e.status === 503 || e.status === 504) ? err(res, e.status, e.message, e.type || 'api_error') : err(res, 400, e.message, 'model_not_found'));
+  const modelErr = (res, e) => {
+    if (e && (e.status === 503 || e.status === 504)) return err(res, e.status, e.message, e.type || 'api_error');
+    // Tệp đúng id nhưng hỏng: không phải "không có mô hình". Cùng câu với lần nạp đang chạy bị lỗi.
+    if (e && e.code === 'BAD_FILE') return err(res, 503, 'Nạp mô hình không thành công. Hãy thử lại.', 'api_error');
+    return err(res, 400, e.message, 'model_not_found');
+  };
   const listNow = () => { try { return typeof models === 'function' ? models() : []; } catch { return []; } };
 
   const readBody = (req, max = 20e6, tooBigMsg) => new Promise((resolve, reject) => {

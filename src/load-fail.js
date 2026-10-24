@@ -35,11 +35,12 @@ function slowOnlyFailure(attempts) {
   return rows.length > 0 && rows.every((a) => a && a.slow);
 }
 
-// Chỉ ghi settings.gpu = false khi đường CPU nạp được và GPU thật sự lỗi.
-// Mọi đường đều lỗi, hoặc chỉ chậm, thì GPU không phải lý do để ghi tắt.
+// Chỉ ghi settings.gpu = false khi đường CPU nạp được và GPU thật sự lỗi (LOAD_FAILED từ backend, thiết bị không hợp lệ).
+// Mọi đường đều lỗi, chỉ chậm, hoặc không có lần GPU nào thất bại (0 lớp vừa vì VRAM trống thấp) thì không ghi tắt.
 function shouldPersistGpuOff({ cpuLoaded, attempts } = {}) {
   if (!cpuLoaded) return false;
   if (slowOnlyFailure(attempts)) return false;
+  if (Array.isArray(attempts) && modelAttempts(attempts).length === 0) return false;
   return true;
 }
 
