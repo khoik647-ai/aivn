@@ -150,7 +150,9 @@ function findSymlink(root) {
 function cleanTemps(j) {
   for (const rel of (j && j.temps) || []) {
     if (typeof rel !== 'string' || !rel.includes('.aivn-moving-')) continue;
-    try { fs.rmSync(path.join(j.to, rel), { force: true }); } catch {}
+    const full = path.resolve(j.to, rel);
+    if (!full.startsWith(path.join(path.resolve(j.to), path.sep))) continue;
+    try { fs.rmSync(full, { force: true }); } catch {}
   }
 }
 function journalTemp(snap, journal, rel) {
