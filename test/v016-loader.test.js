@@ -41,8 +41,10 @@ const LAPTOP = { total: 4.155e9, free: 3.87e9 }; // RTX 3050 Ti 4 GB của ngư�
 test('ước lượng: số lớp tự động không vượt VRAM và giảm khi ngữ cảnh tăng', () => {
   let prev = 99;
   for (const ctx of [8192, 16384, 32768]) {
-    const n = G.autoLayers(QWEN4B, { ctx, vram: LAPTOP }); const e = G.estimate(QWEN4B, { ctx, gpuLayers: n });
-    assert.ok(e.vram <= LAPTOP.free * 0.92 + 1, `ctx ${ctx}: ${e.vram} > VRAM`); assert.ok(n < prev); prev = n;
+    // B190: lề VRAM nhỏ hơn 8 % cũ; số lớp (và KV q8_0 khi GPU < 6 GB) vẫn phải nằm dưới VRAM trống
+    const d = G.chooseOffload(QWEN4B, { ctx, vram: LAPTOP }); const n = d.gpuLayers;
+    const e = G.estimate(QWEN4B, { ctx, gpuLayers: n, kvType: d.kv });
+    assert.ok(e.vram <= LAPTOP.free + 1, `ctx ${ctx}: ${e.vram} > VRAM`); assert.ok(d.used <= d.free + 1, `ctx ${ctx}: chính sách vượt VRAM`); assert.ok(n < prev); prev = n;
   }
   const full = G.estimate(QWEN4B, { ctx: 8192, gpuLayers: 37 });
   assert.ok(full.vram > LAPTOP.free, 'trọn 37 lớp + KV 8k không vừa 4 GB — đúng như máy người dùng');

@@ -56,6 +56,7 @@ function summarize(m) {
     downloads: m.downloads || 0, likes: m.likes || 0, lastModified: m.lastModified || m.createdAt || null,
     license: licenseOf(m), gated: m.gated ? String(m.gated) : false, pipeline: m.pipeline_tag || null,
     arch, archSupported: archSupported(arch), params: (m.gguf && m.gguf.total) || null,
+    experts: (m.gguf && m.gguf.expert_count) || null, expertsUsed: (m.gguf && m.gguf.expert_used_count) || null,
     contextLength: (m.gguf && m.gguf.context_length) || null, vision, embedding,
   };
 }
@@ -162,8 +163,9 @@ async function repoFiles(repo, { token, hw, fetchImpl } = {}) {
   const groups = groupFiles(tree, sum, hw);
   const mmproj = pickMmproj(groups);
   if (mmproj) for (const g of groups) if (g.kind === 'chat') g.vision = true;
-  // độ vừa máy từng bản lượng tử tính giống thẻ Khám phá: theo số tham số (tốc độ ước tính) + phần nhìn ảnh tải kèm
-  const pstr = sum.params ? `${(sum.params / 1e9).toFixed(2)}B${(/-A\d+(?:\.\d+)?B/i.exec(String(sum.name || repo)) || [''])[0]}` : null;
+  // độ vừa máy từng bản lượng tử tính giống thẻ Khám phá: theo số tham số (tốc độ ước tính) + phần nhìn ảnh tải kèm.
+  // MoE không có “-A3B” trong tên (gpt-oss-20b) lấy expert_count / expert_used_count từ siêu dữ liệu GGUF.
+  const pstr = paramLabel({ name: sum.name || repo, params: sum.params, experts: sum.experts, expertsUsed: sum.expertsUsed });
   if (hw) { for (const g of groups) if (g.kind === 'chat') g.fit = fitFor(g.size, hw, { params: pstr, mmprojSize: mmproj ? mmproj.size : 0 }); recommendQuant(groups); }
   return { ...sum, url: `${HF}/${repo}`, groups, mmproj, vision: sum.vision || !!mmproj };
 }
@@ -186,5 +188,17 @@ function pickMmprojFile(names) {
 }
 
 function resolveUrl(repo, file) { return `${HF}/${repo}/resolve/main/${file.split('/').map(encodeURIComponent).join('/')}`; }
+// “20.00B” hoặc “20.00B-A2.5B”. Hậu tố -A…B trong tên thắng; không có thì tính từ expert_count / expert_used_count.
+function paramLabel({ name, params, experts, expertsUsed } = {}) {
+  if (!(params > 0)) return null;
+  const fromName = (/-A\d+(?:\.\d+)?B/i.exec(String(name || '')) || [''])[0];
+  let suffix = fromName;
+  if (!suffix && experts > 1 && expertsUsed > 0 && expertsUsed < experts) {
+    const active = (params / 1e9) * (expertsUsed / experts);
+    const a = active >= 10 ? String(Math.round(active)) : String(Math.round(active * 10) / 10);
+    suffix = `-A${a}B`;
+  }
+  return `${(params / 1e9).toFixed(2)}B${suffix}`;
+}
 
-module.exports = { recommendQuant, QUALITY, screenFit, search, repoFiles, groupFiles, pickMmproj, pickMmprojFile, parseQuant, fitFor, archSupported, resolveUrl, summarize, HfError, QUANT_PREF, SPLIT_RE, llamaCpp: ARCHS.llamaCpp };
+module.exports = { recommendQuant, QUALITY, screenFit, search, repoFiles, groupFiles, pickMmproj, pickMmprojFile, parseQuant, fitFor, archSupported, resolveUrl, paramLabel, summarize, HfError, QUANT_PREF, SPLIT_RE, llamaCpp: ARCHS.llamaCpp };

@@ -26,6 +26,10 @@ test('mọi mô-đun mà engine-host cần đều được giải nén ra ngoài
   }
   assert.deepStrictEqual(missing, [], 'thiếu trong build.asarUnpack: ' + missing.join(', '));
   assert.ok(seen.has('src/agent/sampling.js'));
+  assert.ok(seen.has('src/embed-server.js'), 'engine-host nạp embed-server.js qua engine.js');
+  assert.ok(seen.has('src/model-names.js'), 'embed-server.js nạp model-names.js');
+  assert.ok(isUnpacked('src/embed-server.js'));
+  assert.ok(isUnpacked('src/model-names.js'));
 });
 test('thông báo lỗi khi bộ máy sập nêu dòng lỗi thật', () => {
   const { firstErrorLine } = require('../src/engine-proxy');

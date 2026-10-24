@@ -74,23 +74,27 @@ function findNode() {
   }
   return cands.find(p => { try { return fs.statSync(p).isFile(); } catch { return false; } }) || null;
 }
+// Bản đóng gói: llama-server ở resources/llama. Tiến trình con nhận AIVN_RESOURCES qua engine-proxy;
+// tiến trình chính (embeddings) cũng cần, không chỉ khi chạy llama.cpp ngay trong Electron.
+if (process.resourcesPath && !process.env.AIVN_RESOURCES) process.env.AIVN_RESOURCES = process.resourcesPath;
 const hostScript = path.join(__dirname, 'engine-host.js').replace(/app\.asar([\\/])/, 'app.asar.unpacked$1');
 const nodePath = process.env.AIVN_INPROC === '1' ? null : findNode();
 // B13 (QA lượt 2): ghi pid llama-server ra tệp; lần mở sau dọn tiến trình còn sót khi AIVN bị tắt đột ngột (kill, sập, mất điện…)
 const ORPH = require('./orphans');
 const pidFile = ORPH.createPidFile(path.join(app.getPath('userData'), 'llama-server-pids.json'));
 { const VS = require('./vision-server'); VS.HOOKS.spawn = (pid) => pidFile.add(pid); VS.HOOKS.exit = (pid) => pidFile.remove(pid); process.on('exit', () => VS.killAllSync()); }
+let loadingGpu = null; // số lớp của phương án ĐANG nạp — noteCrash lấy số này, không lấy bản ghi cũ
+function sawLoadPlan(p) { if (!p) return; loadingGpu = Number.isInteger(p.gpuLayers) && p.gpuLayers > 0 ? p.gpuLayers : null; }
 let engine;
 if (nodePath) {
   const { createEngineProxy } = require('./engine-proxy');
   engine = createEngineProxy({ nodePath, hostScript, pidFile, log: (m) => { console.log(m); LOG.log('engine', m); },
-    onProgress: (p) => send('model:progress', { id: p.id, pct: p.pct, mode: p.mode }),
+    onProgress: (p) => { sawLoadPlan(p); send('model:progress', { id: p.id, pct: p.pct, mode: p.mode }); },
     onCrash: (e) => { engineDied = true; send('model:status', { loaded: false }); send('engine:crash', { message: e.message }); } });
 } else {
   console.warn('[engine] không tìm thấy Node.js đi kèm, chạy llama.cpp ngay trong Electron (mô hình > 2 GB chạy CPU có thể lỗi)');
-  if (process.resourcesPath && !process.env.AIVN_RESOURCES) process.env.AIVN_RESOURCES = process.resourcesPath;
   const inproc = require('./engine');
-  inproc.setLoadProgress((p) => send('model:progress', { id: p.id, pct: p.pct, mode: p.mode }));
+  inproc.setLoadProgress((p) => { sawLoadPlan(p); send('model:progress', { id: p.id, pct: p.pct, mode: p.mode }); });
   engine = { ...inproc, external: false, calibrate: async () => {}, ocr: (b) => require('./ocr').recognize(b), start: async () => {}, stop: async () => {} };
 }
 
@@ -117,7 +121,7 @@ async function ensureAfterCrash() {
   const st = engine.status();
   if (!engineDied || st.loaded || st.loading || !settings.data.lastModel) return;
   LOG.log('load', 'Tự nạp lại mô hình cho lượt mới sau khi bộ máy đã dừng', { model: settings.data.lastModel, ctx: lastCtx });
-  await loadById(settings.data.lastModel, { force: true, ctx: lastCtx || null, reason: 'nạp lại sau khi bộ máy dừng' });
+  await shareLoad(settings.data.lastModel, { force: true, ctx: lastCtx || null, reason: 'nạp lại sau khi bộ máy dừng' });
 }
 // 0.15.2: ngữ cảnh tối thiểu. Lời nhắc hệ thống + mô tả công cụ của AIVN AGENT ~2–4 nghìn token, nên AGENT cần ≥ 8192.
 const MIN_CTX_CHAT = 4096, MIN_CTX_AGENT = 8192;
@@ -145,7 +149,7 @@ async function withCtxGrow(fn, { minCtx = MIN_CTX_CHAT, maxCtx = 0, onGrow } = {
     if (!settings.data.lastModel || !st.loaded || want <= have) { engineLog('Ngữ cảnh không đủ, không tăng được', e, { have, need, train }); throw ctxSmallError(have, null); }
     engineLog(`Ngữ cảnh ${have} không đủ (cần ~${need || '?'} token): tự nạp lại mô hình với ngữ cảnh ${want}`, e, { have, need, want });
     onGrow && onGrow(want);
-    try { await loadById(settings.data.lastModel, { force: true, ctx: want, minCtx: want, reason: 'tăng ngữ cảnh' }); }
+    try { await shareLoad(settings.data.lastModel, { force: true, ctx: want, minCtx: want, reason: 'tăng ngữ cảnh' }); }
     catch (e2) { engineLog('Không nạp lại được với ngữ cảnh lớn hơn', e2, { want }); throw ctxSmallError(have, want); }
     const now = engine.status().contextSize || 0;
     try { return await fn(); }
@@ -166,7 +170,7 @@ async function withEngineRecovery(fn, { onRetry, minCtx = MIN_CTX_CHAT } = {}) {
     const ctx = Math.max(minCtx, prev > 8192 ? 8192 : MIN_CTX_CHAT); // 0.15.2: không xuống dưới 4096 (AIVN AGENT: 8192)
     engineLog('Bộ máy AI dừng giữa lượt: tự nạp lại mô hình với ngữ cảnh nhỏ hơn và thử lại một lần', e, { 'ngữ cảnh cũ': prev, 'ngữ cảnh mới': ctx, 'mã thoát': e.exitCode, 'tín hiệu': e.signal, 'lý do': e.killReason || 'không rõ (sập)' });
     onRetry && onRetry(ctx);
-    try { await loadById(settings.data.lastModel, { force: true, ctx, reason: 'tự phục hồi sau khi bộ máy dừng' }); }
+    try { await shareLoad(settings.data.lastModel, { force: true, ctx, reason: 'tự phục hồi sau khi bộ máy dừng' }); }
     catch (e2) { send('model:status', { loaded: false }); const x = new Error(e.message + ' AIVN đã thử nạp lại mô hình nhưng chưa được: ' + cleanMsg(e2.message)); x.code = 'ENGINE_EXIT'; throw x; }
     try { return await fn(); }
     catch (e3) { if (e3 && e3.code === 'ENGINE_EXIT') { engineDied = true; send('model:status', { loaded: false }); } if (e3 && e3.code === 'ENGINE_EXIT') e3.message += ` (đã tự khởi động lại và thử với ngữ cảnh ${ctx} nhưng vẫn lỗi — hãy chọn mô hình nhỏ hơn)`; throw e3; }
@@ -195,6 +199,41 @@ function abortGen(reqId, ac, reason) { if (!ac || ac.signal.aborted) return; sto
 const serverLog = [];
 
 let modelsDirProblem = null;
+let recoverChain = Promise.resolve();
+let pendingAnnounced = false;
+let moveRetryTimer = null;
+let dirMove = null; // { ac } khi đang chuyển; timer thử lại phải bỏ qua
+function modelInUse() { try { const st = engine && engine.status && engine.status(); return !!(st && (st.loaded || st.loading)); } catch { return false; } }
+function noteRecover(rec, live) {
+  if (!rec) return;
+  if (rec.pending) {
+    if (pendingAnnounced) return;
+    pendingAnnounced = true;
+    LOG.log('app', T(rec.log));
+    const text = T(rec.notice);
+    setTimeout(() => { try { send('app:notice', { id: 'move-pending', text, kind: 'warn' }); } catch {} }, 2500);
+    return;
+  }
+  const wasPending = pendingAnnounced;
+  pendingAnnounced = false;
+  if (wasPending) { try { send('app:notice', { id: 'move-pending', clear: true }); } catch {} }
+  if (rec.resumed) { settings.data.modelsDir = rec.dir; settings.save(); if (live) paths.models = rec.dir; LOG.log('app', 'Tiếp tục chuyển thư mục mô hình còn dở → ' + rec.dir); return; }
+  if (rec.rolledBack) LOG.log('app', 'Đã hoàn tác chuyển thư mục mô hình còn dở; dữ liệu vẫn ở ' + rec.dir);
+}
+async function finishPendingMove(live) {
+  const file = path.join(paths.userData, 'models-move.json');
+  let rec = null;
+  try { rec = await require('./models-dir').recoverMove(file); }
+  catch (e) { LOG.log('app', 'Không xử lý được bản chuyển mô hình còn dở: ' + e.message); return null; }
+  noteRecover(rec, live); return rec;
+}
+function retryPendingMove() {
+  try { if (!fs.existsSync(path.join(paths.userData, 'models-move.json'))) return Promise.resolve(null); } catch { return Promise.resolve(null); }
+  if (dirMove || modelInUse()) return Promise.resolve(null);
+  const run = recoverChain.then(() => { if (dirMove) return null; return finishPendingMove(true); });
+  recoverChain = run.then(() => {}, () => {});
+  return run;
+}
 async function initStores() {
   const ud = app.getPath('userData');
   paths = { userData: ud, models: QA_PROFILE ? QA_PROFILE.models : path.join(ud, 'models') }; // hồ sơ QA: dùng chung mô hình của hồ sơ thật
@@ -205,11 +244,9 @@ async function initStores() {
     agentFolders: [], agentWeb: false, agentPython: false, agentMemory: true, agentTemperature: 0.2, agentComputer: true, agentScreen: false, agentScreenMode: 'each', agentAutonomy: false, agentScreenBudget: 40, agentAutoReadOnly: false, keepInTray: false, openAtLogin: false,
   });
   // bản chuyển thư mục mô hình còn dở (sập máy giữa chừng): đủ tệp thì trỏ sang đích, thiếu thì hoàn tác — không để mô hình “biến mất”
-  try {
-    const rec = await require('./models-dir').recoverMove(path.join(ud, 'models-move.json'));
-    if (rec && rec.resumed) { settings.data.modelsDir = rec.dir; settings.save(); LOG.log('app', 'Tiếp tục chuyển thư mục mô hình còn dở → ' + rec.dir); }
-    else if (rec && rec.rolledBack) LOG.log('app', 'Đã hoàn tác chuyển thư mục mô hình còn dở; dữ liệu vẫn ở ' + rec.dir);
-  } catch (e) { LOG.log('app', 'Không xử lý được bản chuyển mô hình còn dở: ' + e.message); }
+  // B218: đích chưa truy cập được thì giữ nhật ký và báo chờ ổ đích; lần mở sau (và khi mở Thư mục mô hình) thử lại
+  await finishPendingMove(false);
+  if (!moveRetryTimer) { moveRetryTimer = setInterval(() => { retryPendingMove().catch(() => {}); }, 60000); if (moveRetryTimer.unref) moveRetryTimer.unref(); }
   // thư mục mô hình do người dùng chọn (Cài đặt → Chung / Mô hình của tôi → Đổi thư mục); ổ đã rút / không ghi được → về mặc định, báo trong nhật ký
   if (!QA_PROFILE && settings.data.modelsDir) { const v = require('./models-dir').validateTarget(settings.data.modelsDir); if (v.ok) paths.models = v.dir; else { modelsDirProblem = `${settings.data.modelsDir}: ${v.error}`; LOG.log('app', 'Thư mục mô hình đã chọn không dùng được, tạm dùng thư mục mặc định: ' + modelsDirProblem); } }
   // B84: --agent-settings-from main — chép cài đặt AIVN AGENT (agent*) từ hồ sơ thật sang hồ sơ QA; hồ sơ thật chỉ ĐỌC
@@ -325,15 +362,18 @@ const log = (msg) => { LOG.log('app', msg); const e = { t: Date.now(), msg }; se
 
 const SPLIT_RE = /^(.*)-(\d{5})-of-(\d{5})\.gguf$/i;
 // Mô hình nhúng (dùng cho tìm kiếm tài liệu), không phải mô hình trò chuyện
-const EMBED_RE = /(^|[-_.])(embed|embedding|bge-m3|bge-small|bge-base|bge-large|multilingual-e5|e5-(small|base|large)|nomic-embed|gte-)/i;
 const NAMES = require('./model-names'); // mục 5: tên tệp chung (q4_k_m.gguf) → id/khớp danh mục kèm tên repo
 function modelIdFromFile(f) { return NAMES.idFor(f, SPLIT_RE); }
+// Ẩn khỏi danh sách trò chuyện khi tên tệp khớp EMBED_RE hoặc siêu dữ liệu chắc là mô hình nhúng.
+function isEmbedGguf(full) {
+  try { return require('./embed-server').isEmbedGguf(full); } catch { return false; }
+}
 
 // Quét thư mục mô hình (models/<tác giả>/<repo>/<tệp>.gguf và tệp ở gốc). Mô hình chia phần chỉ hiện một dòng.
 function scanDir(dir, depth, out, root = paths.models) {
   let ents = [];
   try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  const files = ents.filter(e => e.isFile() && /\.gguf$/i.test(e.name) && !/mmproj/i.test(e.name) && !EMBED_RE.test(e.name));
+  const files = ents.filter(e => e.isFile() && /\.gguf$/i.test(e.name) && !/mmproj/i.test(e.name) && !isEmbedGguf(path.join(dir, e.name)));
   const mmName = hf.pickMmprojFile(ents.filter(e => e.isFile()).map(e => e.name));
   const mmproj = mmName ? path.join(dir, mmName) : null;
   for (const e of files) {
@@ -362,6 +402,7 @@ function listModels() {
   // “chỉ trỏ sang thư mục mới”: thư mục mô hình cũ vẫn được quét (mô hình cũ vẫn hiện, vẫn nạp được)
   for (const d of settings.data.modelDirsExtra || []) if (d && path.resolve(d) !== path.resolve(paths.models) && fs.existsSync(d)) scanDir(d, 3, out, d);
   for (const full of settings.data.imported) {
+    if (isEmbedGguf(full)) continue;
     try { const s = fs.statSync(full); let mm = null; try { const n = hf.pickMmprojFile(fs.readdirSync(path.dirname(full))); if (n) mm = path.join(path.dirname(full), n); } catch {}
       out.push({ id: modelIdFromFile(full), file: path.basename(full), path: full, size: s.size, mtime: s.mtimeMs, source: 'imported', parts: 1, mmproj: mm, vision: !!mm }); } catch {}
   }
@@ -453,6 +494,7 @@ function cleanLoad(o) {
 }
 const modelLoadFor = (id) => cleanLoad(((settings.data.modelLoad || {})[id]) || {});
 let idleVramUsed = null;
+let embedProc = null; // llama-server --embeddings; dừng trước khi đo VRAM và nạp mô hình trò chuyện
 // sau khi nạp TRỌN lên GPU: VRAM tăng thêm = số đo thật cho mô hình này ở ngữ cảnh đã nạp (Khám phá / Mô hình của tôi dùng số này thay cho ước tính)
 async function measureVram(id, st) {
   if (idleVramUsed == null || !st || st.mode === 'cpu-only' || !(Number.isInteger(st.gpuLayers) && st.gpuLayers > 0 && st.gpuLayers >= (st.totalLayers || 0))) return;
@@ -468,7 +510,25 @@ function noteLayers(id, st, kvUsed) {
   const u = settings.data.modelUsage || (settings.data.modelUsage = {}); const e = u[id] || (u[id] = { uses: 0 });
   e.layers = { ctx: st.contextSize || null, gpu: st.gpuLayers, total: st.totalLayers, device: st.device || null, kv: kvUsed || (st.loadParams && st.loadParams.kvCache) || null, at: Date.now() }; settings.save();
 }
-async function loadById(id, { force = false, ctx = null, reason = null, minCtx = null, load = null } = {}) {
+// B190: nhớ cấu hình offload theo tệp + GPU + cài đặt. Không ghim CPU khi thẻ đang bận; không xoá khi mới nạp một phần.
+const OM = require('./offload-memory');
+function offloadIdentity(m, h) {
+  const d = settings.data || {};
+  return OM.identity({ file: m && m.path, size: m && m.size, mtime: m && m.mtime, backend: h && h.gpu || '', gpuName: h && h.gpuName || '', vramTotal: h && h.vram && h.vram.total || 0, settings: [d.gpu, d.gpuDevice, d.gpuLayers, d.vramLimitGB].join('|') });
+}
+async function noteOffload(id, st, m) {
+  const o = st && st.offload; if (!o || !Number.isInteger(o.gpu)) return;
+  const u = settings.data.modelUsage || (settings.data.modelUsage = {}); const e = u[id] || (u[id] = { uses: 0 });
+  const h = await hw().catch(() => null);
+  const next = OM.note(e.offload, { gpu: o.gpu, totalLayers: st.totalLayers || null, ctx: o.ctx || st.contextSize || null, requestedCtx: o.requestedCtx || st.contextSize || null, oom: !!o.oom, oomGpu: o.oomGpu, freeAt: h && h.vram ? h.vram.free : null }, offloadIdentity(m, h));
+  if (next) e.offload = next; else delete e.offload;
+  settings.save();
+}
+function rememberedOffload(id, ctx, h, m) {
+  const o = ((settings.data.modelUsage || {})[id] || {}).offload;
+  return OM.recall(o, { ctx, free: h && h.vram ? h.vram.free : 0, identity: offloadIdentity(m, h) });
+}
+async function loadById(id, { force = false, ctx = null, reason = null, minCtx = null, load = null, api = false } = {}) {
   const m = listModels().find(x => x.id === id);
   if (!m) throw new Error(`Không tìm thấy mô hình "${id}"`);
   const ml = { ...modelLoadFor(id), ...cleanLoad(load) };
@@ -504,34 +564,72 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       if (!picked && ctxWant > cap) { ctxNote = [ctxNote, `Đã giới hạn độ dài ngữ cảnh ở ${cap} (giá trị cũ ${ctxWant}) để mô hình nằm trên GPU nhiều nhất có thể. Muốn dùng ngữ cảnh lớn hơn, hãy chọn trong hộp nạp (Ctrl+L).`].filter(Boolean).join(' '); ctxWant = cap; }
     }
     const lowVramVision = await (async () => { if (!(m.mmproj && settings.data.vision !== false)) return false; const h = await hw(); return !!(h && h.gpu && h.gpu !== 'metal' && h.vram && !h.vram.integratedOnly && h.vram.total > 0 && h.vram.total < 6 * 1024 ** 3); })().catch(() => false); // B163
-    const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj, serverArgs: require('./model-launch').launchArgs({ id: m.id, family: SC.groundingFamily(NAMES.isGeneric(m.file) ? m.id : (m.file || m.id)), catalog: m.catalog, load: ml }) } : {}), ...(ml.mmap === false ? { useMmap: false } : {}), ...(ml.mlock ? { useMlock: true } : {}), ...(load ? { reload: true } : {}),
+    const hRemember = await hw().catch(() => null);
+    const remembered = Number.isInteger(gl) ? {} : rememberedOffload(m.id, ctxWant, hRemember, m);
+    if (remembered.reducedCtx && remembered.ctx && remembered.ctx < ctxWant) {
+      ctxNote = [ctxNote, require('./load-notice').ctxReducedNote(ctxWant, remembered.ctx, (s) => T(s), uiLang())].filter(Boolean).join(' ');
+      ctxWant = remembered.ctx;
+    }
+    const opts = { contextSize: ctxWant, minContextSize: Math.min(ctxWant, Math.max(minCtx || 0, ctxWant >= MIN_CTX_AGENT ? MIN_CTX_AGENT : MIN_CTX_CHAT)), perf: pf, fileSize: m.size, kvType: ml.kvCache || 'auto', ...(Number.isInteger(ml.batchSize) && ml.batchSize > 0 ? { batchSize: Math.min(2048, ml.batchSize) } : {}), ...(ml.flashAttention != null ? { flashAttention: ml.flashAttention } : {}), ...(Number.isInteger(gl) && gl >= 0 ? { gpuLayers: gl } : {}), ...(remembered.capLayers != null ? { capLayers: remembered.capLayers } : {}), ...(remembered.safe ? { safe: true } : {}), ...(m.mmproj && settings.data.vision !== false ? { mmproj: m.mmproj, serverArgs: require('./model-launch').launchArgs({ id: m.id, family: SC.groundingFamily(NAMES.isGeneric(m.file) ? m.id : (m.file || m.id)), catalog: m.catalog, load: ml }) } : {}), ...(ml.mmap === false ? { useMmap: false } : {}), ...(ml.mlock ? { useMlock: true } : {}), ...(load ? { reload: true } : {}),
       // B170: llama-server (mô hình nhìn ảnh) nay cũng theo Bộ đệm K/V / Flash attention của hộp nạp (trước đây bị bỏ qua)
       ...(ml.kvCache ? { kvCache: ml.kvCache } : lowVramVision ? { kvCache: 'q8_0' } : {}), ...(ml.flashAttention != null ? { flashAttention: ml.flashAttention } : {}) };
     if (lowVramVision && !ml.kvCache) LOG.log('load', 'B163: GPU rời dưới 6 GB → bộ đệm K/V q8_0 cho mô hình nhìn ảnh (đổi trong hộp nạp Ctrl+L)');
     if (opts.mmproj) opts.serverExe = await serverExeFor();
     LOG.log('load', `Bắt đầu nạp ${m.file}`, { size: m.size, ctx: opts.contextSize, gpuLayers: opts.gpuLayers ?? 'tự động', vision: !!opts.mmproj, ...(opts.serverArgs && opts.serverArgs.length ? { args: opts.serverArgs.join(' ') } : {}) });
     const tLoad = Date.now();
+    // Giữ máy nhúng suốt lúc nạp: yêu cầu /v1/embeddings đến giữa chừng phải đợi xong rồi mới chọn -ngl.
+    // Dừng tiến trình đang chạy (kể cả lần start chưa xong) trước khi đo VRAM rảnh và trước engine.loadModel.
+    const ep = embeddingProc();
+    ep.hold(HOLD_MS);
+    try {
+    if (embedProc) { try { await embedProc.stop(); } catch (e) { log('[embed] không dừng được trước khi nạp mô hình: ' + (e && e.message || e)); } }
     // B38: số đo VRAM thật — VRAM đã dùng lúc chưa nạp mô hình (màn hình, ứng dụng khác) làm mốc
     try { if (!engine.status().loaded) { const h0 = await engine.hardwareInfo(); if (h0 && h0.vram && h0.vram.total > 0 && !h0.vram.integratedOnly) idleVramUsed = h0.vram.total - h0.vram.free; } } catch {}
+    let holdCrash = false;
+    loadingGpu = null;
     try {
       try { st = await engine.loadModel(m.id, m.path, opts); noteRuntime(st, 'mô hình ' + m.file); }
       catch (e) {
         // GPU (Vulkan/CUDA/Metal) không nạp được: ghi nhật ký, khởi động lại bộ máy ở chế độ chỉ CPU rồi thử lại một lần
         if (e.code === 'ENGINE_EXIT' && !e.startup && !e.killReason && engine.restart) {
           // 0.15.1: bộ máy sập khi đang nạp → thử lại MỘT lần với cấu hình an toàn (chỉ CPU, ngữ cảnh 4096)
+          // B190: lần sập đầu — lần sau không bỏ qua kiểm tra bộ nhớ của thư viện. Sập lần nữa — giữ CPU.
+          holdCrash = true;
+          try {
+            const u = settings.data.modelUsage || (settings.data.modelUsage = {}); const rec = u[m.id] || (u[m.id] = { uses: 0 });
+            const h = await hw().catch(() => null);
+            rec.offload = OM.noteCrash(rec.offload, offloadIdentity(m, h), { ctx: opts.contextSize || null, gpu: loadingGpu });
+            settings.save();
+          } catch {}
           const safeCtx = Math.max(MIN_CTX_CHAT, Math.min(MIN_CTX_AGENT, opts.contextSize || MIN_CTX_AGENT));
           engineLog('Bộ máy AI sập khi nạp ' + m.file + ', thử lại với cấu hình an toàn (CPU, ngữ cảnh ' + safeCtx + ')', e, { path: m.path, size: m.size, stderr: e.detail });
-          await engine.restart({ ...engineEnv(), AIVN_GPU: 'off' }, 'bộ máy sập khi nạp, thử lại chỉ CPU'); hwCache = null;
-          st = await engine.loadModel(m.id, m.path, { ...opts, contextSize: safeCtx, minContextSize: Math.min(opts.minContextSize, safeCtx), gpuLayers: 0 });
+          const releaseHold = holdEngineLoading(m.id);
+          try {
+            await engine.restart({ ...engineEnv(), AIVN_GPU: 'off' }, 'bộ máy sập khi nạp, thử lại chỉ CPU'); hwCache = null;
+            st = await engine.loadModel(m.id, m.path, { ...opts, contextSize: safeCtx, minContextSize: Math.min(opts.minContextSize, safeCtx), gpuLayers: 0 });
+          } finally { releaseHold(); }
           st = { ...st, mode: 'cpu-only', fallbackFrom: ['bộ máy sập: ' + e.message] };
           ctxNote = 'Đã nạp ở chế độ an toàn (chỉ CPU, ngữ cảnh ' + safeCtx + ') vì bộ máy AI bị sập khi nạp bình thường. Xem nhật ký để biết chi tiết.';
         } else {
         if (!(e.code === 'LOAD_FAILED' && e.gpu && engine.restart)) throw e;
+        const LF = require('./load-fail');
         engineLog('GPU không nạp được ' + m.file + ', thử lại bằng bộ máy chỉ CPU', e, { path: m.path, size: m.size });
-        await engine.restart({ ...engineEnv(), AIVN_GPU: 'off' }, 'GPU không nạp được mô hình, chuyển sang chỉ CPU'); hwCache = null;
-        st = await engine.loadModel(m.id, m.path, opts);
-        st = { ...st, mode: 'cpu-only', fallbackFrom: [...(e.attempts || []).map(a => a.mode + ': ' + a.message), ...(st.fallbackFrom || [])] };
-        settings.data.gpu = false; settings.save(); // lần sau mở AIVN dùng CPU luôn (bật lại trong Cài đặt trò chuyện)
+        const cpuOpts = LF.wantsCpuLadder(e.attempts, { memory: e.memory }) ? opts : { ...opts, singleTry: true };
+        // status().loading tắt giữa hai lần loadModel (restart chờ tối đa 8 s). Giữ cờ để người chờ API không nhận 503 sớm.
+        const releaseHold = holdEngineLoading(m.id);
+        try {
+          await engine.restart({ ...engineEnv(), AIVN_GPU: 'off' }, 'GPU không nạp được mô hình, chuyển sang chỉ CPU'); hwCache = null;
+          try {
+            st = await engine.loadModel(m.id, m.path, cpuOpts);
+            st = { ...st, mode: 'cpu-only', slow: e.slow || null, fallbackFrom: [...(e.attempts || []).map(a => a.mode + ': ' + a.message), ...(st.fallbackFrom || [])] };
+            // Chỉ ghi gpu=false khi CPU nạp được và GPU thật sự lỗi. Chỉ chậm: CPU cho lần này, không ghi. Mọi cách đều lỗi thì cũng không ghi.
+            if (LF.shouldPersistGpuOff({ cpuLoaded: true, attempts: e.attempts })) { settings.data.gpu = false; settings.save(); }
+          } catch (e2) {
+            try { await engine.restart(engineEnv(), 'mọi cách nạp đều lỗi, giữ cài đặt GPU'); hwCache = null; } catch {}
+            e2.attempts = [...(e.attempts || []), ...(e2.attempts || [])];
+            throw e2;
+          }
+        } finally { releaseHold(); }
       }
       }
     } catch (e) {
@@ -541,33 +639,204 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
       if (e.code === 'VCREDIST') { send('vision:vcredist', { url: VCREDIST_URL }); throw new Error('Chế độ nhìn ảnh cần bộ thư viện Microsoft Visual C++ (bản 2015–2022, x64). Hãy cài từ trang chính thức của Microsoft rồi nạp lại mô hình.'); }
       if (e.code === 'NO_SERVER') throw new Error('Bản AIVN này thiếu thành phần nhìn ảnh (llama-server). Hãy cài lại AIVN.');
       engineLog('Không nạp được mô hình ' + m.file, e, { path: m.path, size: m.size, vision: !!m.mmproj, contextSize: settings.data.contextSize });
-      const n = Array.isArray(e.attempts) ? e.attempts.length : 0;
-      const x = new Error(`Không nạp được ${m.catalog ? m.catalog.name : m.file}${n ? ` (đã thử ${n} cách: GPU, GPU một phần, CPU)` : ''}. Lỗi: ${e.message}. Chi tiết đã ghi vào nhật ký (Mô hình của tôi → Mở thư mục nhật ký).`);
-      x.code = 'LOAD_FAILED'; throw x;
+      const x = new Error(require('./load-fail').failureText(m.catalog ? m.catalog.name : m.file, e.attempts, e.message));
+      x.code = 'LOAD_FAILED'; x.attempts = e.attempts; throw x;
     }
-    if (st.fallbackFrom && st.fallbackFrom.length) { engineLog('Nạp ' + m.file + ' bằng chế độ dự phòng: ' + st.mode, null, { attempts: st.fallbackFrom, final: { mode: st.mode, ctx: st.contextSize, gpuLayers: st.gpuLayers, totalLayers: st.totalLayers } }); st.notice = require('./load-notice').loadNotice(st); }
+    if (st.fallbackFrom && st.fallbackFrom.length) { engineLog('Nạp ' + m.file + ' bằng chế độ dự phòng: ' + st.mode, null, { attempts: st.fallbackFrom, final: { mode: st.mode, ctx: st.contextSize, gpuLayers: st.gpuLayers, totalLayers: st.totalLayers } }); st.notice = require('./load-notice').loadNotice(st, (s) => T(s), uiLang()); }
     st = { ...st, loadParams: ml }; lastCtx = st.contextSize || lastCtx; engineDied = false;
     if (ctxNote) { st = { ...st, notice: [st.notice, ctxNote].filter(Boolean).join(' ') }; LOG.log('load', ctxNote); }
     if (reason) LOG.log('load', 'Lý do nạp lại: ' + reason);
     measureVram(m.id, st).catch(() => {});
     noteLayers(m.id, st, opts.kvCache);
+    if (!holdCrash) await noteOffload(m.id, st, m);
     LOG.log('load', `Đã nạp ${m.file} sau ${Date.now() - tLoad} ms`, { mode: st.mode, ctx: st.contextSize, gpu: st.backend || st.gpu, runtime: st.vision ? (st.runtime || 'bundled') : 'node-llama-cpp', ...(st.vision && st.gpu && st.backend !== st.gpu ? { chatGpu: st.gpu } : {}), gpuLayers: st.gpuLayers, totalLayers: st.totalLayers, toolMode: st.toolMode, fallbackFrom: st.fallbackFrom });
     noteUsage(null, m.id);
-    settings.data.lastModel = m.id; settings.save(); lastUse = Date.now();
+    if (!api) { settings.data.lastModel = m.id; settings.save(); }
+    lastUse = Date.now();
     send('model:status', st);
     return st;
+    } finally { ep.release(); }
   } catch (e) { send('model:status', engine.status()); throw e; }
 }
 
-async function ensureModel(requested, { api = false } = {}) {
+const { createJitGuard } = require('./jit-load');
+const jitGuard = createJitGuard();
+// Lần chọn mô hình trên giao diện (IPC models:load). Không dùng lastModel: nạp API không được ghi lastModel,
+// và giá trị cũ (ví dụ A trong khi máy đang nạp B) không được giữ mô hình JIT khi client ngắt.
+let uiPick = { id: null, seq: 0 };
+function noteUiPick(id) {
+  uiPick = { id: id == null ? null : String(id), seq: uiPick.seq + 1 };
+  // Chọn trên giao diện sau khi nạp xong: mô hình không còn là JIT, TTL không được gỡ.
+  if (apiJit && String(apiJit.id) === uiPick.id) apiJit = null;
+}
+// UI và API cùng xin một mô hình thì dùng chung một lời hứa đang nạp. Lần nạp thứ hai
+// (engine.loadModel) gỡ mô hình ngay khi bắt đầu, nên yêu cầu API thấy "chưa nạp" dù lần đầu đã xong.
+// Mỗi lần nạp có số thứ tự. Chỉ gom nếu từ lúc lần đó bắt đầu chưa có lần nạp mô hình KHÁC
+// (chọn B, rồi C, rồi B: lần B sau phải nạp lại để lựa chọn cuối thắng).
+let loadTicket = 0;
+const loadStarts = []; // { id, ticket }, cũ trước
+const loadInflight = new Map(); // id -> { p, ticket, ui }
+function noteLoadStart(id) {
+  const ticket = ++loadTicket;
+  loadStarts.push({ id: String(id), ticket });
+  let min = ticket;
+  for (const e of loadInflight.values()) if (e.ticket < min) min = e.ticket;
+  while (loadStarts.length && loadStarts[0].ticket < min) loadStarts.shift();
+  return ticket;
+}
+function otherStartedSince(id, ticket) {
+  const key = String(id);
+  for (let i = loadStarts.length - 1; i >= 0; i--) {
+    const s = loadStarts[i];
+    if (s.ticket <= ticket) break;
+    if (s.id !== key) return true;
+  }
+  return false;
+}
+function loadIsPlain(opts) {
+  // Hộp nạp (Ctrl+L) có load/force/ctx: không gom chung một lời hứa, vì lựa chọn ngữ cảnh và GPU khác lần nạp thường.
+  return !opts.force && opts.ctx == null && opts.load == null && !opts.reason && opts.minCtx == null;
+}
+function holdEngineLoading(id) {
+  if (!engine || typeof engine.holdLoading !== 'function') return () => {};
+  return engine.holdLoading(id);
+}
+function shareLoad(id, opts = {}) {
+  const key = String(id);
+  const plain = loadIsPlain(opts);
+  const hit = loadInflight.get(key);
+  // Lần nạp thường gom vào lời hứa đang chạy. Hộp nạp, nạp ép và tự phục hồi vẫn nạp riêng (tuỳ chọn khác),
+  // nhưng phải có mặt trong loadInflight: giữa GPU lỗi và lần thử CPU, status().loading tắt nên người chờ API nhận 503 sớm.
+  if (plain && hit && !otherStartedSince(key, hit.ticket)) {
+    return hit.p.then((st) => {
+      if (!opts.api) { settings.data.lastModel = id; settings.save(); }
+      return st;
+    });
+  }
+  const ticket = noteLoadStart(key);
+  const entry = { ticket, ui: !opts.api, p: null };
+  const p = Promise.resolve().then(() => loadById(id, opts));
+  entry.p = p;
+  loadInflight.set(key, entry);
+  p.finally(() => { if (loadInflight.get(key) === entry) loadInflight.delete(key); }).catch(() => {});
+  return p;
+}
+function loadClaim(m, pickSeq, st, joiningUi) {
+  const pickedDuring = uiPick.seq !== pickSeq;
+  // API gom vào lần nạp do giao diện bắt đầu (kể cả lúc chưa kịp báo engine.loading): mô hình là của người dùng.
+  const uiOwns = !!joiningUi || (uiPick.id === m.id && (pickedDuring || !!st.loading));
+  return { pickedDuring, uiOwns };
+}
+async function ensureModel(requested, { api = false, signal = null } = {}) {
+  const stopped = () => !!(signal && signal.aborted);
+  if (stopped()) return;
   const st = engine.status();
   if (requested) {
-    const req = String(requested).toLowerCase().replace(/\.gguf$/, '');
-    if (st.loaded && (st.id === req || st.id.includes(req))) return;
-    const m = listModels().find(x => x.id === req) || listModels().find(x => x.id.includes(req));
-    if (m) { await loadById(m.id); if (api) { apiJit = { id: m.id, at: Date.now() }; log(`Nạp theo yêu cầu API (JIT): ${m.id}${settings.data.apiTtlMin > 0 ? ` · tự gỡ sau ${settings.data.apiTtlMin} phút không dùng` : ''}`); } return; }
+    const { resolveModel, sameModel } = require('./model-ref');
+    // Khớp danh sách trên đĩa trước. Id đang nạp dài hơn (…-abliterated) cũng là tiền tố của id đúng
+    // trên đĩa; trả sớm ở bước đó thì chat và messages 409 mãi, không bao giờ nạp đúng mô hình.
+    const m = resolveModel(listModels(), requested);
+    if (st.loaded && m && sameModel(st.id, m.id)) return;
+    if (!m && st.loaded && resolveModel([{ id: st.id }], requested)) return;
+    if (m) {
+      if (stopped()) return;
+      // loadById không huỷ được. Ghi nhận lần nạp do API bắt đầu và số người đang giữ, rồi xét gỡ SAU khi nạp xong.
+      const pickSeq = uiPick.seq;
+      const prev = st.loaded && st.id && st.id !== m.id ? { id: st.id } : null;
+      const hit = loadInflight.get(String(m.id));
+      const joiningUi = !!(api && hit && hit.ui && !otherStartedSince(String(m.id), hit.ticket));
+      // Giao diện đang nạp mô hình khác, kể cả giai đoạn trước khi engine báo loading: chờ xong, không chen.
+      // Client ngắt trong lúc chờ thì không nạp đè.
+      if (api && !joiningUi && uiPick.id && uiPick.id !== m.id) {
+        const uiKey = String(uiPick.id);
+        const uiHit = loadInflight.get(uiKey);
+        if (st.loading || (uiHit && uiHit.ui)) {
+          const waitMs = Number(settings && settings.data && settings.data.apiLoadWaitMs) > 0 ? Number(settings.data.apiLoadWaitMs) : 180000;
+          const deadline = Date.now() + waitMs;
+          while (engine.status().loading || (loadInflight.get(uiKey) && loadInflight.get(uiKey).ui)) {
+            if (stopped()) return;
+            if (Date.now() >= deadline) {
+              const timeout = new Error('Hết thời gian chờ mô hình đang nạp. Hãy thử lại.');
+              timeout.status = 504; timeout.type = 'timeout';
+              throw timeout;
+            }
+            await new Promise((r) => setTimeout(r, 20));
+          }
+          if (stopped()) return;
+        }
+      }
+      const triggered = joiningUi ? false : !st.loading;
+      if (api) jitGuard.enter(m.id, { triggered });
+      try {
+        if (!api) await shareLoad(m.id, {});
+        else await shareLoad(m.id, { api: true });
+        if (stopped()) {
+          if (api) {
+            await Promise.resolve(); // models:load kịp tăng uiPick nếu người dùng vừa chọn
+            const { pickedDuring, uiOwns } = loadClaim(m, pickSeq, st, joiningUi);
+            jitGuard.noteAbort(m.id);
+            const gate = jitGuard.state(m.id);
+            const drop = jitGuard.shouldUnload(m.id, {
+              triggered: !!(gate && gate.apiStarted),
+              uiSelected: uiOwns,
+              uiActive: pickedDuring && !uiOwns,
+              busy: busy > 0 || generations.size > 0,
+              status: engine.status(),
+              allAborted: !!(gate && gate.apiStarted && !gate.survived && gate.aborted === gate.n),
+            });
+            if (drop) {
+              try { await engine.unloadModel(); } catch {}
+              if (apiJit && apiJit.id === m.id) apiJit = null;
+              try { send('model:status', engine.status()); } catch {}
+              if (prev) { try { await loadById(prev.id, { api: true }); } catch {} }
+            } else if (!pickedDuring && !uiOwns) {
+              const after = engine.status();
+              if (after.loaded && String(after.id) === String(m.id)) {
+                apiJit = { id: m.id, at: Date.now() };
+                log(`Nạp theo yêu cầu API (JIT): ${m.id}${settings.data.apiTtlMin > 0 ? ` · tự gỡ sau ${settings.data.apiTtlMin} phút không dùng` : ''}`);
+              }
+            }
+          }
+          return;
+        }
+      } finally { if (api) jitGuard.leave(m.id, { aborted: stopped() }); }
+      if (api) {
+        await Promise.resolve(); // models:load kịp tăng uiPick nếu người dùng vừa chọn
+        const { pickedDuring, uiOwns } = loadClaim(m, pickSeq, st, joiningUi);
+        const after = engine.status();
+        if (!pickedDuring && !uiOwns && after.loaded && String(after.id) === String(m.id)) {
+          apiJit = { id: m.id, at: Date.now() };
+          log(`Nạp theo yêu cầu API (JIT): ${m.id}${settings.data.apiTtlMin > 0 ? ` · tự gỡ sau ${settings.data.apiTtlMin} phút không dùng` : ''}`);
+        } else if (uiOwns && apiJit && apiJit.id === m.id) apiJit = null;
+      }
+      return;
+    }
     if (st.loaded) return; // dùng mô hình đang nạp nếu tên không khớp
-    throw new Error(`Mô hình "${requested}" chưa có trên máy`);
+    // Tên không có trên đĩa, chưa có mô hình nào nạp xong, nhưng một lần nạp đang chạy
+    // (kể cả trước khi engine báo loading): chờ xong rồi trả lời bằng mô hình đó.
+    // Không tự nạp tên lạ. Chỉ lỗi khi không có mô hình và không có lần nạp nào.
+    if (st.loading || loadInflight.size) {
+      // apiLoadWaitMs (mặc định 3 phút) chặn lần nạp treo. Client ngắt thì signal.abort dừng vòng chờ.
+      const waitMs = Number(settings && settings.data && settings.data.apiLoadWaitMs) > 0 ? Number(settings.data.apiLoadWaitMs) : 180000;
+      const deadline = Date.now() + waitMs;
+      while (engine.status().loading || loadInflight.size) {
+        if (stopped()) return;
+        if (Date.now() >= deadline) {
+          const timeout = new Error('Hết thời gian chờ mô hình đang nạp. Hãy thử lại.');
+          timeout.status = 504; timeout.type = 'timeout';
+          throw timeout;
+        }
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      if (stopped()) return;
+      if (engine.status().loaded) return;
+      const failed = new Error('Nạp mô hình không thành công. Hãy thử lại.');
+      failed.status = 503; failed.type = 'api_error';
+      throw failed;
+    }
+    const missing = new Error(`Mô hình "${requested}" chưa có trên máy`);
+    missing.status = 404; missing.type = 'not_found_error';
+    throw missing;
   }
   if (!st.loaded) throw new Error('Chưa nạp mô hình nào. Hãy nạp mô hình trong AIVN hoặc chỉ định "model".');
 }
@@ -708,7 +977,7 @@ async function runAgentTurn({ reqId, convoId, messages, headless = false, signal
   const tb = tokenBatcher(reqId);
   try { return await agent.run({ messages, convoId, signal, headless, qa: !!qa, attachments: files, confirm: qa ? qa.confirm : (...a) => { tb.flush(); return askConfirm(...a); }, confirmScreen: qa ? qa.confirmScreen : (...a) => { tb.flush(); return askScreen(...a); }, approve: qa ? qa.approve : (card) => { tb.flush(); return askApproval(card); }, // QA runner: thẻ xin phép luôn bị TỪ CHỐI tự động (qa-runner.js)
     onToken: (t) => reqId && tb.push(t),
-    onStep: (st) => { tb.flush(); if (qa && qa.onStep) qa.onStep(st); reqId && send('agent:step', { reqId, step: slimStep(st) }); },
+    onStep: (st) => { tb.flush(); const p = qa && qa.onStep ? qa.onStep(st) : undefined; reqId && send('agent:step', { reqId, step: slimStep(st) }); return p; },
     onStatus: (st) => { tb.flush(); reqId && send('agent:status', { reqId, ...st }); } }); }
   finally {
     tb.flush();
@@ -999,20 +1268,48 @@ function withParts(orig, text) {
   return [{ type: 'text', text }, ...orig.filter(x => x && x.type === 'image_url')];
 }
 
-const api = createApiServer({ engine, models: listModels, ensureModel: (m) => ensureModel(m, { api: true }), log, getOpts: () => ({ cors: !!settings.data.apiCors, apiKey: settings.data.apiKey || null }), isBlocked: () => !activated() ? 'AIVN chưa được kích hoạt trên máy này.' : isLocked() ? 'AIVN đang khoá. Hãy mở khoá ứng dụng để dùng máy chủ API.' : null, embeddings: {
+// /v1/embeddings: llama-server --embeddings riêng (src/embed-server.js). RAG vẫn dùng ensureEmbedder() trong tiến trình engine.
+const { createEmbedServer, embedGpuChoice, chatIdsExcept, GPU_PROBE_MS, HOLD_MS } = require('./embed-server');
+function embeddingProc() {
+  if (embedProc) return embedProc;
+  embedProc = createEmbedServer({
+    log,
+    gpuLayers: () => embedGpuChoice({
+      timeoutMs: GPU_PROBE_MS,
+      chatLoaded: () => { try { return !!engine.status().loaded; } catch { return false; } },
+      probe: async () => {
+        const raw = await engine.hardwareInfo();
+        const h = (process.env.AIVN_QA_FAKEHW && !app.isPackaged) ? { ...raw, ...JSON.parse(process.env.AIVN_QA_FAKEHW) } : raw;
+        return withGpuName(h);
+      },
+    }),
+  });
+  return embedProc;
+}
+function embeddingDirs() {
+  const dirs = [];
+  try { if (paths && paths.models) dirs.push(paths.models); } catch {}
+  try { for (const d of (settings && settings.data && settings.data.modelDirsExtra) || []) if (d && !dirs.includes(d)) dirs.push(d); } catch {}
+  return dirs;
+}
+const api = createApiServer({ engine, models: listModels, ensureModel: (m, extra) => ensureModel(m, { api: true, signal: extra && extra.signal }), log, getOpts: () => ({ cors: !!settings.data.apiCors, apiKey: settings.data.apiKey || null }), isBlocked: () => !activated() ? 'AIVN chưa được kích hoạt trên máy này.' : isLocked() ? 'AIVN đang khoá. Hãy mở khoá ứng dụng để dùng máy chủ API.' : null, embeddings: {
   info: () => embedInfo(),
+  list: () => embeddingProc().list(embeddingDirs()),
   async ensure(model) {
     // B80: tên mô hình nhúng kiểu OpenAI/LangChain (text-embedding-3-small, nomic-embed…) → dùng mô hình nhúng đã cài (như LM Studio);
     // chỉ báo lỗi khi tên là một mô hình TRÒ CHUYỆN đã cài (gọi nhầm endpoint).
-    if (model && String(model).toLowerCase() !== EMBED.id && listModels().some(m => m.id === model)) {
-      const e = new Error(`"${model}" là mô hình trò chuyện, không tạo embeddings được. Dùng "${EMBED.id}" (hoặc bỏ trường "model").`); e.status = 400; throw e;
-    }
-    if (!embedInfo().installed) { const e = new Error(`Chưa tải mô hình nhúng "${EMBED.id}". Hãy mở AIVN → Cài đặt → Tìm kiếm tài liệu để tải.`); e.status = 400; throw e; }
-    await ensureEmbedder();
-    return { id: EMBED.id };
+    const srv = embeddingProc();
+    const embedRows = srv.list(embeddingDirs());
+    const target = srv.resolve(model, {
+      models: embedRows,
+      fallbackId: EMBED.id,
+      chatIds: chatIdsExcept(listModels().map(m => m.id), embedRows),
+      chatMessage: (m) => `"${m}" là mô hình trò chuyện, không tạo embeddings được. Dùng "${EMBED.id}" (hoặc bỏ trường "model").`,
+    });
+    return srv.open(target);
   },
-  embed: (texts) => engine.embed(texts, 'passage'),
-  count: (texts) => Promise.resolve(engine.embedCount(texts)).then(a => a.reduce((s, x) => s + x, 0)), // engine trong tiến trình trả mảng ngay, qua proxy trả Promise
+  embed: (texts) => embeddingProc().embed(texts),
+  count: (texts) => embeddingProc().count(texts),
 } });
 const updater = createUpdater({ send, log: (m) => console.log(m) });
 
@@ -1062,7 +1359,7 @@ function registerIpc() {
   ah('admin:issue', (_e, o) => admin.issue(o || {}));
   const saveDoc = async (r) => {
     if (r.published) return { published: true, state: r.state };
-    const d = await dialog.showSaveDialog(win, { buttonLabel: 'Lưu', title: 'Lưu revoked.json (chưa có token GitHub để tự đăng)', defaultPath: 'revoked.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
+    const d = await dialog.showSaveDialog(win, { buttonLabel: 'Lưu', title: 'Lưu revoked-v2.json (chưa có token GitHub để tự đăng)', defaultPath: 'revoked-v2.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
     if (!d.canceled && d.filePath) fs.writeFileSync(d.filePath, JSON.stringify(r.doc, null, 2) + '\n');
     return { published: false, savedTo: d.canceled ? null : d.filePath, state: r.state };
   };
@@ -1239,7 +1536,7 @@ function registerIpc() {
     const fin = same ? { ...require('./gguf').estimate({ ...g, fileSize: m.size }, { ...o, gpu, vram, server, gpuLayers: real.gpu }), auto: true, measured: true } : est;
     return { ...fin, server: !!server, hw: { gpu: h.gpu || false, vram: vram || null, ram: h.ram || 0, freeRam: h.freeRam || 0, devices: h.devices || [], gpuName: device, unified: h.gpu === 'metal' } }; });
   ipcMain.handle('models:saveLoad', async (_e, id, o) => { settings.data.modelLoad = { ...(settings.data.modelLoad || {}) }; const c = cleanLoad(o); if (o === null || !Object.keys(c).length) delete settings.data.modelLoad[id]; else settings.data.modelLoad[id] = c; settings.save(); return modelLoadFor(id); });
-  ipcMain.handle('models:load', async (_e, id, o = {}) => { try { if (o && o.remember && o.load) { settings.data.modelLoad = { ...(settings.data.modelLoad || {}), [id]: cleanLoad(o.load) }; settings.save(); } return { ok: true, status: await loadById(id, { force: !!(o && o.force), load: o && o.load || null }) }; } catch (e) { return { ok: false, error: e.message, code: e.code || null, modelId: e.modelId || id, catalogId: e.catalogId || null }; } });
+  ipcMain.handle('models:load', async (_e, id, o = {}) => { noteUiPick(id); try { if (o && o.remember && o.load) { settings.data.modelLoad = { ...(settings.data.modelLoad || {}), [id]: cleanLoad(o.load) }; settings.save(); } return { ok: true, status: await shareLoad(id, { force: !!(o && o.force), load: o && o.load || null }) }; } catch (e) { return { ok: false, error: e.message, code: e.code || null, modelId: e.modelId || id, catalogId: e.catalogId || null }; } });
   ipcMain.handle('models:unload', async () => { await engine.unloadModel(); const st = engine.status(); send('model:status', st); return st; });
   ipcMain.handle('models:delete', async (_e, id) => {
     if (QA_PROFILE) throw new Error('Hồ sơ QA chỉ đọc thư mục mô hình dùng chung: không xoá mô hình.');
@@ -1254,7 +1551,6 @@ function registerIpc() {
     return listModels();
   });
   // ---------- Đổi thư mục mô hình (beta.3) ----------
-  let dirMove = null; // { ac } khi đang chuyển
   const defaultModelsDir = () => path.join(paths.userData, 'models');
   const dirInfo = () => { const MD = require('./models-dir'); const files = MD.listFiles(paths.models); return { dir: paths.models, isDefault: path.resolve(paths.models) === path.resolve(defaultModelsDir()), default: defaultModelsDir(), free: MD.freeBytes(paths.models), drive: MD.driveOf(paths.models), bytes: files.reduce((s, f) => s + f.size, 0), files: files.length, extra: (settings.data.modelDirsExtra || []).filter(d => fs.existsSync(d)), problem: modelsDirProblem, moving: !!dirMove, qaProfile: !!QA_PROFILE }; };
   // Runtime CUDA/Vulkan (tab Runtime trong Cài đặt)
@@ -1267,7 +1563,7 @@ function registerIpc() {
   ipcMain.handle('runtime:install', async () => { const r = await runtimes().install({ onProgress: () => { const n = Date.now(); if (n - rtTick > 300) { rtTick = n; runtimes().status().then(s => send('runtime:progress', s.job)).catch(() => {}); } } }); send('runtime:progress', null); return r; });
   ipcMain.handle('runtime:cancel', () => runtimes().cancel());
   ipcMain.handle('runtime:remove', () => { if (engine.status()?.runtime === 'cuda') return { ok: false, error: 'Runtime CUDA đang chạy mô hình — hãy dỡ mô hình trước khi gỡ.' }; return runtimes().remove(); });
-  ipcMain.handle('models:dir-info', () => dirInfo());
+  ipcMain.handle('models:dir-info', async () => { if (!dirMove) { try { await retryPendingMove(); } catch (e) { LOG.log('app', 'Không xử lý được bản chuyển mô hình còn dở: ' + e.message); } } return dirInfo(); });
   ipcMain.handle('models:dir-pick', async () => {
     if (QA_PROFILE) return { ok: false, error: 'Hồ sơ QA dùng chung thư mục mô hình của hồ sơ thật: không đổi được.' };
     const r = await dialog.showOpenDialog(win, { title: 'Chọn thư mục lưu mô hình', buttonLabel: 'Chọn thư mục này', properties: ['openDirectory', 'createDirectory'], defaultPath: paths.models });
@@ -1279,29 +1575,43 @@ function registerIpc() {
     const MD = require('./models-dir');
     if (QA_PROFILE) return { ok: false, error: 'Hồ sơ QA: không đổi thư mục mô hình.' };
     if (dirMove) return { ok: false, error: 'Đang chuyển mô hình, hãy đợi xong.' };
-    const v = MD.validateTarget(dir, { from: paths.models }); if (!v.ok) return v;
-    if (downloader.list().some(j => j.status === 'downloading' || j.status === 'queued')) return { ok: false, error: 'Đang tải mô hình: hãy tạm dừng hoặc đợi tải xong rồi đổi thư mục.' };
-    const old = paths.models;
-    if (mode === 'move') {
-      const st = engine.status(); if (st.loaded && st.path && path.resolve(st.path).startsWith(path.resolve(old) + path.sep)) { await engine.unloadModel(); send('model:status', engine.status()); }
-      dirMove = { ac: new AbortController() }; LOG.log('app', `Chuyển mô hình: ${old} → ${v.dir}`);
+    const hold = { ac: null };
+    dirMove = hold; // chặn timer trước mọi await — recover đang băm không được chạy chồng lần chuyển mới
+    try {
+      const v = MD.validateTarget(dir, { from: paths.models }); if (!v.ok) return v;
+      if (downloader.list().some(j => j.status === 'downloading' || j.status === 'queued')) return { ok: false, error: 'Đang tải mô hình: hãy tạm dừng hoặc đợi tải xong rồi đổi thư mục.' };
+      try { await recoverChain; } catch {}
       const journal = path.join(paths.userData, 'models-move.json');
-      try { const r = await MD.moveModels(old, v.dir, { signal: dirMove.ac.signal, journal, onProgress: (p) => { try { send('models:dir-progress', p); } catch (err) { LOG.log('app', 'Tiến độ chuyển mô hình: ' + err.message); } } });
-        paths.models = v.dir; settings.data.modelsDir = v.dir; settings.data.modelDirsExtra = (settings.data.modelDirsExtra || []).filter(d => path.resolve(d) !== path.resolve(v.dir)); settings.save();
-        try { MD.journalClear(journal); } catch {}
-        LOG.log('app', `Đã chuyển ${r.moved} tệp (${(r.bytes / 1024 ** 3).toFixed(2)} GB)${r.sameDrive ? ' (cùng ổ, đổi tên)' : ''} → ${v.dir}`); send('models:dir-progress', { finished: true, ...r });
-        // B189: gửi thêm một sự kiện tiến độ SAU khi invoke đã trả — tái hiện thanh kẹt khi IPC đến muộn (chỉ QA)
-        if (String(process.env.AIVN_QA_MODE || '') === '1' && process.env.AIVN_MDIR_LATE_PROGRESS === '1') setTimeout(() => { try { send('models:dir-progress', { done: 1, total: 1, file: 'late.gguf', bytesDone: 1, bytesTotal: 1 }); } catch {} }, 400);
-        return { ok: true, ...r, info: dirInfo() };
-      } catch (e) { LOG.log('app', 'Chuyển mô hình dừng: ' + e.message); try { send('models:dir-progress', { finished: true, error: e.message, code: e.code || '' }); } catch {} return { ok: false, error: e.message, code: e.code || '', info: dirInfo() }; }
-      finally { dirMove = null; }
-    }
-    // chỉ trỏ sang thư mục mới: thư mục cũ vẫn được quét
-    const extra = new Set(settings.data.modelDirsExtra || []); if (MD.listFiles(old).length) extra.add(old); extra.delete(v.dir);
-    paths.models = v.dir; settings.data.modelsDir = v.dir; settings.data.modelDirsExtra = [...extra]; settings.save(); modelsDirProblem = null;
-    LOG.log('app', `Thư mục mô hình mới: ${v.dir} (mô hình ở ${old} vẫn dùng được)`); return { ok: true, moved: 0, info: dirInfo() };
+      let journalExists = false; try { journalExists = fs.existsSync(journal); } catch { journalExists = true; }
+      // Ổ vừa gắn lại: hoàn tất lần chuyển trước trước khi từ chối. Mô hình đang nạp thì không đụng tệp — báo đúng lý do đó.
+      let rec = null;
+      if (journalExists && !modelInUse()) {
+        try { rec = await finishPendingMove(true); } catch {}
+        try { journalExists = fs.existsSync(journal); } catch { journalExists = true; }
+      }
+      const block = MD.applyMoveBlock({ journalExists, rec, modelInUse: modelInUse() });
+      if (block) return { ok: false, error: T(block.error || 'Đang chờ ổ đích của lần chuyển trước.'), code: block.code || '' };
+      const old = paths.models;
+      if (mode === 'move') {
+        const st = engine.status(); if (st.loaded && st.path && path.resolve(st.path).startsWith(path.resolve(old) + path.sep)) { await engine.unloadModel(); send('model:status', engine.status()); }
+        dirMove = { ac: new AbortController() }; LOG.log('app', `Chuyển mô hình: ${old} → ${v.dir}`);
+        try { const r = await MD.moveModels(old, v.dir, { signal: dirMove.ac.signal, journal, onProgress: (p) => { try { send('models:dir-progress', p); } catch (err) { LOG.log('app', 'Tiến độ chuyển mô hình: ' + err.message); } } });
+          paths.models = v.dir; settings.data.modelsDir = v.dir; settings.data.modelDirsExtra = (settings.data.modelDirsExtra || []).filter(d => path.resolve(d) !== path.resolve(v.dir)); settings.save();
+          try { MD.journalClear(journal); } catch {}
+          LOG.log('app', `Đã chuyển ${r.moved} tệp (${(r.bytes / 1024 ** 3).toFixed(2)} GB)${r.sameDrive ? ' (cùng ổ, đổi tên)' : ''} → ${v.dir}`); send('models:dir-progress', { finished: true, ...r });
+          // B189: gửi thêm một sự kiện tiến độ SAU khi invoke đã trả — tái hiện thanh kẹt khi IPC đến muộn (chỉ QA)
+          if (String(process.env.AIVN_QA_MODE || '') === '1' && process.env.AIVN_MDIR_LATE_PROGRESS === '1') setTimeout(() => { try { send('models:dir-progress', { done: 1, total: 1, file: 'late.gguf', bytesDone: 1, bytesTotal: 1 }); } catch {} }, 400);
+          return { ok: true, ...r, info: dirInfo() };
+        } catch (e) { LOG.log('app', 'Chuyển mô hình dừng: ' + e.message); try { send('models:dir-progress', { finished: true, error: e.message, code: e.code || '' }); } catch {} return { ok: false, error: e.message, code: e.code || '', info: dirInfo() }; }
+        finally { dirMove = null; }
+      }
+      // chỉ trỏ sang thư mục mới: thư mục cũ vẫn được quét
+      const extra = new Set(settings.data.modelDirsExtra || []); if (MD.listFiles(old).length) extra.add(old); extra.delete(v.dir);
+      paths.models = v.dir; settings.data.modelsDir = v.dir; settings.data.modelDirsExtra = [...extra]; settings.save(); modelsDirProblem = null;
+      LOG.log('app', `Thư mục mô hình mới: ${v.dir} (mô hình ở ${old} vẫn dùng được)`); return { ok: true, moved: 0, info: dirInfo() };
+    } finally { if (dirMove === hold) dirMove = null; }
   });
-  ipcMain.handle('models:dir-cancel', () => { if (dirMove) dirMove.ac.abort(); return true; });
+  ipcMain.handle('models:dir-cancel', () => { if (dirMove && dirMove.ac) dirMove.ac.abort(); return true; });
   ipcMain.handle('models:dir-reset', () => { if (QA_PROFILE || dirMove) return { ok: false }; settings.data.modelsDir = null; paths.models = defaultModelsDir(); fs.mkdirSync(paths.models, { recursive: true }); settings.save(); return { ok: true, info: dirInfo() }; });
   ipcMain.handle('models:reveal', (_e, p) => { shell.showItemInFolder(p || paths.models); return true; });
   ipcMain.handle('model:status', () => engine.status());

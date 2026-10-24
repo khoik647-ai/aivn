@@ -44,6 +44,7 @@ test('B89: “thêm/bớt N%”, “by N%” = đổi tương đối; “lên/v�
 test('B89: đường tắt ghi bước vào result.json (onStep bất đồng bộ được chờ) và có outcome', async () => {
   const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'aivn-b89-')), 'r.json'); const shots = path.dirname(out) + '/s';
   const res = await Q.run({ task: 'Tăng âm lượng thêm 10%', out, timeout: 30, shots }, { engine: { status: () => ({ loaded: true, id: 'm' }) }, listModels: () => [],
+    windows: async () => [], ocr: async () => 'am luong', // không có cửa sổ đang hiện vẫn OCR; chữ sạch thì ảnh bước vẫn được ghi. Ca này kiểm tra onStep được chờ.
     capture: async () => { await new Promise(r => setTimeout(r, 200)); return { dataUrl: 'data:image/jpeg;base64,AA==' }; },
     runAgentTurn: async ({ qa }) => { const st = { id: 'auto_sys_1', name: 'system_action', args: { action: 'volume_change', level: 10 }, status: 'running', auto: true }; qa.onStep({ ...st }); const fin = { ...st, status: 'ok', summary: 'Âm lượng 40% → 50% (+10%)', ms: 200 }; qa.onStep(fin); return { text: 'Đã làm.', steps: [fin], outcome: 'done' }; } }, { runId: 't' });
   assert.strictEqual(res.status, 'done'); assert.strictEqual(res.steps.length, 1); assert.strictEqual(res.steps[0].tool, 'system_action'); assert.ok(res.steps[0].shot); assert.ok(res.steps[0].auto);
