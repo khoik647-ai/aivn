@@ -616,8 +616,8 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
         try {
           st = await engine.loadModel(m.id, m.path, cpuOpts);
           st = { ...st, mode: 'cpu-only', slow: e.slow || null, fallbackFrom: [...(e.attempts || []).map(a => a.mode + ': ' + a.message), ...(st.fallbackFrom || [])] };
-          // Chỉ ghi gpu=false khi CPU nạp được. Mọi cách đều lỗi thì GPU không phải nguyên nhân — không ghi, và khởi động lại theo cài đặt GPU của người dùng.
-          if (LF.shouldPersistGpuOff({ cpuLoaded: true })) { settings.data.gpu = false; settings.save(); }
+          // Chỉ ghi gpu=false khi CPU nạp được và GPU thật sự lỗi. Chỉ chậm: CPU cho lần này, không ghi. Mọi cách đều lỗi thì cũng không ghi.
+          if (LF.shouldPersistGpuOff({ cpuLoaded: true, attempts: e.attempts })) { settings.data.gpu = false; settings.save(); }
         } catch (e2) {
           try { await engine.restart(engineEnv(), 'mọi cách nạp đều lỗi, giữ cài đặt GPU'); hwCache = null; } catch {}
           e2.attempts = [...(e.attempts || []), ...(e2.attempts || [])];
@@ -652,6 +652,7 @@ async function loadById(id, { force = false, ctx = null, reason = null, minCtx =
 }
 
 async function ensureModel(requested, { api = false } = {}) {
+  if (engine.status().loading && typeof engine.whenReady === 'function') await engine.whenReady(); // B190: chờ mô hình cuối (kể cả lúc đo tốc độ), không dùng bản nháp
   const st = engine.status();
   if (requested) {
     const req = String(requested).toLowerCase().replace(/\.gguf$/, '');

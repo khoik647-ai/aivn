@@ -21,6 +21,36 @@ const MiB = 1024 ** 2;
 const VI = /[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i;
 const byId = (id) => catalog.find((c) => c.id === id);
 
+test('nvidia-smi: đường dẫn đầy đủ, PATH chỉ khi các đường đã biết lỗi', async () => {
+  const linux = V.nvidiaSmiCandidates('linux', {});
+  assert.strictEqual(linux[0], '/usr/bin/nvidia-smi');
+  assert.strictEqual(linux[linux.length - 1], 'nvidia-smi');
+  const win = V.nvidiaSmiCandidates('win32', { SystemRoot: 'D:\\Windows' });
+  assert.strictEqual(win[0], 'D:\\Windows\\System32\\nvidia-smi.exe');
+  assert.strictEqual(win[1], 'C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe');
+  assert.strictEqual(win[win.length - 1], 'nvidia-smi');
+  const cmds = [];
+  const rows = await V.queryNvidiaSmi({
+    timeoutMs: 200,
+    candidates: ['/usr/bin/nvidia-smi', 'nvidia-smi'],
+    execFile: (cmd, args, opts, cb) => {
+      cmds.push(cmd);
+      if (cmd === '/usr/bin/nvidia-smi') cb(Object.assign(new Error('not found'), { code: 'ENOENT' }));
+      else cb(null, '1000, 4096\n');
+    },
+  });
+  assert.deepStrictEqual(cmds, ['/usr/bin/nvidia-smi', 'nvidia-smi']);
+  assert.strictEqual(rows[0].freeBytes, 1000 * MiB);
+  const first = [];
+  await V.queryNvidiaSmi({
+    timeoutMs: 200,
+    execFile: (cmd, _a, _o, cb) => { first.push(cmd); cb(null, '2048, 4096\n'); },
+  });
+  assert.notStrictEqual(first[0], 'nvidia-smi', 'vẫn gọi nvidia-smi qua PATH trước');
+  if (process.platform === 'linux') assert.strictEqual(first[0], '/usr/bin/nvidia-smi');
+  if (process.platform === 'win32') assert.match(first[0], /nvidia-smi\.exe$/i);
+});
+
 test('nvidia-smi: đọc memory.free và chọn đúng GPU theo tổng VRAM', () => {
   const rows = V.parseNvidiaSmi(' 3320, 4096\n512, 512\n');
   assert.strictEqual(rows.length, 2);
@@ -57,14 +87,20 @@ test('3B trên 4 GB mà chỉ còn 0,7 GB trống thì không còn 37/37 lớp',
   assert.strictEqual(unknown.gpuLayers, 29);
 });
 
-test('đo tốc độ: 22 token/giây trên 3B là tràn, 72 thì không; VRAM kẹt cũng bước xuống', () => {
+test('đo tốc độ: 22 token/giây trên 3B là tràn, 72 thì không; tốc độ tốt thì không bước vì VRAM kẹt', () => {
   const exp = S.expectedTps({ bytes: 2e9, gpuFrac: 1, gpuBw: 192 });
   assert.ok(exp > 55 && exp < 70, String(exp));
   assert.strictEqual(S.shouldStepDown({ tps: 22, expected: exp, tokens: 24 }).step, true);
   assert.strictEqual(S.shouldStepDown({ tps: 26, expected: exp, tokens: 24 }).step, true);
   assert.strictEqual(S.shouldStepDown({ tps: 72, expected: exp, tokens: 24 }).step, false);
   assert.strictEqual(S.shouldStepDown({ tps: 10, expected: exp, tokens: 3 }).reason, 'inconclusive');
-  assert.strictEqual(S.shouldStepDown({ tps: 72, expected: exp, tokens: 24, freeBytes: 10 * MiB }).reason, 'vram');
+  assert.strictEqual(S.shouldStepDown({ tps: 72, expected: exp, tokens: 24, freeBytes: 10 * MiB }).step, false);
+  assert.strictEqual(S.shouldStepDown({ tps: 72, expected: exp, tokens: 24, freeBytes: 10 * MiB }).reason, 'ok');
+  assert.strictEqual(S.shouldStepDown({ tps: 10, expected: exp, tokens: 3, freeBytes: 10 * MiB }).reason, 'vram');
+  assert.strictEqual(S.probeWindow(0), S.PROBE_EACH_MS);
+  assert.ok(S.probeWindow(S.PROBE_EACH_MS) < S.PROBE_EACH_MS);
+  assert.strictEqual(S.probeWindow(S.PROBE_TOTAL_MS), 0);
+  assert.ok(S.PROBE_TOTAL_MS < S.PROBE_EACH_MS * 3);
 });
 
 test('câu lỗi: số cách, danh sách và số lần nạp là một', () => {
@@ -83,8 +119,9 @@ test('câu lỗi: số cách, danh sách và số lần nạp là một', () => 
   assert.deepStrictEqual(LF.waysOf(ctxRetry), ['GPU']);
   assert.strictEqual(LF.shouldPersistGpuOff({ cpuLoaded: false }), false);
   assert.strictEqual(LF.shouldPersistGpuOff({ cpuLoaded: true }), true);
+  assert.strictEqual(LF.shouldPersistGpuOff({ cpuLoaded: true, attempts: [{ mode: 'gpu (29 lớp GPU, ngữ cảnh 4096)', message: 'chậm: 16 token/giây', slow: true }] }), false);
   const main = fs.readFileSync(path.join(__dirname, '../src/main.js'), 'utf8');
-  assert.match(main, /shouldPersistGpuOff\(\{ cpuLoaded: true \}\)/);
+  assert.match(main, /shouldPersistGpuOff\(\{ cpuLoaded: true, attempts: e\.attempts \}\)/);
   assert.match(main, /mọi cách nạp đều lỗi, giữ cài đặt GPU/);
   assert.doesNotMatch(main, /đã thử \$\{n\} cách: GPU, GPU một phần, CPU/);
 });

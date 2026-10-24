@@ -206,13 +206,34 @@ function oomSchedule(plans) {
   return picked;
 }
 
-async function runSpeedProbe() {
+// Đo trên bản nháp, không đi qua generate() và không đưa bản nháp vào `current`.
+// generate() trong lúc nạp phải đợi mô hình cuối; nếu lần đo gọi generate() thì chờ lẫn nhau.
+async function runSpeedProbe(draft, timeoutMs) {
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 12000);
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
   try {
-    const res = await generate([{ role: 'user', content: 'Hi' }], { temperature: 0, maxTokens: 24, signal: ac.signal });
-    const usage = res && res.usage || {};
-    return { tps: usage.tokensPerSecond || 0, tokens: usage.completion_tokens || 0 };
+    const { LlamaChatSession } = await getLib();
+    const sequence = draft.context.getSequence(draft.tokenPredictor ? { tokenPredictor: draft.tokenPredictor } : undefined);
+    const session = new LlamaChatSession({ contextSequence: sequence, autoDisposeSequence: false });
+    const t0 = Date.now();
+    let text = '', ttft = null;
+    try {
+      const res = await session.promptWithMeta('Hi', {
+        temperature: 0, maxTokens: 24, signal: ac.signal, stopOnAbortSignal: true,
+        onResponseChunk: (c) => {
+          if (ttft == null) ttft = (Date.now() - t0) / 1000;
+          if (c && c.text) text += c.text;
+        },
+      });
+      if (res && typeof res.responseText === 'string') text = res.responseText;
+    } finally {
+      try { session.dispose({ disposeSequence: false }); } catch {}
+      try { if (sequence && !sequence.disposed) sequence.dispose(); } catch {}
+    }
+    const completionTokens = draft.model.tokenize(text).length;
+    const secs = (Date.now() - t0) / 1000;
+    const genSecs = Math.max(0.001, secs - (ttft || 0));
+    return { tps: completionTokens > 1 ? (completionTokens - 1) / genSecs : 0, tokens: completionTokens };
   } catch { return null; }
   finally { clearTimeout(timer); }
 }
@@ -294,7 +315,7 @@ async function loadModel(id, modelPath, opts = {}) {
       ...(kv ? { experimentalKvCacheKeyType: 'Q8_0', experimentalKvCacheValueType: 'Q8_0' } : {}) });
     const LF = require('./load-fail');
     const GS = require('./gpu-speed');
-    let abandoned = false, oomGpu = null, steppedSlow = null;
+    let abandoned = false, oomGpu = null, steppedSlow = null, probeSpent = 0;
     let devices = [];
     try { devices = l.getGpuDeviceNames ? await l.getGpuDeviceNames() : []; } catch { devices = []; }
     const gpuBw = require('./fit').gpuBandwidth({ devices, vram });
@@ -324,14 +345,18 @@ async function loadModel(id, modelPath, opts = {}) {
           offload: { gpu: Number.isInteger(plan.gpuLayers) ? plan.gpuLayers : model.gpuLayers, ctx: plan.ctx, requestedCtx: ctxMax, kv: kvUsed ? 'q8_0' : 'f16', oom: abandoned, ...(oomGpu > 0 ? { oomGpu } : {}), confident: !!plan.confident },
           perf: { threads: pf.threads || l.cpuMathCores || null, batchSize: Math.max(1, Math.min(batchCap, plan.ctx)), kv: kvUsed ? 'q8_0' : 'f16', flashAttention: context.flashAttention ?? faUsed, lookup: !!tokenPredictor, profile: pf.effective || null } };
         if (gpuPlan && !(vram && vram.integratedOnly) && !opts.skipSpeedProbe && process.env.AIVN_SKIP_SPEED_PROBE !== '1') {
-          current = draft;
+          // Chưa công bố current: status() vẫn là đang nạp, yêu cầu API chờ whenReady / loading.
           const layersOn = Number.isInteger(plan.gpuLayers) ? plan.gpuLayers : (Number(model.gpuLayers) || 0);
           const totalL = geo.layers ? geo.layers + 1 : layersOn;
           const gpuFrac = totalL > 0 ? Math.min(1, layersOn / totalL) : 1;
           const expected = GS.expectedTps({ bytes: fileSize, gpuFrac, gpuBw });
-          const measured = typeof opts.measureSpeed === 'function' ? await opts.measureSpeed({ plan, fileSize, expected }) : await runSpeedProbe();
-          try { if (current && current.seq && !current.seq.disposed) current.seq.dispose(); } catch {}
-          if (current) current.seq = null;
+          const windowMs = GS.probeWindow(probeSpent);
+          let measured = null;
+          if (windowMs > 0) {
+            const tProbe = Date.now();
+            measured = typeof opts.measureSpeed === 'function' ? await opts.measureSpeed({ plan, fileSize, expected }) : await runSpeedProbe(draft, windowMs);
+            probeSpent += Date.now() - tProbe;
+          }
           const after = await vramInfo(l).catch(() => null);
           const decision = GS.shouldStepDown({ tps: measured && measured.tps, expected, tokens: measured && measured.tokens, freeBytes: after && after.freeKnown ? after.free : null });
           if (decision.step) {
@@ -342,7 +367,6 @@ async function loadModel(id, modelPath, opts = {}) {
             if (Number.isInteger(plan.gpuLayers) && plan.gpuLayers > 0) oomGpu = oomGpu == null ? plan.gpuLayers : Math.min(oomGpu, plan.gpuLayers);
             attempts.push({ mode: `${plan.mode} (${plan.gpuLayers} lớp GPU, ngữ cảnh ${plan.ctx})`, message: decision.reason === 'vram' ? 'VRAM trống gần hết sau khi nạp' : `chậm: ${tps == null ? '?' : tps} token/giây`, slow: true });
             console.log(`[engine] ${plan.mode} quá chậm hoặc hết VRAM trống (${decision.reason}), bước xuống`);
-            current = null;
             try { await context.dispose(); } catch {}
             try { await model.dispose(); } catch {}
             continue;
@@ -386,9 +410,17 @@ async function unloadModel() {
 }
 
 function status() {
+  // Đang nạp, đang đo tốc độ hoặc đang bước xuống: chưa có mô hình cuối. Không báo loaded.
+  if (loading) return { loaded: false, loading: true };
   // B123: bộ máy THẬT đang chạy mô hình nhìn ảnh (llama-server), không phải GPU của node-llama-cpp
   if (visionOn) { const v = getVision().status(); if (v) return { loaded: true, id: v.id, path: v.path, contextSize: v.contextSize, vision: true, gpu: llama && llama.gpu, backend: serverBackend(v), gpuLayers: v.gpuLayers ?? null, totalLayers: v.totalLayers ?? null, device: v.device || null, toolMode: v.textTools ? 'text' : 'native', runtime: v.runtime || 'bundled', runtimeFallback: v.runtimeFallback || null, meta: v.template ? { toolTemplate: !!v.template.nativeTools } : null }; }
-  return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, meta: current.meta || null, perf: current.perf || null, offload: current.offload || null, slow: current.slow || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: !!loading };
+  return current ? { loaded: true, id: current.id, path: current.path, contextSize: current.context.contextSize, gpu: llama && llama.gpu, mode: current.mode, gpuLayers: current.gpuLayers, totalLayers: current.totalLayers, toolMode: current.toolMode || null, chatWrapper: current.chatWrapper || null, meta: current.meta || null, perf: current.perf || null, offload: current.offload || null, slow: current.slow || null, fallbackFrom: current.attempts && current.attempts.length ? current.attempts : null } : { loaded: false, loading: false };
+}
+
+// Một promise cho cả lần nạp: resolve khi mô hình cuối đã được công bố (hoặc lần nạp kết thúc không có mô hình).
+function whenReady() {
+  if (!loading) return Promise.resolve(status());
+  return loading.then(() => status(), () => status());
 }
 
 // Một chuỗi ngữ cảnh dùng lại giữa các lượt (giữ bộ nhớ đệm KV: lượt sau chỉ tính phần mới của lời nhắc)
@@ -412,6 +444,7 @@ async function chatGrammar(schema) { // đầu ra JSON theo lược đồ cho tr
 // 0.16: seed, chuỗi dừng, đầu ra JSON theo lược đồ, khối suy nghĩ (onToken(t, 'think')), thời gian ra token đầu (ttft), lý do dừng, số token trong ngữ cảnh
 function generate(messages, { temperature = 0.7, maxTokens = 1024, topP, signal, onToken, sampling = null, seed = null, stop = null, jsonSchema = null } = {}) {
   const run = async () => {
+    if (loading) await loading.catch(() => {});
     if (visionOn) return getVision().generate(messages, { temperature, maxTokens, topP, signal, onToken, sampling, seed, stop, jsonSchema });
     if (!current) throw new Error('Chưa nạp mô hình nào.');
     const { LlamaChatSession } = await getLib();
@@ -590,6 +623,7 @@ function chatStep(messages, { tools = [], toolChoice = 'auto', responseFormat = 
   // vẫn không vừa thì báo rõ cách sửa thay vì lỗi tiếng Anh của node-llama-cpp
   const CTX_RE = TP.CTX_RE;
   const runSafe = async () => {
+    if (loading) await loading.catch(() => {});
     try { return await run(messages, tools); }
     catch (e) {
       if (!CTX_RE.test(String(e && e.message))) throw e;
@@ -650,7 +684,7 @@ function embed(texts, kind = 'passage') {
 function countTokens(text) { if (!current) return Math.ceil(text.length / 3); try { return current.model.tokenize(text).length; } catch { return Math.ceil(text.length / 3); } }
 
 async function countTokensAsync(texts) { if (visionOn) { const r = await getVision().countTokens(texts); if (r) return r; } return texts.map(countTokens); }
-module.exports = { setLoadProgress, loadPlans, oomSchedule, explicitFlash, flashForContext, contextTries, modelGeometry, vramInfo, countTokens, countTokensAsync, hardwareInfo, loadModel, unloadModel, status, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount };
+module.exports = { setLoadProgress, loadPlans, oomSchedule, explicitFlash, flashForContext, contextTries, modelGeometry, vramInfo, countTokens, countTokensAsync, hardwareInfo, loadModel, unloadModel, status, whenReady, generate, chatStep, toChatHistory, getLlama, loadEmbedder, unloadEmbedder, embedStatus, embed, embedCount };
 
 // B123: llama-server CUDA → 'cuda'; bản đi kèm → vulkan (Windows) / metal (Mac) / cpu (Linux); 0 lớp lên GPU → 'cpu'
 function serverBackend(v) { if (!v) return null; if (v.gpuLayers === 0) return 'cpu'; if (v.runtime === 'cuda') return 'cuda'; return process.platform === 'win32' ? 'vulkan' : process.platform === 'darwin' ? 'metal' : 'cpu'; }

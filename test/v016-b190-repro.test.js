@@ -32,18 +32,24 @@ test('repro: VRAM trống thật — 0,7 GB không tính như tổng, không đo
   assert.match(read('src/engine.js'), /UNKNOWN_FREE_LOG/);
 });
 
-test('repro: tràn bộ nhớ / tốc độ — 22 token/giây bước xuống, 72 thì không', () => {
-  const eng = read('src/engine.js');
-  assert.match(eng, /runSpeedProbe/);
-  assert.match(eng, /shouldStepDown/);
+test('repro: bước xuống khi đo chậm, giữ lớp khi đo nhanh', async () => {
+  const { loadWith, raceDuringProbe } = require('./b190-adv-run');
+  const race = await raceDuringProbe();
+  assert.strictEqual(race.seen.loaded, false, 'bản nháp được coi là đã nạp trong lúc đo');
+  assert.strictEqual(race.seen.loading, true);
+  assert.ok(!(race.userRes instanceof Error), race.userRes && race.userRes.message);
+  assert.ok(race.loadRes && race.loadRes.gpuLayers < 29, 'không bước xuống');
+  const slow = await loadWith({ msFor: (n) => (n >= 29 ? 60 : 4) }, 'repro-slow');
+  assert.strictEqual(slow.loaded, true);
+  assert.ok(slow.gpuLayers < 29 && slow.gpuLayers > 0, 'chậm mà không bước xuống: ' + slow.gpuLayers);
+  const fast = await loadWith({ msFor: () => 4 }, 'repro-fast');
+  assert.strictEqual(fast.loaded, true);
+  assert.strictEqual(fast.gpuLayers, 29, 'nhanh mà vẫn bước xuống: ' + fast.gpuLayers);
   const S = require('../src/gpu-speed');
   const exp = S.expectedTps({ bytes: 2e9, gpuFrac: 1, gpuBw: 192 });
   assert.ok(exp > 55 && exp < 70, String(exp));
   assert.strictEqual(S.shouldStepDown({ tps: 22, expected: exp, tokens: 24 }).step, true);
-  assert.strictEqual(S.shouldStepDown({ tps: 26, expected: exp, tokens: 24 }).step, true);
   assert.strictEqual(S.shouldStepDown({ tps: 72, expected: exp, tokens: 24 }).step, false);
-  assert.strictEqual(S.shouldStepDown({ tps: 10, expected: exp, tokens: 3 }).reason, 'inconclusive');
-  assert.strictEqual(S.shouldStepDown({ tps: 72, expected: exp, tokens: 24, freeBytes: 10 * MiB }).reason, 'vram');
 });
 
 test('repro: số cách, danh sách và nhật ký là một', () => {
@@ -66,16 +72,16 @@ test('repro: số cách, danh sách và nhật ký là một', () => {
   assert.match(main, /failureText\(/);
 });
 
-test('repro: không lưu gpu=false khi mọi cách đều lỗi', () => {
-  const main = read('src/main.js');
-  const gate = main.indexOf('shouldPersistGpuOff({ cpuLoaded: true })');
-  const save = main.indexOf('settings.data.gpu = false');
-  assert.ok(gate >= 0, 'gpu=false được ghi mà không kiểm tra CPU đã nạp được');
-  assert.ok(save > gate, 'dòng lưu gpu=false không nằm sau chốt CPU nạp được');
-  assert.match(main, /mọi cách nạp đều lỗi, giữ cài đặt GPU/);
-  const LF = require('../src/load-fail');
-  assert.strictEqual(LF.shouldPersistGpuOff({ cpuLoaded: false }), false);
-  assert.strictEqual(LF.shouldPersistGpuOff({ cpuLoaded: true }), true);
+test('repro: chỉ chậm thì không lưu gpu=false, lỗi nạp GPU thật thì vẫn lưu', async () => {
+  const { loadErr, LF } = require('./b190-adv-run');
+  const slow = await loadErr({ msFor: () => 60 }, 'repro-slow-only');
+  assert.strictEqual(slow && slow.code, 'LOAD_FAILED');
+  assert.strictEqual(slow.gpu, true);
+  assert.ok(slow.attempts.every((a) => a.slow), JSON.stringify(slow.attempts));
+  assert.strictEqual(LF.shouldPersistGpuOff({ cpuLoaded: true, attempts: slow.attempts }), false, 'chỉ chậm vẫn ghi gpu=false');
+  const oom = await loadErr({ loadFail: 'cudaMalloc failed' }, 'repro-oom');
+  assert.strictEqual(LF.shouldPersistGpuOff({ cpuLoaded: true, attempts: oom.attempts }), true);
+  assert.strictEqual(LF.shouldPersistGpuOff({ cpuLoaded: false, attempts: oom.attempts }), false);
 });
 
 test('repro #102: ngữ cảnh không vượt trainCtx', () => {

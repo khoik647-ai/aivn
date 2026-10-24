@@ -6,6 +6,9 @@ const EFF_GPU = 0.75, EFF_CPU = 0.7, TOK_OVH_GPU = 0.0025;
 const SLOW_FRAC = 0.45;
 const PINCH = 96 * 1024 * 1024;
 const MIN_TOKENS = 8;
+// Mỗi lần đo tối đa 12 s. Ba bậc GPU không được cộng thành ~36 s: ngân sách cả lần nạp là 18 s.
+const PROBE_EACH_MS = 12000;
+const PROBE_TOTAL_MS = 18000;
 
 function expectedTps({ bytes, gpuFrac = 1, gpuBw, cpuBw = 60 } = {}) {
   const b = Math.max(0, Number(bytes) || 0);
@@ -18,13 +21,22 @@ function expectedTps({ bytes, gpuFrac = 1, gpuBw, cpuBw = 60 } = {}) {
 }
 
 // step: true → bỏ cấu hình này, xuống thang lớp rồi CPU.
-// Đo không ra (null, hoặc dưới MIN_TOKENS) thì không kết luận chậm. VRAM trống sau khi nạp gần 0 thì vẫn bước xuống.
+// Đo không ra (null, hoặc dưới MIN_TOKENS) thì không kết luận chậm.
+// VRAM trống sau khi nạp gần 0 thì bước xuống, trừ khi tốc độ đo được vẫn tốt — kẹt VRAM mà vẫn nhanh thì giữ cấu hình.
 function shouldStepDown({ tps, expected, freeBytes, tokens } = {}) {
+  const enough = !(tokens != null && !(Number(tokens) >= MIN_TOKENS));
+  const haveSpeed = enough && Number(tps) > 0 && Number(expected) > 0;
+  if (haveSpeed && !(Number(tps) < SLOW_FRAC * Number(expected))) return { step: false, reason: 'ok' };
   if (Number.isFinite(Number(freeBytes)) && Number(freeBytes) < PINCH) return { step: true, reason: 'vram' };
-  if (tokens != null && !(Number(tokens) >= MIN_TOKENS)) return { step: false, reason: 'inconclusive' };
-  if (!(Number(tps) > 0) || !(Number(expected) > 0)) return { step: false, reason: 'inconclusive' };
-  if (Number(tps) < SLOW_FRAC * Number(expected)) return { step: true, reason: 'slow' };
-  return { step: false, reason: 'ok' };
+  if (!haveSpeed) return { step: false, reason: 'inconclusive' };
+  return { step: true, reason: 'slow' };
 }
 
-module.exports = { expectedTps, shouldStepDown, SLOW_FRAC, PINCH, MIN_TOKENS, EFF_GPU, TOK_OVH_GPU };
+// Thời gian còn lại cho lần đo kế. 0 → bỏ qua, không kết luận chậm.
+function probeWindow(elapsedMs) {
+  const left = PROBE_TOTAL_MS - Math.max(0, Number(elapsedMs) || 0);
+  if (!(left >= 250)) return 0;
+  return Math.min(PROBE_EACH_MS, Math.floor(left));
+}
+
+module.exports = { expectedTps, shouldStepDown, probeWindow, SLOW_FRAC, PINCH, MIN_TOKENS, EFF_GPU, TOK_OVH_GPU, PROBE_EACH_MS, PROBE_TOTAL_MS };

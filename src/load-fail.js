@@ -29,9 +29,18 @@ function failureText(name, attempts, message) {
   return `Không nạp được ${name} (đã thử ${n} cách: ${ways.join(', ')}). ${err}`;
 }
 
-// Chỉ ghi settings.gpu = false khi đường CPU nạp được. Mọi đường đều lỗi thì GPU không phải nguyên nhân.
-function shouldPersistGpuOff({ cpuLoaded } = {}) {
-  return !!cpuLoaded;
+// Mọi lần thử GPU chỉ bị coi là chậm (không OOM, không lỗi nạp) thì không tắt GPU vĩnh viễn.
+function slowOnlyFailure(attempts) {
+  const rows = modelAttempts(attempts);
+  return rows.length > 0 && rows.every((a) => a && a.slow);
+}
+
+// Chỉ ghi settings.gpu = false khi đường CPU nạp được và GPU thật sự lỗi.
+// Mọi đường đều lỗi, hoặc chỉ chậm, thì GPU không phải lý do để ghi tắt.
+function shouldPersistGpuOff({ cpuLoaded, attempts } = {}) {
+  if (!cpuLoaded) return false;
+  if (slowOnlyFailure(attempts)) return false;
+  return true;
 }
 
 // Hết VRAM thì thang CPU (ngữ cảnh đầy rồi nhỏ hơn) vẫn có ích. Lỗi tệp / kiến trúc thì một lần CPU là đủ.
@@ -41,4 +50,4 @@ function wantsCpuLadder(attempts, { memory = false } = {}) {
   return rows.length > 0 && rows.every((a) => isMemoryError(a.message));
 }
 
-module.exports = { wayLabel, isMemoryError, waysOf, failureText, shouldPersistGpuOff, wantsCpuLadder, modelAttempts };
+module.exports = { wayLabel, isMemoryError, waysOf, failureText, shouldPersistGpuOff, slowOnlyFailure, wantsCpuLadder, modelAttempts };
