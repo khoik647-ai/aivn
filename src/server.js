@@ -46,6 +46,7 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
   const cors = () => (getOpts().cors ? { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key, anthropic-version', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' } : {});
   // B80: mọi phản hồi lỗi đều vào nhật ký kèm mã (trước đây 404 chỉ thấy “POST /v1/completions”, không thấy mã)
   const err = (res, code, message, type = 'invalid_request_error') => { if (code !== 401) log(`  → ${code} ${String(message).slice(0, 200)}`); return send(res, code, { error: { message, type, code } }); };
+  const modelErr = (res, e) => (e && (e.status === 503 || e.status === 504) ? err(res, e.status, e.message, e.type || 'api_error') : err(res, 400, e.message, 'model_not_found'));
   const listNow = () => { try { return typeof models === 'function' ? models() : []; } catch { return []; } };
 
   const readBody = (req, max = 20e6, tooBigMsg) => new Promise((resolve, reject) => {
@@ -120,14 +121,19 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
       try { body = JSON.parse(await readBody(req) || '{}'); } catch (e) { if (tooBig(e)) return err(res, 413, 'Body quá lớn', 'payload_too_large'); return err(res, 400, 'JSON không hợp lệ'); }
       if (!Array.isArray(body.messages) || !body.messages.length) return err(res, 400, 'Thiếu trường "messages"');
       const beforeChat = engine.status();
-      try { await ensureModel(body.model); } catch (e) { return err(res, 400, e.message, 'model_not_found'); }
+      const ac = new AbortController();
+      res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+      try { await ensureModel(body.model, { signal: ac.signal }); }
+      catch (e) {
+        if (ac.signal.aborted) return;
+        return modelErr(res, e);
+      }
+      if (ac.signal.aborted) return;
       const goneChat = modelChanged(listNow(), body.model, beforeChat, engine.status()); if (goneChat) return err(res, 409, goneChat, 'model_changed');
 
       const st = engine.status();
       const id = 'chatcmpl-' + crypto.randomBytes(12).toString('hex');
       const created = Math.floor(Date.now() / 1000);
-      const ac = new AbortController();
-      res.on('close', () => { if (!res.writableEnded) ac.abort(); });
       const opts = { temperature: body.temperature ?? 0.7, topP: body.top_p, maxTokens: body.max_tokens ?? body.max_completion_tokens ?? 1024, signal: ac.signal };
       // Gọi công cụ (tools/tool_choice) và đầu ra JSON (response_format): công cụ do ứng dụng gọi API tự chạy, AIVN chỉ trả tool_calls
       let tools, toolChoice, responseFormat;
@@ -197,13 +203,18 @@ function createApiServer({ engine, models, ensureModel, log, embeddings = null, 
       if (prompts.length > 16) return err(res, 400, 'Tối đa 16 prompt mỗi yêu cầu');
       if (body.stream && prompts.length > 1) return err(res, 400, '"stream" chỉ dùng với một prompt');
       const beforeCmp = engine.status();
-      try { await ensureModel(body.model); } catch (e) { return err(res, 400, e.message, 'model_not_found'); }
+      const ac = new AbortController();
+      res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+      try { await ensureModel(body.model, { signal: ac.signal }); }
+      catch (e) {
+        if (ac.signal.aborted) return;
+        return modelErr(res, e);
+      }
+      if (ac.signal.aborted) return;
       const goneCmp = modelChanged(listNow(), body.model, beforeCmp, engine.status()); if (goneCmp) return err(res, 409, goneCmp, 'model_changed');
       const st = engine.status();
       const id = 'cmpl-' + crypto.randomBytes(12).toString('hex');
       const created = Math.floor(Date.now() / 1000);
-      const ac = new AbortController();
-      res.on('close', () => { if (!res.writableEnded) ac.abort(); });
       const opts = { temperature: body.temperature ?? 0.7, topP: body.top_p, maxTokens: body.max_tokens ?? 256, signal: ac.signal };
       const stops = (Array.isArray(body.stop) ? body.stop : body.stop ? [body.stop] : []).filter(x => typeof x === 'string' && x).slice(0, 4);
       const cut = (t) => { let at = -1; for (const x of stops) { const i = t.indexOf(x); if (i >= 0 && (at < 0 || i < at)) at = i; } return at < 0 ? { text: t, stopped: false } : { text: t.slice(0, at), stopped: true }; };
