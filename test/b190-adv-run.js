@@ -31,6 +31,7 @@ function prep(extra) {
   S.probeTokens = 8;
   S.userMsPerTok = 1;
   S.userTokens = 8;
+  S.loadDelayMs = 0;
   if (extra) Object.assign(S, extra);
 }
 
@@ -77,4 +78,4 @@ async function raceDuringProbe() {
   });
 }
 
-module.exports = { S, E, LF, loadWith, loadErr, raceDuringProbe, prep };
+module.exports = { S, E, LF, loadWith, loadErr, raceDuringProbe, prep, unload, lock, FILE };

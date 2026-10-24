@@ -3,17 +3,14 @@
 // Không đổi logic sửa — chỉ gọi fit / gguf / câu lỗi đang có.
 const test = require('node:test');
 const assert = require('node:assert');
-const fs = require('fs');
-const path = require('path');
 const F = require('../src/fit');
 
 const GiB = 1024 ** 3;
 const MiB = 1024 ** 2;
-const read = (rel) => fs.readFileSync(path.join(__dirname, '..', rel), 'utf8');
 const hw3050 = (vram) => ({ gpu: 'cuda', ram: 16 * GiB, vram, devices: ['NVIDIA GeForce RTX 3050 Ti Laptop GPU'] });
 const llama3b = { id: 'llama-3.2-3b', params: '3B', size: 1.88 * GiB };
 
-test('repro: VRAM trống thật — 0,7 GB không tính như tổng, không đo được thì dùng tổng', () => {
+test('repro: VRAM trống thật — 0,7 GB không tính như tổng, không đo được thì dùng tổng', async () => {
   const held = F.machineFit(llama3b, hw3050({ total: 4 * GiB, free: 0.7 * GiB, freeKnown: true }), { ctx: 4096 });
   assert.match(held.hint, /Tràn/, held.hint);
   assert.notStrictEqual(held.group, 'smooth', held.hint);
@@ -29,7 +26,24 @@ test('repro: VRAM trống thật — 0,7 GB không tính như tổng, không đo
   assert.strictEqual(missed.freeKnown, false);
   assert.strictEqual(missed.free, 4 * GiB);
   assert.match(V.UNKNOWN_FREE_LOG, /tạm tính theo tổng VRAM/);
-  assert.match(read('src/engine.js'), /UNKNOWN_FREE_LOG/);
+  const prev = process.env.AIVN_VRAM_LIMIT;
+  process.env.AIVN_VRAM_LIMIT = String(4 * GiB);
+  const logs = [];
+  const orig = console.log;
+  console.log = (...a) => { logs.push(a.map(String).join(' ')); };
+  try {
+    const info = await require('../src/engine').vramInfo({
+      gpu: 'vulkan',
+      getVramState: async () => ({ total: 12 * GiB, free: 10 * GiB, unifiedSize: 8 * GiB }),
+    });
+    assert.strictEqual(info.freeKnown, false);
+    assert.strictEqual(info.free, 4 * GiB);
+    assert.ok(logs.some((l) => l.includes('tạm tính theo tổng VRAM')), logs.join('\n') || '(không có nhật ký)');
+  } finally {
+    console.log = orig;
+    if (prev == null) delete process.env.AIVN_VRAM_LIMIT;
+    else process.env.AIVN_VRAM_LIMIT = prev;
+  }
 });
 
 test('repro: bước xuống khi đo chậm, giữ lớp khi đo nhanh', async () => {
@@ -52,11 +66,19 @@ test('repro: bước xuống khi đo chậm, giữ lớp khi đo nhanh', async (
   assert.strictEqual(S.shouldStepDown({ tps: 72, expected: exp, tokens: 24 }).step, false);
 });
 
-test('repro: số cách, danh sách và nhật ký là một', () => {
-  const main = read('src/main.js');
-  assert.doesNotMatch(main, /đã thử \$\{n\} cách: GPU, GPU một phần, CPU/);
-  assert.match(read('src/engine.js'), /\[engine\] thử nạp /);
+test('repro: số cách, danh sách và nhật ký là một', async () => {
+  const { loadErr } = require('./b190-adv-run');
   const LF = require('../src/load-fail');
+  const logs = [];
+  const orig = console.log;
+  console.log = (...a) => { logs.push(a.map(String).join(' ')); };
+  let err;
+  try { err = await loadErr({ loadFail: 'out of memory' }, 'repro-log'); }
+  finally { console.log = orig; }
+  assert.strictEqual(err && err.code, 'LOAD_FAILED');
+  const tries = logs.filter((l) => l.includes('[engine] thử nạp'));
+  assert.ok(tries.length >= 2, tries.join(' | ') || '(không có dòng thử nạp)');
+  assert.strictEqual(LF.waysOf(err.attempts).length, tries.length, JSON.stringify(err.attempts));
   const attempts = [
     { mode: 'gpu (29 lớp GPU, ngữ cảnh 8192)', message: 'Failed to load model' },
     { mode: 'cpu-only (0 lớp GPU, ngữ cảnh 8192)', message: 'Failed to load model' },
@@ -64,12 +86,13 @@ test('repro: số cách, danh sách và nhật ký là một', () => {
   const s = LF.failureText('broken.gguf', attempts, 'Failed to load model');
   assert.match(s, /đã thử 2 cách: GPU, CPU/);
   assert.doesNotMatch(s, /GPU một phần/);
+  assert.doesNotMatch(s, /GPU, GPU một phần, CPU/);
   const ctxRetry = [
     { mode: 'gpu FA auto', message: 'out of memory', context: true },
     { mode: 'gpu (29 lớp GPU, ngữ cảnh 8192)', message: 'Failed to load model' },
   ];
   assert.deepStrictEqual(LF.waysOf(ctxRetry), ['GPU']);
-  assert.match(main, /failureText\(/);
+  assert.match(LF.failureText('broken.gguf', err.attempts, err.message), new RegExp('đã thử ' + tries.length + ' cách'));
 });
 
 test('repro: chỉ chậm thì không lưu gpu=false, lỗi nạp GPU thật thì vẫn lưu', async () => {
@@ -121,9 +144,13 @@ test('repro #102: loaderLayers truyền kvScale', () => {
   const q8 = F.machineFit(m, hw, { ctx: 4096, kvScale: 0.55 });
   assert.notStrictEqual(f16.hint, q8.hint, `${f16.hint} == ${q8.hint}`);
   assert.strictEqual(q8.group, 'smooth', q8.hint);
-  const src = read('src/fit.js');
-  assert.match(src, /function loaderLayers\(m, g, hw, ctx, o/);
-  assert.match(src, /kvScale: o\.kvScale/);
+  const G = require('../src/gguf');
+  const g = F.resolveGeo(m);
+  const kvTok = g.layers * g.kvHeads * (g.keyLen + g.valLen) * 2;
+  const model = { fileSize: m.size, layers: g.layers, kvPerToken: kvTok };
+  const n16 = G.gpuFit(model, { ctx: 4096, vram: hw.vram, kvScale: 1 });
+  const n8 = G.gpuFit(model, { ctx: 4096, vram: hw.vram, kvScale: 0.55 });
+  assert.ok(n8 > n16, `kvScale 0,55 phải đưa nhiều lớp hơn f16 (${n8} so với ${n16})`);
 });
 
 test('repro #102: không ghi Tràn 0,0 GB', () => {
