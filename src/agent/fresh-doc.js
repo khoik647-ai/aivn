@@ -133,10 +133,10 @@ const CUT = /[\r\n]|[:：﹕∶꞉˸︓](?![\\/]|\d)|["“”„«»‹「『‘
 // Cùng lỗ trên CÙNG một dòng: “Đừng xoá tệp này. Mở Notepad và gõ…” / “Meeting notes from the current file, open Notepad and type…”
 // / “See readme.txt. Open Notepad and type the above” — mệnh đề đứng trước động từ ghi là nội dung, không được tắt bảo vệ.
 // Ngắt dòng Unicode (U+2028/U+2029) cũng là dòng mới. Giờ 10:30 không phải dấu phân cách; “notes.txt” / “3.14” không phải hết câu.
-// r14 I: bản sao CHỈ để phân loại (fresh/file). Gỡ Cf, filler (U+034F/115F/1160/3164/FFA0),
-// variation selector (FE00–FE0F) và dấu Mông Cổ (180B–180F) trước khi tách. Cờ u để khớp tag astral (U+E0020).
+// r14 I / r15 N1: bản sao CHỈ để phân loại (fresh/file). Gỡ Cf, filler (U+034F/115F/1160/3164/FFA0/2800),
+// variation selector (FE00–FE0F và E0100–E01EF) và dấu Mông Cổ (180B–180F) trước khi tách. Cờ u để khớp tag astral.
 // Không đổi chữ được gõ: desktop-agent gõ a.text từ userQuery, không đi qua linesOf.
-const linesOf = (q) => String(q || '').replace(/[\p{Cf}\u034f\u115f\u1160\u3164\uffa0\ufe00-\ufe0f\u180b-\u180f]/gu, '').replace(/(\d)[:：﹕∶](?=\d)/gu, '$1\u2009').split(/\r\n|[\r\n\u2028\u2029]/);
+const linesOf = (q) => String(q || '').replace(/[\p{Cf}\u034f\u115f\u1160\u3164\uffa0\u2800\ufe00-\ufe0f\u180b-\u180f\u{E0100}-\u{E01EF}]/gu, '').replace(/(\d)[:：﹕∶](?=\d)/gu, '$1\u2009').split(/\r\n|[\r\n\u2028\u2029]/);
 const OPEN_START = /^\s*(?:(?:please|hãy|xin)\s+)?(?:mở|open|edit|sửa|打开|打開)(?![\p{L}])/iu;
 function splitClauses(line) {
   // r13: mệnh đề phủ định kết thúc ở ，。;； và ở 然后 (然后再 là MỘT chỗ ngắt). 然后 là ngắt mềm như dấu phẩy.
@@ -148,8 +148,9 @@ function splitClauses(line) {
   // “输入再打开” dính vào chữ trước và không phải các mẫu trên → không ngắt (thà không cắt 再见).
   // r14 M1: 再 ngay sau phủ định (不要/别/別/勿/不准/不能/禁止/不用) không ngắt. Cả mệnh đề giữ phủ định, tên tệp không được ghim (“不要再在 notes.txt…”).
   // Vòng 2: giữa phủ định và 再 được cách bởi khoảng trắng (\s gồm NBSP, U+3000) và/hoặc thêm chữ 再 (“不要 再在”, “不要再再在”).
-  // P1/P2: cùng khe đó còn có 、 và gạch —/– (“不要、再在”, “不要——再在”). Xuống dòng không nằm ở đây: linesOf đã tách dòng trước.
-  const negZai = String.raw`(?<!(?:不要|別|别|勿|不准|不能|禁止|不用)[\s再、—–]*)`;
+  // P1/P2: cùng khe đó còn có 、 và gạch —/–. r15 N1 thêm ― - ～ · (“不要-再在”, “不要～再在”).
+  // Xuống dòng không nằm trong lookbehind: linesOf tách dòng trước; commandLine nối dòng chỉ-phủ-định với dòng 再.
+  const negZai = String.raw`(?<!(?:不要|別|别|勿|不准|不能|禁止|不用)[\s再、—–―～·-]*)`;
   const re = new RegExp(String.raw`[.!?…](?=\s)|[,，;；](?=\s)|[。！？…]|[，；]|然后再|然後再|然后|然後|${negZai}再(?=把|在)|(?<=^|[\s,，;；。！？…])${negZai}再`, 'gu');
   const parts = []; let start = 0; let m;
   while ((m = re.exec(line))) { parts.push({ text: line.slice(start, m.index), sep: /[,，;；]|然后|然後|再/u.test(m[0]) ? 'comma' : 'stop' }); start = m.index + m[0].length; }
@@ -192,9 +193,17 @@ function unknownCommand(parts) {
   if (opens.length === 1) return withFileClause(parts, opens[0]);
   return '';
 }
+const NEG_ONLY_LINE = /^\s*(?:(?:please|hãy|xin|请)\s+)?(?:不准|不用|不能|不要(?!忘记|忘記)|禁止|(?<!特)(?:别|別)(?!忘了|人)|勿)[\s再、—–―～·-]*$/u;
+const RE_START_LINE = /^[\s、—–―～·-]*再/u;
 function commandLine(q) {
   const lines = linesOf(q);
-  const w = lines.find(l => writeTask(l)); if (w != null) return w;
+  const idx = lines.findIndex(l => writeTask(l));
+  if (idx >= 0) {
+    let line = lines[idx];
+    // r15 N1: “不要\n再在 …” — nối dòng chỉ là phủ định vào dòng 再 để phân loại. linesOf vẫn tách mọi dòng khác như cũ.
+    if (idx > 0 && NEG_ONLY_LINE.test(lines[idx - 1]) && RE_START_LINE.test(line)) line = lines[idx - 1].replace(/[\s、—–―～·-]+$/u, '') + line.replace(/^[\s、—–―～·-]+/u, '');
+    return line;
+  }
   const nonempty = lines.map(l => l.trim()).filter(Boolean);
   if (nonempty.length === 1) return nonempty[0];
   const opened = nonempty.filter(l => OPEN_START.test(l));
@@ -324,6 +333,26 @@ function existingTarget(c) {
 }
 // → { fresh: có bật bảo vệ, file: tên tệp nêu ở “gõ X vào <tệp>” (ngoại lệ 2) hoặc null }
 // Bảo vệ BẬT mặc định cho mọi việc gõ. Chỉ TẮT khi phần LỆNH (sau khi cắt nội dung, không tính câu phủ định) nêu rõ tệp/tài liệu có sẵn.
+// r15 N2: U+202A–202E / U+2066–2069 trong mệnh đề đích (phần lệnh, trước nội dung sau dấu cắt).
+// Fail-closed = đường sẵn có { fresh: true, file: null }: không ghim tệp, bắt tài liệu mới. Không sửa chữ sẽ gõ.
+const BIDI_RE = /[\u202A-\u202E\u2066-\u2069]/u;
+function targetCommandHasBidi(q) {
+  const raw = String(q || '').split(/\r\n|[\r\n\u2028\u2029]/);
+  const lines = linesOf(q);
+  let idx = lines.findIndex(l => writeTask(l));
+  if (idx < 0) {
+    const nonempty = [];
+    lines.forEach((l, i) => { if (l.trim()) nonempty.push(i); });
+    if (nonempty.length === 1) idx = nonempty[0];
+    else {
+      const opened = nonempty.filter(i => OPEN_START.test(lines[i].trim()));
+      if (opened.length === 1) idx = opened[0];
+    }
+  }
+  if (idx < 0 || !raw[idx]) return false;
+  const c0 = raw[idx].search(CUT);
+  return BIDI_RE.test(c0 >= 0 ? raw[idx].slice(0, c0) : raw[idx]);
+}
 function taskMode(q) {
   const t = String(q || ''); const ON = { fresh: true, file: null };
   if (!t.trim() || !typingTask(t)) return { fresh: false, file: null };
@@ -331,7 +360,9 @@ function taskMode(q) {
   if (writeTask(t) && linesOf(t).filter(l => writeTask(l)).length !== 1) return ON;
   const c = commandPart(t); if (!c) return ON;
   if (writeTask(t) && !firstVerb(c)) return ON; // động từ nằm sau dấu phân cách (trong nội dung) → bảo vệ
-  return existingTarget(c);
+  const mode = existingTarget(c);
+  if (mode.fresh === false && targetCommandHasBidi(t)) return ON;
+  return mode;
 }
 const freshDocTask = (q) => taskMode(q).fresh;
 const namedTarget = (q) => taskMode(q).file;
