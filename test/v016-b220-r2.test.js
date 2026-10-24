@@ -168,13 +168,14 @@ test('B220 r2: classic Outlook class is carried from diag after normalize drops 
   assert.strictEqual(f.composeHot, false);
   assert.match(fs.readFileSync(path.join(root, 'src/desktop-agent.js'), 'utf8'), /attachTreeMeta\(/);
 });
-test('B220 r2: a partial tree flag on the raw UIA result still fail-closes after normalize', () => {
+test('B220 r2: a cut value (partial) on a readable main window is not an unreadable compose', () => {
   assert.strictEqual(typeof SV.attachTreeMeta, 'function');
   const raw = { win: { proc: 'OUTLOOK.EXE', title: 'Inbox' }, diag: { cls: 'rctrl_renwnd32' }, partial: true };
   const obs = { win: { proc: 'OUTLOOK.EXE', title: 'Inbox' }, elements: mainWindow().elements.map(e => ({ ...e, value: e.name === 'Message' ? '' : e.value })) };
   SV.attachTreeMeta(obs, raw);
   const f = SV.gateFields({ obs, target: { el: { name: 'Inbox' } } });
   assert.strictEqual(obs.partial, true);
-  assert.strictEqual(f.composeUnreadable, true);
-  assert.strictEqual(f.composeHot, true);
+  assert.strictEqual(f.composeUnreadable, false);
+  assert.strictEqual(f.composeHot, false);
+  assert.strictEqual(SG.classify('click', {}, { targetName: 'Inbox', ...f }).send, false);
 });

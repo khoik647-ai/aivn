@@ -18,7 +18,7 @@ function parsedCombo(k) { try { return Keys.parse(k); } catch { return null; } }
 function isSendCombo(k) {
   const p = parsedCombo(k); if (!p) return false;
   if (/^(?:alt|right_alt)\+s$/.test(p.combo)) return true;
-  if (/^(?:control|right_control|cmd|meta)(?:\+shift)?\+(?:enter|numpad_enter)$/.test(p.combo)) return true;
+  if (/^(?:control|right_control|cmd|meta)(?:\+(?:shift|right_shift))?\+(?:enter|numpad_enter)$/.test(p.combo)) return true;
   return false;
 }
 const SEND_COMBO = { test: (k) => isSendCombo(k) };

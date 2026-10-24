@@ -33,9 +33,25 @@ function peelEmbeddedSend(r) {
   const m = /(?:^|\s)(?:outlook|olk)\s+(?:gửi|nhắn|send)\s+(?:(?:cho|tới|đến|với|to)\s+)?(.+)$/iu.exec(x);
   return m && m[1].trim() ? m[1].trim() : x;
 }
+// “gửi Lan và Minh”: từ dừng “và” cắt mất người thứ hai. Ghép lại khi phần sau “và” vẫn là tên.
+function withCoRecipients(query, name) {
+  const n = String(name || '').trim();
+  if (!n || /\svà\s/iu.test(n)) return name;
+  const re = new RegExp(n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + String.raw`\s+và\s+([\p{L}][\p{L}'’.-]*(?:\s+[\p{L}][\p{L}'’.-]*){0,3})`, 'iu');
+  const m = re.exec(String(query || ''));
+  if (!m) return name;
+  let extra = m[1].trim();
+  const cut = extra.search(/\s+(?:nhưng|but|mà|là|rằng|nội dung|với nội dung|tiêu đề|chủ đề|nói|bảo|hỏi|nhắc|chúc|mời|không|đừng|khỏi|rồi|nhé|nha|giúp|hộ|ngay|trên|ở|qua|bằng|and|or)\b/iu);
+  if (cut >= 0) extra = extra.slice(0, cut).trim();
+  if (!extra || NOT_NAME.test(extra) || NOT_RECIPIENT.test(extra) || rcpStop(extra) || extra.split(/\s+/).length > 4) return name;
+  if (/^(?:đừng|không|nói|bảo|hỏi|nhắc|chúc|rồi|nhé|nha|giúp|hộ|mà|nhưng|với|trên|ở|the|a|an)$/iu.test(extra.split(/\s+/)[0])) return name;
+  return `${n} và ${extra}`;
+}
 function recipientOf(query) {
-  const raw = recipientOf0(String(query || '').replace(EN_HONOR_DOT, '$1').replace(NEG_SEND, ' '));
-  const r = raw ? peelEmbeddedSend(raw) : raw; if (!r) return r;
+  const q0 = String(query || '').replace(EN_HONOR_DOT, '$1').replace(NEG_SEND, ' ');
+  const raw = recipientOf0(q0);
+  const peeled = raw ? peelEmbeddedSend(raw) : raw;
+  const r = peeled ? withCoRecipients(q0, peeled) : peeled; if (!r) return r;
   if (NOT_RECIPIENT.test(String(r).trim()) || notAName(r) || rcpStop(r) || /^(?:hiện tại|đang mở|này|hiện giờ|current|this)$/iu.test(String(r).trim())) return null;
   { const z = String(r).replace(/\s*的\s*(?:聊天|对话|對話|会话|會話|聊天窗口)$/u, '').trim(); if (z !== String(r).trim()) return z || null; }
   const x = stripHonorAfter(r) || r; const y = x.replace(EN_HONOR_LEAD, '').trim(); return y || x;
@@ -697,12 +713,29 @@ function readMail(elements) {
   }
   return { to, cc, bcc, unreadable: false };
 }
+// Khung thư chính (Inbox / Thư mới / Reply / Sent). Thấy các nút này thì cửa sổ không phải ô soạn bị cắt mất.
+function seesMailChrome(elements) {
+  for (const e of elements || []) {
+    const n = fold(e && e.name);
+    if (/^(?:inbox|hop thu den|hop thu|new mail|new message|thu moi|sent items|sent|muc da gui|reply|reply all|tra loi|tra loi tat ca)$/.test(n)) return true;
+  }
+  return false;
+}
 function treeUnreadable(obs, elements) {
-  if (obs && (obs.uiaError || obs.unread || obs.error || obs.partial || obs.truncated || obs.timedOut)) return true;
+  // partial = uitree cắt một giá trị dài (≥200 ký tự). Phần tử vẫn còn, không phải cây lỗi.
+  if (obs && (obs.uiaError || obs.unread || obs.error || obs.timedOut)) return true;
   const els = elements || (obs && obs.elements) || [];
   if (!els.length) return true;
   const named = els.filter(e => String((e && (e.name || e.value)) || '').trim());
-  return named.length < 3;
+  if (named.length < 3) return true;
+  // truncated = quá giới hạn số phần tử. Chỉ fail-closed khi là Outlook mà không thấy ô To/Cc/Bcc/Subject
+  // và cũng không thấy khung thư chính. Thấy ô soạn thì xét chính ô To. Zalo/Teams vẫn đọc được danh sách.
+  if (obs && obs.truncated && !composeForm(els) && !seesMailChrome(els)) {
+    const w = obs.win || {};
+    const kind = sendAppKind({ proc: w.proc, className: w.className || w.cls || (obs.diag && obs.diag.cls) || '', url: w.url || obs.url || '', host: w.host || '', elements: els });
+    if (isOutlookApp(kind)) return true;
+  }
+  return false;
 }
 function bodyHasText(elements, win) {
   for (const e of elements || []) {
@@ -756,7 +789,8 @@ function gateFields({ obs = null, win = null, elements = null, target = null, fo
   const unreadTree = treeUnreadable(obs, els);
   if (unreadTree) mail.unreadable = true;
   // Khung đọc và thanh Inbox/New mail/Reply/Search/Archive không phải ô soạn. Chỉ tính nội dung khi đang ở vùng soạn.
-  // Cây không đọc được (lỗi UIA, cụt, dưới 3 phần tử có tên): không thấy ô soạn vẫn coi là đang có nội dung.
+  // Cây không đọc được (lỗi UIA, hết giờ, dưới 3 phần tử có tên, Outlook cụt mà không thấy ô To): coi là đang có nội dung.
+  // partial (cắt giá trị dài) không làm cây thành không đọc được.
   const form = composeForm(els);
   let composeHot = false; let composeUnreadable = false;
   if (unreadTree) { composeHot = true; composeUnreadable = true; }
