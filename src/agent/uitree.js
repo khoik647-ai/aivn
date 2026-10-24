@@ -71,7 +71,9 @@ function Walk($walker, $secs) {
         }
         if ($null -ne $v -and $v.Length -ge $vmax) { if ($v.Length -gt $vmax) { $v = $v.Substring(0, $vmax) }; $script:cutPartial = $true }
       }
-      [void]$out.Add([ordered]@{ r = $ct; n = $c.Name; a = $c.AutomationId; b = @([int]$r.X, [int]$r.Y, [int]$r.Width, [int]$r.Height); e = $c.IsEnabled; p = $c.IsPassword; f = $c.HasKeyboardFocus; v = $v; d = $d })
+      # B191 (QA #64 v3): thẻ nào ĐANG CHỌN (Notepad Win11 chung một cửa sổ cho mọi thẻ) — để không gõ nhầm vào thẻ cũ của người dùng
+      $sl = $null; if ($ct -eq 'TabItem') { try { $sl = [bool]$el.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected } catch {} }
+      [void]$out.Add([ordered]@{ r = $ct; n = $c.Name; a = $c.AutomationId; b = @([int]$r.X, [int]$r.Y, [int]$r.Width, [int]$r.Height); e = $c.IsEnabled; p = $c.IsPassword; f = $c.HasKeyboardFocus; v = $v; sl = $sl; d = $d })
     }
     if ($d -lt 40 -and ($vis -or $d -eq 0)) {
       try { $ch = $walker.GetFirstChild($el); while ($ch -ne $null) { $q.Enqueue(@($ch, $d + 1)); $ch = $walker.GetNextSibling($ch) } } catch { $script:cutPartial = $true }
@@ -320,7 +322,7 @@ function normalize(raw, { max = 150, ocr = [] } = {}) {
     // chữ OCR nằm gọn trong phần tử đã có cùng tên → bỏ
     if (role === 'OCR' && els.some(e => e.name && name && e.name.toLowerCase().includes(name.toLowerCase()) && x0 >= e.b[0] - 4 && y0 >= e.b[1] - 4 && x0 + w <= e.b[0] + e.b[2] + 4 && y0 + h <= e.b[1] + e.b[3] + 4)) continue;
     els.push({ role, kind: ROLE_VI[role] || role.replace(/^AX/, '').toLowerCase() || 'phần tử', name, b: [Math.round(x0), Math.round(y0), Math.round(w), Math.round(h)], enabled: x.e !== false,
-      password: !!x.p || (EDITABLE.test(role) && PASSWORD_NAME.test(name)), focused: !!x.f, value: x.v != null && !x.p ? String(x.v).slice(0, 200) : null, editable: EDITABLE.test(role), ocr: role === 'OCR', autoId: x.a || null });
+      password: !!x.p || (EDITABLE.test(role) && PASSWORD_NAME.test(name)), focused: !!x.f, value: x.v != null && !x.p ? String(x.v).slice(0, 200) : null, editable: EDITABLE.test(role), ocr: role === 'OCR', autoId: x.a || null, ...(typeof x.sl === 'boolean' ? { selected: x.sl } : {}) });
   }
   // ưu tiên phần tử tương tác, rồi chữ; giữ thứ tự đọc (trên → dưới, trái → phải)
   const pick = [...els.filter(e => !e.ocr && INTERACTIVE.has(e.role)), ...els.filter(e => !INTERACTIVE.has(e.role))].slice(0, max);

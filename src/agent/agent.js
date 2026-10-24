@@ -980,7 +980,7 @@ if (ok === null) return { refused: true, timeout: true, forModel: 'Không ai tr�
       deps.log && deps.log(`[aivn agent] ensure_app “${ensureTarget}” → ${step.status}: ${String(step.summary || '').slice(0, 160)}`);
       const base = { steps, usage, finishReason: 'stop', urls: [], memories: sys.memories.map(m => m.text), tools: names, warning: null };
       if (out.ask) return { ...base, text: out.ask, asked: out.code || 'login', outcome: 'asked_user' };
-      if (out.error && out.code !== 'not-found') return { ...base, text: `Mình chưa làm được: ${String(out.error).slice(0, 400)}`, outcome: 'failed' };
+      if (out.error && out.code !== 'not-found') return { ...base, text: cannotText(LG, sysTr(LG, String(out.error).slice(0, 400))), outcome: 'failed' }; // B191: theo ngôn ngữ trả lời (B182)
       msgs.push({ role: 'assistant', content: '', tool_calls: [{ id, type: 'function', function: { name: 'ensure_app', arguments: JSON.stringify(args) } }] });
       msgs.push({ role: 'tool', tool_call_id: id, content: step.sensitive && step.sensitive.length ? SG.redactTitles(String(out.forModel || out.summary || ''), step.win && step.win.title ? [step.win.title] : []) : String(out.forModel || out.summary || '') });
       if (!out.error) {
