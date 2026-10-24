@@ -537,7 +537,7 @@ select{color:var(--text, inherit);font:inherit;min-height:36px}
 .toast-item{pointer-events:auto;display:flex;gap:10px;align-items:flex-start;background:var(--toast-bg);color:var(--toast-text);box-shadow:0 6px 24px rgba(0,0,0,.18);padding:10px 12px 10px 16px;border-radius:10px;border:1px solid transparent;font-size:13.5px;line-height:1.45;animation:toastIn .18s ease-out}
 .toast-item.err{border-color:var(--accent);color:var(--toast-err)}
 .toast-item .tx{flex:1;white-space:pre-wrap;word-break:break-word}
-.toast-item button{background:none;border:0;color:inherit;opacity:.7;cursor:pointer;font-size:16px;line-height:1;padding:2px 4px}
+.toast-item button{background:none;border:0;color:inherit;opacity:.7;cursor:pointer;font-size:16px;line-height:1;padding:2px 4px;min-width:24px;min-height:24px}
 .toast-item button:hover{opacity:1}
 @keyframes toastIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
 .nav-group{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
