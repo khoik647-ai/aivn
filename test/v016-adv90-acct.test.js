@@ -106,6 +106,21 @@ test('ADV-A8 ngẫu nhiên 200 thao tác: Tổng quan.receivable = agedTotals.to
     assert.ok(r.agedTotals.total >= 0, 'bước ' + k);
     for (const bk of ['current', 'd30', 'd60', 'd90', 'older']) { assert.ok(r.agedTotals[bk] >= 0, bk + ' bước ' + k); for (const row of r.aged) assert.ok(row[bk] >= 0 && row.total >= 0, bk); }
     assert.strictEqual(ov.customerCredit, r.agedTotals.credit);
+    const byP = new Map();
+    for (const i of db.all("SELECT partner_id, kind, amount_total, amount_paid FROM invoices WHERE state='posted'")) {
+      const res = Math.max(0, i.amount_total - i.amount_paid);
+      if (!(res > 0)) continue;
+      const g = byP.get(i.partner_id) || { inv: 0, cr: 0 };
+      if (i.kind === 'out_refund') g.cr += res; else g.inv += res;
+      byP.set(i.partner_id, g);
+    }
+    for (const [pid, g] of byP) {
+      const row = r.aged.find(x => x.partner_id === pid);
+      const total = Math.max(0, g.inv - g.cr), credit = Math.max(0, g.cr - g.inv);
+      if (!row) { assert.strictEqual(total, 0, 'bước ' + k); assert.strictEqual(credit, 0, 'bước ' + k); continue; }
+      assert.strictEqual(row.total, total, 'bước ' + k + ' total = max(0, hoá đơn − giấy báo có)');
+      assert.strictEqual(row.credit, credit, 'bước ' + k + ' credit = max(0, giấy báo có − hoá đơn)');
+    }
     const net = db.all("SELECT * FROM invoices WHERE state='posted'").reduce((a, i) => a + (i.kind === 'out_refund' ? -1 : 1) * Math.max(0, i.amount_total - i.amount_paid), 0);
     assert.strictEqual(r.agedTotals.total - r.agedTotals.credit, net, 'bước ' + k);
     // Đã thu không lọc = tổng payments hoá đơn

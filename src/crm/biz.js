@@ -52,7 +52,7 @@ function agedReceivable(open, t) {
     const kb = `${b.due_date || b.invoice_date || '9999-12-31'}\0${b.invoice_date || ''}\0${b.id}`;
     return ka < kb ? -1 : ka > kb ? 1 : 0;
   };
-  const rows = []; let overdueN = 0, overdueSum = 0;
+  const rows = []; const remain = new Map(); let overdueN = 0, overdueSum = 0;
   for (const g of partners.values()) {
     g.inv.sort(ord);
     const left = g.inv.map(i => i.residual);
@@ -64,6 +64,7 @@ function agedReceivable(open, t) {
     }
     const row = { partner_id: g.partner_id, partner_name: g.partner_name, current: 0, d30: 0, d60: 0, d90: 0, older: 0, total: 0, credit: unapplied };
     g.inv.forEach((i, k) => {
+      remain.set(i.id, left[k]);
       if (!(left[k] > 0)) return;
       const b = ageBucket(i.due_date, t); row[b] += left[k]; row.total += left[k];
       if (isDate(i.due_date) && i.due_date < t) { overdueN += 1; overdueSum += left[k]; }
@@ -74,7 +75,7 @@ function agedReceivable(open, t) {
   const totals = {};
   for (const k of ['current', 'd30', 'd60', 'd90', 'older', 'total', 'credit']) totals[k] = rows.reduce((a, r) => a + r[k], 0);
   totals.overdue = overdueSum;
-  return { rows, totals, overdueN };
+  return { rows, totals, overdueN, remain };
 }
 const lineAmount = (l) => Math.round(num(l.qty) * num(l.price) * (1 - num(l.discount_pct) / 100));
 const EPS = 1e-9;
@@ -351,7 +352,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => civilOf(Date
     inv.refunds = db.all("SELECT id, number, state, amount_total FROM invoices WHERE reversed_id = ? AND state != 'cancel'", [id]);
     inv.reversed_number = inv.reversed_id ? (db.get('SELECT number FROM invoices WHERE id = ?', [inv.reversed_id]) || {}).number || '' : '';
     inv.total_words = T.vndWords(inv.amount_total);
-    return inv;
+    return clearOffsetOverdue([inv])[0];
   }
   function listInvoices({ q = '', state = '', payment = '', kind = '', partnerId = '', soId = '' } = {}) {
     const where = [], p = [];
@@ -361,6 +362,7 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => civilOf(Date
     if (soId) { where.push('i.so_id = ?'); p.push(soId); }
     if (q) { where.push('(lower(i.number) LIKE ? OR c.name_norm LIKE ? OR lower(s.number) LIKE ?)'); p.push('%' + q.toLowerCase() + '%', '%' + T.fold(q) + '%', '%' + q.toLowerCase() + '%'); }
     let rows = db.all(`SELECT i.* FROM invoices i LEFT JOIN contacts c ON c.id = i.partner_id LEFT JOIN quotes s ON s.id = i.so_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY COALESCE(i.invoice_date, '9999') DESC, i.created_at DESC`, p).map(pubInvoice);
+    rows = clearOffsetOverdue(rows);
     if (payment === 'overdue') rows = rows.filter(r => r.overdue); else if (payment === 'unpaid') rows = rows.filter(r => r.state === 'posted' && r.residual > 0); else if (payment) rows = rows.filter(r => r.payment_state === payment);
     return rows;
   }
@@ -451,6 +453,16 @@ function createBiz({ db, crm, now = () => Date.now(), today = () => civilOf(Date
   // ---------- Báo cáo ----------
   const inRange = (d, from, to) => (!isDate(from) || d >= from) && (!isDate(to) || d <= to);
   const openDocs = () => db.all("SELECT * FROM invoices WHERE state = 'posted' AND kind IN ('out_invoice','out_refund')").map(pubInvoice).filter(i => i.residual > 0);
+  // Danh sách hoá đơn: quá hạn theo phần còn lại sau đối trừ giấy báo có. Hoá đơn bị đối trừ hết không còn cờ quá hạn.
+  function clearOffsetOverdue(rows) {
+    if (!rows.some(r => r && r.kind === 'out_invoice' && r.overdue)) return rows;
+    const { remain } = agedReceivable(openDocs(), today());
+    return rows.map(r => {
+      if (!r || r.kind !== 'out_invoice' || !r.overdue) return r;
+      const left = remain.has(r.id) ? remain.get(r.id) : 0;
+      return left > 0 ? r : { ...r, overdue: false };
+    });
+  }
   // Phân tích bán hàng: đơn đã xác nhận, nhóm theo tháng / khách hàng / sản phẩm / nhóm sản phẩm / người phụ trách
   function salesReport({ groupBy = 'month', from = '', to = '' } = {}) {
     const orders = db.all("SELECT q.*, c.name AS contact_name FROM quotes q LEFT JOIN contacts c ON c.id = q.contact_id WHERE q.status = 'sale'").filter(o => inRange(civilOf(o.confirmed_at || o.updated_at), from, to));

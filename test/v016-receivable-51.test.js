@@ -76,12 +76,13 @@ test('#51 hoá đơn thu một phần rồi báo có toàn bộ: phần báo có
   assert.strictEqual(r.totals.total, 0); assert.strictEqual(r.totals.paid, 300000);
 });
 
-test('#51 vi/en/zh: dòng “đã trừ giấy báo có khách hàng {0}” có trong khoá dịch và bản dịch; giao diện báo cáo dùng đúng chuỗi', () => {
-  const root = path.join(__dirname, '..'); const key = 'đã trừ giấy báo có khách hàng {0}';
+test('#51 vi/en/zh: dòng “giấy báo có chưa đối trừ {0}” có trong khoá dịch và bản dịch; giao diện báo cáo dùng đúng chuỗi', () => {
+  const root = path.join(__dirname, '..'); const key = 'giấy báo có chưa đối trừ {0}';
   assert.ok(JSON.parse(fs.readFileSync(path.join(root, 'src/i18n/strings.json'), 'utf8')).includes(key));
-  assert.strictEqual(require('../src/i18n/en.js')[key], '{0} customer credit deducted');
-  assert.strictEqual(require('../src/i18n/zh.js')[key], '已扣除客户贷项通知单 {0}');
-  assert.match(fs.readFileSync(path.join(root, 'src/renderer/biz.js'), 'utf8'), /a\.credit \? `<span class="small muted">đã trừ giấy báo có khách hàng \$\{vnd\(a\.credit\)\}<\/span>`/);
+  assert.strictEqual(require('../src/i18n/en.js')[key], 'unapplied credit note {0}');
+  assert.strictEqual(require('../src/i18n/zh.js')[key], '未抵扣的贷项通知单 {0}');
+  assert.match(fs.readFileSync(path.join(root, 'src/renderer/biz.js'), 'utf8'), /a\.credit \? `<span class="small muted">giấy báo có chưa đối trừ \$\{vnd\(a\.credit\)\}<\/span>`/);
+  assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/renderer/biz.js'), 'utf8'), /đã trừ giấy báo có khách hàng/);
 });
 
 test('#51 KPI quá hạn = agedTotals.overdue = Tổng quan.overdue.sum; báo có quá hạn không kéo KPI xuống âm', async () => {
